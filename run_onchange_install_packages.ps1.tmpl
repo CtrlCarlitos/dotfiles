@@ -676,7 +676,17 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 #     already-registered config is never re-serialized.
 if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
     $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
-    if (-not (Test-Path $ocConfig) -or -not ((Get-Content $ocConfig -Raw) -match '"serena"')) {
+    # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
+    # locked/unreadable opencode.json would otherwise terminate the script
+    # here (WT settings read idiom); on read failure fall through to the
+    # merge path, which re-reads inside its own try/catch.
+    $ocNeedsMerge = $true
+    if (Test-Path $ocConfig) {
+        try { $ocNeedsMerge = -not ((Get-Content $ocConfig -Raw) -match '"serena"') } catch {
+            Write-Host "  Warning: opencode.json unreadable - attempting merge anyway" -ForegroundColor Yellow
+        }
+    }
+    if ($ocNeedsMerge) {
         Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
         try {
             New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
