@@ -660,12 +660,12 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     # uv tool shims land in User PATH (~\.local\bin) - rebuild again
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command serena -ErrorAction SilentlyContinue) {
-        Invoke-Quietly -Description "Failed to run serena init" -Action { serena init 2>$null }
+        Invoke-WithTimeout -Description "serena init" -Seconds 60 -Action { serena init 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
         if (Get-Command claude -ErrorAction SilentlyContinue) {
-            Invoke-Quietly -Description "Failed to run serena setup claude-code" -Action { serena setup claude-code 2>$null }
+            Invoke-WithTimeout -Description "serena setup claude-code" -Seconds 60 -Action { serena setup claude-code 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
         }
         if (Get-Command codex -ErrorAction SilentlyContinue) {
-            Invoke-Quietly -Description "Failed to run serena setup codex" -Action { serena setup codex 2>$null }
+            Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
         }
     }
 }
@@ -707,7 +707,7 @@ if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -Er
     try { $agyMcp = (agy mcp list 2>&1 | Out-String) } catch { $agyMcp = "" }
     if ($agyMcp -notmatch "serena") {
         Write-Host "  Registering Serena MCP in agy..." -ForegroundColor Yellow
-        Invoke-Quietly -Description "Failed to register Serena MCP in agy" -Action { agy mcp add serena serena start-mcp-server --context ide-assistant 2>$null }
+        Invoke-WithTimeout -Description "agy mcp add serena" -Seconds 60 -Action { agy mcp add serena serena start-mcp-server --context ide-assistant 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
     }
 }
 
