@@ -1038,10 +1038,12 @@ PYEOF
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
     # per-repo activation is `graft init` (documented in
     # docs/agent-context-tools.md). Telemetry off per repo decision.
+    # $SUDO on the install: apt-Node's global prefix is system-owned (plain
+    # npm -g fails EACCES); brew-Node's prefix is user-writable (no sudo).
     if command -v npm &>/dev/null; then
         if ! command -v graft &>/dev/null; then
             info "Installing Graft (npm -g)..."
-            net_timeout 300 npm install -g @nanonets/graft \
+            net_timeout 300 $SUDO npm install -g @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
