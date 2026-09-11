@@ -16,6 +16,37 @@ Thumbs.db
 # Screenshots dropped in for debugging (not part of the dotfiles)
 *.png
 
+# Secret-shaped files - a public dotfiles repo never wants these tracked
+# (SSH keys would land here as private_dot_ssh/id_* if copied in by mistake)
+*.key
+*.pem
+*.p12
+*.pfx
+*.kdbx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+.env
+.env.*
+!.env.example
+
+# More accidental-dropping classes (temp_check.ps1 once got committed;
+# tree-result.log too, before *.log existed)
+temp_*
+*.tmp
+*.bak
+*.orig
+*.rej
+._*
+
+# Tooling accidents (npx/npm run from the wrong cwd)
+node_modules/
+
+# Claude Code local state - settings.json is tracked; per-machine overrides
+# and session droppings are not
+.claude/settings.local.json
+.claude/todos/
+
 # Local-only working notes (session research, agent planning docs) - never
 # commit these; they have been swept into a commit by a broad `git add` before.
 docs/research/
