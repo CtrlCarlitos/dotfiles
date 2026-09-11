@@ -337,6 +337,8 @@ This table lists all programs installed by your dotfiles across different enviro
 | | Superpowers (Codex CLI) | ❌ manual only (`/plugins` in-app) | ❌ manual only (`/plugins` in-app) | ❌ manual only (`/plugins` in-app) | ❌ manual only (`/plugins` in-app) | ❌ |
 | | Playwright Chromium | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
 | | act (local GitHub Actions) | ✅ 📦 | ✅ 🔧 | ✅ 🔧 | ✅ 📦 | ❌ |
+| | Serena (semantic code MCP) | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
+| | Graft (repo context graph) | ✅ 🟢 | ✅ 🟢 | ✅ 🟢 | ✅ 🟢 | ❌ |
 | **Desktop Apps** | VS Code | ✅ 📦 | ❌ | ✅ 📦 | ✅ 📦 | ❌ |
 | | Google Chrome | ✅ 📦 | ❌ | ✅ 📦 | ✅ 📦 | ❌ |
 | | Docker Desktop | ✅ 📦 | ❌ | ✅ 📦 | ✅ 📦 | ❌ |
