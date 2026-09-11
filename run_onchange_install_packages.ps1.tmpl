@@ -724,11 +724,18 @@ if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -Er
 # 12. Graft (trailhq/Graft) - codebase context graph. Global CLI here;
 #     per-repo activation is `graft init` (documented in
 #     docs/agent-context-tools.md). Telemetry off per repo decision.
+#     --allow-scripts: npm 12 blocks install scripts by default, which
+#     silently skips graft's tree-sitter parser native builds - the binary
+#     then crashes with "No native build was found" (node-gyp-build). The
+#     allowlist is the exact list npm's own warning prints for this graft
+#     version; if a graft update changes its parser set, npm's error output
+#     prints the new list to paste here. (Single-quoted because PS 5.1
+#     splits unquoted commas into multiple native args.)
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     if (-not (Get-Command graft -ErrorAction SilentlyContinue)) {
         Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
         Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
-            npm install -g @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+            npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
             if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
         }
     }
