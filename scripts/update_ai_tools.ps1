@@ -207,4 +207,24 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     npx --yes playwright install chromium 2>$null
 }
 
+# 5. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
+if (Get-Command serena -ErrorAction SilentlyContinue) {
+    Write-Host "🧩 Updating Serena..." -ForegroundColor Yellow
+    try {
+        uv tool upgrade serena-agent 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: serena upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+    } catch {
+        Write-Host "  Warning: serena upgrade failed - continuing" -ForegroundColor Red
+    }
+}
+if (Get-Command graft -ErrorAction SilentlyContinue) {
+    Write-Host "🌱 Updating Graft..." -ForegroundColor Yellow
+    try {
+        graft upgrade 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+    } catch {
+        Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+    }
+}
+
 Write-Host "✅ AI Tools Update Complete!" -ForegroundColor Green

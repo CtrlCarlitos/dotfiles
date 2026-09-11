@@ -149,4 +149,8 @@ if command -v npx &>/dev/null; then
     npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
 fi
 
+# 5. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
+command -v serena &>/dev/null && { uv tool upgrade serena-agent 2>/dev/null || echo "  Warning: serena upgrade failed - continuing"; }
+command -v graft &>/dev/null && { graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"; }
+
 echo "✅ AI Tools Update Complete!"
