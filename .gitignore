@@ -1,0 +1,17 @@
+# Chezmoi repository gitignore
+# Files that should NOT be committed to the dotfiles repo
+
+# Temporary/Debug files
+temp/
+*.log
+
+# Local development
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Screenshots dropped in for debugging (not part of the dotfiles)
+*.png

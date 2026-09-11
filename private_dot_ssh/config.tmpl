@@ -1,0 +1,50 @@
+#===============================================================================
+# SSH HOST ALIASES
+# Required for git@github-Identity:Org/Repo syntax
+# Auto-generated from chezmoi accounts configuration
+#===============================================================================
+
+# Note: IdentityFile points to the key.
+# IdentitiesOnly=yes ensures we don't try all keys in the agent.
+
+#-------------------------------------------------------------------------------
+# Global options (must come before any Host block to apply everywhere).
+# AddKeysToAgent: when ssh/git first uses a key, add it to the running agent
+# so the passphrase is asked once per agent lifetime, not per connection.
+# (Signing keys still need an explicit ssh-add - signing doesn't go through
+# ssh - which the identity generator + shell startup handle.)
+{{- if eq .chezmoi.os "darwin" }}
+# UseKeychain: macOS only - load/store key passphrases in the login keychain
+# so they survive reboots. Pair with `ssh-add --apple-use-keychain`.
+{{- end }}
+#-------------------------------------------------------------------------------
+AddKeysToAgent yes
+{{- if eq .chezmoi.os "darwin" }}
+UseKeychain yes
+{{- end }}
+
+{{- if .accounts }}
+{{- range .accounts }}
+{{- $username := "" }}
+{{- $provider := "github" }}
+{{- if hasKey . "username" }}{{ $username = .username }}{{ end }}
+{{- if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
+{{- if $username }}
+{{- $alias := printf "%s-%s" $provider $username }}
+
+{{- if .key }}
+
+# {{ .name }}
+Host {{ $alias }}
+    HostName {{ $provider }}.com
+    User git
+    IdentityFile ~/.ssh/{{ .key }}
+    IdentitiesOnly yes
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+
+# No accounts configured yet.
+# Run 'chezmoi init' to set up your git identity.
+{{- end }}

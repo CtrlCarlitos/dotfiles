@@ -1,0 +1,535 @@
+name: Chezmoi CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+
+jobs:
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          # Extract and lint bash scripts from templates.
+          # perl -0777 (slurp whole file) + the 's' modifier (dot matches newline) is
+          # required, not just a style choice: a plain per-line `sed 's/{{[^}]*}}//g'`
+          # cannot span a multi-line {{/* ... */}} comment, silently leaking its prose
+          # text through as "bash code" for shellcheck to choke on - confirmed live,
+          # this exact thing happened with a real multi-line comment in this repo.
+          # SC1128 (shebang must be on line 1) is excluded because every one of these
+          # OS-gated *.sh.tmpl files starts with a `{{ if eq .chezmoi.os ... -}}`
+          # wrapper line before the real shebang - stripping it still leaves a blank
+          # first line, which is a structural property of templating this file this
+          # way, not a real problem chezmoi or a shell will ever hit.
+          FAILED=0
+          for f in run_onchange_*.sh.tmpl install.sh devcontainer/install.sh; do
+            if [[ -f "$f" ]]; then
+              echo "Checking $f..."
+              if ! perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 -; then
+                FAILED=1
+              fi
+            fi
+          done
+          exit $FAILED
+
+      - name: Test skills CLI argument boundaries
+        run: bash tests/install_agent_skills_arguments.sh
+
+      - name: Test workflow configs cover every prompted key
+        run: bash tests/check_workflow_config_keys.sh
+
+      - name: Validate TOML files
+        run: |
+          pip install toml
+          python -c "import toml; toml.load('.chezmoiexternal.toml')"
+
+      - name: Validate YAML files
+        run: |
+          pip install pyyaml
+          python -c "import yaml; yaml.safe_load(open('.pre-commit-config.yaml'))"
+
+  test-unix:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install chezmoi
+        run: |
+          CHEZMOI_VERSION=$(cat .chezmoi-version)
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install zsh (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Verify chezmoi version
+        run: ~/.local/bin/chezmoi --version
+
+      - name: Create test config
+        run: |
+          # Create minimal config to avoid prompts and provide all required data
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [data]
+
+          [[data.accounts]]
+            name = "CI User"
+            email = "ci@test.local"
+            key = ""
+            organizations = []
+            dirs = []
+          
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          EOF
+
+      - name: Test chezmoi apply (dry-run)
+        run: ~/.local/bin/chezmoi apply --dry-run --verbose --source="${GITHUB_WORKSPACE}"
+
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install chezmoi
+        run: |
+          # Create directory first
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\bin" | Out-Null
+          # Download the pinned version (matches Test (ubuntu-latest/macos-latest),
+          # which reads the same .chezmoi-version - this job used to always grab
+          # /releases/latest/..., testing a different, unpinned chezmoi version than
+          # every other job in this file, silently.
+          $chezmoiVersion = (Get-Content .chezmoi-version -Raw).Trim()
+          Invoke-WebRequest -Uri "https://github.com/twpayne/chezmoi/releases/download/$chezmoiVersion/chezmoi-windows-amd64.exe" -OutFile "$env:USERPROFILE\.local\bin\chezmoi.exe"
+          # Add to PATH
+          echo "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify chezmoi
+        run: |
+          & "$env:USERPROFILE\.local\bin\chezmoi.exe" --version
+
+      - name: Create test config
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
+          @"
+          [data]
+
+          [[data.accounts]]
+            name = "CI User"
+            email = "ci@test.local"
+            username = "ciuser"
+            provider = "github"
+            key = ""
+            organizations = ["ci-org"]
+            dirs = ["scripts"]
+          
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
+
+      - name: Verify PowerShell script syntax
+        run: |
+          # Strip chezmoi template directives before parsing. Unlike the bash lint
+          # step's sed (which is line-by-line and cannot span a multi-line {{ }}
+          # block), PowerShell's -replace on a -Raw (whole-file) string with a
+          # negated character class DOES span newlines correctly - verified this
+          # directly against the current file, which parses with zero errors, so
+          # this check is written to actually fail on any parse error rather than
+          # only warn (there is currently nothing to filter).
+          $content = Get-Content "run_onchange_install_packages.ps1.tmpl" -Raw
+          $cleaned = $content -replace '\{\{[^}]*\}\}', ''
+          $cleaned | Out-File -FilePath "$env:TEMP\test.ps1" -Encoding utf8
+
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$env:TEMP\test.ps1",
+            [ref]$null,
+            [ref]$errors
+          ) | Out-Null
+
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Host "##[error]$($_.Message)" }
+            exit 1
+          }
+          Write-Host "PowerShell syntax check passed (0 errors)"
+
+      - name: Test chezmoi apply (dry-run)
+        run: |
+          & "$env:USERPROFILE\.local\bin\chezmoi.exe" apply --dry-run --verbose --source="$env:GITHUB_WORKSPACE"
+
+  devcontainer:
+    name: Test Devcontainer
+    runs-on: ubuntu-latest
+    env:
+      DEVCONTAINER: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Syntax check devcontainer/install.sh
+        run: |
+          bash -n devcontainer/install.sh
+          echo "Devcontainer script syntax OK"
+
+      - name: Install chezmoi
+        run: |
+          CHEZMOI_VERSION=$(cat .chezmoi-version)
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run chezmoi apply (deliberately no pre-seeded account or packages)
+        run: |
+          # Every other job in this file pre-seeds ~/.config/chezmoi/chezmoi.toml
+          # with an account and package toggles already set, which bypasses
+          # .chezmoi.toml.tmpl's "no accounts key" -> devcontainer-defaults fallback
+          # and its non-interactive package-toggle defaults entirely. This is the
+          # one job that lets DEVCONTAINER=true drive real template behavior, so it
+          # can actually verify isDevcontainer detection works end-to-end instead of
+          # just parsing the wrapper script's syntax.
+          #
+          # `chezmoi apply` alone does NOT evaluate .chezmoi.toml.tmpl - that only
+          # happens via `chezmoi init` (confirmed live: plain `apply` here failed
+          # with "map has no entry for key accounts", because with no chezmoi.toml
+          # on disk at all, `.` is just an empty map - every other job in this file
+          # sidesteps this by pre-seeding a *static* chezmoi.toml directly, never
+          # exercising .chezmoi.toml.tmpl's own logic either). Need `init --apply`.
+          ~/.local/bin/chezmoi init --apply --source="${GITHUB_WORKSPACE}"
+
+      - name: Verify devcontainer detection worked end-to-end
+        run: |
+          echo "=== Devcontainer placeholder account ==="
+          grep -q 'name = "Devcontainer User"' ~/.gitconfig && echo "✓ Devcontainer User account created" || exit 1
+          grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "✓ devcontainer@local email set" || exit 1
+
+          echo "=== Package categories correctly defaulted non-interactive ==="
+          grep -q 'install_core = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ install_core defaulted false" || exit 1
+          grep -q 'install_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ install_desktop defaulted false" || exit 1
+
+  #=============================================================================
+  # TIER 1: Docker Smoke Test - Real chezmoi init/apply in fresh environment
+  #=============================================================================
+  smoke-test:
+    name: Smoke Test (Docker)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl git zsh
+
+      - name: Install chezmoi
+        run: |
+          CHEZMOI_VERSION=$(cat .chezmoi-version)
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin -t "${CHEZMOI_VERSION}"
+
+      - name: Create multi-account test config
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [data]
+
+          [[data.accounts]]
+            name = "Personal Account"
+            email = "personal@example.com"
+            username = "myuser"
+            provider = "github"
+            key = "id_personal"
+            organizations = ["myuser"]
+            dirs = ["projects/personal", ".dotfiles"]
+          
+          [[data.accounts]]
+            name = "Work Account"
+            email = "work@company.com"
+            username = "work" # Gets github-work alias
+            provider = "github"
+            key = "id_work"
+            organizations = ["mycompany"]
+            dirs = ["projects/work"]
+          
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          EOF
+
+      - name: Run chezmoi apply
+        run: |
+          chezmoi apply --source="${GITHUB_WORKSPACE}" --verbose
+
+      - name: Verify core files exist
+        run: |
+          echo "=== Checking generated files ==="
+          test -f ~/.gitconfig && echo "✓ ~/.gitconfig exists" || exit 1
+          test -f ~/.zshrc && echo "✓ ~/.zshrc exists" || exit 1
+          test -f ~/.tmux.conf && echo "✓ ~/.tmux.conf exists" || exit 1
+          test -f ~/.aliases.zsh && echo "✓ ~/.aliases.zsh exists" || exit 1
+          test -d ~/.config/nvim && echo "✓ ~/.config/nvim exists" || exit 1
+          echo "=== All core files present ==="
+
+  #=============================================================================
+  # TIER 2: Integration Tests - Validate account system generates correct output
+  #=============================================================================
+  integration-test:
+    name: Integration Test (Account System)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install chezmoi
+        run: |
+          CHEZMOI_VERSION=$(cat .chezmoi-version)
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Create multi-account test config
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [data]
+
+          [[data.accounts]]
+            name = "Alice Personal"
+            email = "alice@personal.com"
+            username = "alice"
+            provider = "github"
+            key = "id_alice"
+            organizations = ["alice"]
+            dirs = ["projects/alice", ".dotfiles"]
+          
+          [[data.accounts]]
+            name = "Bob Work"
+            email = "bob@work.com"
+            username = "bob"
+            provider = "github"
+            key = "id_bob"
+            organizations = ["bobcorp"]
+            dirs = ["projects/bobcorp"]
+          
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          EOF
+
+      - name: Run chezmoi apply
+        run: ~/.local/bin/chezmoi apply --source="${GITHUB_WORKSPACE}"
+
+      - name: Test .gitconfig has correct includeIf rules
+        run: |
+          echo "=== Testing .gitconfig includeIf rules ==="
+          
+          # Check includeIf for alice's directories
+          grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "✓ includeIf for alice/projects" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "✓ includeIf for .dotfiles" || exit 1
+          
+          # Check includeIf for bob's directories
+          grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "✓ includeIf for bobcorp" || exit 1
+          
+          echo "=== includeIf rules correct ==="
+
+      - name: Test .gitconfig has correct URL shortcuts
+        run: |
+          echo "=== Testing .gitconfig URL shortcuts ==="
+          
+          # Check URL rewriting for alice
+          grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "✓ URL shortcut for alice" || exit 1
+          grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "✓ insteadOf for alice" || exit 1
+          
+          # Check URL rewriting for bob
+          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bobcorp" || exit 1
+          grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "✓ insteadOf for bobcorp" || exit 1
+          
+          echo "=== URL shortcuts correct ==="
+
+      - name: Test SSH config has correct host entries
+        run: |
+          echo "=== Testing SSH config ==="
+          
+          grep -q 'Host github-alice' ~/.ssh/config && echo "✓ Host github-alice exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "✓ IdentityFile for alice" || exit 1
+          
+          grep -q 'Host github-bob' ~/.ssh/config && echo "✓ Host github-bob exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "✓ IdentityFile for bob" || exit 1
+          
+          echo "=== SSH config correct ==="
+
+      - name: Test identity generation script exists
+        run: |
+          echo "=== Checking identity generation ==="
+          # The run_onchange script should have created identity files
+          # Note: In CI the script may not run, but we can at least check the template output
+          ~/.local/bin/chezmoi execute-template --source="${GITHUB_WORKSPACE}" '{{ range .accounts }}{{ if hasKey . "username" }}{{ .provider | default "github" }}-{{ .username }},{{ end }}{{ end }}' | grep -q 'github-alice' && echo "✓ Template can iterate accounts" || exit 1
+          echo "=== Identity generation verified ==="
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "============================================"
+          echo "  ✅ All integration tests passed!"
+          echo "============================================"
+          echo ""
+          echo "Validated:"
+          echo "  • Multi-account config parsing"
+          echo "  • .gitconfig includeIf generation"
+          echo "  • .gitconfig URL shortcuts generation"
+          echo "  • SSH config host entries"
+          echo "  • Template iteration over accounts array"
+
+  #=============================================================================
+  # TIER 3: Backward Compatibility - Test with minimal/legacy configs
+  #=============================================================================
+  minimal-config-test:
+    name: Minimal Config Test (Backward Compat)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Create minimal config (missing optional fields)
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [data]
+
+          # Minimal account - only required fields, no detailed identity
+          [[data.accounts]]
+            name = "Minimal User"
+            email = "minimal@example.com"
+
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          EOF
+
+      - name: Run install.sh (Universal Installer)
+        run: |
+          # Use the installer script to bootstrap everything
+          sh install.sh
+          
+          # Add local bin to path for subsequent steps
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify gitconfig has user info
+        run: |
+          echo "=== Testing minimal config (simple mode) ==="
+          grep -q 'name = "Minimal User"' ~/.gitconfig && echo "✓ user.name set" || exit 1
+          grep -q 'email = "minimal@example.com"' ~/.gitconfig && echo "✓ user.email set" || exit 1
+          echo "=== Minimal config works ==="
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "============================================"
+          echo "  ✅ Backward compatibility test passed!"
+          echo "============================================"
+          echo ""
+          echo "Validated:"
+          echo "  • Configs with missing key/organizations/dirs work"
+          echo "  • Simple single-identity mode works"
+
+  # TIER 3: Windows Installer Test
+  #=============================================================================
+  test-windows-install:
+    name: Windows Installer Test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      
+      - name: Create minimal config (disable desktop apps)
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
+          @"
+          sourceDir = '$env:GITHUB_WORKSPACE'
+          
+          [data]
+          
+          [[data.accounts]]
+            name = "CI Windows"
+            email = "ci@windows.local"
+          
+          [data.packages]
+            install_core = false
+            install_modern = false
+            install_fonts = false
+            install_ai_tools = false
+            install_guardrail = false
+            install_desktop = false
+          "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
+
+      - name: Run install.ps1
+        shell: powershell
+        env:
+          CHEZMOI_TEST_MINIMAL: "true"
+        run: |
+          # CHEZMOI_TEST_MINIMAL (checked alongside CI, which GitHub Actions already
+          # sets to "true" here regardless) tells install.ps1 to skip its own
+          # interactive prompts (admin-elevation question, trailing "Press Enter to
+          # exit") - it has no effect on chezmoi's own template prompting, which
+          # this runner's CI=true already handles on its own.
+          .\install.ps1
+
+      - name: Fix sourceDir in config
+        shell: powershell
+        run: |
+          # install.ps1 overwrites config, so we must re-add sourceDir for verify to work
+          $conf = "$env:USERPROFILE\.config\chezmoi\chezmoi.toml"
+          $src = "sourceDir = '$env:GITHUB_WORKSPACE'"
+          if (Test-Path $conf) {
+            $content = Get-Content $conf -Raw
+            Set-Content $conf "$src`n$content" -Encoding utf8
+          } else {
+            Write-Error "Config file not found at $conf"
+            exit 1
+          }
+          exit 0
+          
+      - name: Verify installation
+        shell: powershell
+        run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+          chezmoi verify
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Windows installation verified!"

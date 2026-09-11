@@ -1,0 +1,1382 @@
+{{ if eq .chezmoi.os "linux" "darwin" -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Sudo helper
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null; then
+        SUDO="sudo"
+        # Cache sudo credentials upfront so the user only types password once
+        sudo -v
+        # Keep-alive: refresh sudo timestamp in background until this script exits
+        while true; do sudo -n true; sleep 30; kill -0 "$$" || exit; done 2>/dev/null &
+    else
+        echo "Error: This script requires root privileges or sudo." >&2
+        exit 1
+    fi
+fi
+
+{{ $install_core := false -}}
+{{- $install_modern := false -}}
+{{- $install_fonts := false -}}
+{{- $install_ai_tools := false -}}
+{{- $install_guardrail := false -}}
+{{- $install_desktop := false -}}
+{{- if hasKey . "packages" -}}
+  {{- $install_core = .packages.install_core -}}
+  {{- $install_modern = .packages.install_modern -}}
+  {{- $install_fonts = .packages.install_fonts -}}
+  {{- $install_ai_tools = .packages.install_ai_tools -}}
+  {{- if hasKey .packages "install_guardrail" }}{{- $install_guardrail = .packages.install_guardrail }}{{- end -}}
+  {{- $install_desktop = .packages.install_desktop -}}
+{{- end -}}
+
+{{/* Computed inline (not read from stored data) so this is always live/correct on
+      every apply, never stale from a `chezmoi init` run on a different machine/
+      environment type - see the [data] comment in .chezmoi.toml.tmpl. "isDevcontainer"
+      really means "any container" (Docker specifically) by design - intentionally
+      Docker-only for now, see .chezmoi.toml.tmpl's detection block for the planned
+      rollout order if other runtimes are ever added. Computed once here and shared
+      by install_desktop's host-only gating (Chrome/VS Code/Docker Desktop on Linux,
+      Mac casks on Darwin) - install_desktop used to be gated only by a runtime
+      $DISPLAY check, which isn't sufficient: WSLg sets $DISPLAY automatically, so
+      on a WSLg-enabled machine that runtime check alone let Desktop Apps install
+      proceed *inside* WSL (confirmed live), duplicating Chrome/VS Code/Docker
+      Desktop the user already has on the Windows host. $DISPLAY is kept as a
+      second, genuine safety net for real headless Linux hosts. */}}
+{{- $envDev := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") | default "" -}}
+{{- $isDevcontainer := or (eq $envDev "true") (eq $envDev "1") (stat "/.dockerenv" | not | not) -}}
+{{- $isWsl := false -}}
+{{- if eq .chezmoi.os "linux" -}}
+  {{- if contains "microsoft" (.chezmoi.kernel.osrelease | lower) -}}
+    {{- $isWsl = true -}}
+  {{- end -}}
+{{- end -}}
+{{- $isHost := and (not $isDevcontainer) (not $isWsl) -}}
+
+#===============================================================================
+# CHEZMOI RUN_ONCHANGE: Install Packages (Linux/macOS)
+# This script runs whenever its content changes (hash-based).
+# Version: 1.0.0 (change this to force re-run)
+#===============================================================================
+
+#-------------------------------------------------------------------------------
+# Colors
+#-------------------------------------------------------------------------------
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+info()    { printf "${BLUE}▸${NC} %s\n" "$1"; }
+success() { printf "${GREEN}✓${NC} %s\n" "$1"; }
+warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1"; }
+error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
+
+#-------------------------------------------------------------------------------
+# net_timeout <seconds> <cmd...> - wall-clock guard for network install steps.
+#
+# A stalled download or `curl | sh` installer (no built-in timeout) otherwise
+# freezes this whole `set -e` run indefinitely - confirmed live: Ollama's
+# ~1.5GB bundle stalled mid-transfer for 15+ min with nothing else able to
+# proceed. Wrap the fetch so a dead connection is killed and the caller's
+# `|| warn` can carry on. Pipelines: `net_timeout N bash -c '... | sh'`.
+#
+# Uses coreutils `timeout` (always present on Linux) or `gtimeout` (macOS -
+# `coreutils` is first in the brew core list so it lands before the guarded
+# steps); if neither exists the command runs unguarded rather than failing.
+# Resolved per-call, not cached, so a `gtimeout` installed partway through a
+# macOS run is picked up by later steps. `-k 10` follows SIGTERM with SIGKILL
+# after 10s for processes that ignore the first signal. Exit 124 = timed out.
+#-------------------------------------------------------------------------------
+net_timeout() {
+    local secs="$1"; shift
+    local bin=""
+    if command -v timeout &>/dev/null; then bin="timeout"
+    elif command -v gtimeout &>/dev/null; then bin="gtimeout"
+    fi
+    if [ -n "$bin" ]; then
+        "$bin" -k 10 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+#-------------------------------------------------------------------------------
+# Detect OS and Package Manager
+#-------------------------------------------------------------------------------
+detect_os() {
+    case "$(uname -s)" in
+        Darwin) echo "macos" ;;
+        Linux)  echo "linux" ;;
+        *)      echo "unknown" ;;
+    esac
+}
+
+detect_package_manager() {
+    if command -v apt &>/dev/null; then echo "apt"
+    elif command -v pacman &>/dev/null; then echo "pacman"
+    elif command -v dnf &>/dev/null; then echo "dnf"
+    elif command -v brew &>/dev/null; then echo "brew"
+    else echo "unknown"
+    fi
+}
+
+get_distro_info() {
+    local id="" id_like="" codename=""
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        id="${ID:-}"
+        id_like="${ID_LIKE:-}"
+        codename="${VERSION_CODENAME:-${UBUNTU_CODENAME:-${DEBIAN_CODENAME:-}}}"
+    fi
+    if [[ -z "$codename" ]] && command -v lsb_release &>/dev/null; then
+        codename=$(lsb_release -cs 2>/dev/null || true)
+    fi
+    printf "%s|%s|%s" "$id" "$id_like" "$codename"
+}
+
+install_fonts() {
+    local font_dir="$HOME/.local/share/fonts"
+    # Ensure wget and 7zip are available
+    command -v wget &>/dev/null || $SUDO apt install -y wget
+    if ! command -v 7z &>/dev/null && ! command -v 7zz &>/dev/null; then
+         if [[ "$(uname -s)" == "Darwin" ]]; then
+             brew install sevenzip
+         else
+             $SUDO apt install -y p7zip-full
+         fi
+    fi
+
+    # Check for Meslo Nerd Font
+    if [[ ! -f "$font_dir/MesloLGMNerdFont-Regular.ttf" ]]; then
+        info "Installing Meslo Nerd Font (for Starship)..."
+        mkdir -p "$font_dir"
+        
+        # Determine latest Nerd Fonts release
+        local nf_version
+        nf_version=$(curl -s --max-time 30 "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+
+        # Download from official Nerd Fonts repo
+        if ! net_timeout 300 wget -q --show-progress -O /tmp/Meslo.zip "https://github.com/ryanoasis/nerd-fonts/releases/download/${nf_version}/Meslo.zip"; then
+            warn "Meslo Nerd Font download failed or timed out - skipping"
+            rm -f /tmp/Meslo.zip
+            return
+        fi
+
+        # Unzip with 7z/7zz
+        # 7z x -o{output_dir} {archive}
+        local seven_z="7z"
+        if command -v 7zz &>/dev/null; then seven_z="7zz"; fi
+        
+        "$seven_z" x -y -o"$font_dir" /tmp/Meslo.zip
+        rm /tmp/Meslo.zip
+
+        if command -v fc-cache &>/dev/null; then
+            info "Updating font cache..."
+            fc-cache -f
+        fi
+        success "Meslo Nerd Font installed"
+    fi
+}
+
+install_node() {
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 24 ]]; then
+        info "Installing Node.js 24.x..."
+        # Ensure curl is available
+        command -v curl &>/dev/null || $SUDO apt install -y curl
+        # -E (preserve environment) only makes sense as a sudo flag - when
+        # $SUDO is empty (already running as root, e.g. inside a container),
+        # `$SUDO -E bash -` expands to a bare `-E bash -`, and the shell
+        # tries to run a command literally named "-E" ("command not found").
+        # Confirmed live in a real Docker container run as root: this killed
+        # the entire install right here, before anything past Node.js ever
+        # ran - a pre-existing bug, not something introduced this session,
+        # surfaced by actually running the script instead of just reading it.
+        if [[ -n "$SUDO" ]]; then
+            net_timeout 180 bash -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | '"$SUDO"' -E bash -' || warn "NodeSource setup script failed or timed out - 'apt install nodejs' below may fail"
+        else
+            net_timeout 180 bash -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' || warn "NodeSource setup script failed or timed out - 'apt install nodejs' below may fail"
+        fi
+        $SUDO apt install -y nodejs
+    fi
+    # Upgrade npm to latest
+    if command -v npm &>/dev/null; then
+        info "Upgrading npm to latest..."
+        $SUDO npm install -g npm@latest --fund=false 2>/dev/null || true
+    fi
+}
+
+# Curated third-party agent skills, installed with the `skills` CLI
+# (vercel-labs/skills) rather than hand-staged per agent. One `skills add`
+# writes ~/.agents/skills/<name>/ (OpenCode and Antigravity read this
+# agent-compatible path natively) and ~/.claude/skills/<name>/ (Claude Code).
+# --copy makes real directories, not symlinks into an npm cache that won't
+# survive. Replaces the old clone + hand-copy + plugin.json + `agy plugin
+# install` staging, which only reached Antigravity.
+#
+# Antigravity note: `-a antigravity` is the `skills` CLI's own Antigravity
+# target (~/.agents/skills/). Not yet re-verified with `agy` actually present
+# on a box; if agy turns out not to read that path, add back an
+# `agy plugin install <staged dir>` for the Antigravity leg only.
+install_agent_skills() {
+    command -v npx &>/dev/null || { warn "npx not found - skipping curated agent skills"; return; }
+    # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /
+    # npm notice run 'skills' add ..." hint to stderr on every invocation -
+    # pure console noise here, suppressed like the Windows side does.
+    # </dev/null on every $SK call: chezmoi run_onchange scripts inherit the
+    # terminal's TTY on stdin, and a CLI that decides to prompt (or a stalled
+    # fetch with no internal timeout) then blocks the whole run holding the
+    # terminal - confirmed live 2026-08-30, first real run hung indefinitely
+    # at the skills CLI's intro banner. With stdin at EOF the same commands
+    # complete non-interactively in ~5s (verified: 8 skills + mp-code-review +
+    # frontend-design). net_timeout stays as the wall-clock backstop.
+    local -a SK=(npx --yes --loglevel=error skills@latest)
+    local -a AGENTS=(claude-code opencode antigravity)
+
+    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
+    # teach + writing-for-agents live under skills/productivity/, the rest under
+    # skills/engineering/; the CLI resolves by skill name, not path (grilling and
+    # handoff are already productivity/ skills that resolve fine here).
+    info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
+    net_timeout 300 "${SK[@]}" add mattpocock/skills \
+        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
+           prototype research grilling handoff teach writing-for-agents \
+           resolving-merge-conflicts \
+        -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "Matt Pocock skills install failed or timed out - continuing"
+
+    # code-review -> mp-code-review. The `skills` CLI has no rename flag, so
+    # stage a renamed copy with its `name:` frontmatter patched and install
+    # that local directory. "mp-" keeps it distinct from this repo's own
+    # /code-review command and Superpowers' receiving-code-review skill.
+    local sk_tmp; sk_tmp="$(mktemp -d)"
+    # net_timeout: same wall-clock contract as every other network fetch here
+    # (docs/tool-parity.md's Network-step timeouts section includes git clones).
+    if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
+        local src="$sk_tmp/repo/skills/engineering/code-review"
+        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
+        if [[ -d "$src" ]]; then
+            mkdir -p "$sk_tmp/stage/mp-code-review"
+            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
+            local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
+            if [[ -f "$skf" ]]; then
+                # portable in-place edit (GNU and BSD sed differ on -i).
+                # Guarded: a bare failing `sed ... && mv` here would trip
+                # set -e and abort the whole run - frontend-design, Playwright,
+                # act, desktop apps and shell setup all come after this.
+                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
+                net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+                    || warn "mp-code-review skill install failed - continuing"
+            else
+                warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
+            fi
+        else
+            warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
+        fi
+    fi
+    rm -rf "$sk_tmp"
+
+    # Anthropic's frontend-design skill - distinctive visual direction for new UI.
+    info "Installing Anthropic's frontend-design skill..."
+    net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "frontend-design skill install failed or timed out - continuing"
+}
+
+# agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.
+GUARDRAIL_VERSION="v0.18.0-dev"
+GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+
+# agent-guardrails: a single static Go binary ("guardrail") that enforces the
+# shared hook policy. Installed from the pinned GitHub release, checksum-verified
+# (the first asset-checksum check in this repo), then wired into Claude Code by
+# `guardrail gen-config claude --merge`. Idempotent: skips the download when the
+# installed binary already reports GUARDRAIL_VERSION; always re-runs gen-config
+# (its owned-entry merge is safe to repeat).
+install_agent_guardrails() {
+    local ver="$GUARDRAIL_VERSION" repo="$GUARDRAIL_REPO"
+    local dest="$HOME/.local/bin/guardrail"
+
+    if command -v guardrail &>/dev/null && [ "$(guardrail version 2>/dev/null)" = "guardrail ${ver}" ]; then
+        info "guardrail ${ver} already installed"
+    else
+        local os arch
+        case "$(uname -s)" in
+            Linux)  os="linux" ;;
+            Darwin) os="darwin" ;;
+            *) warn "guardrail: unsupported OS $(uname -s) - skipping"; return ;;
+        esac
+        case "$(uname -m)" in
+            x86_64|amd64) arch="amd64" ;;
+            aarch64|arm64) arch="arm64" ;;
+            *) warn "guardrail: unsupported arch $(uname -m) - skipping"; return ;;
+        esac
+        local asset="guardrail_${os}_${arch}"
+        local base="https://github.com/${repo}/releases/download/${ver}"
+        local tmp; tmp="$(mktemp -d)"
+
+        info "Installing guardrail ${ver} (${asset})..."
+        if ! net_timeout 180 curl -fLo "$tmp/$asset" "${base}/${asset}"; then
+            warn "guardrail: download failed or timed out - skipping"; rm -rf "$tmp"; return
+        fi
+        if ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "${base}/SHA256SUMS"; then
+            warn "guardrail: SHA256SUMS download failed - skipping (won't install unverified)"; rm -rf "$tmp"; return
+        fi
+        # stock macOS ships `shasum`, not `sha256sum` — without this the pipeline
+        # returns 127, the install is skipped, and the Mac is left with NO guard
+        # under a message that misattributes it to a checksum mismatch.
+        local SHA_CMD
+        if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
+        elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
+        elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
+        else warn "guardrail: no SHA-256 tool found - cannot verify, skipping install"; rm -rf "$tmp"; return; fi
+        if ! ( cd "$tmp" && grep " ${asset}\$" SHA256SUMS | $SHA_CMD -c - ); then
+            warn "guardrail: CHECKSUM MISMATCH for ${asset} - not installing"; rm -rf "$tmp"; return
+        fi
+        mkdir -p "$HOME/.local/bin"
+        install -m 0755 "$tmp/$asset" "$dest" || { warn "guardrail: install to $dest failed - skipping"; rm -rf "$tmp"; return; }
+        rm -rf "$tmp"
+        info "guardrail installed to $dest"
+    fi
+
+    # Wire into Claude Code (no-op-safe if claude is absent or already wired).
+    if command -v claude &>/dev/null; then
+        info "Configuring guardrail for Claude Code..."
+        "$dest" gen-config claude --merge "$HOME/.claude/settings.json" --binary "$dest" \
+            || warn "guardrail: gen-config claude --merge failed - continuing"
+    fi
+
+    # Wire into OpenCode: declarative permission.{bash,read,edit} + the
+    # embedded plugin (deployed alongside opencode.json, outside opencode's
+    # own config tree so it can't be mistaken for something opencode scans).
+    if command -v opencode &>/dev/null; then
+        info "Configuring guardrail for OpenCode..."
+        mkdir -p "$HOME/.local/share/guardrail"
+        "$dest" gen-config opencode \
+            --merge "$HOME/.config/opencode/opencode.json" \
+            --binary "$dest" \
+            --plugin-dir "$HOME/.local/share/guardrail" \
+            || warn "guardrail: gen-config opencode --merge failed - continuing"
+    fi
+
+    # Wire into Antigravity: global hooks.json. No declarative floor exists
+    # for this plane (see agent-guardrails ADR-0008) - the hook registration
+    # IS the entire enforcement surface, so this is the only guardrail
+    # coverage Antigravity gets.
+    if command -v agy &>/dev/null; then
+        info "Configuring guardrail for Antigravity..."
+        mkdir -p "$HOME/.gemini/config"
+        "$dest" gen-config antigravity \
+            --merge "$HOME/.gemini/config/hooks.json" \
+            --binary "$dest" \
+            || warn "guardrail: gen-config antigravity --merge failed - continuing"
+    fi
+}
+
+install_linux_desktop() {
+    info "Installing Linux Desktop Apps..."
+
+    # Ensure gpg is available (needed for repo keys)
+    command -v gpg &>/dev/null || $SUDO apt install -y gpg
+
+    # 1. Google Chrome
+    if ! command -v google-chrome &>/dev/null; then
+        info "Installing Google Chrome..."
+        if net_timeout 300 wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; then
+            $SUDO apt install -y /tmp/chrome.deb || warn "Chrome install failed"
+        else
+            warn "Chrome download failed or timed out - skipping"
+        fi
+        rm -f /tmp/chrome.deb
+    fi
+
+    # 2. VS Code (Official Repo - MSFT)
+    if ! command -v code &>/dev/null; then
+        info "Installing VS Code..."
+        net_timeout 60 wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
+        $SUDO install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
+        $SUDO sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
+        rm packages.microsoft.gpg
+        $SUDO apt update
+        $SUDO apt install -y code
+    fi
+
+    # 3. Docker Desktop (Official .deb + Repo)
+    # Replaces server-focused Docker Engine with Desktop version for GUI environments
+    if ! dpkg -s docker-desktop &>/dev/null && ! command -v docker-desktop &>/dev/null; then
+        info "Installing Docker Desktop..."
+
+        # A. Setup Docker Repository (Required for 'docker-ce-cli' dependency)
+        local distro_info distro_id distro_like distro_codename repo_base
+        distro_info=$(get_distro_info)
+        distro_id="${distro_info%%|*}"
+        distro_like="${distro_info#*|}"
+        distro_like="${distro_like%%|*}"
+        distro_codename="${distro_info##*|}"
+
+        case "$distro_id" in
+            ubuntu) repo_base="https://download.docker.com/linux/ubuntu" ;;
+            debian) repo_base="https://download.docker.com/linux/debian" ;;
+            linuxmint)
+                repo_base="https://download.docker.com/linux/ubuntu"
+                # Use upstream Ubuntu codename for Mint (e.g. zena -> noble)
+                if [[ -f /etc/os-release ]]; then
+                    distro_codename=$(grep UBUNTU_CODENAME /etc/os-release | cut -d= -f2 | tr -d '"')
+                fi
+                ;;
+            *) if [[ "$distro_like" == *debian* ]]; then repo_base="https://download.docker.com/linux/debian"; fi ;;
+        esac
+
+        if [[ -n "$repo_base" && -n "$distro_codename" ]]; then
+            # Add Docker's official GPG key:
+            $SUDO apt update # Refresh to ensure we can get prereqs
+            $SUDO apt install -y ca-certificates curl
+            $SUDO install -m 0755 -d /etc/apt/keyrings
+            $SUDO curl -fsSL --max-time 60 "$repo_base/gpg" -o /etc/apt/keyrings/docker.asc
+            $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+
+            # Add the repository to Apt sources:
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] $repo_base \
+              $distro_codename stable" | \
+              $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+            
+            $SUDO apt update # Update indices to include docker repo
+        else
+            warn "Could not determine Docker repo for $distro_id (codename=$distro_codename). dependency 'docker-ce-cli' might fail."
+        fi
+        
+        # B. Download and Install Docker Desktop .deb
+        # Generic URL for latest stable amd64
+        # Verified to work for Ubuntu, Debian, and Linux Mint
+        local docker_deb_url="https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
+        local docker_deb="/tmp/docker-desktop-amd64.deb"
+        
+        # Ensure curl is available
+        command -v curl &>/dev/null || $SUDO apt install -y curl
+
+        info "Downloading Docker Desktop..."
+        # ~600MB .deb - the largest single download in this script.
+        net_timeout 900 curl -fL -o "$docker_deb" "$docker_deb_url" || {
+             warn "Failed to download Docker Desktop (or timed out)"
+             rm -f "$docker_deb"
+             return
+        }
+        
+        info "Installing Docker Desktop package..."
+        # apt install ./file.deb resolves dependencies automatically (including pulling docker-ce-cli from the repo we just added)
+        $SUDO apt install -y "$docker_deb" || warn "Docker Desktop install failed"
+        rm -f "$docker_deb"
+    fi
+
+    # Docker Desktop's VM backend needs /dev/kvm access via the "kvm" group -
+    # confirmed against Docker's own install docs (docs.docker.com/desktop/setup/
+    # install/linux/): `sudo usermod -aG kvm $USER`, not the "docker" group.
+    # Desktop's CLI talks to a per-user socket (~/.docker/desktop/docker.sock,
+    # the "desktop-linux" context) instead of the traditional group-owned
+    # /var/run/docker.sock, so the classic "add user to docker group" advice
+    # doesn't apply here at all - this was genuinely missing before, confirmed
+    # via a full repo grep for "kvm"/"docker group" turning up nothing.
+    # Checked unconditionally (not just inside the "just installed" branch
+    # above) in case Docker Desktop was already present from before this fix
+    # existed and never got this.
+    if getent group kvm &>/dev/null; then
+        if ! id -nG "$USER" | grep -qw kvm; then
+            info "Adding $USER to the 'kvm' group (required for Docker Desktop's VM backend)..."
+            if $SUDO usermod -aG kvm "$USER"; then
+                warn "Added to 'kvm' group - Docker Desktop won't work until you log out and back in (or reboot). A new terminal or 'exec \$SHELL' will NOT pick this up: group membership is loaded at login (via initgroups()), not re-read per command, and Docker Desktop is a GUI app launched from your desktop session - not from whatever shell ran this script."
+            else
+                warn "Failed to add $USER to 'kvm' group - Docker Desktop's VM backend will not start until this is done manually: sudo usermod -aG kvm \$USER (then log out/in)"
+            fi
+        fi
+    else
+        warn "'kvm' group not found - Docker Desktop needs KVM virtualization support. Check 'ls -al /dev/kvm' and 'lsmod | grep kvm'; see https://docs.docker.com/desktop/setup/install/linux/ for prerequisites."
+    fi
+
+    # Utilities
+    # geany: cross-platform replacement for Notepad++ (Windows-only, no real
+    # Mac/Linux port) - fills the same "lightweight quick-edit GUI editor"
+    # role. In Ubuntu's default apt repos, no extra setup needed.
+    # Installed individually so one package that's unavailable on this release
+    # doesn't take the whole `apt install` (and, under `set -e`, the run) down.
+    for pkg in meld flameshot vlc p7zip-full obs-studio qbittorrent ghostscript geany; do
+        $SUDO apt install -y "$pkg" || warn "Skipping '$pkg' (not installable on this release)."
+    done
+
+    # Termius (SSH/SFTP client - replaces FileZilla everywhere as of this
+    # commit; FileZilla itself is fine on Linux/Windows, but its Homebrew
+    # cask was pulled entirely on macOS, adware concerns - standardizing on
+    # one tool across all 3 platforms rather than mixing). Static "latest"
+    # .deb URL, same pattern as the Chrome download above - no repo/GPG key
+    # needed, no version to track.
+    if ! dpkg -s termius &>/dev/null && ! command -v termius &>/dev/null; then
+        info "Installing Termius..."
+        if net_timeout 300 wget -q -O /tmp/termius.deb https://download.termius.com/linux/Termius.deb; then
+            $SUDO apt install -y /tmp/termius.deb || warn "Termius install failed"
+        else
+            warn "Termius download failed or timed out - skipping"
+        fi
+        rm -f /tmp/termius.deb
+    fi
+
+    # 4. ScreenRec (Official Repo - modern keyring)
+    if ! command -v screenrec &>/dev/null; then
+        info "Installing ScreenRec..."
+        $SUDO mkdir -p /etc/apt/keyrings
+        curl -fsSL --max-time 60 https://screenrec.com/download/pub.asc | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/screenrec.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/screenrec.gpg] https://screenrec.com/download/ubuntu stable main" | $SUDO tee /etc/apt/sources.list.d/screenrec.list > /dev/null
+        $SUDO apt update || true
+        # screenrec's .deb still hard-depends on libgdk-pixbuf2.0-0, which was renamed to
+        # libgdk-pixbuf-2.0-0 on Ubuntu 24.04+ (Linux Lite 7). Don't let it abort the run,
+        # and tear the repo back down on failure so future `apt update`s stay clean.
+        if ! $SUDO apt install -y screenrec; then
+            warn "ScreenRec install failed (stale libgdk-pixbuf2.0-0 dependency on Ubuntu 24.04+); removing its apt source."
+            $SUDO rm -f /etc/apt/sources.list.d/screenrec.list /etc/apt/keyrings/screenrec.gpg
+            $SUDO apt update || true
+        fi
+    fi
+
+    # 5. Handy (Speech-to-Text, https://handy.computer) - not in any apt repo,
+    # only distributed as GitHub release assets. No static "latest" .deb URL
+    # like Chrome's, so resolve the current tag via the API first (same
+    # pattern as the Meslo Nerd Font download in install_fonts() above).
+    # Model selection (Whisper vs Parakeet, which size) is GUI-only - no CLI
+    # flag or config file exists to pre-select one, so this only installs
+    # the app. For Spanish + English both: pick a Whisper model in-app
+    # (Parakeet is English-only, so it's off the table) - Large for the best
+    # accuracy in both languages, or Turbo for a much faster model with a
+    # small accuracy trade-off (most noticeable on non-English audio).
+    if ! dpkg -s handy &>/dev/null; then
+        info "Installing Handy (Speech-to-Text)..."
+        local handy_version
+        handy_version=$(curl -s --max-time 30 "https://api.github.com/repos/cjpais/Handy/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        if [[ -n "$handy_version" ]]; then
+            if net_timeout 300 wget -q -O /tmp/handy.deb "https://github.com/cjpais/Handy/releases/download/v${handy_version}/Handy_${handy_version}_amd64.deb"; then
+                $SUDO apt install -y /tmp/handy.deb || warn "Handy install failed"
+            else
+                warn "Handy download failed or timed out - skipping"
+            fi
+            rm -f /tmp/handy.deb
+        else
+            warn "Could not determine latest Handy version - skipping"
+        fi
+    fi
+
+    # 6. Tailscale (Official Install Script)
+    # Uses Tailscale's own official installer (sets up its apt repo per-distro
+    # itself) rather than a possibly-stale Ubuntu-provided package - same
+    # reasoning as Docker's official repo above. Deliberately never run inside
+    # WSL: this whole function is $isHost-gated already (see the top-of-file
+    # comment), and that's not just consistency with the other desktop
+    # apps here - Tailscale's own docs specifically recommend against running
+    # it inside WSL2 at all (breaks encrypted traffic if it's also running on
+    # the Windows host, which is the whole point of using WSL on a machine
+    # that has a Windows host). WSL gets full tailnet access automatically
+    # through whatever's running on the Windows host, no separate install
+    # needed.
+    if ! command -v tailscale &>/dev/null; then
+        info "Installing Tailscale..."
+        net_timeout 180 bash -c 'curl -fsSL https://tailscale.com/install.sh | sh' \
+            || warn "Tailscale install failed or timed out - continuing"
+    fi
+}
+
+install_apt() {
+{{- if or $install_core $install_modern $install_fonts $install_ai_tools $install_desktop }}
+    info "Updating apt..."
+    $SUDO apt update -y || true
+    info "Upgrading installed packages..."
+    $SUDO apt upgrade -y || true
+{{- else }}
+    info "No package categories enabled - skipping apt update/upgrade."
+{{- end }}
+
+{{- if $install_core }}
+    info "Installing core packages..."
+    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd
+
+    # GitHub CLI - via the official apt repo rather than the distro-packaged
+    # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
+    # it only entered the universe pocket at 23.04. This is GitHub's own
+    # documented install snippet, works identically across every supported
+    # Ubuntu/Debian release.
+    if ! command -v gh &>/dev/null; then
+        info "Installing GitHub CLI..."
+        {
+            $SUDO mkdir -p -m 755 /etc/apt/keyrings
+            out=$(mktemp)
+            net_timeout 60 wget -nv -O "$out" https://cli.github.com/packages/githubcli-archive-keyring.gpg
+            $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg < "$out" > /dev/null
+            $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+            rm -f "$out"
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            $SUDO apt update
+            $SUDO apt install -y gh
+        } || warn "GitHub CLI install failed - continuing"
+    fi
+
+    # Node.js 24.x
+    install_node
+
+    # Neovim
+    if ! command -v nvim &>/dev/null; then
+        info "Installing Neovim..."
+        $SUDO apt install -y neovim || {
+            net_timeout 180 curl -fLO https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz \
+                && $SUDO tar -C /opt -xzf nvim-linux64.tar.gz \
+                && $SUDO ln -sf /opt/nvim-linux64/bin/nvim /usr/local/bin/nvim
+            rm -f nvim-linux64.tar.gz
+        }
+    fi
+{{- else }}
+    info "Core packages disabled in config"
+{{- end }}
+
+{{- if $install_modern }}
+    # Modern CLI tools
+    $SUDO apt install -y bat fd-find || true
+
+    # CI and .pre-commit-config.yaml both lint shell with shellcheck; without it
+    # locally a fresh machine only finds template errors in CI.
+    # shfmt: built on mvdan.cc/sh, the same parser internal/engine/tokenize.go
+    # uses - handy for seeing how the engine actually reads a command.
+    $SUDO apt install -y shellcheck || warn "shellcheck install failed - continuing"
+    if ! command -v shfmt &>/dev/null; then
+        local shfmt_machine shfmt_arch="" shfmt_sha256=""
+        shfmt_machine="$(uname -m)"
+        case "$shfmt_machine" in
+            x86_64|amd64)
+                shfmt_arch="amd64"
+                shfmt_sha256="27b3c6f9d9592fc5b4856c341d1ff2c88856709b9e76469313642a1d7b558fe0"
+                ;;
+            aarch64|arm64)
+                shfmt_arch="arm64"
+                shfmt_sha256="27e1f69b0d57c584bcbf5c882b4c4f78ffcf945d0efef45c1fbfc6692213c7c3"
+                ;;
+            *) warn "shfmt: unsupported architecture ${shfmt_machine} - skipping" ;;
+        esac
+
+        if [[ -n "$shfmt_arch" ]]; then
+            local -a shfmt_sha_cmd=()
+            if command -v sha256sum &>/dev/null; then shfmt_sha_cmd=(sha256sum)
+            elif command -v gsha256sum &>/dev/null; then shfmt_sha_cmd=(gsha256sum)
+            elif command -v shasum &>/dev/null; then shfmt_sha_cmd=(shasum -a 256)
+            else warn "shfmt: no SHA-256 tool found - cannot verify, skipping install"; fi
+
+            if (( ${#shfmt_sha_cmd[@]} > 0 )); then
+                local shfmt_tmp shfmt_url
+                shfmt_url="https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_${shfmt_arch}"
+                if shfmt_tmp="$(mktemp)"; then
+                    info "Installing shfmt..."
+                    if ! net_timeout 120 curl -fLo "$shfmt_tmp" "$shfmt_url"; then
+                        warn "shfmt download failed or timed out - continuing"
+                    elif ! printf '%s  %s\n' "$shfmt_sha256" "$shfmt_tmp" | "${shfmt_sha_cmd[@]}" -c -; then
+                        warn "shfmt checksum verification failed - not installing"
+                    elif ! $SUDO install "$shfmt_tmp" /usr/local/bin/shfmt; then
+                        warn "shfmt install failed - continuing"
+                    fi
+                    rm -f "$shfmt_tmp"
+                else
+                    warn "shfmt: could not create temporary file - skipping install"
+                fi
+            fi
+        fi
+    fi
+    
+    # Symlink batcat -> bat (Ubuntu/Debian)
+    if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
+        info "Symlinking batcat -> bat..."
+        mkdir -p "$HOME/.local/bin"
+        ln -s "$(which batcat)" "$HOME/.local/bin/bat"
+    fi
+
+    # Symlink fdfind -> fd (Ubuntu/Debian's fd-find package installs as fdfind, same
+    # naming-conflict reason as batcat above - confirmed missing live: fd was the
+    # only tool out of the whole modern-tools list not found on PATH after a real
+    # apt-based install in CI).
+    if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
+        info "Symlinking fdfind -> fd..."
+        mkdir -p "$HOME/.local/bin"
+        ln -s "$(which fdfind)" "$HOME/.local/bin/fd"
+    fi
+
+    # Zoxide (smarter cd)
+    if ! command -v zoxide &>/dev/null; then
+        info "Installing zoxide..."
+        $SUDO apt install -y zoxide \
+            || net_timeout 120 bash -c 'curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash' \
+            || warn "zoxide install failed or timed out - continuing"
+    fi
+
+    # Starship (prompt)
+    if ! command -v starship &>/dev/null; then
+        info "Installing Starship..."
+        net_timeout 120 bash -c 'curl -sS https://starship.rs/install.sh | sh -s -- -y' 2>&1 | tail -1 || warn "Starship installer failed or timed out - continuing"
+    fi
+
+    # Direnv
+    $SUDO apt install -y direnv || true
+
+    # Lazygit
+    if ! command -v lazygit &>/dev/null; then
+        info "Installing lazygit..."
+        LAZYGIT_VERSION=$(curl -s --max-time 30 "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        if net_timeout 180 curl -fLo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"; then
+            tar xf lazygit.tar.gz lazygit && $SUDO install lazygit /usr/local/bin
+        else
+            warn "lazygit download failed or timed out - continuing"
+        fi
+        rm -f lazygit lazygit.tar.gz
+    fi
+
+    # Gum (Bubble Gum for shell scripts)
+    if ! command -v gum &>/dev/null; then
+        info "Installing gum..."
+        $SUDO mkdir -p /etc/apt/keyrings
+        curl -fsSL --max-time 60 https://repo.charm.sh/apt/gpg.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $SUDO tee /etc/apt/sources.list.d/charm.list
+        $SUDO apt update && $SUDO apt install -y gum
+    fi
+
+    # eza
+    if ! command -v eza &>/dev/null; then
+        info "Installing eza..."
+        $SUDO apt install -y gpg
+        $SUDO mkdir -p /etc/apt/keyrings
+        # Ensure wget
+        command -v wget &>/dev/null || $SUDO apt install -y wget
+        net_timeout 60 wget -qO- https://raw.githubusercontent.com/eza-community/eza/main/deb.asc | $SUDO gpg --dearmor -o /etc/apt/keyrings/gierens.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gierens.gpg] http://deb.gierens.de stable main" | $SUDO tee /etc/apt/sources.list.d/gierens.list
+        $SUDO apt update || true
+        $SUDO apt install -y eza
+    fi
+
+    # git-delta (not in apt repos, download from GitHub)
+    if ! command -v delta &>/dev/null; then
+        info "Installing git-delta..."
+        local delta_version
+        delta_version=$(curl -s --max-time 30 "https://api.github.com/repos/dandavison/delta/releases/latest" | grep -Po '"tag_name": "\K[^"]*')
+        local delta_deb="/tmp/git-delta_${delta_version}_amd64.deb"
+        # Ensure wget
+        command -v wget &>/dev/null || $SUDO apt install -y wget
+        net_timeout 180 wget -q --show-progress -O "$delta_deb" \
+            "https://github.com/dandavison/delta/releases/download/${delta_version}/git-delta_${delta_version}_amd64.deb" || {
+            warn "Failed to download git-delta v${delta_version} (or timed out)"
+        }
+        if [[ -f "$delta_deb" ]]; then
+            $SUDO dpkg -i "$delta_deb" || $SUDO apt install -f -y
+            rm -f "$delta_deb"
+        fi
+    fi
+
+    # duf (df replacement) - in the apt archive since Ubuntu 22.04 (jammy)
+    $SUDO apt install -y duf || true
+
+    # tealdeer (tldr) - not in apt until Ubuntu 23.04 (lunar), so download the
+    # official static binary directly for full compatibility with older/other
+    # distros (confirmed via the GitHub releases API, no .deb published).
+    if ! command -v tldr &>/dev/null; then
+        info "Installing tealdeer (tldr)..."
+        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+        net_timeout 120 curl -fLo /tmp/tldr "https://github.com/dbrgn/tealdeer/releases/latest/download/tealdeer-linux-x86_64-musl" \
+            && $SUDO install /tmp/tldr /usr/local/bin/tldr \
+            && rm -f /tmp/tldr \
+            || warn "Failed to install tealdeer (or timed out)"
+    fi
+
+    # dust (du replacement) - not in apt until Ubuntu 25.04 (plucky), so
+    # download the GitHub-published .deb directly, same pattern as git-delta.
+    if ! command -v dust &>/dev/null; then
+        info "Installing dust..."
+        local dust_version
+        dust_version=$(curl -s --max-time 30 "https://api.github.com/repos/bootandy/dust/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        local dust_deb="/tmp/du-dust_${dust_version}-1_amd64.deb"
+        net_timeout 180 wget -q -O "$dust_deb" \
+            "https://github.com/bootandy/dust/releases/download/v${dust_version}/du-dust_${dust_version}-1_amd64.deb" || {
+            warn "Failed to download dust v${dust_version} (or timed out)"
+        }
+        if [[ -f "$dust_deb" ]]; then
+            $SUDO dpkg -i "$dust_deb" || $SUDO apt install -f -y
+            rm -f "$dust_deb"
+        fi
+    fi
+
+    # procs (ps replacement) - not in apt until Ubuntu 25.04 (plucky) either,
+    # and only ships as a .zip (no .deb), so extract the binary directly.
+    if ! command -v procs &>/dev/null; then
+        info "Installing procs..."
+        local procs_version
+        procs_version=$(curl -s --max-time 30 "https://api.github.com/repos/dalance/procs/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+        net_timeout 180 curl -fLo /tmp/procs.zip \
+            "https://github.com/dalance/procs/releases/download/v${procs_version}/procs-v${procs_version}-x86_64-linux.zip" \
+            && $SUDO apt install -y unzip \
+            && unzip -o /tmp/procs.zip -d /tmp/procs-extract \
+            && $SUDO install /tmp/procs-extract/procs /usr/local/bin/procs \
+            && rm -rf /tmp/procs.zip /tmp/procs-extract \
+            || warn "Failed to install procs"
+    fi
+{{- else }}
+    info "Modern CLI tools disabled in config"
+{{- end }}
+
+{{- if $install_fonts }}
+    # Fonts - MesloLGS NF is great for Starship too
+    install_fonts
+{{- else }}
+    info "Fonts disabled in config"
+{{- end }}
+
+{{- if $install_ai_tools }}
+    # AI Coding Tools
+    install_node
+
+    # Ollama - needs zstd (added to install_core above) to extract its release
+    # archive; confirmed live on WSL that without it the installer fails outright
+    # with "This version requires zstd for extraction" and ollama ends up
+    # genuinely NOT installed, not a harmless post-install nag like the macOS
+    # case below. Keeping the || warn regardless (not || true): Ollama's own
+    # installer can still exit non-zero after a successful install for reasons
+    # unrelated to whether ollama itself actually landed (confirmed on macOS: it
+    # tries to auto-launch the GUI app post-install, which fails outright with no
+    # desktop session - e.g. headless CI). Under this script's `set -euo
+    # pipefail`, letting that propagate would silently abort every remaining
+    # install in this whole run, not just this one - but if you see this warning,
+    # verify `command -v ollama` afterward rather than assuming it's benign.
+    if ! command -v ollama &>/dev/null; then
+        info "Installing Ollama..."
+        # ~1.5GB bundle (GPU libs); its installer's curl has no timeout of its
+        # own - confirmed live stalling 15+ min. `rm -f` the binary on failure
+        # so a half-extracted install isn't seen as "installed" next run.
+        net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' \
+            || { warn "Ollama install failed or timed out - continuing"; $SUDO rm -f /usr/local/bin/ollama; }
+    fi
+
+    if command -v npm &>/dev/null; then
+        info "Installing AI coding tools..."
+        NPM_BIN="$(which npm)"
+        
+        # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
+        # If path starts with /usr, valid to use sudo. Otherwise (home dir), drop sudo.
+        local npm_sudo="$SUDO"
+        if [[ "$NPM_BIN" != /usr* ]]; then
+            warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
+            npm_sudo=""
+        fi
+
+        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        
+        # Claude Code (Native Installer - Recommended)
+        if ! command -v claude &>/dev/null; then
+             info "Installing Claude Code (Native)..."
+             net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
+        fi
+
+        # OpenCode (Official Install Script - ~180MB binary). The --version
+        # re-check matters: a legacy npm-global opencode-ai shim can sit on
+        # PATH with a dead binary inside (its postinstall never fetched the
+        # platform binary - confirmed live 2026-08-31: "opencode-ai's
+        # postinstall script was not run"), and `command -v` alone treats
+        # that as installed and never fixes it. The npm rm removes the shim
+        # so it can't shadow the native binary the installer just laid down
+        # (~/.opencode/bin or ~/bin, depending on what exists).
+        if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
+             info "Installing OpenCode..."
+             net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
+             npm rm -g opencode-ai &>/dev/null || true
+        fi
+
+        # Antigravity CLI (agy) - official install script, no apt package.
+        # Google retired standalone Gemini Code Assist for individuals in
+        # favor of the Antigravity suite (see docs/tool-parity.md) - this
+        # repo no longer installs Gemini CLI, agy replaces it here.
+        if ! command -v agy &>/dev/null; then
+             info "Installing Antigravity CLI (agy)..."
+             net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
+        fi
+
+        # Superpowers skills plugin for Claude Code (global - active in every
+        # session once installed, via Claude Code's own plugin marketplace
+        # mechanism, not npm). Re-running add/install is safe if already present.
+        if command -v claude &>/dev/null; then
+            info "Installing Superpowers plugin for Claude Code..."
+            claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+            claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+        fi
+
+        # Superpowers skills for OpenCode (separate mechanism from Claude
+        # Code's plugin marketplace above - OpenCode reads its own
+        # opencode.json config). jq merges into the plugin array without
+        # clobbering any other settings already in the file.
+        if command -v opencode &>/dev/null; then
+            info "Configuring Superpowers for OpenCode..."
+            command -v jq &>/dev/null || $SUDO apt install -y jq
+            local oc_config_dir="$HOME/.config/opencode"
+            local oc_config="$oc_config_dir/opencode.json"
+            local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
+            mkdir -p "$oc_config_dir"
+            if [[ ! -f "$oc_config" ]]; then
+                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+            elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
+                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+            fi
+        fi
+
+        # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
+        # <url>` is the officially-documented mechanism (obra/superpowers'
+        # own README.md Antigravity section, confirmed against the locally-
+        # installed copy's docs) - NOT hand-copying skill files into a
+        # guessed plugin directory: Superpowers' own contributor docs
+        # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
+        # unsupported ("Everything arrives through the install mechanism -
+        # not by editing the user's config"). This also sidesteps needing to
+        # hardcode Antigravity's actual plugin storage path here (confirmed
+        # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
+        # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
+        # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
+        # not us, so it stays correct even if/when that path changes again.
+        if command -v agy &>/dev/null; then
+            info "Installing Superpowers plugin for Antigravity..."
+            agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
+        fi
+
+        # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
+        # Anthropic's frontend-design) for Claude Code / OpenCode /
+        # Antigravity, via the `skills` CLI - see install_agent_skills above.
+        install_agent_skills
+
+        # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
+        # live via an isolated Docker test that the third-party `codex-plugin`
+        # npm helper (the only scriptable option) doesn't just prompt
+        # interactively - it expects a plugins/<name>/ marketplace layout
+        # that obra/superpowers doesn't use (it ships a root-level
+        # .codex-plugin/plugin.json manifest instead), so it fails outright
+        # regardless of flags. Codex's real install path for this plugin is
+        # its native in-app `/plugins` search UI - genuinely GUI/session-only,
+        # no config file or CLI command reaches it from outside a session.
+
+        # Playwright Chromium - headless browser for coding-agent browser
+        # automation. Deliberately here, not under install_desktop: that's
+        # gated host-only ($isHost) and never runs on WSL/containers, exactly
+        # where coding agents most often run. install-deps needs root for
+        # system packages; the actual browser binary download must NOT run as
+        # root (playwright warns/refuses, and the cache would end up owned by
+        # the wrong user) - kept as two separate steps for that reason.
+        NPX_BIN="$(which npx)"
+        info "Installing Playwright Chromium (headless browser for agent automation)..."
+        # timeout-wrapped: confirmed live on WSL that `sudo ... npx playwright
+        # install-deps` can hang indefinitely (state T, no further output) well
+        # after apt-get's actual work is done - dpkg --audit showed everything
+        # fully configured (ii) at the time, so this isn't a debconf prompt, it's
+        # something in the sudo(use_pty)/npx/node wrapper chain never releasing
+        # the pty. net_timeout wraps coreutils `timeout` (always on Linux) /
+        # `gtimeout` (macOS only with coreutils brewed), running unguarded if
+        # neither is present - so it's safe to reuse in the brew/macOS block too.
+        net_timeout 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+        net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
+    fi
+
+    # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
+    # No apt package exists; uses the official install script. Note: act runs
+    # every job inside a real Docker container, and this repo's isDevcontainer
+    # check treats any container as one (see .chezmoi.toml.tmpl) - so
+    # $interactive can never be true under act, meaning it can validate
+    # template/script syntax and the devcontainer code path, but can't
+    # exercise install_core/install_ai_tools/etc content. Confirmed this
+    # session testing a Superpowers install fix - had to fall back to
+    # isolated `docker run` tests for that instead.
+    # On WSL specifically: installing the binary here is harmless either way,
+    # but it only actually works if Docker Desktop's WSL integration is
+    # enabled for this distro (Settings > Resources > WSL Integration on the
+    # Windows host) - the same existing assumption this repo already relies
+    # on for Docker generally on WSL (see docs/tool-parity.md's Container row).
+    if ! command -v act &>/dev/null; then
+        info "Installing act (local GitHub Actions runner)..."
+        net_timeout 180 bash -c 'curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | '"$SUDO"' bash -s -- -b /usr/local/bin' || warn "act install failed or timed out"
+    fi
+{{- else }}
+    info "AI coding tools disabled in config"
+{{- end }}
+
+{{- if $install_guardrail }}
+    # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
+    install_agent_guardrails
+{{- end }}
+
+    # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
+    # is a second runtime check for genuine headless Linux hosts, not the
+    # primary WSL/devcontainer guard anymore)
+{{- if and $install_desktop $isHost }}
+    if [[ -n "${DISPLAY:-}" ]]; then
+        install_linux_desktop
+    fi
+{{- else }}
+    info "Desktop apps disabled (WSL/Devcontainer/config)"
+{{- end }}
+}
+
+install_brew() {
+    info "Installing packages with Brew..."
+    
+    if ! command -v brew &>/dev/null; then
+        info "Homebrew not found. Installing..."
+        # Fetch and run as two guarded steps so a stalled download is covered
+        # too, while keeping Homebrew's documented `bash -c "$(...)"` exec form.
+        # net_timeout falls back to unguarded when no timeout/gtimeout exists
+        # (the usual case on a fresh Mac), so this can't make matters worse.
+        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+        _brew_installer=$(net_timeout 120 curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) \
+            && net_timeout 900 env NONINTERACTIVE=1 /bin/bash -c "$_brew_installer" || {
+            error "Failed to install Homebrew (or timed out)"
+            exit 1
+        }
+        
+        # Add brew to path for this session
+        if [[ -d "/opt/homebrew/bin" ]]; then
+             eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [[ -d "/home/linuxbrew/.linuxbrew/bin" ]]; then
+             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        fi
+    fi
+
+{{- if $install_core }}
+    # Core packages. coreutils first: it provides `gtimeout`, which net_timeout
+    # needs to guard the download-heavy steps further down (modern tools, AI
+    # tools, ScreenRec/Antigravity .dmgs) - macOS has no `timeout` in the base OS.
+    brew install coreutils gcc git curl wget jq fzf zsh tmux neovim ripgrep htop tree node@24 python3 cmake ffmpeg sevenzip gh
+    brew link --overwrite node@24 || true
+{{- else }}
+    info "Core packages disabled in config"
+{{- end }}
+
+{{- if $install_modern }}
+    # Modern CLI tools
+    brew install bat eza fd git-delta zoxide starship direnv lazygit gum tealdeer dust duf procs || true
+    brew install shellcheck shfmt || warn "shellcheck/shfmt install failed - continuing"
+{{- end }}
+
+{{- if $install_fonts }}
+    # Fonts - MesloLGS NF is a great Nerd Font for Starship
+    brew install --cask font-meslo-lg-nerd-font || true
+{{- end }}
+
+{{- if $install_ai_tools }}
+    # AI Coding Tools
+
+    # Ollama
+    if ! command -v ollama &>/dev/null; then
+        info "Installing Ollama..."
+        # Confirmed live: Ollama's official macOS installer exits non-zero after
+        # ollama itself is genuinely installed, because it also tries to
+        # auto-launch the Ollama.app GUI post-install, which fails outright with
+        # no desktop session (e.g. headless CI: "Unable to find application named
+        # 'Ollama'"). Under this script's `set -euo pipefail`, letting that
+        # propagate silently aborts every remaining install in this whole run -
+        # confirmed live too: nothing after this point ran at all. net_timeout
+        # also guards the ~1.5GB download from stalling the run (no-op on a Mac
+        # without coreutils' gtimeout).
+        net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' || warn "Ollama installer failed, timed out, or (often harmless) could not auto-launch its GUI - continuing"
+    fi
+
+    if command -v npm &>/dev/null; then
+        info "Installing AI coding tools..."
+        command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
+
+        # Claude Code (Native Installer - Recommended)
+        if ! command -v claude &>/dev/null; then
+             info "Installing Claude Code (Native)..."
+             net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
+        fi
+
+        # OpenCode (Native Install Script - ~180MB binary). --version
+        # re-check + legacy npm shim removal: same rationale as the apt
+        # branch above (a dead npm-global opencode-ai on PATH otherwise
+        # counts as "installed" forever).
+        if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
+             info "Installing OpenCode..."
+             net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
+             npm rm -g opencode-ai &>/dev/null || true
+        fi
+
+        # Antigravity CLI (agy) - Homebrew cask (v1.1.22, confirmed current
+        # on formulae.brew.sh, matching the exact version Chocolatey ships on
+        # Windows). Google retired standalone Gemini Code Assist for
+        # individuals in favor of the Antigravity suite (see
+        # docs/tool-parity.md) - this repo no longer installs Gemini CLI, agy
+        # replaces it here.
+        command -v agy &>/dev/null || brew install --cask antigravity-cli || warn "Antigravity CLI install failed - continuing"
+
+        # Superpowers skills plugin for Claude Code (global - active in every
+        # session once installed, via Claude Code's own plugin marketplace
+        # mechanism, not npm). Re-running add/install is safe if already present.
+        if command -v claude &>/dev/null; then
+            info "Installing Superpowers plugin for Claude Code..."
+            claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+            claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+        fi
+
+        # Superpowers skills for OpenCode (separate mechanism from Claude
+        # Code's plugin marketplace above - OpenCode reads its own
+        # opencode.json config). jq merges into the plugin array without
+        # clobbering any other settings already in the file.
+        if command -v opencode &>/dev/null; then
+            info "Configuring Superpowers for OpenCode..."
+            command -v jq &>/dev/null || brew install jq
+            local oc_config_dir="$HOME/.config/opencode"
+            local oc_config="$oc_config_dir/opencode.json"
+            local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
+            mkdir -p "$oc_config_dir"
+            if [[ ! -f "$oc_config" ]]; then
+                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+            elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
+                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+            fi
+        fi
+
+        # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
+        # <url>` is the officially-documented mechanism (obra/superpowers'
+        # own README.md Antigravity section, confirmed against the locally-
+        # installed copy's docs) - NOT hand-copying skill files into a
+        # guessed plugin directory: Superpowers' own contributor docs
+        # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
+        # unsupported ("Everything arrives through the install mechanism -
+        # not by editing the user's config"). This also sidesteps needing to
+        # hardcode Antigravity's actual plugin storage path here (confirmed
+        # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
+        # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
+        # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
+        # not us, so it stays correct even if/when that path changes again.
+        if command -v agy &>/dev/null; then
+            info "Installing Superpowers plugin for Antigravity..."
+            agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
+        fi
+
+        # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
+        # Anthropic's frontend-design) for Claude Code / OpenCode /
+        # Antigravity, via the `skills` CLI - see install_agent_skills above.
+        install_agent_skills
+
+        # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
+        # live via an isolated Docker test that the third-party `codex-plugin`
+        # npm helper (the only scriptable option) doesn't just prompt
+        # interactively - it expects a plugins/<name>/ marketplace layout
+        # that obra/superpowers doesn't use (it ships a root-level
+        # .codex-plugin/plugin.json manifest instead), so it fails outright
+        # regardless of flags. Codex's real install path for this plugin is
+        # its native in-app `/plugins` search UI - genuinely GUI/session-only,
+        # no config file or CLI command reaches it from outside a session.
+
+        # Playwright Chromium - headless browser for coding-agent browser
+        # automation. Deliberately here, not under install_desktop: that's
+        # gated host-only ($isHost) and never runs on WSL/containers, exactly
+        # where coding agents most often run. No install-deps step on macOS -
+        # that concept is apt-specific and unsupported/unneeded here.
+        info "Installing Playwright Chromium (headless browser for agent automation)..."
+        net_timeout 600 npx --yes playwright install chromium || warn "Playwright Chromium install failed or timed out - continuing"
+    fi
+
+    # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
+    # Confirmed current on Homebrew (formula, not cask). Note: act runs every
+    # job inside a real Docker container, and this repo's isDevcontainer
+    # check treats any container as one (see .chezmoi.toml.tmpl) - so
+    # $interactive can never be true under act, meaning it can validate
+    # template/script syntax and the devcontainer code path, but can't
+    # exercise install_core/install_ai_tools/etc content. Confirmed this
+    # session testing a Superpowers install fix - had to fall back to
+    # isolated `docker run` tests for that instead.
+    command -v act &>/dev/null || brew install act || warn "act install failed"
+{{- end }}
+
+{{- if $install_guardrail }}
+    # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
+    install_agent_guardrails
+{{- end }}
+
+    # Mac Desktop Apps (Cask) - hosts only, see the top-of-file $isHost comment
+{{- if and $install_desktop $isHost }}
+    info "Installing Mac Desktop Apps..."
+    # filezilla intentionally omitted: confirmed removed from homebrew-cask
+    # entirely (adware concerns, not a naming/renaming issue like Antigravity) -
+    # "Warning: No available formula with the name 'filezilla'" was being
+    # silently swallowed by the trailing `|| true` below. No cask exists either,
+    # so there's no brew-based fix. Standardized on Termius as the SFTP/SSH
+    # client across all 3 platforms instead of mixing tools.
+    # handy (https://handy.computer, Speech-to-Text): Whisper/Parakeet model
+    # selection is GUI-only, no CLI flag or config file to pre-seed one. For
+    # Spanish + English both, pick a Whisper model post-install (Parakeet is
+    # English-only) - Large for best accuracy, Turbo for much faster with a
+    # small accuracy trade-off (most noticeable on non-English audio).
+    # geany: cross-platform replacement for Notepad++ (Windows-only, no real
+    # Mac/Linux port) - fills the same "lightweight quick-edit GUI editor" role.
+    # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
+    # so a single unavailable/pulled cask surfaces a warning instead of being
+    # swallowed silently by a trailing `|| true` (see the filezilla note above).
+    # tailscale-app specifically (not the bare "tailscale" formula, which is
+    # the headless CLI-only daemon with no menu-bar app) - matches how every
+    # other tool in this list is a GUI app, not a CLI daemon.
+    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany tailscale-app; do
+        brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
+    done
+
+    # ScreenRec (Manual Install - No Homebrew Cask)
+    if [[ ! -d "/Applications/ScreenRec.app" ]]; then
+        info "Installing ScreenRec..."
+        local arch
+        arch=$(uname -m)
+        local dmg_url
+        if [[ "$arch" == "arm64" ]]; then
+            dmg_url="https://screenrec.com/download/ScreenRec_webinstall_apple_silicon.dmg"
+        else
+            dmg_url="https://screenrec.com/download/ScreenRec_webinstall_apple_intel.dmg"
+        fi
+        
+        info "Downloading ScreenRec for macOS ($arch)..."
+        net_timeout 300 curl -fsSL -o /tmp/ScreenRec.dmg "$dmg_url" || {
+            warn "Failed to download ScreenRec (or timed out)"
+        }
+
+        if [[ -f "/tmp/ScreenRec.dmg" ]]; then
+             # Mount and install
+             hdiutil attach /tmp/ScreenRec.dmg -quiet
+             # Note: Volume name might differ, checking mount
+             if [[ -d "/Volumes/ScreenRec" ]]; then
+                 cp -R "/Volumes/ScreenRec/ScreenRec.app" /Applications/ || warn "Failed to copy ScreenRec.app"
+                 hdiutil detach "/Volumes/ScreenRec" -quiet
+                 success "ScreenRec installed to /Applications"
+             else
+                 warn "Could not find mounted ScreenRec volume"
+                 hdiutil detach "$(hdiutil info | grep ScreenRec | cut -f1)" -quiet || true
+             fi
+             rm -f /tmp/ScreenRec.dmg
+        fi
+    fi
+{{- end }}
+}
+
+#-------------------------------------------------------------------------------
+# Google Antigravity Desktop App was removed (2026-09-11): VS Code + the agy
+# CLI (installed under install_ai_tools, above) cover that workflow. This
+# function is kept as an explicit no-op so main()'s dispatch list and any
+# muscle memory stay honest; the Linux apt repo, macOS dmg pin, and the
+# install_antigravity config toggle are all gone.
+#-------------------------------------------------------------------------------
+install_antigravity() {
+    : # removed - see the comment above
+}
+
+setup_shell() {
+    local target_shell
+    target_shell="$(which zsh 2>/dev/null || true)"
+    if [[ -x "$target_shell" ]]; then
+        # Ensure USER is set
+        local current_user="${USER:-$(id -un)}"
+        local current_shell=""
+        
+        if command -v getent &>/dev/null; then
+            # Handle getent failure gracefully (avoid pipefail exit)
+            current_shell=$(getent passwd "$current_user" 2>/dev/null | cut -d: -f7 || true)
+        elif [[ "$(uname -s)" == "Darwin" ]]; then
+            current_shell=$(dscl . -read /Users/"$current_user" UserShell 2>/dev/null | awk '{print $2}' || true)
+        fi
+
+        if [[ -n "$current_shell" && "$current_shell" != "$target_shell" ]]; then
+            info "Changing shell to $target_shell for $current_user..."
+            
+            # Ensure target shell is in /etc/shells
+            if ! grep -q "^$target_shell$" /etc/shells; then
+                info "Adding $target_shell to /etc/shells..."
+                echo "$target_shell" | $SUDO tee -a /etc/shells >/dev/null
+            fi
+
+            if command -v chsh &>/dev/null; then
+                # Try chsh, but don't fail script if password auth is required/fails
+                $SUDO chsh -s "$target_shell" "$current_user" || {
+                    warn "chsh failed (password required?). Attempting usermod fallback..."
+                    if command -v usermod &>/dev/null; then
+                        $SUDO usermod -s "$target_shell" "$current_user" || warn "usermod fallback failed."
+                    fi
+                }
+            else
+                warn "chsh not found, checking for usermod..."
+                if command -v usermod &>/dev/null; then
+                    $SUDO usermod -s "$target_shell" "$current_user" || warn "usermod fallback failed."
+                else
+                    warn "neither chsh nor usermod found, skipping shell change."
+                fi
+            fi
+            warn "Default shell changed to zsh - it takes effect on your next login. For this terminal now: exec zsh"
+        fi
+    fi
+}
+
+main() {
+{{- if $isWsl }}
+    # Docker Desktop's WSL Integration has to be turned on from the Windows
+    # side (Docker Desktop > Settings > Resources > WSL Integration) before
+    # `docker` works in WSL at all - this repo deliberately never installs a
+    # Docker engine/CLI inside WSL itself (see install_linux_desktop's
+    # $isHost gate below and docs/tool-parity.md's Container row), and
+    # nothing running inside WSL can flip that toggle on its own. Checked
+    # here, first thing, before any package installs run - checking only at
+    # the very end (the original approach) meant discovering this only after
+    # the whole install had already finished, too late for a heads-up to be
+    # useful. `timeout` guards against `docker version` hanging if the CLI
+    # exists but can't reach a daemon, rather than being missing outright.
+    if ! (command -v docker &>/dev/null && timeout 5 docker version &>/dev/null); then
+        warn "Docker is not reachable from this WSL distro."
+        warn "  Docker Desktop's WSL Integration is off (or Docker Desktop for Windows isn't installed/running yet):"
+        warn "  1. Open Docker Desktop on Windows"
+        warn "  2. Settings > Resources > WSL Integration"
+        warn "  3. Toggle ON for this distro"
+        warn "  4. Restart this WSL terminal, then re-run this installer"
+        if [[ -t 0 ]] && [[ -z "${CI:-}" ]]; then
+            read -r -p "Continue installing without Docker working in this WSL distro? [y/N]: " docker_continue
+            if [[ ! "$docker_continue" =~ ^[Yy]$ ]]; then
+                error "Stopping - enable WSL Integration above, then re-run this installer."
+                exit 1
+            fi
+        else
+            warn "Non-interactive run - continuing without Docker (nothing here installs Docker inside WSL by design, so there's nothing this run itself could do differently)."
+        fi
+    else
+        success "Docker is reachable via Docker Desktop's WSL integration."
+    fi
+{{- end }}
+
+    local pkg_manager
+    pkg_manager=$(detect_package_manager)
+    info "Detected Package Manager: $pkg_manager"
+
+    case "$pkg_manager" in
+        apt)  install_apt ;;
+        brew) install_brew ;;
+        *)    warn "Skipping package installation (unsupported manager: $pkg_manager)" ;;
+    esac
+
+    # Google Antigravity (hosts only)
+    install_antigravity
+    
+    # Ensure zsh is default
+    setup_shell
+
+    success "Package installation complete!"
+{{- if and $install_desktop $isHost }}
+    echo ""
+    info "[Post-Install] Launch Docker Desktop once from your applications menu to accept the"
+    info "  EULA and start the engine, then confirm it works with:  docker ps"
+    echo ""
+    # Tailscale needs an interactive login (browser-based device auth, or a
+    # private authkey this repo deliberately never bakes in - it's a shared
+    # template, not just one person's machines) - install can't do this step
+    # for you. Deliberately never installed inside WSL at all - see the
+    # comment on the install step itself for why.
+    info "[Post-Install] Sign in to Tailscale to connect this machine:  sudo tailscale up"
+    info "  (or open the Tailscale app/menu-bar icon and sign in there)"
+{{- end }}
+}
+
+main
+{{ end -}}

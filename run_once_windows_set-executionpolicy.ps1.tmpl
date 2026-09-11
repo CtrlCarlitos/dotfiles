@@ -1,0 +1,45 @@
+{{ if eq .chezmoi.os "windows" -}}
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Chezmoi run_once script: allow the profiles this repo installs to actually load.
+.DESCRIPTION
+    Windows' default execution policy (Restricted, or Undefined which resolves to
+    Restricted) blocks all PowerShell script execution, including automatic profile
+    loading on shell startup. Without this, the profiles this repo installs to
+    Documents\WindowsPowerShell and Documents\PowerShell never run, silently, in a
+    normal interactive session - only `-ExecutionPolicy Bypass` sessions are unaffected,
+    which is why this can go unnoticed during scripted testing.
+
+    Only sets the CurrentUser scope (no Administrator required). RemoteSigned still
+    requires a digital signature for scripts *downloaded from the internet*; it does
+    not affect these locally chezmoi-written profile scripts.
+
+    Runs once (chezmoi run_once semantics) - if you've deliberately set a stricter
+    policy since, this won't fight you on every apply.
+
+    NOTE: this deliberately does NOT call Set-ExecutionPolicy / Get-ExecutionPolicy.
+    Both live in the Microsoft.PowerShell.Security module, and that module can fail
+    to auto-load specifically inside chezmoi's own run_once/run_onchange script
+    invocation (confirmed: works fine via `powershell -Command "..."` run directly,
+    fails via the `-File <tempscript>` style chezmoi actually uses here) - for
+    reasons not fully root-caused, but reproducible. That would make a
+    cmdlet-based fix silently no-op on exactly the machine it exists to fix.
+
+    `Set-ExecutionPolicy -Scope CurrentUser` is documented to do nothing more than
+    write one registry value, so write it directly instead - the registry provider
+    has no module-autoload dependency at all.
+#>
+
+$keyPath = "HKCU:\Software\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell"
+try {
+    if (-not (Test-Path $keyPath)) {
+        New-Item -Path $keyPath -Force -ErrorAction Stop | Out-Null
+    }
+    Set-ItemProperty -Path $keyPath -Name "ExecutionPolicy" -Value "RemoteSigned" -Type String -Force -ErrorAction Stop
+    Write-Host "PowerShell execution policy for CurrentUser set to RemoteSigned." -ForegroundColor Green
+} catch {
+    Write-Host "Warning: Could not set execution policy for CurrentUser - $_" -ForegroundColor Yellow
+    Write-Host "  If this is enforced by Group/User Policy, this repo's profiles may not auto-load; contact your admin." -ForegroundColor Yellow
+}
+{{ end -}}

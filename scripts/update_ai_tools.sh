@@ -1,0 +1,152 @@
+#!/bin/bash
+set -e
+
+echo "🤖 Updating AI Coding Tools..."
+
+# 1. NPM Packages (Codex)
+# Note: OpenCode is native on Linux/Mac, so it's not included here
+if command -v npm &>/dev/null; then
+    echo "📦 Updating NPM packages..."
+    sudo npm update -g @openai/codex
+else
+    echo "⚠️  npm not found. Skipping npm packages."
+fi
+
+# 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates (checksum
+# verify each run), so this just refreshes the plugin - re-running `agy plugin
+# install` is the same idempotent pattern used for Claude Code/OpenCode below.
+if command -v agy &>/dev/null; then
+    echo "✨ Updating Superpowers (Antigravity)..."
+    agy plugin install https://github.com/obra/superpowers &>/dev/null || echo "   Superpowers plugin update for Antigravity failed - skipping"
+fi
+
+# 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
+# Re-running the same `skills add` re-fetches latest (--copy overwrites). Keep
+# this list in sync with install_agent_skills() in
+# run_onchange_install_packages.sh.tmpl. --loglevel=error kills npm 12's benign
+# per-run "npm notice run ..." stderr hint; </dev/null keeps any prompt from
+# ever holding the terminal (see installer for full notes).
+if command -v npx &>/dev/null; then
+    echo "✨ Updating curated agent skills (Matt Pocock + frontend-design)..."
+    SK="npx --yes --loglevel=error skills@latest"
+    AGENTS="claude-code opencode antigravity"
+    $SK add mattpocock/skills \
+        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
+           prototype research grilling handoff teach writing-for-agents \
+           resolving-merge-conflicts \
+        -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   Matt Pocock skills update failed - skipping"
+    sk_tmp="$(mktemp -d)"
+    if git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" &>/dev/null; then
+        src="$sk_tmp/repo/skills/engineering/code-review"
+        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
+        if [[ -d "$src" ]]; then
+            mkdir -p "$sk_tmp/stage/mp-code-review"
+            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
+            skf="$sk_tmp/stage/mp-code-review/SKILL.md"
+            # guarded: bare `sed && mv` aborts this set -e script if SKILL.md
+            # is missing (upstream layout drift) - mirrors the installer
+            if [[ -f "$skf" ]]; then
+                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
+                $SK add "$sk_tmp/stage" -s mp-code-review -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   mp-code-review update failed - skipping"
+            else
+                echo "   Warning: SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
+            fi
+        else
+            echo "   Warning: code-review skill dir not found in mattpocock/skills - upstream layout changed?"
+        fi
+    fi
+    rm -rf "$sk_tmp"
+    $SK add anthropics/skills -s frontend-design -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   frontend-design update failed - skipping"
+fi
+
+# Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl
+# for why (the only scriptable option is structurally incompatible with this
+# plugin's manifest format, confirmed via an isolated test, not just an
+# interactive-prompt issue). Update it via Codex's own `/plugins` UI.
+
+# 1c. Agent guardrails (agent-guardrails release binary + Claude gen-config).
+#     Keep GUARDRAIL_VERSION in sync with run_onchange_install_packages.sh.tmpl.
+GUARDRAIL_VERSION="v0.18.0-dev"
+GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+guardrail_dest="$HOME/.local/bin/guardrail"
+if [ "$(command -v guardrail >/dev/null 2>&1 && guardrail version 2>/dev/null)" != "guardrail ${GUARDRAIL_VERSION}" ]; then
+    case "$(uname -s)" in Linux) gos=linux ;; Darwin) gos=darwin ;; *) gos= ;; esac
+    case "$(uname -m)" in x86_64|amd64) garch=amd64 ;; aarch64|arm64) garch=arm64 ;; *) garch= ;; esac
+    if [ -n "$gos" ] && [ -n "$garch" ]; then
+        gtmp="$(mktemp -d)"
+        gbase="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
+        # stock macOS ships `shasum`, not `sha256sum` — without this the pipeline
+        # returns 127, the install is skipped, and the Mac is left with NO guard
+        # under a message that misattributes it to a checksum mismatch.
+        SHA_CMD=""
+        if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
+        elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
+        elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
+        else echo "  guardrail: no SHA-256 tool found - cannot verify, skipping install"; fi
+        if [ -z "$SHA_CMD" ]; then
+            :
+        elif curl -fLo "$gtmp/guardrail_${gos}_${garch}" "${gbase}/guardrail_${gos}_${garch}" \
+           && curl -fLo "$gtmp/SHA256SUMS" "${gbase}/SHA256SUMS" \
+           && ( cd "$gtmp" && grep " guardrail_${gos}_${garch}\$" SHA256SUMS | $SHA_CMD -c - ); then
+            mkdir -p "$HOME/.local/bin"
+            if ! install -m 0755 "$gtmp/guardrail_${gos}_${garch}" "$guardrail_dest"; then
+                echo "  guardrail install failed - skipping"
+            else
+                echo "  guardrail updated to ${GUARDRAIL_VERSION}"
+            fi
+        else
+            echo "  guardrail update failed or checksum mismatch - skipping"
+        fi
+        rm -rf "$gtmp"
+    fi
+fi
+if command -v claude >/dev/null 2>&1 && [ -x "$guardrail_dest" ]; then
+    "$guardrail_dest" gen-config claude --merge "$HOME/.claude/settings.json" --binary "$guardrail_dest" || true
+fi
+if command -v opencode >/dev/null 2>&1 && [ -x "$guardrail_dest" ]; then
+    mkdir -p "$HOME/.local/share/guardrail"
+    "$guardrail_dest" gen-config opencode --merge "$HOME/.config/opencode/opencode.json" --binary "$guardrail_dest" --plugin-dir "$HOME/.local/share/guardrail" || true
+fi
+if command -v agy >/dev/null 2>&1 && [ -x "$guardrail_dest" ]; then
+    mkdir -p "$HOME/.gemini/config"
+    "$guardrail_dest" gen-config antigravity --merge "$HOME/.gemini/config/hooks.json" --binary "$guardrail_dest" || true
+fi
+
+# 2. Claude Code (Native)
+if command -v claude &>/dev/null; then
+    echo "🧠 Updating Claude Code..."
+    # Try built-in update first (if it exists/works), otherwise reinstall
+    if ! claude update &>/dev/null; then
+        echo "   Running installer to update..."
+        curl -L https://claude.ai/download/cli/linux | sh
+    fi
+
+    # Superpowers skills plugin
+    echo "✨ Updating Superpowers (Claude Code)..."
+    claude plugin update superpowers -y &>/dev/null || echo "   Superpowers not installed for Claude Code - skipping"
+fi
+
+# 3. OpenCode (Native)
+if command -v opencode &>/dev/null; then
+    echo "💻 Updating OpenCode..."
+    curl -fsSL https://opencode.ai/install | bash
+    # A legacy npm-global opencode-ai shim (dead binary - postinstall never
+    # ran) can shadow the native binary this installer just refreshed; remove
+    # it if present. Harmless when npm or the package is absent.
+    npm rm -g opencode-ai &>/dev/null || true
+
+    # Superpowers skills - not a `claude plugin`, it's a git-backed npm
+    # package under OpenCode's own config dir; re-running the install pulls
+    # the latest commit since no version/tag is pinned.
+    echo "✨ Updating Superpowers (OpenCode)..."
+    # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
+    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$HOME/.config/opencode" --allow-git=all --loglevel=error --no-progress 2>/dev/null || echo "   Superpowers not installed for OpenCode - skipping"
+fi
+
+# 4. Playwright Chromium (headless browser for agent automation)
+if command -v npx &>/dev/null; then
+    echo "🌐 Updating Playwright Chromium..."
+    npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
+fi
+
+echo "✅ AI Tools Update Complete!"

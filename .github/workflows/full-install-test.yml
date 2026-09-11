@@ -1,0 +1,271 @@
+name: Full Install Test
+
+# Real, full package installs across Windows/Linux/macOS - deliberately NOT run on
+# every push (unlike ci.yml). This is the only place any package category actually
+# gets turned on and verified; every bug found in run_onchange_install_packages.*
+# this repo has hit so far (wrong Chocolatey package names, stale Antigravity
+# URLs/paths, a stale checksum) was found by a human running a full install by
+# hand - this exists so drift like that gets caught automatically instead.
+#
+# Cron only supports weekly, not biweekly, directly - `check-schedule` below runs
+# every Sunday but only lets the platform jobs actually proceed on even ISO weeks,
+# approximating "every other Sunday". workflow_dispatch always runs regardless.
+
+on:
+  schedule:
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+jobs:
+  check-schedule:
+    name: Check biweekly schedule
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manually triggered - running regardless of week."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            WEEK=$(date +%V)
+            if [ $((10#$WEEK % 2)) -eq 0 ]; then
+              echo "ISO week $WEEK is even - running this week."
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ISO week $WEEK is odd - skipping, runs every other Sunday."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  full-install-windows:
+    name: Full Install (Windows)
+    needs: check-schedule
+    if: needs.check-schedule.outputs.should_run == 'true'
+    runs-on: windows-latest
+    # 120, not 90: with every choco install capped at 600s and ScreenRec's
+    # own 300s download cap, the realistic worst case for the full
+    # ~50-package list lands around 65-75 min - one capped hang away from 90.
+    # Unused headroom bills nothing.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create full-install config (all package categories on)
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
+          @"
+          sourceDir = '$env:GITHUB_WORKSPACE'
+
+          [[data.accounts]]
+            name = "CI Full Install"
+            email = "ci-full-install@example.local"
+
+          [data.packages]
+            install_core = true
+            install_modern = true
+            install_fonts = true
+            install_ai_tools = true
+            install_guardrail = true
+            install_desktop = true
+          "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
+
+      - name: Run install.ps1 (full install)
+        shell: powershell
+        env:
+          # GitHub Actions always sets CI=true, which makes .chezmoi.toml.tmpl's
+          # $interactive false, which makes every package toggle fall through to
+          # its hardcoded non-interactive literal (false) - completely ignoring the
+          # `true` values pre-seeded above. Confirmed live: the pre-seeded config
+          # was silently discarded on the first real run of this workflow. With CI
+          # unset, $interactive is true, so promptBoolOnce runs - which finds the
+          # pre-seeded answers already present and reuses them without prompting
+          # (same "answer already exists" mechanism ci.yml's other jobs rely on),
+          # rather than colliding with a real Read-Host hang.
+          CI: ""
+          # install.ps1 itself also checks $env:CI, separately, to decide whether to
+          # skip its OWN Read-Host prompts (the fix for the hang found earlier this
+          # session) - unsetting CI above would silently undo that fix too. Set this
+          # instead so install.ps1 stays non-interactive regardless of the CI
+          # override just above, decoupling the two unrelated things that happened
+          # to both key off the same variable.
+          CHEZMOI_TEST_MINIMAL: "true"
+        run: .\install.ps1
+
+      - name: Verify real installs landed
+        shell: powershell
+        run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+          $failed = $false
+
+          $expectedCommands = @(
+            "git", "chezmoi", "nvim", "rg", "agy", "tmux",
+            "starship", "zoxide", "direnv", "lazygit", "bat", "eza", "fd", "delta", "gum"
+          )
+          foreach ($cmd in $expectedCommands) {
+            if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+              Write-Host "  OK: $cmd"
+            } else {
+              Write-Host "::error::$cmd not found on PATH"
+              $failed = $true
+            }
+          }
+
+          # Antigravity's desktop surfaces (IDE + hub app) were removed from
+          # this repo - agy (checked above) is the one Antigravity surface
+          # that remains. tmux is psmux's alias (the native Windows tmux).
+
+          $chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+          if (Test-Path $chromeExe) {
+            Write-Host "  OK: Google Chrome"
+          } else {
+            Write-Host "::error::Google Chrome not found at $chromeExe"
+            $failed = $true
+          }
+
+          if ($failed) { exit 1 }
+          Write-Host "All expected installs verified."
+          # Explicit success exit: this step's fresh PowerShell process
+          # auto-loads the profile installed moments ago, whose native init
+          # commands (starship/zoxide/direnv) can leave $LASTEXITCODE non-zero
+          # - and the Actions runner treats that stale value as the step
+          # result, failing a fully successful verify. Same class PR #16
+          # fixed in install.ps1 and ci.yml's config-patch step.
+          exit 0
+
+  full-install-linux:
+    name: Full Install (Linux)
+    needs: check-schedule
+    if: needs.check-schedule.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create full-install config (all package categories on)
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [[data.accounts]]
+            name = "CI Full Install"
+            email = "ci-full-install@example.local"
+
+          [data.packages]
+            install_core = true
+            install_modern = true
+            install_fonts = true
+            install_ai_tools = true
+            install_guardrail = true
+            install_desktop = true
+          EOF
+
+      - name: Install Xvfb (so install_desktop is real coverage, not a silent no-op)
+        run: |
+          # install_linux_desktop() only runs if $DISPLAY is set - a plain headless
+          # runner would make install_desktop=true test nothing at all.
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Run install.sh under a virtual display (full install)
+        env:
+          # GitHub Actions always sets CI=true, which makes .chezmoi.toml.tmpl's
+          # $interactive false, which makes every package toggle fall through to
+          # its hardcoded non-interactive literal (false) - completely ignoring the
+          # `true` values pre-seeded above. Confirmed live on the first real run of
+          # this workflow. With CI unset, $interactive is true, so promptBoolOnce
+          # runs - which finds the pre-seeded answers already present and reuses
+          # them without prompting. install.sh itself has no CI-gated prompts of
+          # its own (unlike install.ps1), so nothing else needs decoupling here.
+          CI: ""
+        run: |
+          xvfb-run -a sh install.sh
+
+      - name: Verify real installs landed
+        run: |
+          FAILED=0
+          check() {
+            if command -v "$1" &>/dev/null; then
+              echo "  OK: $1"
+            else
+              echo "::error::$1 not found on PATH"
+              FAILED=1
+            fi
+          }
+          for cmd in git chezmoi nvim rg agy starship zoxide direnv lazygit bat eza fd delta gum; do
+            check "$cmd"
+          done
+
+          # Antigravity's desktop app was removed from this repo - agy
+          # (checked above) is the one Antigravity surface that remains.
+
+          if command -v google-chrome &>/dev/null; then
+            echo "  OK: google-chrome"
+          else
+            echo "::error::google-chrome not found on PATH"
+            FAILED=1
+          fi
+
+          exit $FAILED
+
+  full-install-macos:
+    name: Full Install (macOS)
+    needs: check-schedule
+    if: needs.check-schedule.outputs.should_run == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create full-install config (all package categories on)
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+          [[data.accounts]]
+            name = "CI Full Install"
+            email = "ci-full-install@example.local"
+
+          [data.packages]
+            install_core = true
+            install_modern = true
+            install_fonts = true
+            install_ai_tools = true
+            install_guardrail = true
+            install_desktop = true
+          EOF
+
+      - name: Run install.sh (full install)
+        env:
+          # See the matching comment in the Linux job - GitHub Actions' CI=true
+          # collapses every package toggle to its non-interactive default (false),
+          # ignoring the pre-seeded config above, unless CI is overridden here so
+          # promptBoolOnce reuses the pre-seeded answers instead.
+          CI: ""
+        run: sh install.sh
+
+      - name: Verify real installs landed
+        run: |
+          FAILED=0
+          check() {
+            if command -v "$1" &>/dev/null; then
+              echo "  OK: $1"
+            else
+              echo "::error::$1 not found on PATH"
+              FAILED=1
+            fi
+          }
+          for cmd in git chezmoi nvim rg agy starship zoxide direnv lazygit bat eza fd delta gum; do
+            check "$cmd"
+          done
+
+          # Antigravity's desktop app was removed from this repo - agy
+          # (checked above) is the one Antigravity surface that remains.
+
+          if [ -d "/Applications/Google Chrome.app" ]; then
+            echo "  OK: Google Chrome"
+          else
+            echo "::error::Google Chrome not found in /Applications"
+            FAILED=1
+          fi
+
+          exit $FAILED

@@ -1,0 +1,101 @@
+# Example Chezmoi Configuration
+# ==============================================================================
+# This single file contains all chezmoi settings: environment, packages, and
+# git identities. Copy to ~/.config/chezmoi/chezmoi.toml and customize.
+#
+# SETUP:
+#   cp docs/chezmoi.toml.example ~/.config/chezmoi/chezmoi.toml
+#   # Edit with your data, then:
+#   chezmoi apply
+# ==============================================================================
+
+
+[data]
+
+# ==============================================================================
+# PACKAGE INSTALLATION PREFERENCES
+# ==============================================================================
+# Toggle what gets installed. Runs via `chezmoi apply`.
+
+  [data.packages]
+    # Core CLI (all platforms): Git, Zsh, Tmux, Neovim, GitHub CLI (gh), etc.
+    install_core = true
+
+    # Modern CLI: Bat, Eza, Fd, Ripgrep, Delta, tealdeer (tldr), dust, duf,
+    # procs. See docs/tool-parity.md for the current full list.
+    install_modern = true
+
+    # Fonts: Meslo Nerd Font (for terminal/Starship)
+    install_fonts = true
+
+    # AI Coding Tools: Codex, Claude Code, OpenCode, Antigravity CLI (agy),
+    # Superpowers (for Claude Code/OpenCode/Antigravity) + curated skills
+    # (Matt Pocock x12 + Anthropic's frontend-design, for
+    # Claude Code/OpenCode/Antigravity via the `skills` CLI), Playwright
+    # Chromium, act - requires Node.js.
+    # Not host-gated, so this also applies on WSL. See docs/tool-parity.md
+    # for the current full list.
+    install_ai_tools = true
+
+    # Desktop Apps (Host only): Chrome, VS Code, Docker Desktop, etc.
+    # Automatically skipped on WSL/Devcontainers even if true.
+    install_desktop = false
+
+
+# ==============================================================================
+# GIT IDENTITIES
+# ==============================================================================
+# Each account generates:
+#   - ~/.gitconfig-{provider}-{username}  (identity file)
+#   - SSH host alias in ~/.ssh/config
+#   - URL rewrites for organizations
+
+[[data.accounts]]
+  name = "Your Name"
+  email = "your.email@example.com"
+  username = "your-username"           # GitHub/GitLab username
+  provider = "github"                  # "github" or "gitlab"
+  key = "id_ed25519"                   # SSH key filename in ~/.ssh/
+  # signingKey = "id_ed25519_sign"     # Optional: separate key for commit signing
+  # If you use separate auth/sign keys, a passphrase on both is recommended.
+  organizations = []                   # Orgs to rewrite URLs for
+  dirs = ["projects", ".local/share/chezmoi"]  # Directories using this identity (auto-created)
+
+
+# MULTI-ACCOUNT EXAMPLE (uncomment and customize):
+# -----------------------------------------------------------------------------
+# [[data.accounts]]
+#   name = "Work Name"
+#   email = "work@company.com"
+#   username = "work-user"
+#   provider = "github"
+#   key = "id_work"
+#   organizations = ["company-org"]
+#   dirs = ["projects/work"]
+#
+# [[data.accounts]]
+#   name = "OSS Identity"
+#   email = "oss@protonmail.com"
+#   username = "oss-user"
+#   provider = "github"
+#   key = "id_oss"
+#   organizations = []
+#   dirs = ["projects/opensource"]
+
+
+# ==============================================================================
+# QUICK SETUP
+# ==============================================================================
+# 1. Generate SSH key:
+#    ssh-keygen -t ed25519 -f ~/.ssh/id_<keyname> -C "email@example.com"
+#
+# 2. Add public key to GitHub (Settings > SSH Keys):
+#    cat ~/.ssh/id_<keyname>.pub
+#
+# 3. Edit this file with your real data
+#
+# 4. Apply:
+#    chezmoi apply
+#
+# 5. Test:
+#    cd ~/projects && git config user.email

@@ -1,0 +1,80 @@
+# Chezmoi Ignore File
+# Files listed here will not be applied to the target directory
+
+# Documentation (never apply)
+README.md
+LICENSE
+docs/**
+
+# Installers (bootstrap only)
+install.sh
+install.ps1
+
+# Pre-commit config (only needed in source repo)
+.pre-commit-config.yaml
+
+# Claude Code project settings (source-repo tooling, not a dotfile to deploy)
+.claude/**
+
+# Devcontainer helper scripts (not for home directory)
+devcontainer/**
+
+# GitHub Actions Scripts (not for home directory)
+scripts/update-versions.sh
+
+# Version pin file used only by CI (ci.yml/full-install-test.yml/auto-update.yml
+# all read it to install a consistent chezmoi version) - not a dotfile, and
+# `chezmoi doctor` flags it as a "suspicious entry" otherwise since it doesn't
+# match any of chezmoi's naming conventions. Confirmed via `chezmoi managed`
+# that it was never actually being applied as a target either way - this just
+# silences the cosmetic warning.
+.chezmoi-version
+
+# Stray build/testing artifacts that don't belong in the source tree - this
+# repo's real managed executables live under dot_local/bin/ (with the proper
+# dot_ prefix), never a bare top-level bin/. Confirmed live: a stray chezmoi
+# binary that landed here from earlier ad-hoc testing was silently being
+# copied to ~/bin/ on every apply since nothing excluded it.
+bin/**
+
+# Platform-specific exclusions
+{{- if ne .chezmoi.os "windows" }}
+# Exclude Windows-specific files on non-Windows
+Documents/**
+.local/bin/*.ps1
+scripts/*.ps1
+{{- end }}
+
+{{- if eq .chezmoi.os "windows" }}
+# Exclude Unix-specific files on Windows
+.tmux.conf
+.zshrc
+.aliases.zsh
+.local/bin/devprofile
+scripts/*.sh
+{{- end }}
+
+# Devcontainer detection (using environment variables)
+{{- $isDevcontainer := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") (stat "/.dockerenv") }}
+{{- if $isDevcontainer }}
+# In devcontainers, don't manage SSH or sensitive configs
+private_dot_ssh/**
+dot_gitconfig-*
+{{- end }}
+
+# Build artifacts and caches
+**/.git/**
+**/__pycache__/**
+**/*.pyc
+**/node_modules/**
+
+# Editor/IDE files
+**/.vscode/**
+**/.idea/**
+*.swp
+*.swo
+*~
+
+# OS-specific junk
+.DS_Store
+Thumbs.db

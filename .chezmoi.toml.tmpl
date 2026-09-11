@@ -1,0 +1,145 @@
+{{/* Detect environment */}}
+{{- $envDev := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") | default "" -}}
+{{/* "isDevcontainer" really means "any container", by design (Docker specifically -
+     /.dockerenv fires for any Docker container, not just VS Code devcontainers).
+     Intentionally Docker-only for now. Planned rollout order if/when other runtimes
+     matter: Podman (/run/.containerenv) -> Kubernetes -> others. */}}
+{{- $isDevcontainer := or (eq $envDev "true") (eq $envDev "1") (stat "/.dockerenv" | not | not) -}}
+{{- $isWsl := false -}}
+{{- if eq .chezmoi.os "linux" -}}
+{{-   if contains "microsoft" (.chezmoi.kernel.osrelease | lower) -}}
+{{-     $isWsl = true -}}
+{{-   end -}}
+{{- end -}}
+
+{{/* isHost = physical machine, not WSL or Devcontainer */}}
+{{- $isHost := and (not $isDevcontainer) (not $isWsl) -}}
+
+{{/* Initialize accounts - check if already configured */}}
+{{- $accounts := list -}}
+{{- if hasKey . "accounts" -}}
+{{-   $accounts = .accounts -}}
+{{- else if not $isDevcontainer -}}
+{{/* First-time setup: prompt for primary account */}}
+{{-   $primaryName := promptStringOnce . "primaryName" "Your name for git commits" -}}
+{{-   $primaryEmail := promptStringOnce . "primaryEmail" "Your email for git commits" -}}
+{{-   $primaryUsername := promptStringOnce . "primaryUsername" "Your GitHub/GitLab username" -}}
+{{-   $primaryKey := promptStringOnce . "primaryKey" "SSH key name (e.g., id_personal, leave blank to skip SSH)" -}}
+{{-   
+      $accounts = list (dict 
+        "name" $primaryName 
+        "email" $primaryEmail 
+        "username" $primaryUsername
+        "provider" "github"
+        "key" $primaryKey 
+        "dirs" (list "projects/personal" ".local/share/chezmoi")
+      ) 
+-}}
+{{- end -}}
+
+{{/* Determine interactive mode for package prompts */}}
+{{- $interactive := and (not $isDevcontainer) (not (env "CI")) -}}
+
+[data]
+  # isDevcontainer/isWsl/isHost intentionally NOT stored here anymore - they used to
+  # be, which meant they were computed once at `chezmoi init` time and frozen into
+  # this file, going stale on every subsequent `chezmoi apply` (e.g. after copying
+  # this config to a different machine/environment type) until someone remembered to
+  # re-run `chezmoi init`. The two other templates that need these values
+  # (run_onchange_install_packages.sh.tmpl, dot_gitconfig.tmpl) compute them inline
+  # instead, so they're always live/correct on every apply, never stored, never stale.
+
+  # ==========================================================================
+  # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
+  # All toggles are independent on all platforms (Linux, macOS, Windows).
+  # ==========================================================================
+  [data.packages]
+    # Core utilities (git, curl, zsh, tmux, etc.)
+    install_core = {{ if $interactive }}{{ promptBoolOnce . "packages.install_core" "Install core packages (git, curl, zsh, tmux)?" true }}{{ else }}false{{ end }}
+    
+    # Modern CLI tools (bat, eza, fd, zoxide, starship, direnv, lazygit, gum)
+    install_modern = {{ if $interactive }}{{ promptBoolOnce . "packages.install_modern" "Install modern CLI tools (zoxide, starship, bat, eza, etc)?" true }}{{ else }}false{{ end }}
+    
+    # Fonts (MesloLGS NF / Nerd Fonts) - Required for Starship
+    install_fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.install_fonts" "Install Nerd Fonts?" true }}{{ else }}false{{ end }}
+    
+    # AI Coding Tools
+    install_ai_tools = {{ if $interactive }}{{ promptBoolOnce . "packages.install_ai_tools" "Install AI coding tools?" true }}{{ else }}false{{ end }}
+
+    # Agent guardrails (agent-guardrails release binary + Claude gen-config).
+    # Modifies ~/.claude/settings.json hooks — separate opt-in from install_ai_tools.
+    install_guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.install_guardrail" "Install agent guardrails (hook enforcement for Claude Code)?" true }}{{ else }}false{{ end }}
+    
+    # Desktop Apps (hosts only - not asked on WSL/containers, and enforced there
+    # too: run_onchange_install_packages.sh.tmpl gates the actual install on the
+    # same $isHost check, not just this prompt, so hand-editing this to `true` on
+    # WSL/in a container still won't install Chrome/VS Code/Docker Desktop/Mac
+    # casks there. That enforcement was added after finding WSLg sets $DISPLAY
+    # automatically, which used to be install_linux_desktop()'s only guard -
+    # $DISPLAY is now just a secondary safety net for genuine headless Linux hosts.
+    # Also includes Tailscale (deliberate choice - see docs/tool-parity.md's Mesh
+    # VPN row) - never inside WSL either way, same $isHost gate, and Tailscale's
+    # own docs recommend against running it there regardless of this toggle)
+    install_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.install_desktop" "Install Desktop Apps?" true }}{{ else }}false{{ end }}
+
+{{- if $isDevcontainer }}
+  # Devcontainer defaults - create a minimal account for git identity
+  primaryName = "Devcontainer User"
+  primaryEmail = "devcontainer@local"
+
+[[data.accounts]]
+  name = "Devcontainer User"
+  email = "devcontainer@local"
+  username = "devcontainer"
+  provider = "github"
+  key = ""
+  organizations = []
+  dirs = []
+{{- else }}
+  # Account configuration
+  # Each account generates: ~/.gitconfig-<alias> and includeIf rules
+  #
+  # To add more accounts, edit ~/.config/chezmoi/chezmoi.toml:
+  #
+  # [[data.accounts]]
+  #   name = "Work Name"
+  #   email = "work@company.com"
+  #   key = "id_work"
+  #   alias = "github-work"
+  #   dirs = ["projects/work"]
+  #
+{{- range $accounts }}
+
+[[data.accounts]]
+  name = {{ .name | quote }}
+  email = {{ .email | quote }}
+  username = {{ if hasKey . "username" }}{{ .username | quote }}{{ else }}""{{ end }}
+  provider = {{ if hasKey . "provider" }}{{ .provider | quote }}{{ else }}"github"{{ end }}
+  key = {{ if hasKey . "key" }}{{ .key | quote }}{{ else }}""{{ end }}
+{{- if hasKey . "organizations" }}
+{{-   if kindOf .organizations | eq "string" }}
+  organizations = [{{ .organizations | quote }}]
+{{-   else }}
+  organizations = [{{ range $i, $org := .organizations }}{{ if $i }}, {{ end }}{{ $org | quote }}{{ end }}]
+{{-   end }}
+{{- end }}
+  dirs = [{{ if hasKey . "dirs" }}{{ range $i, $dir := .dirs }}{{ if $i }}, {{ end }}{{ $dir | quote }}{{ end }}{{ end }}]
+{{- end }}
+{{- end }}
+
+[add]
+  secrets = "warning"
+
+[diff]
+  pager = "delta"
+
+{{- if eq .chezmoi.os "darwin" }}
+[interpreters.ps1]
+  command = "pwsh"
+{{- end }}
+
+{{- if eq .chezmoi.os "windows" }}
+[interpreters.ps1]
+  command = "powershell"
+  args = ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+{{- end }}

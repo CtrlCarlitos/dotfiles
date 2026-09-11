@@ -1,0 +1,71 @@
+# Chezmoi External Dependencies
+# Manages Oh-My-Zsh and its plugins
+# Run `chezmoi apply` to install/update these
+#
+# Version Pinning (updated 2026-02-27)
+# Using commit hashes instead of tags for better stability, security, and to avoid GitHub tag archive 502 errors.
+
+[".oh-my-zsh"]
+  type = "archive"
+  url = "https://github.com/ohmyzsh/ohmyzsh/archive/5c4f27b7166360bd23709f24642b247eac30a147.tar.gz"
+  exact = false
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-autosuggestions"]
+  type = "archive"
+  url = "https://github.com/zsh-users/zsh-autosuggestions/archive/85919cd1ffa7d2d5412f6d3fe437ebdbeeec4fc5.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-syntax-highlighting"]
+  type = "archive"
+  url = "https://github.com/zsh-users/zsh-syntax-highlighting/archive/1d85c692615a25fe2293bdd44b34c217d5d2bf04.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-completions"]
+  type = "archive"
+  url = "https://github.com/zsh-users/zsh-completions/archive/684021f2a1eb3ba1735d86268c07bce8b0ea0588.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-history-substring-search"]
+  type = "archive"
+  url = "https://github.com/zsh-users/zsh-history-substring-search/archive/14c8d2e0ffaee98f2df9850b19944f32546fdea5.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-you-should-use"]
+  type = "archive"
+  url = "https://github.com/MichaelAquilina/zsh-you-should-use/archive/ff371d6a11b653e1fa8dda4e61c896c78de26bfa.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/zsh-z"]
+  type = "archive"
+  url = "https://github.com/agkozak/zsh-z/archive/cf9225feebfae55e557e103e95ce20eca5eff270.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+[".oh-my-zsh/custom/plugins/fzf-tab"]
+  type = "archive"
+  url = "https://github.com/Aloxaf/fzf-tab/archive/24105b15714bfec37989ed5c5b6e60f572253019.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"
+
+# Tmux Plugin Manager
+[".tmux/plugins/tpm"]
+  type = "archive"
+  # Pinned to commit to avoid 502 Bad Gateway on tag archive
+  url = "https://github.com/tmux-plugins/tpm/archive/99469c4a9b1ccf77fade25842dc7bafbc8ce9946.tar.gz"
+  exact = true
+  stripComponents = 1
+  refreshPeriod = "168h"

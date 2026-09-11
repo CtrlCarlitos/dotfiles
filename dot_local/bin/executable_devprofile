@@ -1,0 +1,850 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+#===============================================================================
+# DEVPROFILE - Git Identity Manager
+# Manage multiple Git identities for different accounts/organizations
+#
+# Commands:
+#   devprofile              Show current repo's git identity
+#   devprofile list         List configured accounts and SSH keys
+#   devprofile use [NAME]   Set git identity for current repo (interactive if no NAME)
+#   devprofile init NAME EMAIL  Create new account (generates auth + signing keys)
+#   devprofile verify       Check if identity is correctly configured
+#   devprofile verify --install-hook  Install pre-commit hook to verify identity
+#   devprofile help         Show this help message
+#===============================================================================
+
+VERSION="2.0.0"
+SSH_DIR="${HOME}/.ssh"
+CHEZMOI_CONFIG="${HOME}/.config/chezmoi/chezmoi.toml"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+info()    { printf "${BLUE}▸${NC} %s\n" "$1"; }
+success() { printf "${GREEN}✓${NC} %s\n" "$1"; }
+warn()    { printf "${YELLOW}!${NC} %s\n" "$1"; }
+error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
+
+# Account data (loaded from chezmoi or toml)
+ACCOUNT_USERNAMES=()
+ACCOUNT_NAMES=()
+ACCOUNT_EMAILS=()
+ACCOUNT_KEYS=()
+ACCOUNT_SIGNKEYS=()
+ACCOUNT_PROVIDERS=()
+ACCOUNT_DIRS=()
+
+load_accounts_from_chezmoi() {
+    command -v chezmoi &>/dev/null || return 1
+    command -v jq &>/dev/null || return 1
+
+    local json
+    json=$(chezmoi data --format=json 2>/dev/null) || return 1
+
+    local lines
+    lines=$(printf '%s' "$json" | jq -r '.accounts[]? | [.username, .name, .email, (.key // ""), (.signingKey // .signingkey // ""), (.provider // "github"), ((.dirs // []) | join("|"))] | @tsv') || return 1
+    [[ -z "$lines" ]] && return 1
+
+    # Loop variables must be `local` - without it, `read` sets them as (dynamically
+    # scoped) variables in the nearest enclosing scope, which silently clobbers a
+    # caller's own $name/$email if it has locals of the same name (verify_identity
+    # does). Pre-existing bug, just never surfaced because of how the old caller
+    # ordered its checks; caught live while testing the dirs-mismatch check below.
+    local username name email key signkey provider dirs
+    while IFS=$'\t' read -r username name email key signkey provider dirs; do
+        # On Windows, chezmoi.exe/jq.exe emit CRLF, so `read` leaves a trailing \r on
+        # the last TSV column (whichever field that is) - confirmed live: it showed up
+        # on `dirs` here and silently broke the directory-prefix match below. Strip it
+        # from every field rather than just the last, since column order can change.
+        username="${username%$'\r'}"; name="${name%$'\r'}"; email="${email%$'\r'}"
+        key="${key%$'\r'}"; signkey="${signkey%$'\r'}"; provider="${provider%$'\r'}"; dirs="${dirs%$'\r'}"
+        [[ "$username" == "null" || -z "$username" ]] && continue
+        [[ "$name" == "null" ]] && name="N/A"
+        [[ "$email" == "null" ]] && email="N/A"
+        [[ "$key" == "null" ]] && key=""
+        [[ "$signkey" == "null" ]] && signkey=""
+        [[ "$provider" == "null" || -z "$provider" ]] && provider="github"
+        [[ "$dirs" == "null" ]] && dirs=""
+        ACCOUNT_USERNAMES+=("$username")
+        ACCOUNT_NAMES+=("$name")
+        ACCOUNT_EMAILS+=("$email")
+        ACCOUNT_KEYS+=("$key")
+        ACCOUNT_SIGNKEYS+=("$signkey")
+        ACCOUNT_PROVIDERS+=("$provider")
+        ACCOUNT_DIRS+=("$dirs")
+    done <<< "$lines"
+
+    [[ ${#ACCOUNT_USERNAMES[@]} -gt 0 ]]
+}
+
+load_accounts_from_toml() {
+    [[ -f "$CHEZMOI_CONFIG" ]] || return 1
+
+    local in_account=false
+    local current_name="" current_email="" current_username="" current_key="" current_signkey="" current_provider="" current_dirs=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[\[data\.accounts\]\] ]]; then
+            if [[ -n "$current_username" ]]; then
+                ACCOUNT_USERNAMES+=("$current_username")
+                ACCOUNT_NAMES+=("${current_name:-N/A}")
+                ACCOUNT_EMAILS+=("${current_email:-N/A}")
+                ACCOUNT_KEYS+=("${current_key:-}")
+                ACCOUNT_SIGNKEYS+=("${current_signkey:-}")
+                ACCOUNT_PROVIDERS+=("${current_provider:-github}")
+                ACCOUNT_DIRS+=("${current_dirs:-}")
+            fi
+            in_account=true
+            current_name="" current_email="" current_username="" current_key="" current_signkey="" current_provider="" current_dirs=""
+        elif $in_account; then
+            if [[ "$line" =~ ^[[:space:]]*name[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_name="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*email[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_email="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*username[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_username="${BASH_REMATCH[1]}"
+            # signingKey must be checked before the plain `key` pattern below, since
+            # "signingKey = ..." would also match a loose key=".." pattern otherwise.
+            elif [[ "$line" =~ ^[[:space:]]*signing[Kk]ey[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_signkey="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*key[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_key="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*provider[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+                current_provider="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^[[:space:]]*dirs[[:space:]]*=[[:space:]]*\[(.*)\] ]]; then
+                # Turn `dirs = ["a/b", "c"]` into a "a/b|c" string (git config values
+                # can't hold arrays; "|" is safe since directory paths never contain it).
+                local raw="${BASH_REMATCH[1]}"
+                # dirs = [] (empty array, e.g. the devcontainer default account) makes
+                # `grep -o` match nothing and exit 1 - guard it so `set -e -o pipefail`
+                # doesn't abort the whole script over a perfectly valid empty list.
+                current_dirs=$({ printf '%s' "$raw" | grep -o '"[^"]*"' || true; } | tr -d '"' | paste -sd'|' -)
+            fi
+        fi
+    done < "$CHEZMOI_CONFIG"
+
+    if [[ -n "$current_username" ]]; then
+        ACCOUNT_USERNAMES+=("$current_username")
+        ACCOUNT_NAMES+=("${current_name:-N/A}")
+        ACCOUNT_EMAILS+=("${current_email:-N/A}")
+        ACCOUNT_KEYS+=("${current_key:-}")
+        ACCOUNT_SIGNKEYS+=("${current_signkey:-}")
+        ACCOUNT_PROVIDERS+=("${current_provider:-github}")
+        ACCOUNT_DIRS+=("${current_dirs:-}")
+    fi
+
+    [[ ${#ACCOUNT_USERNAMES[@]} -gt 0 ]]
+}
+
+load_accounts() {
+    ACCOUNT_USERNAMES=()
+    ACCOUNT_NAMES=()
+    ACCOUNT_EMAILS=()
+    ACCOUNT_KEYS=()
+    ACCOUNT_SIGNKEYS=()
+    ACCOUNT_PROVIDERS=()
+    ACCOUNT_DIRS=()
+
+    load_accounts_from_chezmoi || load_accounts_from_toml
+}
+
+# Given a path relative to $HOME (no leading/trailing slash), return the index
+# of the account whose `dirs` list contains the longest matching prefix (same
+# prefix-match semantics as dot_gitconfig.tmpl's `gitdir/i:.../<dir>/` includeIf).
+# Echoes the index and returns 0 on a match; returns 1 if no account's dirs match.
+find_account_for_relpath() {
+    local relpath="$1"
+    local best_idx=-1 best_len=-1
+    for i in "${!ACCOUNT_DIRS[@]}"; do
+        local dirs="${ACCOUNT_DIRS[$i]}"
+        [[ -z "$dirs" ]] && continue
+        local IFS='|'
+        local d
+        for d in $dirs; do
+            [[ -z "$d" ]] && continue
+            if [[ "$relpath" == "$d" || "$relpath" == "$d"/* ]]; then
+                if [[ ${#d} -gt $best_len ]]; then
+                    best_len=${#d}
+                    best_idx=$i
+                fi
+            fi
+        done
+    done
+    [[ $best_idx -ge 0 ]] || return 1
+    echo "$best_idx"
+}
+
+email_in_accounts() {
+    local email="$1"
+    for e in "${ACCOUNT_EMAILS[@]}"; do
+        [[ "$e" == "$email" ]] && return 0
+    done
+    return 1
+}
+
+find_account_index() {
+    local username="$1"
+    for i in "${!ACCOUNT_USERNAMES[@]}"; do
+        [[ "${ACCOUNT_USERNAMES[$i]}" == "$username" ]] && echo "$i" && return 0
+    done
+    return 1
+}
+
+#-------------------------------------------------------------------------------
+# HELP
+#-------------------------------------------------------------------------------
+show_help() {
+    cat << 'EOF'
+devprofile - Git Identity Manager
+
+USAGE:
+    devprofile [COMMAND] [OPTIONS]
+
+COMMANDS:
+    (none)          Show current repository's git identity
+    list            List all configured accounts and SSH keys
+    use [NAME]      Set git identity for current repository
+                    Interactive selection if NAME not provided
+    init NAME EMAIL [--passphrase]
+                    Create new account with auth and signing keys
+    verify          Check if current repo has correct identity
+    verify --install-hook
+                    Install pre-commit hook to verify identity
+    help            Show this help message
+
+EXAMPLES:
+    devprofile                      # Show current identity
+    devprofile list                 # List all accounts
+    devprofile use CtrlCarlitos     # Set identity for this repo
+    devprofile use                  # Interactive selection
+    devprofile init work work@co.com # Create new account
+    devprofile init work work@co.com --passphrase # Create with passphrases
+    devprofile verify               # Check identity config
+    devprofile verify --install-hook # Add verification hook
+
+NOTES:
+    - Accounts are configured in ~/.config/chezmoi/chezmoi.toml
+    - SSH keys are stored in ~/.ssh/id_<name> and id_<name>_sign
+    - Use 'chezmoi apply' after modifying chezmoi.toml
+EOF
+}
+
+#-------------------------------------------------------------------------------
+# SHOW CURRENT IDENTITY
+#-------------------------------------------------------------------------------
+show_current() {
+    echo ""
+    
+    local name email signingkey source
+    
+    if git rev-parse --git-dir &>/dev/null; then
+        # In a git repo - get effective identity
+        name=$(git config user.name 2>/dev/null || echo "")
+        email=$(git config user.email 2>/dev/null || echo "")
+        signingkey=$(git config user.signingkey 2>/dev/null || echo "")
+        
+        # Determine source (local or inherited)
+        if git config --local user.email &>/dev/null; then
+            source="repo-local"
+        else
+            source="inherited from global"
+        fi
+    else
+        # Not in git repo - show global
+        name=$(git config --global user.name 2>/dev/null || echo "")
+        email=$(git config --global user.email 2>/dev/null || echo "")
+        signingkey=$(git config --global user.signingkey 2>/dev/null || echo "")
+        source="global"
+    fi
+    
+    if [[ -n "$name" && -n "$email" ]]; then
+        success "Current identity ($source):"
+        echo ""
+        
+        # Boxed format with row headings
+        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
+        printf "  ├──────────┼────────────────────────────────────────────┤\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
+        if [[ -n "$signingkey" ]]; then
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            # Shorten key path for display
+            local shortkey="${signingkey/#$HOME/~}"
+            [[ ${#shortkey} -gt 42 ]] && shortkey="${shortkey:0:40}.."
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "$shortkey"
+        fi
+        printf "  └──────────┴────────────────────────────────────────────┘\n"
+        echo ""
+        
+        # Check if this matches a known account
+        if load_accounts; then
+            if email_in_accounts "$email"; then
+                success "Email matches a configured account"
+            else
+                warn "Email does not match any configured account"
+            fi
+        fi
+    else
+        warn "No git identity configured"
+        echo ""
+        echo "Run: devprofile use <account-name>"
+    fi
+    echo ""
+}
+
+#-------------------------------------------------------------------------------
+# LIST ACCOUNTS
+#-------------------------------------------------------------------------------
+list_accounts() {
+    echo ""
+    
+    if ! load_accounts; then
+        warn "No accounts configured in chezmoi.toml"
+        echo ""
+        echo "Add accounts with: devprofile init <username> <email>"
+        echo ""
+        return
+    fi
+    
+    # Display accounts table
+    info "Configured Accounts (${#ACCOUNT_USERNAMES[@]} total):"
+    echo ""
+    
+    # Table with box-drawing characters
+    printf "  ┌────────────────────┬────────────────────────┬──────────────────────────────┬──────────┐\n"
+    printf "  │ ${CYAN}%-18s${NC} │ ${CYAN}%-22s${NC} │ ${CYAN}%-28s${NC} │ ${CYAN}%-8s${NC} │\n" "USERNAME" "NAME" "EMAIL" "PROVIDER"
+    printf "  ├────────────────────┼────────────────────────┼──────────────────────────────┼──────────┤\n"
+    
+    # Table rows
+    for i in "${!ACCOUNT_USERNAMES[@]}"; do
+        local username="${ACCOUNT_USERNAMES[$i]}"
+        local name="${ACCOUNT_NAMES[$i]}"
+        local email="${ACCOUNT_EMAILS[$i]}"
+        local provider="${ACCOUNT_PROVIDERS[$i]}"
+        local key="${ACCOUNT_KEYS[$i]}"
+        
+        # Truncate long values
+        [[ ${#name} -gt 22 ]] && name="${name:0:20}.."
+        [[ ${#email} -gt 28 ]] && email="${email:0:26}.."
+        
+        printf "  │ %-18s │ %-22s │ %-28s │ %-8s │\n" "$username" "$name" "$email" "$provider"
+    done
+    
+    printf "  └────────────────────┴────────────────────────┴──────────────────────────────┴──────────┘\n"
+    echo ""
+    
+    # SSH Keys section
+    info "SSH Keys:"
+    echo ""
+    printf "  ┌──────────────────────────┬────────────┬────────────────┐\n"
+    printf "  │ ${CYAN}%-24s${NC} │ ${CYAN}%-10s${NC} │ ${CYAN}%-14s${NC} │\n" "KEY FILE" "TYPE" "STATUS"
+    printf "  ├──────────────────────────┼────────────┼────────────────┤\n"
+    
+    if ls "${SSH_DIR}"/id_* 1> /dev/null 2>&1; then
+        for key in "${SSH_DIR}"/id_*; do
+            if [[ "$key" != *.pub ]]; then
+                local keyname=$(basename "$key")
+                local keytype="auth"
+                local status_icon="${GREEN}✓${NC}"
+                local status_text="ok"
+                
+                [[ "$keyname" == *_sign ]] && keytype="signing"
+                if [[ ! -f "${key}.pub" ]]; then
+                    status_icon="${YELLOW}!${NC}"
+                    status_text="no .pub"
+                fi
+                
+                # Check if key is used by any account
+                for k in "${ACCOUNT_KEYS[@]}"; do
+                    if [[ "$keyname" == "$k" ]] || [[ "$keyname" == "${k}_sign" ]]; then
+                        status_text="in use"
+                    fi
+                done
+                
+                printf "  │ %-24s │ %-10s │ %b %-12s │\n" "$keyname" "$keytype" "$status_icon" "$status_text"
+            fi
+        done
+        printf "  └──────────────────────────┴────────────┴────────────────┘\n"
+    else
+        printf "  │ %-24s │ %-10s │ %-14s │\n" "(no keys found)" "-" "-"
+        printf "  └──────────────────────────┴────────────┴────────────────┘\n"
+    fi
+    echo ""
+}
+
+#-------------------------------------------------------------------------------
+# USE ACCOUNT
+#-------------------------------------------------------------------------------
+use_account() {
+    local account_name="$1"
+    
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        exit 1
+    fi
+
+    if ! load_accounts; then
+        error "No accounts configured"
+        exit 1
+    fi
+    
+    if [[ -z "$account_name" ]]; then
+        # Interactive selection
+        echo ""
+        info "Select account for this repository:"
+        echo ""
+
+        for i in "${!ACCOUNT_USERNAMES[@]}"; do
+            printf "  %d) ${CYAN}%s${NC} - %s <%s>\n" "$((i+1))" "${ACCOUNT_USERNAMES[$i]}" "${ACCOUNT_NAMES[$i]}" "${ACCOUNT_EMAILS[$i]}"
+        done
+        echo ""
+        
+        read -p "Choice [1]: " choice
+        choice=${choice:-1}
+        
+        if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#ACCOUNT_USERNAMES[@]} ]]; then
+            error "Invalid selection"
+            exit 1
+        fi
+        
+        local idx=$((choice-1))
+        account_name="${ACCOUNT_USERNAMES[$idx]}"
+        local name="${ACCOUNT_NAMES[$idx]}"
+        local email="${ACCOUNT_EMAILS[$idx]}"
+        local key="${ACCOUNT_KEYS[$idx]}"
+        local signkey="${ACCOUNT_SIGNKEYS[$idx]:-}"
+
+        # Set repo-local config
+        git config user.name "$name"
+        git config user.email "$email"
+        if [[ -n "$key" ]]; then
+            # Prefer the account's dedicated signing key over the auth key, same as
+            # dot_gitconfig.tmpl / run_onchange_generate_identities - falls back to
+            # the auth key only if no signingKey is configured for this account.
+            git config user.signingkey "$HOME/.ssh/${signkey:-$key}.pub"
+            git config commit.gpgsign true
+            git config gpg.format ssh
+        fi
+        echo ""
+        success "Configured identity for this repo: $account_name"
+        echo ""
+        
+        # Boxed format with row headings
+        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
+        printf "  ├──────────┼────────────────────────────────────────────┤\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
+        if [[ -n "$key" ]]; then
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "~/.ssh/${key}"
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Signing" "~/.ssh/${signkey:-$key}"
+        fi
+        printf "  └──────────┴────────────────────────────────────────────┘\n"
+        echo ""
+    else
+        # Direct account name provided
+        local idx
+        if ! idx=$(find_account_index "$account_name"); then
+            error "Account not found: $account_name"
+            echo "Run 'devprofile list' to see available accounts"
+            exit 1
+        fi
+
+        local name="${ACCOUNT_NAMES[$idx]}"
+        local email="${ACCOUNT_EMAILS[$idx]}"
+        local key="${ACCOUNT_KEYS[$idx]}"
+        local signkey="${ACCOUNT_SIGNKEYS[$idx]:-}"
+
+        git config user.name "$name"
+        git config user.email "$email"
+        if [[ -n "$key" ]]; then
+            # Prefer the account's dedicated signing key over the auth key - see the
+            # matching comment in the interactive branch above.
+            git config user.signingkey "$HOME/.ssh/${signkey:-$key}.pub"
+            git config commit.gpgsign true
+            git config gpg.format ssh
+        fi
+
+        echo ""
+        success "Configured identity for this repo: $account_name"
+        echo ""
+
+        # Boxed format with row headings
+        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
+        printf "  ├──────────┼────────────────────────────────────────────┤\n"
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
+        if [[ -n "$key" ]]; then
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "~/.ssh/${key}"
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Signing" "~/.ssh/${signkey:-$key}"
+        fi
+        printf "  └──────────┴────────────────────────────────────────────┘\n"
+        echo ""
+    fi
+}
+
+#-------------------------------------------------------------------------------
+# INIT NEW ACCOUNT
+#-------------------------------------------------------------------------------
+init_account() {
+    local name="$1"
+    local email="$2"
+    shift 2 || true
+    local passphrase_mode="ask"
+
+    if [[ -z "$name" || -z "$email" ]]; then
+        error "Usage: devprofile init NAME EMAIL [--passphrase|--no-passphrase]"
+        exit 1
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --passphrase)
+                passphrase_mode="prompt"
+                ;;
+            --no-passphrase)
+                passphrase_mode="none"
+                ;;
+        esac
+        shift
+    done
+
+    case "${DEVPROFILE_PASSPHRASE:-}" in
+        1|true|yes) passphrase_mode="prompt" ;;
+        0|false|no) passphrase_mode="none" ;;
+    esac
+
+    if [[ "$passphrase_mode" == "ask" ]]; then
+        if [[ -t 0 ]]; then
+            read -r -p "Use passphrase for SSH keys? [y/N] (recommended): " use_passphrase
+            if [[ "$use_passphrase" =~ ^[Yy]$ ]]; then
+                passphrase_mode="prompt"
+            else
+                passphrase_mode="none"
+            fi
+        else
+            passphrase_mode="none"
+        fi
+    fi
+    
+    mkdir -p "$SSH_DIR"
+    chmod 700 "$SSH_DIR"
+    
+    local auth_key="${SSH_DIR}/id_${name}"
+    local sign_key="${SSH_DIR}/id_${name}_sign"
+    
+    echo ""
+    info "Creating account: $name <$email>"
+    echo ""
+    
+    # Generate auth key
+    if [[ -f "$auth_key" ]]; then
+        warn "Auth key already exists: $auth_key"
+    else
+        info "Generating authentication key..."
+        umask 077
+        if [[ "$passphrase_mode" == "none" ]]; then
+            ssh-keygen -t ed25519 -f "$auth_key" -C "$email" -N ""
+        else
+            ssh-keygen -t ed25519 -f "$auth_key" -C "$email"
+        fi
+        success "Created: $auth_key"
+    fi
+    
+    # Generate signing key
+    if [[ -f "$sign_key" ]]; then
+        warn "Signing key already exists: $sign_key"
+    else
+        info "Generating signing key..."
+        umask 077
+        # Comment is "<email>-sign", not "signing-<name>" - allowed_signers
+        # generation parses this to recover the email when scanning ~/.ssh for
+        # keys it doesn't already know about via chezmoi.toml (see
+        # run_onchange_generate_identities.sh.tmpl); an unparseable comment
+        # means that key silently never gets trusted for verification.
+        if [[ "$passphrase_mode" == "none" ]]; then
+            ssh-keygen -t ed25519 -f "$sign_key" -C "${email}-sign" -N ""
+        else
+            ssh-keygen -t ed25519 -f "$sign_key" -C "${email}-sign"
+        fi
+        success "Created: $sign_key"
+    fi
+    
+    echo ""
+    echo "Public keys:"
+    echo ""
+    echo "${CYAN}Authentication key${NC} (add to GitHub/GitLab as Authentication Key):"
+    cat "${auth_key}.pub"
+    echo ""
+    echo "${CYAN}Signing key${NC} (add to GitHub/GitLab as Signing Key):"
+    cat "${sign_key}.pub"
+    echo ""
+    
+    info "Next steps:"
+    echo "  1. Add keys to your Git provider (GitHub, GitLab, etc.)"
+    echo "  2. Add account to ~/.config/chezmoi/chezmoi.toml:"
+    echo ""
+    echo "     [[data.accounts]]"
+    echo "       name = \"Your Name\""
+    echo "       email = \"$email\""
+    echo "       username = \"$name\""
+    echo "       provider = \"github\""
+    echo "       key = \"id_${name}\""
+    echo "       signingKey = \"id_${name}_sign\""
+    echo "       dirs = [\"projects/${name}\"]"
+    echo ""
+    echo "  3. Run 'chezmoi apply' to update git config"
+    echo ""
+}
+
+#-------------------------------------------------------------------------------
+# VERIFY IDENTITY
+#-------------------------------------------------------------------------------
+verify_identity() {
+    local install_hook=false
+    [[ "${1:-}" == "--install-hook" ]] && install_hook=true
+    
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        exit 1
+    fi
+    
+    echo ""
+    local name email signingkey
+    name=$(git config user.name 2>/dev/null || echo "")
+    email=$(git config user.email 2>/dev/null || echo "")
+    signingkey=$(git config user.signingkey 2>/dev/null || echo "")
+    
+    local issues=0
+    local identity_status="" identity_icon=""
+    local key_status="" key_icon=""
+    local account_status="" account_icon=""
+    
+    # Check identity
+    if [[ -z "$name" || -z "$email" ]]; then
+        identity_status="Not configured"
+        identity_icon="${RED}✗${NC}"
+        issues=$((issues + 1))
+    else
+        identity_status="$name <$email>"
+        identity_icon="${GREEN}✓${NC}"
+    fi
+    
+    # Check signing key
+    if [[ -n "$signingkey" ]]; then
+        if [[ "$signingkey" == ssh-* ]]; then
+            key_status="Inline public key"
+            key_icon="${GREEN}✓${NC}"
+        else
+            local expanded_key="${signingkey/#\~/$HOME}"
+            if [[ -f "${expanded_key%.pub}" ]] || [[ -f "$expanded_key" ]]; then
+                local shortkey="${signingkey/#$HOME/~}"
+                key_status="$shortkey"
+                key_icon="${GREEN}✓${NC}"
+            else
+                key_status="File not found"
+                key_icon="${YELLOW}!${NC}"
+                issues=$((issues + 1))
+            fi
+        fi
+    else
+        key_status="Not configured (optional)"
+        key_icon="${BLUE}▸${NC}"
+    fi
+    
+    # Load accounts once - used by both the email check below and the
+    # directory-mapping check that follows it.
+    local have_accounts=false
+    load_accounts && have_accounts=true
+
+    # Check if email matches known account
+    if [[ -n "$email" ]]; then
+        if $have_accounts && email_in_accounts "$email"; then
+            account_status="Email matches configured account"
+            account_icon="${GREEN}✓${NC}"
+        else
+            account_status="Email not in config"
+            account_icon="${YELLOW}!${NC}"
+        fi
+    else
+        account_status="No config to check"
+        account_icon="${BLUE}▸${NC}"
+    fi
+
+    # Check whether the active identity is the one this directory is actually
+    # mapped to (via each account's `dirs` list) - catches the case where a
+    # repo-local override (`devprofile use`) was set while sitting in the wrong
+    # repo, or a repo was cloned/moved under the wrong account's directory.
+    local dir_status="" dir_icon=""
+    local repo_root
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+    # On Git Bash for Windows, `git rev-parse --show-toplevel` returns a drive-letter
+    # path (C:/Users/...) while $HOME is POSIX-style (/c/Users/...) - same directory,
+    # different spelling, so a raw string-prefix compare against $HOME always misses.
+    # Re-resolving both through `cd`+`pwd` normalizes them to the same form; a no-op
+    # on real POSIX systems (WSL/Linux/macOS) where they already match.
+    if [[ -n "$repo_root" ]]; then
+        repo_root=$(cd "$repo_root" 2>/dev/null && pwd || printf '%s' "$repo_root")
+    fi
+    local home_norm
+    home_norm=$(cd "$HOME" 2>/dev/null && pwd || printf '%s' "${HOME%/}")
+    if [[ -z "$repo_root" ]]; then
+        dir_status="Could not resolve repo path"
+        dir_icon="${BLUE}▸${NC}"
+    elif [[ "$repo_root" != "$home_norm"/* ]]; then
+        dir_status="Repo outside \$HOME - no mapping to check"
+        dir_icon="${BLUE}▸${NC}"
+    elif ! $have_accounts; then
+        dir_status="No account config to check against"
+        dir_icon="${BLUE}▸${NC}"
+    else
+        local relpath="${repo_root#"$home_norm"/}"
+        local match_idx
+        if match_idx=$(find_account_for_relpath "$relpath"); then
+            local expected_email="${ACCOUNT_EMAILS[$match_idx]}"
+            local expected_username="${ACCOUNT_USERNAMES[$match_idx]}"
+            if [[ -z "$email" ]]; then
+                dir_status="Expected $expected_username ($expected_email) - no identity set"
+                dir_icon="${YELLOW}!${NC}"
+                issues=$((issues + 1))
+            elif [[ "$email" == "$expected_email" ]]; then
+                dir_status="Matches $expected_username (dirs mapping)"
+                dir_icon="${GREEN}✓${NC}"
+            else
+                dir_status="Expected $expected_username ($expected_email), signing as $email"
+                dir_icon="${RED}✗${NC}"
+                issues=$((issues + 1))
+            fi
+        else
+            dir_status="No account's dirs list covers this path"
+            dir_icon="${BLUE}▸${NC}"
+        fi
+    fi
+
+    # Display boxed results
+    info "Identity Verification:"
+    echo ""
+    
+    # Truncate identity if too long
+    local display_identity="$identity_status"
+    [[ ${#display_identity} -gt 40 ]] && display_identity="${display_identity:0:38}.."
+    
+    printf "  ┌──────────┬──────────────────────────────────────────┬───┐\n"
+    printf "  │ ${CYAN}%-8s${NC} │ %-40s │ %b │\n" "Identity" "$display_identity" "$identity_icon"
+    printf "  ├──────────┼──────────────────────────────────────────┼───┤\n"
+    
+    local display_key="$key_status"
+    [[ ${#display_key} -gt 40 ]] && display_key="${display_key:0:38}.."
+    printf "  │ ${CYAN}%-8s${NC} │ %-40s │ %b │\n" "Key" "$display_key" "$key_icon"
+    printf "  ├──────────┼──────────────────────────────────────────┼───┤\n"
+    
+    local display_account="$account_status"
+    [[ ${#display_account} -gt 40 ]] && display_account="${display_account:0:38}.."
+    printf "  │ ${CYAN}%-8s${NC} │ %-40s │ %b │\n" "Account" "$display_account" "$account_icon"
+    printf "  ├──────────┼──────────────────────────────────────────┼───┤\n"
+
+    local display_dir="$dir_status"
+    [[ ${#display_dir} -gt 40 ]] && display_dir="${display_dir:0:38}.."
+    printf "  │ ${CYAN}%-8s${NC} │ %-40s │ %b │\n" "Dir" "$display_dir" "$dir_icon"
+    printf "  └──────────┴──────────────────────────────────────────┴───┘\n"
+    
+    echo ""
+    
+    # Install hook
+    if $install_hook; then
+        local git_dir
+        git_dir=$(git rev-parse --git-dir)
+        local hook_file="${git_dir}/hooks/pre-commit"
+        local user_hook="${git_dir}/hooks/pre-commit.user"
+
+        mkdir -p "${git_dir}/hooks"
+
+        if [[ -f "$hook_file" ]] && ! grep -q "devprofile-hook-wrapper" "$hook_file"; then
+            if [[ -f "$user_hook" ]]; then
+                local ts
+                ts=$(date +%s)
+                mv "$hook_file" "${user_hook}.${ts}"
+                warn "Existing pre-commit moved to ${user_hook}.${ts}"
+            else
+                mv "$hook_file" "$user_hook"
+                warn "Existing pre-commit moved to ${user_hook}"
+            fi
+        fi
+
+        cat > "$hook_file" << HOOK
+#!/bin/sh
+# devprofile-hook-wrapper
+
+email=\$(git config user.email)
+name=\$(git config user.name)
+
+if [ -z "\$email" ] || [ -z "\$name" ]; then
+    echo "ERROR: Git identity not configured!"
+    echo "Run: devprofile use <account-name>"
+    exit 1
+fi
+
+echo "Committing as: \$name <\$email>"
+
+USER_HOOK="$user_hook"
+if [ -x "\$USER_HOOK" ]; then
+    "\$USER_HOOK" "\$@"
+fi
+HOOK
+
+        chmod +x "$hook_file"
+        success "Pre-commit hook installed: $hook_file"
+        echo ""
+    fi
+    
+    if [[ $issues -eq 0 ]]; then
+        success "All checks passed!"
+    else
+        warn "$issues issue(s) found"
+    fi
+    echo ""
+}
+
+#-------------------------------------------------------------------------------
+# MAIN
+#-------------------------------------------------------------------------------
+main() {
+    case "${1:-}" in
+        help|--help|-h)
+            show_help
+            ;;
+        list)
+            list_accounts
+            ;;
+        use)
+            use_account "${2:-}"
+            ;;
+        init)
+            shift
+            init_account "$@"
+            ;;
+        verify)
+            verify_identity "${2:-}"
+            ;;
+        "")
+            show_current
+            ;;
+        *)
+            error "Unknown command: $1"
+            echo "Run 'devprofile help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
