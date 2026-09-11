@@ -100,7 +100,7 @@ jobs:
           $failed = $false
 
           $expectedCommands = @(
-            "git", "chezmoi", "nvim", "rg", "agy", "tmux",
+            "git", "chezmoi", "nvim", "rg", "agy", "serena", "graft", "tmux",
             "starship", "zoxide", "direnv", "lazygit", "bat", "eza", "fd", "delta", "gum"
           )
           foreach ($cmd in $expectedCommands) {
@@ -192,7 +192,7 @@ jobs:
               FAILED=1
             fi
           }
-          for cmd in git chezmoi nvim rg agy starship zoxide direnv lazygit bat eza fd delta gum; do
+          for cmd in git chezmoi nvim rg agy serena graft starship zoxide direnv lazygit bat eza fd delta gum; do
             check "$cmd"
           done
 
@@ -254,7 +254,7 @@ jobs:
               FAILED=1
             fi
           }
-          for cmd in git chezmoi nvim rg agy starship zoxide direnv lazygit bat eza fd delta gum; do
+          for cmd in git chezmoi nvim rg agy serena graft starship zoxide direnv lazygit bat eza fd delta gum; do
             check "$cmd"
           done
 
