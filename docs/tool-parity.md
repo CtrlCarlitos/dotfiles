@@ -122,13 +122,13 @@ able to proceed until it was killed by hand.
 | Script | Mechanism |
 | :--- | :--- |
 | `run_onchange_install_packages.sh.tmpl`, `install.sh` | `net_timeout <secs> <cmd>` / `_net` helper - wraps coreutils `timeout` (always on Linux) or `gtimeout` (macOS: `coreutils` is first in the brew core list, so it's present before the download-heavy steps; resolved per-call so a mid-run install is picked up). Runs unguarded if neither exists (e.g. Homebrew's own bootstrap, which runs first). Small key/API fetches use `curl --max-time` instead. |
-| `run_onchange_install_packages.ps1.tmpl`, `install.ps1` | `Invoke-WithTimeout -Seconds <n> { … }` (job + `Wait-Job -Timeout`) for `irm \| iex` installers and `npx`; `-TimeoutSec` on `Invoke-WebRequest`/`Invoke-RestMethod`; `Start-Process -PassThru` + `.WaitForExit(ms)` for silent installers; `--fetch-timeout`/`--fetch-retries` on `npm install -g`. |
+| `run_onchange_install_packages.ps1.tmpl`, `install.ps1` | `Invoke-WithTimeout -Seconds <n> { … }` (job + `Wait-Job -Timeout`) for `irm \| iex` installers, `npx`, and **every `choco install`** (600s cap, live-streamed output, env-var handoff - one bad installer with no cap and `\| Out-Null` once sat invisible for 22 minutes and ate a whole CI job); `-TimeoutSec` on `Invoke-WebRequest`/`Invoke-RestMethod`; `Start-Process -PassThru` + `.WaitForExit(ms)` for silent installers; `--fetch-timeout`/`--fetch-retries` on `npm install -g`. |
 
 On timeout the step is killed and the run continues (`\|\| warn` / a warning
 line) - the tool is just left uninstalled or half-installed and can be
 re-run by hand. Ollama additionally `rm`s its binary on failure so a
 partial extract isn't mistaken for a finished install on the next pass.
-`apt` / `brew` / `choco` are left alone - they carry their own network
+`apt` / `brew` are left alone - they carry their own network
 timeouts.
 
 ## SSH agent & key loading

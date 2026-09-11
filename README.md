@@ -47,8 +47,8 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main
 iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
 ```
 
-### Private Repository Access (Paying Customers)
-If you are accessing this as a private repository, you must use a **Personal Access Token (PAT)**.
+### Private Fork / Mirror Access (Optional)
+If you fork or mirror this repository **privately**, the one-liners above need a **Personal Access Token (PAT)** with repo read access.
 
 **Windows (PowerShell) with PAT**
 ```powershell

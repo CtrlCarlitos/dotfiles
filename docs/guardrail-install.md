@@ -46,3 +46,9 @@ _Added 2026-09-04 with Plan 3b of the agent-guardrails project._
 - **First install on an existing machine needs `chezmoi init`** so the new
   `install_guardrail` config key is prompted into the live config; until then
   `chezmoi diff`/`apply` fail with `map has no entry for key`.
+- **opencode.json must stay BOM-less** — PS 5.1's
+  `Set-Content -Encoding utf8` writes a UTF-8 BOM and guardrail's Go JSON
+  merge rejects it (`invalid character 'ï'`); the installer writes it via
+  `WriteAllLines`/`UTF8Encoding($false)` for exactly this reason. All
+  gen-config call sites print the tool's output when a merge fails, so a
+  regression here shows its cause instead of warning blind.

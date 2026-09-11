@@ -165,6 +165,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
+(The loop has since evolved further: every `choco install` now runs through
+`Invoke-WithTimeout` — 600s cap, live-streamed output, package name handed
+off via `$env` — after a bad installer with no cap and `| Out-Null` sat
+invisible for 22 minutes and consumed an entire CI job. The exit-code
+lesson below is why the check exists at all.)
+
 **The general lesson, not the specific fix:** any loop or batch operation that
 suppresses output (`| Out-Null`, `2>$null`, `|| true`, etc.) without checking the
 actual result code can hide an arbitrary number of failures indefinitely. If

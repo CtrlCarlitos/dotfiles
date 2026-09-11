@@ -15,3 +15,8 @@ Thumbs.db
 
 # Screenshots dropped in for debugging (not part of the dotfiles)
 *.png
+
+# Local-only working notes (session research, agent planning docs) - never
+# commit these; they have been swept into a commit by a broad `git add` before.
+docs/research/
+docs/superpowers/

@@ -37,6 +37,12 @@
     # for the current full list.
     install_ai_tools = true
 
+    # Agent guardrails: CtrlCarlitos/agent-guardrails release binary +
+    # gen-config wiring for Claude Code / OpenCode / Antigravity hooks.
+    # Modifies ~/.claude/settings.json etc. - deliberately separate opt-in
+    # from install_ai_tools. See docs/guardrail-install.md.
+    install_guardrail = true
+
     # Desktop Apps (Host only): Chrome, VS Code, Docker Desktop, etc.
     # Automatically skipped on WSL/Devcontainers even if true.
     install_desktop = false
