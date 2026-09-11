@@ -145,7 +145,7 @@ Get-ChildItem -Path $sshDirForSigners -Filter "id_*" -File -ErrorAction Silently
 # config: Windows OpenSSH's client enforces this too (same "Bad owner or
 # permissions" refusal as Unix - confirmed against a Win32-OpenSSH GitHub
 # issue specifically about this file). Only normalized if it already exists
-# - this repo's private_dot_ssh/config.tmpl creates it, chezmoi applies that
+# - this repo's private_dot_ssh/private_config.tmpl creates it, chezmoi applies that
 # separately from this script.
 $configPath = Join-Path $sshDirForSigners "config"
 if (Test-Path $configPath) { Set-OwnerOnlyAcl $configPath }

@@ -75,7 +75,7 @@ different failure modes.
    chezmoi's template didn't know about, which is exactly what caused the drift
    prompt in point 3. This repo manages git identity/auth entirely through SSH host
    aliases (see `dot_gitconfig.tmpl`'s `[url ...] insteadOf` rules and
-   `private_dot_ssh/config.tmpl`) — it doesn't need `gh`'s https credential helper
+   `private_dot_ssh/private_config.tmpl`) — it doesn't need `gh`'s https credential helper
    at all for its own push/pull. If you add something like this, either don't
    (confirm SSH already works via `ssh -T git@github-<alias> -o BatchMode=yes`
    first — it likely does), or revert it afterward so `chezmoi status` stays
@@ -313,7 +313,7 @@ PowerShell profiles do an idempotent top-up of the same list on shell start.
   ground rule 14 for why not via the `Set-ExecutionPolicy` cmdlet). Without this,
   neither PowerShell profile above can auto-load on a machine with the default
   policy.
-- `private_dot_ssh/config.tmpl` → `~/.ssh/config` — generates `Host <provider>-<user>`
+- `private_dot_ssh/private_config.tmpl` → `~/.ssh/config` — generates `Host <provider>-<user>`
   aliases used by the git URL-rewrite system in `dot_gitconfig.tmpl`.
 
 ## Procedure

@@ -100,7 +100,7 @@ Windows-interop specific gotchas WSL adds.
 - `.chezmoiexternal.toml` — installs Oh My Zsh + plugins + tmux plugin manager via
   pinned-commit GitHub archive downloads. Worth confirming these archives still
   resolve (pinned commits can go stale if a fork/rename happens upstream).
-- `private_dot_ssh/config.tmpl` → `~/.ssh/config` — generates `Host <provider>-<user>`
+- `private_dot_ssh/private_config.tmpl` → `~/.ssh/config` — generates `Host <provider>-<user>`
   aliases used by the git URL-rewrite system in `dot_gitconfig.tmpl`.
 
 ## Known watch-items for Linux specifically (verify, don't assume)
