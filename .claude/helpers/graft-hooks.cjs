@@ -14,6 +14,31 @@ function fromPkg(base) {
   } catch { return null; }
 }
 
+// The dist/claude dir of @nanonets/graft beside the graft launcher on PATH — covers
+// user-prefix npm layouts (~/.local/bin/graft -> ../lib/node_modules/...) where
+// `npm root -g` reports the system prefix, and Windows npm layouts
+// (%APPDATA%\npm\graft.cmd -> ../node_modules/...).
+function fromLauncher() {
+  try {
+    const which = process.platform === 'win32' ? 'where.exe' : 'which';
+    const bin = execFileSync(which, ['graft'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split(/\r?\n/)[0]
+      .trim();
+    if (!bin) return null;
+    const binDirs = [path.dirname(bin)];
+    try { binDirs.push(path.dirname(fs.realpathSync(bin))); } catch { /* link dir is enough */ }
+    const roots = binDirs.flatMap((binDir) => [
+      path.join(binDir, '..', 'lib', 'node_modules', '@nanonets', 'graft'),
+      path.join(binDir, '..', 'node_modules', '@nanonets', 'graft'),
+    ]);
+    for (const root of roots) {
+      const distClaude = path.join(root, 'dist', 'claude');
+      if (fs.existsSync(distClaude)) return distClaude;
+    }
+    return null;
+  } catch { return null; }
+}
+
 // The global node_modules dir per npm (handles Homebrew/Windows/volta). Queried on demand.
 function globalRoot() {
   try {
@@ -54,8 +79,8 @@ function best(dirs, name) {
 }
 
 function entry(name) {
-  // Cheap candidates first, and only shell out to npm when every one of them misses.
-  const cheap = [BAKED, fromPkg(dir), fromPkg(path.join(path.dirname(process.execPath), '..', 'lib'))];
+  // Cheap candidates and the PATH launcher first; only shell out to npm when every one of them misses.
+  const cheap = [BAKED, fromLauncher(), fromPkg(dir), fromPkg(path.join(path.dirname(process.execPath), '..', 'lib'))];
   const hit = best(cheap, name);
   if (hit) return path.join(hit, name);
   const gr = globalRoot();
