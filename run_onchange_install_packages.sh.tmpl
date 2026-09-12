@@ -1612,22 +1612,33 @@ install_antigravity_desktop() {
             # names - the legacy lesson: Google renamed the bundle mid-channel
             # and `cp /Volumes/Antigravity/Antigravity.app` broke live.
             local mount_output volume_path
-            mount_output=$(hdiutil attach /tmp/Antigravity.dmg -nobrowse)
-            volume_path=$(echo "$mount_output" | grep -Eo '/Volumes/.*$' | tail -1)
+            # Attach guarded: an unguarded failure would abort the whole
+            # remaining run under `set -euo pipefail` (warn-and-continue
+            # contract instead). grep's no-match exit is neutralized with
+            # `|| true` INSIDE the substitution so an empty result reaches
+            # the -z guard below instead of tripping pipefail first.
+            mount_output=$(hdiutil attach /tmp/Antigravity.dmg -nobrowse) \
+                || { warn "Failed to mount Antigravity 2.0 DMG"; rm -f /tmp/Antigravity.dmg; return 0; }
+            volume_path=$(echo "$mount_output" | grep -Eo '/Volumes/.*$' | tail -1 || true)
             if [[ -z "$volume_path" ]]; then
                 warn "Could not determine mounted volume path for Antigravity 2.0 DMG"
             else
                 local app_path
                 app_path=$(find "$volume_path" -maxdepth 1 -name "*.app" -print -quit)
                 if [[ -n "$app_path" ]]; then
-                    cp -R "$app_path" /Applications/ || warn "Failed to copy $(basename "$app_path") to /Applications"
+                    # Success line only on a confirmed copy - a failed cp
+                    # must not read as "installed" in the log.
+                    if cp -R "$app_path" /Applications/; then
+                        success "Antigravity 2.0 installed to /Applications"
+                    else
+                        warn "Failed to copy $(basename "$app_path") to /Applications"
+                    fi
                 else
                     warn "No .app bundle found in mounted Antigravity 2.0 volume at $volume_path"
                 fi
-                hdiutil detach "$volume_path" -quiet
+                hdiutil detach "$volume_path" -quiet || warn "Failed to detach Antigravity 2.0 volume at $volume_path"
             fi
             rm -f /tmp/Antigravity.dmg
-            success "Antigravity 2.0 installed to /Applications"
             ;;
         Linux)
             # Tarball install under ~/.local/share (the 2.0 hub channel ships
