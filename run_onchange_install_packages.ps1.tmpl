@@ -44,22 +44,40 @@ function Invoke-WithTimeout {
     Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
-{{ $install_core := false -}}
-{{- $install_modern := false -}}
-{{- $install_fonts := false -}}
-{{- $install_ai_tools := false -}}
-{{- $install_guardrail := false -}}
-{{- $install_desktop := false -}}
+{{/* 12-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
+      Variable names = config keys = menu options = CI seeds, one vocabulary.
+      Old install_* keys: clean break, ignored (no migration) - rename map in
+      docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
+      non-interactive/bare-init applies install nothing beyond what's seeded.
+      Windows twin of the sh installer's variable block. */}}
+{{ $core := false -}}
+{{- $modern_cli := false -}}
+{{- $fonts := false -}}
+{{- $agent_toolkit := false -}}
+{{- $claude_cli := false -}}
+{{- $claude_desktop := false -}}
+{{- $chatgpt_cli := false -}}
+{{- $chatgpt_desktop := false -}}
+{{- $antigravity_cli := false -}}
+{{- $antigravity_desktop := false -}}
+{{- $dev_desktop := false -}}
+{{- $guardrail := false -}}
 {{- if hasKey . "packages" -}}
-  {{- $install_core = .packages.install_core -}}
-  {{- $install_modern = .packages.install_modern -}}
-  {{- $install_fonts = .packages.install_fonts -}}
-  {{- $install_ai_tools = .packages.install_ai_tools -}}
-  {{- if hasKey .packages "install_guardrail" }}{{- $install_guardrail = .packages.install_guardrail }}{{- end -}}
-  {{- $install_desktop = .packages.install_desktop -}}
+  {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
+  {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
+  {{- if hasKey .packages "fonts" }}{{- $fonts = .packages.fonts }}{{- end -}}
+  {{- if hasKey .packages "agent_toolkit" }}{{- $agent_toolkit = .packages.agent_toolkit }}{{- end -}}
+  {{- if hasKey .packages "claude_cli" }}{{- $claude_cli = .packages.claude_cli }}{{- end -}}
+  {{- if hasKey .packages "claude_desktop" }}{{- $claude_desktop = .packages.claude_desktop }}{{- end -}}
+  {{- if hasKey .packages "chatgpt_cli" }}{{- $chatgpt_cli = .packages.chatgpt_cli }}{{- end -}}
+  {{- if hasKey .packages "chatgpt_desktop" }}{{- $chatgpt_desktop = .packages.chatgpt_desktop }}{{- end -}}
+  {{- if hasKey .packages "antigravity_cli" }}{{- $antigravity_cli = .packages.antigravity_cli }}{{- end -}}
+  {{- if hasKey .packages "antigravity_desktop" }}{{- $antigravity_desktop = .packages.antigravity_desktop }}{{- end -}}
+  {{- if hasKey .packages "dev_desktop" }}{{- $dev_desktop = .packages.dev_desktop }}{{- end -}}
+  {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
 {{- end }}
 
-{{- if or $install_core $install_modern $install_fonts $install_desktop $install_ai_tools }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $guardrail }}
 # Check Admin Status
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -145,7 +163,7 @@ function Install-Node {
     }
 }
 
-{{- if $install_core }}
+{{- if $core }}
 # Core tools
 # psmux: the native Windows tmux (Rust, github.com/psmux/psmux) - official
 # Chocolatey package, ships psmux/pmux/tmux commands and reads .tmux.conf, so
@@ -156,11 +174,13 @@ $packages += @(
     "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg"
 )
 
-# Node.js 24.x (required for Codex)
+# Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups
+# (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
+# also work with core off.
 Install-Node
 {{- end }}
 
-{{- if $install_modern }}
+{{- if $modern_cli }}
 # Modern CLI tools
 $packages += @("bat", "eza", "fd", "delta", "starship", "zoxide", "direnv", "lazygit", "tealdeer", "dust", "duf", "procs", "shellcheck", "shfmt")
 
@@ -203,12 +223,12 @@ function Install-Gum {
 Install-Gum
 {{- end }}
 
-{{- if $install_fonts }}
+{{- if $fonts }}
 # Fonts - MesloLGS NF is excellent for Starship
 $packages += @("nerd-fonts-meslo")
 {{- end }}
 
-{{- if $install_desktop }}
+{{- if $dev_desktop }}
 # Desktop apps
 # handy (https://handy.computer, Speech-to-Text): Whisper/Parakeet model
 # selection is GUI-only, no CLI flag or config file to pre-seed one. For
@@ -236,21 +256,41 @@ $packages += @(
 )
 {{- end }}
 
-{{- if $install_ai_tools }}
+{{- if $agent_toolkit }}
 # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
 # Confirmed current on Chocolatey (act-cli, v0.2.89). Note: act runs every
 # job inside a real Docker container, and this repo's isDevcontainer check
 # treats any container as one (see .chezmoi.toml.tmpl) - so $interactive can
 # never be true under act, meaning it can validate template/script syntax
-# and the devcontainer code path, but can't exercise install_core/
-# install_ai_tools/etc content. Confirmed this session testing a Superpowers
-# install fix - had to fall back to isolated `docker run` tests.
-#
+# and the devcontainer code path, but can't exercise the core/
+# agent_toolkit/etc section content. Confirmed this session testing a
+# Superpowers install fix - had to fall back to isolated `docker run` tests.
+$packages += @("act-cli")
+{{- end }}
+
+{{- if $antigravity_cli }}
 # antigravity-cli (agy) - Antigravity's terminal/headless surface, updated
-# near-daily upstream and confirmed on Chocolatey. The only Antigravity
-# surface this repo installs: the IDE and hub desktop apps were removed
-# (VS Code + agy in a terminal cover that workflow).
-$packages += @("act-cli", "antigravity-cli")
+# near-daily upstream and confirmed on Chocolatey. Its superpowers wiring
+# runs in the antigravity_cli section below. History: the IDE/hub desktop
+# apps were removed 2026-09-11 (VS Code + agy covered that workflow); the
+# 2.0 desktop app is back since 2026-09-13 as its own antigravity_desktop
+# group (choco `antigravity`, below) - agy here remains the CLI surface.
+$packages += @("antigravity-cli")
+{{- end }}
+
+{{- if $claude_desktop }}
+# Claude Desktop (spec §5) - official Chocolatey package, rides the capped
+# choco loop like every other package. Claude Code (the CLI) is a separate
+# claude_cli group - different software, different gate.
+$packages += @("claude")
+{{- end }}
+
+{{- if $antigravity_desktop }}
+# Antigravity 2.0 desktop app (spec §5) - official Chocolatey package,
+# proven in this repo's CI history (the pre-removal full-install runs
+# installed it via choco). Windows floats on choco's version - no pinned
+# hub-channel URL here, unlike the sh template's dmg/tar.gz pins.
+$packages += @("antigravity")
 {{- end }}
 
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
@@ -308,7 +348,7 @@ foreach ($pkg in $packages) {
     }
 }
 
-{{- if $install_modern }}
+{{- if $modern_cli }}
 # tealdeer's Chocolatey package puts its binary at tools\x64\tealdeer.exe -
 # Chocolatey's shim generator only picks up .exe files directly in a
 # package's tools\ root, not subfolders, so the package installs cleanly but
@@ -325,7 +365,7 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 }
 {{- end }}
 
-{{- if $install_fonts }}
+{{- if $fonts }}
 # Wire the Nerd Font into the places that actually render it. Installing the
 # font isn't enough - confirmed live that a real machine had it fully
 # installed (nerd-fonts-meslo via choco) but neither Windows Terminal nor VS
@@ -381,8 +421,12 @@ if (Test-Path $vscodeSettings) {
 
 
 
-{{- if $install_ai_tools }}
-# AI Coding Tools
+{{- if $agent_toolkit }}
+# Agent Toolkit (spec §2: the cross-vendor agent layer - OpenCode, Serena,
+# Graft, act, Playwright Chromium, superpowers-for-OpenCode wiring. Codex
+# moved to chatgpt_cli, Claude Code to claude_cli, agy to antigravity_cli:
+# vendor products live in vendor groups per the spec's placement rule. act
+# joins the choco $packages list above under this same gate.)
 
 # Ollama - installer downloads a large (~700MB+) setup with no timeout of its own
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
@@ -392,23 +436,9 @@ if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
 
 Install-Node
 if (Get-Command npm -ErrorAction SilentlyContinue) {
-    Write-Host "Installing AI coding tools..." -ForegroundColor Cyan
+    Write-Host "Installing agent toolkit (OpenCode, superpowers, Playwright)..." -ForegroundColor Cyan
     
-    # 1. Codex (npm)
-    # Global NPM packages are usually added to PATH during Node.js install
-    # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-         Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
-    }
-
-    # 2. Claude Code (Native - Recommended)
-    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "  Installing Claude Code (Native)..." -ForegroundColor Yellow
-        # Official Native Install
-        Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm https://claude.ai/install.ps1 | iex" }
-    }
-
-    # 3. OpenCode (choco). NOT npm: opencode-ai's npm package only fetches
+    # OpenCode (choco). NOT npm: opencode-ai's npm package only fetches
     #    its real platform binary in a postinstall script, and any install
     #    where that didn't run (npm 12 script handling, --ignore-scripts,
     #    partial installs) leaves bin/opencode.exe an invalid exe - every
@@ -458,18 +488,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         }
     }
 
-    # 4. Superpowers skills plugin for Claude Code (global - active in every
-    #    session once installed, via Claude Code's own plugin marketplace
-    #    mechanism, not npm). Re-running add/install is safe if already present.
-    if (Get-Command claude -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing Superpowers plugin for Claude Code..." -ForegroundColor Yellow
-        Invoke-Quietly -Description "Failed to add Superpowers marketplace for Claude Code" -Action { claude plugin marketplace add obra/superpowers-marketplace 2>$null }
-        Invoke-Quietly -Description "Failed to install Superpowers plugin for Claude Code" -Action { claude plugin install superpowers@superpowers-marketplace 2>$null }
-    }
-
-    # 5. Superpowers skills for OpenCode (separate mechanism from Claude
-    #    Code's plugin marketplace above - OpenCode reads its own
-    #    opencode.json config). Uses the Windows-specific workaround from
+    # Superpowers skills for OpenCode (separate mechanism from Claude
+    # Code's plugin marketplace, which lives in the claude_cli section
+    # below - OpenCode reads its own opencode.json config). Uses the
+    # Windows-specific workaround from
     #    obra/superpowers' own install docs: the standard git+https plugin
     #    spec has documented upstream OpenCode/Windows issues (Bun not
     #    finding git.exe, cache-path bugs), so install via `npm --prefix`
@@ -511,136 +533,25 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         }
     }
 
-    # 6. Superpowers plugin for Antigravity CLI (agy). Google Gemini Code
-    #    Assist for individuals (which the standalone Gemini CLI used) was
-    #    retired in favor of the Antigravity suite - see docs/tool-parity.md -
-    #    so this repo no longer installs Gemini CLI; Antigravity CLI is its
-    #    replacement in the AI-tools lineup.
-    #    `agy plugin install <url>` is the officially-documented mechanism
-    #    (obra/superpowers' own README.md Antigravity section, confirmed
-    #    against the locally-installed copy's docs) - NOT hand-copying skill
-    #    files into a guessed plugin directory. Superpowers' own contributor
-    #    docs (docs/porting-to-a-new-harness.md) explicitly call manual
-    #    file-copying fragile/unsupported: "Everything arrives through the
-    #    install mechanism - not by editing the user's config." This also
-    #    sidesteps needing to hardcode Antigravity's actual plugin storage
-    #    path here (confirmed live: `~/.gemini/config/plugins/<name>/` -
-    #    antigravity.google's own docs claim `~/.gemini/antigravity-cli/
-    #    plugins/<name>/` instead, which is simply wrong as of agy 1.1.22) -
-    #    agy itself resolves this, not us, so it stays correct even if/when
-    #    that path changes again.
-    # Refresh PATH in case Chocolatey just installed agy in this same run
-    # (its shim may not be a package this session has seen yet, mirroring
-    # Install-Node's same refresh above).
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    if (Get-Command agy -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing Superpowers plugin for Antigravity..." -ForegroundColor Yellow
-        Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action { agy plugin install https://github.com/obra/superpowers 2>$null }
-    }
-
-    # Curated third-party agent skills via the `skills` CLI (vercel-labs/skills):
-    # Matt Pocock's 11 + mp-code-review + Anthropic's frontend-design, installed
-    # for Claude Code / OpenCode / Antigravity in one pass. One `skills add`
-    # writes ~\.agents\skills\<name>\ (OpenCode + Antigravity read it) and
-    # ~\.claude\skills\<name>\ (Claude Code). --copy = real dirs, not symlinks.
-    # Replaces the old per-agent hand-staging + `agy plugin install`. Gated on npx.
-    #
-    # Every npx/git call runs through Invoke-WithTimeout, for three reasons:
-    # 1. Wall-clock guard - these are unbounded network fetches, same contract
-    #    as every other network step in this script (docs/tool-parity.md's
-    #    Network-step timeouts section promises this for npx and git clones).
-    # 2. The job's fresh session runs with default ErrorActionPreference, so
-    #    stderr can never be promoted to a terminating error here - the PS 5.1
-    #    trap that killed the first real deploy of this block (npm 12's npx
-    #    prints a benign "npm notice run npx / npm notice run 'skills' add ..."
-    #    to STDERR on every invocation, exit 0, verified live on npm 12.0.2;
-    #    under EAP=Stop the old `2>&1` redirect promoted the first stderr line
-    #    into a terminating error that aborted all three installs at birth).
-    #    --loglevel=error is still passed to keep the notices from existing.
-    # 3. The job's detached stdin makes an interactive prompt impossible - the
-    #    same block hung a real WSL run holding the terminal (chezmoi inherits
-    #    the console's stdin); the bash side gets the same guarantee via
-    #    `< /dev/null`.
-    # The trailing exit-code throw keeps real failures visible: a non-zero
-    # exit marks the job Failed, which Invoke-WithTimeout reports as a warning
-    # (stderr alone wouldn't, in the job's default EAP).
-    # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
-    # are deliberately self-contained (literal args + $env:TEMP only).
-    if (Get-Command npx -ErrorAction SilentlyContinue) {
-        $skAgents = @('claude-code', 'opencode', 'antigravity')
-        Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
-            npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-        }
-
-        # code-review -> mp-code-review: no rename flag in the CLI, so stage a
-        # renamed copy with its name: frontmatter patched and install that dir.
-        # "mp-" keeps it distinct from this repo's own /code-review command.
-        $skRepo  = "$env:TEMP\mp-skills-repo"
-        $skStage = "$env:TEMP\mp-skills-stage"
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-        # --quiet: git's "Cloning into..." is on stderr even on success and
-        # would pollute the job's output; timeout-wrapped like every other clone.
-        Invoke-WithTimeout -Description "mattpocock/skills clone" -Seconds 60 -Action {
-            git clone --quiet --depth 1 https://github.com/mattpocock/skills "$env:TEMP\mp-skills-repo" 2>$null
-            if ($LASTEXITCODE -ne 0) { throw "git clone exited with code $LASTEXITCODE" }
-        }
-        $cr = Join-Path $skRepo "skills\engineering\code-review"
-        if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
-        if (Test-Path $cr) {
-            New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
-            Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
-            $skf = "$skStage\mp-code-review\SKILL.md"
-            if (Test-Path $skf) {
-                $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
-                [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
-            }
-            Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
-                npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-            }
-        } else {
-            Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
-        }
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-
-        Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
-            npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-        }
-    }
-
-    # Superpowers for Codex CLI: deliberately NOT automated. Confirmed live
-    # via an isolated Docker test that the third-party `codex-plugin` npm
-    # helper (the only scriptable option) doesn't just prompt interactively -
-    # it expects a plugins/<name>/ marketplace layout that obra/superpowers
-    # doesn't use (it ships a root-level .codex-plugin/plugin.json manifest
-    # instead), so it fails outright regardless of flags. Codex's real
-    # install path for this plugin is its native in-app `/plugins` search UI -
-    # genuinely GUI/session-only, no config file or CLI command reaches it
-    # from outside a session.
-
-    # 8. Playwright Chromium - headless browser for coding-agent browser
-    #    automation. Deliberately here, not under install_desktop: that's
-    #    gated host-only and never runs on WSL/containers, exactly where
-    #    coding agents most often run.
+    # Playwright Chromium - headless browser for coding-agent browser
+    # automation. Deliberately here, not under dev_desktop: that's
+    # gated host-only and never runs on WSL/containers, exactly where
+    # coding agents most often run.
     Write-Host "  Installing Playwright Chromium (headless browser for agent automation)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -Action { npx --yes playwright install chromium 2>$null }
 }
 
-# 9. Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/
+# Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/
 #    references/rename/replace-symbol). uv-managed: uv ships its own CPython
 #    3.13, so no system Python prerequisite. Register per-client: native
-#    `serena setup` for claude-code/codex; JSON/TOML/manual for the rest
-#    (blocks 10-11 below). Sibling of the npm-guarded block above, NOT inside
-#    it - Serena rides on uv, not npm. Windows twin of the sh installer's
-#    Serena block.
+#    `serena setup` for claude-code/codex; JSON/manual merge for the rest
+#    (the opencode/agy registration blocks below). Sibling of the npm-guarded
+#    block above, NOT inside it - Serena rides on uv, not npm. Windows twin
+#    of the sh installer's Serena block.
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "  Installing uv (Astral)..." -ForegroundColor Yellow
     # Literal-only scriptblock (jobs don't inherit session variables - see the
-    # NOTE on the skills scriptblocks above); the trailing exit-code throw
+    # NOTE on the skills scriptblocks below); the trailing exit-code throw
     # keeps a failed download visible as a job failure.
     Invoke-WithTimeout -Description "uv install" -Seconds 300 -Action {
         & powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
@@ -670,8 +581,8 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     }
 }
 
-# 10. opencode: global config mcp key (merge, never clobber the plugin key -
-#     the Superpowers wiring in block 5 owns it). Raw-content '"serena"'
+# opencode: global config mcp key (merge, never clobber the plugin key -
+#     the Superpowers-for-OpenCode wiring above owns it). Raw-content '"serena"'
 #     pre-check, same cheap idempotence guard as the sh side's grep, so an
 #     already-registered config is never re-serialized.
 if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
@@ -708,7 +619,7 @@ if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command seren
     }
 }
 
-# 11. agy: first-class MCP management (verified: agy mcp add/list).
+# agy: first-class MCP management (verified: agy mcp add/list).
 if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
     # try/catch + 2>&1 capture, not a bare call: under EAP=Stop a native
     # command's stderr is the terminating-error trap (same idiom as the
@@ -721,7 +632,7 @@ if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -Er
     }
 }
 
-# 12. Graft (trailhq/Graft) - codebase context graph. Global CLI here;
+# Graft (trailhq/Graft) - codebase context graph. Global CLI here;
 #     per-repo activation is `graft init` (documented in
 #     docs/agent-context-tools.md). Telemetry off per repo decision.
 #     --allow-scripts: npm 12 blocks install scripts by default, which
@@ -739,8 +650,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
         }
     }
-    # Rebuild so the fresh graft shim resolves in this session (no npm/npx
-    # steps follow this point, so the rebuild can't strand anything).
+    # Rebuild so the fresh graft shim resolves in this session. npm/npx steps
+    # DO follow this point now (the cross-cutting skills pass below uses npx),
+    # but they resolve through the same Machine+User rebuild, so nothing is
+    # stranded.
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command graft -ErrorAction SilentlyContinue) {
         Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
@@ -750,7 +663,165 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
-{{- if $install_guardrail }}
+{{- if $claude_cli }}
+# Claude Code (Native Installer - Recommended). Deliberately NOT nested under
+# an npm-presence check (its former home, the old ai_tools npm block): the
+# native installer is `irm | iex` and needs no Node - so claude_cli works
+# standalone even with core/agent_toolkit off.
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installing Claude Code (Native)..." -ForegroundColor Yellow
+    # Official Native Install
+    Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm https://claude.ai/install.ps1 | iex" }
+}
+
+# Superpowers skills plugin for Claude Code (global - active in every
+# session once installed, via Claude Code's own plugin marketplace
+# mechanism, not npm). Re-running add/install is safe if already present.
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+    Write-Host "  Installing Superpowers plugin for Claude Code..." -ForegroundColor Yellow
+    Invoke-Quietly -Description "Failed to add Superpowers marketplace for Claude Code" -Action { claude plugin marketplace add obra/superpowers-marketplace 2>$null }
+    Invoke-Quietly -Description "Failed to install Superpowers plugin for Claude Code" -Action { claude plugin install superpowers@superpowers-marketplace 2>$null }
+}
+{{- end }}
+
+{{- if $chatgpt_cli }}
+# Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+# superpowers/skills/guardrail have no codex surface (the skills and
+# guardrail passes stay presence-gated on their own CLIs; only this npm
+# install lives here).
+Install-Node
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
+    # Global NPM packages are usually added to PATH during Node.js install
+    # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+         Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+    }
+}
+
+# Superpowers for Codex CLI: deliberately NOT automated. Confirmed live
+# via an isolated Docker test that the third-party `codex-plugin` npm
+# helper (the only scriptable option) doesn't just prompt interactively -
+# it expects a plugins/<name>/ marketplace layout that obra/superpowers
+# doesn't use (it ships a root-level .codex-plugin/plugin.json manifest
+# instead), so it fails outright regardless of flags. Codex's real
+# install path for this plugin is its native in-app `/plugins` search UI -
+# genuinely GUI/session-only, no config file or CLI command reaches it
+# from outside a session.
+{{- end }}
+
+{{- if $antigravity_cli }}
+# Superpowers plugin for Antigravity CLI (agy). Google Gemini Code
+#    Assist for individuals (which the standalone Gemini CLI used) was
+#    retired in favor of the Antigravity suite - see docs/tool-parity.md -
+#    so this repo no longer installs Gemini CLI; Antigravity CLI is its
+#    replacement in the agent lineup. The agy binary itself rides the choco
+#    $packages loop above (antigravity-cli), under this same gate.
+#    `agy plugin install <url>` is the officially-documented mechanism
+#    (obra/superpowers' own README.md Antigravity section, confirmed
+#    against the locally-installed copy's docs) - NOT hand-copying skill
+#    files into a guessed plugin directory. Superpowers' own contributor
+#    docs (docs/porting-to-a-new-harness.md) explicitly call manual
+#    file-copying fragile/unsupported: "Everything arrives through the
+#    install mechanism - not by editing the user's config." This also
+#    sidesteps needing to hardcode Antigravity's actual plugin storage
+#    path here (confirmed live: `~/.gemini/config/plugins/<name>/` -
+#    antigravity.google's own docs claim `~/.gemini/antigravity-cli/
+#    plugins/<name>/` instead, which is simply wrong as of agy 1.1.22) -
+#    agy itself resolves this, not us, so it stays correct even if/when
+#    that path changes again.
+# Refresh PATH in case Chocolatey just installed agy in this same run
+# (its shim may not be a package this session has seen yet, mirroring
+# Install-Node's same refresh above).
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+if (Get-Command agy -ErrorAction SilentlyContinue) {
+    Write-Host "  Installing Superpowers plugin for Antigravity..." -ForegroundColor Yellow
+    Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action { agy plugin install https://github.com/obra/superpowers 2>$null }
+}
+{{- end }}
+
+{{- if or $claude_cli $antigravity_cli $agent_toolkit }}
+# Curated third-party agent skills via the `skills` CLI (vercel-labs/skills):
+# Matt Pocock's 11 + mp-code-review + Anthropic's frontend-design, installed
+# for Claude Code / OpenCode / Antigravity in one pass. One `skills add`
+# writes ~\.agents\skills\<name>\ (OpenCode + Antigravity read it) and
+# ~\.claude\skills\<name>\ (Claude Code). --copy = real dirs, not symlinks.
+# Replaces the old per-agent hand-staging + `agy plugin install`.
+#
+# Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
+# groups (claude_cli / antigravity_cli / agent_toolkit) is enabled - the
+# CLIs it writes to may have arrived from any of those gates, and the pass
+# is idempotent either way. Gated on npx.
+#
+# Every npx/git call runs through Invoke-WithTimeout, for three reasons:
+# 1. Wall-clock guard - these are unbounded network fetches, same contract
+#    as every other network step in this script (docs/tool-parity.md's
+#    Network-step timeouts section promises this for npx and git clones).
+# 2. The job's fresh session runs with default ErrorActionPreference, so
+#    stderr can never be promoted to a terminating error here - the PS 5.1
+#    trap that killed the first real deploy of this block (npm 12's npx
+#    prints a benign "npm notice run npx / npm notice run 'skills' add ..."
+#    to STDERR on every invocation, exit 0, verified live on npm 12.0.2;
+#    under EAP=Stop the old `2>&1` redirect promoted the first stderr line
+#    into a terminating error that aborted all three installs at birth).
+#    --loglevel=error is still passed to keep the notices from existing.
+# 3. The job's detached stdin makes an interactive prompt impossible - the
+#    same block hung a real WSL run holding the terminal (chezmoi inherits
+#    the console's stdin); the bash side gets the same guarantee via
+#    `< /dev/null`.
+# The trailing exit-code throw keeps real failures visible: a non-zero
+# exit marks the job Failed, which Invoke-WithTimeout reports as a warning
+# (stderr alone wouldn't, in the job's default EAP).
+# NOTE: jobs do NOT inherit this session's variables - these scriptblocks
+# are deliberately self-contained (literal args + $env:TEMP only).
+if (Get-Command npx -ErrorAction SilentlyContinue) {
+    $skAgents = @('claude-code', 'opencode', 'antigravity')
+    Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # code-review -> mp-code-review: no rename flag in the CLI, so stage a
+    # renamed copy with its name: frontmatter patched and install that dir.
+    # "mp-" keeps it distinct from this repo's own /code-review command.
+    $skRepo  = "$env:TEMP\mp-skills-repo"
+    $skStage = "$env:TEMP\mp-skills-stage"
+    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
+    # --quiet: git's "Cloning into..." is on stderr even on success and
+    # would pollute the job's output; timeout-wrapped like every other clone.
+    Invoke-WithTimeout -Description "mattpocock/skills clone" -Seconds 60 -Action {
+        git clone --quiet --depth 1 https://github.com/mattpocock/skills "$env:TEMP\mp-skills-repo" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "git clone exited with code $LASTEXITCODE" }
+    }
+    $cr = Join-Path $skRepo "skills\engineering\code-review"
+    if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
+    if (Test-Path $cr) {
+        New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
+        Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
+        $skf = "$skStage\mp-code-review\SKILL.md"
+        if (Test-Path $skf) {
+            $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
+            [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
+            npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+        }
+    } else {
+        Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
+    }
+    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+}
+{{- end }}
+
+{{- if $guardrail }}
 # agent-guardrails hook-enforcement binary (guardrail.exe): pinned release
 # download, checksum-verified, then wired into Claude Code by `guardrail
 # gen-config claude --merge`. Windows twin of install_agent_guardrails() in
@@ -905,7 +976,7 @@ if ((Test-Path $guardrailExe) -and (Get-Command agy -ErrorAction SilentlyContinu
 
 # ScreenRec (Desktop App - Manual Install)
 # https://screenrec.com
-{{- if $install_desktop }}
+{{- if $dev_desktop }}
 $screenRecExe = "$env:LOCALAPPDATA\StreamingVideoProvider\ScreenRec_app\ScreenRec.exe"
 if (-not (Test-Path $screenRecExe)) {
     try {
@@ -943,7 +1014,7 @@ if (-not (Test-Path $screenRecExe)) {
 # regularly lags Google's own release cadence and fails install with a checksum mismatch
 # during that window. Download straight from Google instead. Chrome self-updates in the
 # background afterwards (Google Update), so it doesn't need `choco upgrade all` to stay current.
-{{- if $install_desktop }}
+{{- if $dev_desktop }}
 $chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chromeExe)) {
     try {
@@ -976,10 +1047,46 @@ if (-not (Test-Path $chromeExe)) {
 }
 {{- end }}
 
+# ChatGPT Desktop (spec §5) - Microsoft Store package via winget's msstore
+# source, not Chocolatey: the Store MSIX is the officially-supported Windows
+# distribution and choco has no maintained package for it. Idempotence guard
+# is Get-AppxPackage, not `choco list`/the uninstall-registry cache - Store
+# installs register as Appx packages, a surface both of those checks are
+# blind to. winget/msstore on CI runners is unproven in this repo (spec §10)
+# - warn-and-continue keeps a flaky Store interaction from aborting the rest.
+{{- if $chatgpt_desktop }}
+if (Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue) {
+    Write-Host "ChatGPT Desktop already installed" -ForegroundColor Green
+} elseif (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "  Warning: winget not found - cannot install ChatGPT Desktop" -ForegroundColor Red
+} else {
+    try {
+        Write-Host "Installing ChatGPT Desktop (winget msstore)..." -ForegroundColor Cyan
+        # All arguments are literals, so the job scriptblock is already
+        # self-contained without the $env: handoff the choco/guardrail blocks
+        # need (jobs inherit $env, not session variables - nothing
+        # session-side to pass here). The exit-code throw inside marks the
+        # job Failed on a real winget error; Invoke-WithTimeout surfaces that
+        # as a warning and never throws itself.
+        Invoke-WithTimeout -Description "ChatGPT Desktop install" -Seconds 300 -Action {
+            winget install --id 9NT1R1C2HH7J --source msstore --accept-package-agreements --accept-source-agreements
+            if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+        }
+        if (Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue) {
+            Write-Host "  ChatGPT Desktop installed!" -ForegroundColor Green
+        } else {
+            Write-Host "  Warning: winget reported success but no ChatGPT Appx package is registered" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  Warning: Failed to install ChatGPT Desktop - $_" -ForegroundColor Red
+    }
+}
+{{- end }}
+
 
 Write-Host "Package installation complete!" -ForegroundColor Green
 
-{{- if $install_desktop }}
+{{- if $dev_desktop }}
 Write-Host ""
 Write-Host "[Post-Install] Launch Docker Desktop once from the Start menu to accept the EULA" -ForegroundColor Yellow
 Write-Host "  and start the engine, then confirm it works with:  docker ps" -ForegroundColor Cyan
