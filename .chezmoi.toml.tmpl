@@ -57,19 +57,19 @@
   # ==========================================================================
   [data.packages]
     # core - terminal fundamentals (git, zsh, tmux, node, python, fzf, gh)
-    core = {{ if $interactive }}{{ promptBoolOnce . "packages.core" "Install core (terminal fundamentals: git, zsh, tmux)?" true }}{{ else }}true{{ end }}
+    core = {{ if $interactive }}{{ promptBoolOnce . "packages.core" "Install core (terminal fundamentals: git, zsh, tmux)?" true }}{{ else }}false{{ end }}
 
     # modern_cli - modern CLI replacements (bat, eza, fd, starship, zoxide, gum)
-    modern_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.modern_cli" "Install modern_cli (modern CLI replacements: bat, eza, starship)?" true }}{{ else }}true{{ end }}
+    modern_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.modern_cli" "Install modern_cli (modern CLI replacements: bat, eza, starship)?" true }}{{ else }}false{{ end }}
 
     # fonts - Nerd Fonts (MesloLGS NF), required for Starship
-    fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}true{{ end }}
+    fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
 
     # agent_toolkit - cross-vendor agent layer (OpenCode, Serena, Graft, act)
-    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: OpenCode, Serena, Graft)?" true }}{{ else }}true{{ end }}
+    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: OpenCode, Serena, Graft)?" true }}{{ else }}false{{ end }}
 
     # claude_cli - Claude Code CLI + superpowers/skills/guardrail wiring
-    claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)?" true }}{{ else }}true{{ end }}
+    claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)?" true }}{{ else }}false{{ end }}
 
     # claude_desktop - Claude Desktop app (host only; Linux has no build)
     claude_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.claude_desktop" "Install claude_desktop (Claude Desktop app)?" false }}{{ else }}false{{ end }}
@@ -94,7 +94,7 @@
     dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
 
     # guardrail - agent guardrails (guardrail binary + per-CLI planes)
-    guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}true{{ end }}
+    guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
 
 {{- if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
