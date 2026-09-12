@@ -629,6 +629,125 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "  Installing Playwright Chromium (headless browser for agent automation)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -Action { npx --yes playwright install chromium 2>$null }
 }
+
+# 9. Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/
+#    references/rename/replace-symbol). uv-managed: uv ships its own CPython
+#    3.13, so no system Python prerequisite. Register per-client: native
+#    `serena setup` for claude-code/codex; JSON/TOML/manual for the rest
+#    (blocks 10-11 below). Sibling of the npm-guarded block above, NOT inside
+#    it - Serena rides on uv, not npm. Windows twin of the sh installer's
+#    Serena block.
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installing uv (Astral)..." -ForegroundColor Yellow
+    # Literal-only scriptblock (jobs don't inherit session variables - see the
+    # NOTE on the skills scriptblocks above); the trailing exit-code throw
+    # keeps a failed download visible as a job failure.
+    Invoke-WithTimeout -Description "uv install" -Seconds 300 -Action {
+        & powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+        if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+    }
+}
+# uv's installer persists its bin dir to User PATH - rebuild so this session sees it
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    if (-not (Get-Command serena -ErrorAction SilentlyContinue)) {
+        Write-Host "  Installing Serena via uv..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "uv tool install serena-agent" -Seconds 600 -Action {
+            uv tool install -p 3.13 serena-agent
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        }
+    }
+    # uv tool shims land in User PATH (~\.local\bin) - rebuild again
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command serena -ErrorAction SilentlyContinue) {
+        Invoke-WithTimeout -Description "serena init" -Seconds 60 -Action { serena init 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        if (Get-Command claude -ErrorAction SilentlyContinue) {
+            Invoke-WithTimeout -Description "serena setup claude-code" -Seconds 60 -Action { serena setup claude-code 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        }
+        if (Get-Command codex -ErrorAction SilentlyContinue) {
+            Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        }
+    }
+}
+
+# 10. opencode: global config mcp key (merge, never clobber the plugin key -
+#     the Superpowers wiring in block 5 owns it). Raw-content '"serena"'
+#     pre-check, same cheap idempotence guard as the sh side's grep, so an
+#     already-registered config is never re-serialized.
+if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
+    $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
+    # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
+    # locked/unreadable opencode.json would otherwise terminate the script
+    # here (WT settings read idiom); on read failure fall through to the
+    # merge path, which re-reads inside its own try/catch.
+    $ocNeedsMerge = $true
+    if (Test-Path $ocConfig) {
+        try { $ocNeedsMerge = -not ((Get-Content $ocConfig -Raw) -match '"serena"') } catch {
+            Write-Host "  Warning: opencode.json unreadable - attempting merge anyway" -ForegroundColor Yellow
+        }
+    }
+    if ($ocNeedsMerge) {
+        Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
+            $ocJson = if (Test-Path $ocConfig) { Get-Content $ocConfig -Raw | ConvertFrom-Json } else { New-Object PSObject }
+            $serenaDef = @{ type = "local"; command = @("serena", "start-mcp-server", "--context", "ide-assistant"); enabled = $true }
+            if (-not $ocJson.PSObject.Properties["mcp"]) {
+                $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ serena = $serenaDef }
+            } else {
+                # mcp already holds other servers - add serena beside them
+                $ocJson.mcp | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef -Force
+            }
+            # BOM-less UTF-8 write (PS 5.1's Set-Content -Encoding utf8 prepends
+            # a BOM that Go JSON consumers reject - see block 5's note); the
+            # round-trip preserves every existing key, plugin included.
+            [System.IO.File]::WriteAllLines($ocConfig, ($ocJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+        } catch {
+            Write-Host "  Warning: opencode Serena registration failed - $_" -ForegroundColor Red
+        }
+    }
+}
+
+# 11. agy: first-class MCP management (verified: agy mcp add/list).
+if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
+    # try/catch + 2>&1 capture, not a bare call: under EAP=Stop a native
+    # command's stderr is the terminating-error trap (same idiom as the
+    # guardrail version check below).
+    $agyMcp = ""
+    try { $agyMcp = (agy mcp list 2>&1 | Out-String) } catch { $agyMcp = "" }
+    if ($agyMcp -notmatch "serena") {
+        Write-Host "  Registering Serena MCP in agy..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "agy mcp add serena" -Seconds 60 -Action { agy mcp add serena serena start-mcp-server --context ide-assistant 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    }
+}
+
+# 12. Graft (trailhq/Graft) - codebase context graph. Global CLI here;
+#     per-repo activation is `graft init` (documented in
+#     docs/agent-context-tools.md). Telemetry off per repo decision.
+#     --allow-scripts: npm 12 blocks install scripts by default, which
+#     silently skips graft's tree-sitter parser native builds - the binary
+#     then crashes with "No native build was found" (node-gyp-build). The
+#     allowlist is the exact list npm's own warning prints for this graft
+#     version; if a graft update changes its parser set, npm's error output
+#     prints the new list to paste here. (Single-quoted because PS 5.1
+#     splits unquoted commas into multiple native args.)
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    if (-not (Get-Command graft -ErrorAction SilentlyContinue)) {
+        Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
+            npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        }
+    }
+    # Rebuild so the fresh graft shim resolves in this session (no npm/npx
+    # steps follow this point, so the rebuild can't strand anything).
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command graft -ErrorAction SilentlyContinue) {
+        Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
+    }
+} else {
+    Write-Host "  Warning: npm not found - skipping Graft" -ForegroundColor Red
+}
 {{- end }}
 
 {{- if $install_guardrail }}

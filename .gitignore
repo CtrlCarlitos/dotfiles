@@ -51,3 +51,6 @@ node_modules/
 # commit these; they have been swept into a commit by a broad `git add` before.
 docs/research/
 docs/superpowers/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
