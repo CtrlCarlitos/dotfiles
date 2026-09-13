@@ -157,6 +157,33 @@ npx --yes skills@latest add anthropics/skills -s frontend-design \
 ```
 User's call — candidate, not decided.
 
+## Curated set widened (2026-09-13): +4 skills
+
+Four more single-skill installs joined the same sequence (all counts from
+skills.sh at add time):
+
+| Skill | Source | Installs | What it does |
+| :-- | :-- | :-- | :-- |
+| `find-skills` | `vercel-labs/skills` | 3.4M | lets an agent search and install skills from skills.sh mid-session |
+| `agent-browser` | `vercel-labs/agent-browser` | 843.8K | browser automation: navigate, click, fill, scrape, screenshot |
+| `skill-creator` | `anthropics/skills` | 380.0K | Anthropic's skill-authoring lifecycle tool with benchmarks and eval viewer |
+| `writing-great-skills` | `mattpocock/skills` | 323.0K | Matt Pocock's skill-writing craft guide |
+
+Each gets its own `skills add` (one skill per source repo, so no `-s` list to
+keep in sync), same `-a claude-code opencode antigravity -g -y --copy` flags:
+
+```sh
+npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a claude-code opencode antigravity -g -y --copy
+```
+
+No overlap with Superpowers or the existing curated set: `skill-creator` is a
+lifecycle/benchmark harness (vs Superpowers' `writing-skills` process guide),
+`writing-great-skills` is craft-level guidance (complements both), and
+`find-skills` / `agent-browser` have no installed equivalent.
+
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
@@ -223,6 +250,10 @@ Skills of interest: `plan-devex-review`, `devex-review`, `qa-only`,
 3. ✅ `mp-code-review` staged (rename + `name:` patch → `skills add <local dir>`).
 4. ✅ `docs/tool-parity.md` + `README.md` rows updated.
 5. ✅ GStack: no code; this doc is the record.
+6. ✅ 2026-09-13: `find-skills`, `agent-browser`, `skill-creator`,
+   `writing-great-skills` added to all four files (see the
+   "Curated set widened" section above); `tests/install_agent_skills_arguments.sh`
+   expected-call count bumped 3 → 7 to match.
 
 Not done / open:
 - ~~`-a antigravity` unverified with `agy` present on a box~~ **Verified
