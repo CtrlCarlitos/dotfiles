@@ -87,22 +87,24 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 
 14 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
 
-| Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer |
-|-------|-------------|:-----:|:-----:|:-------:|:---:|:------------:|
-| **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | seed-only |
-| **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **agent_toolkit** | Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **opencode_cli** | OpenCode CLI + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer* |
+|-------|-------------|:-----:|:-----:|:-------:|:---:|:--------------:|
+| **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | `node` |
+| **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | `modern-cli` |
+| **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | `nerd-font` |
+| **agent_toolkit** | Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `graft` `playwright` |
+| **opencode_cli** | OpenCode CLI + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `opencode` |
 | **opencode_desktop** | OpenCode Desktop app | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **claude_cli** | Claude Code + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **claude_cli** | Claude Code + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `claude-code` |
 | **claude_desktop** | Claude Desktop app | ❌ | ✅ | ✅ | ❌ | ❌ |
-| **chatgpt_cli** | Codex CLI | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **chatgpt_cli** | Codex CLI | ✅ | ✅ | ✅ | ✅ | `codex` |
 | **chatgpt_desktop** | ChatGPT Desktop app | ❌ | ✅ | ✅ | ❌ | ❌ |
-| **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **dev_desktop** | Chrome, VS Code, Docker Desktop, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |
+
+> \* **In devcontainers**, these tools install via [devcontainer-features](https://github.com/CtrlCarlitos/devcontainer-features) instead of the dotfiles installer — add individual features to your `devcontainer.json`. The dotfiles installer renders all groups false non-interactively in containers (they're ephemeral; a full install on every rebuild wastes time). Desktop groups (❌) stay off — no GUI in containers.
 
 > 🔎 Full details: **[Package Groups](docs/package-groups.md)** — taxonomy, placement rules, presets, and how to customize.
 
