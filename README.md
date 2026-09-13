@@ -174,6 +174,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Windows Setup](docs/windows.md) | Windows-specific details, troubleshooting, devprofile |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
+| [Remote Access](docs/remote-access.md) | Phone + third-party access via Tailscale + Cloudflare Tunnel |
 | [Guardrail Install](docs/guardrail-install.md) | The agent-guardrails system's design doc |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
 

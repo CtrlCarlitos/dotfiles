@@ -605,6 +605,24 @@ install_linux_desktop() {
         net_timeout 180 bash -c 'curl -fsSL https://tailscale.com/install.sh | sh' \
             || warn "Tailscale install failed or timed out - continuing"
     fi
+
+    # 7. cloudflared (Cloudflare Tunnel client) - outbound tunnel for sharing
+    # dev services (opencode web etc.) with third parties via Cloudflare
+    # Access. Named tunnels only; Quick Tunnels (trycloudflare.com) don't
+    # support SSE. Companion to Tailscale above (#6): Tailscale is the
+    # personal-device path, this is the share-with-outsiders path.
+    if command -v cloudflared &>/dev/null; then
+        info "cloudflared already installed. Skipping."
+    elif command -v apt-get &>/dev/null; then
+        info "Installing cloudflared..."
+        # Add the Cloudflare package signing key and repo
+        $SUDO mkdir -p --mode=0755 /usr/share/keyrings
+        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | $SUDO tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
+        $SUDO apt-get update -qq && $SUDO apt-get install -y cloudflared
+    else
+        warn "cloudflared: apt not found - manual install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    fi
 }
 
 install_apt() {
@@ -1508,6 +1526,13 @@ PYEOF
     for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany tailscale-app; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
+
+    # cloudflared (Cloudflare Tunnel client) - a formula, not a cask: it's the
+    # headless CLI daemon with no GUI app for /Applications, which is what
+    # every entry in the cask list above is. Companion to tailscale-app in
+    # that list - see install_linux_desktop's cloudflared block for the
+    # personal-device vs share-with-outsiders rationale.
+    command -v cloudflared &>/dev/null || brew install cloudflared || warn "cloudflared install failed - continuing"
 
     # ScreenRec (Manual Install - No Homebrew Cask)
     if [[ ! -d "/Applications/ScreenRec.app" ]]; then
