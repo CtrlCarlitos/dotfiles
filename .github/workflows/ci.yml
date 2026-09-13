@@ -55,7 +55,7 @@ jobs:
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
         # audit. Pinned to a release SHA like every third-party action.
-        uses: gitleaks/gitleaks-action@ff98106e8c3f100c3c76b433ac3c8e0e841ae836 # v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
