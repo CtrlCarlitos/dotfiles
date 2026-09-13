@@ -32,6 +32,12 @@
 {{-     $isWsl = true -}}
 {{-   end -}}
 {{- end }}
+{{- $devDesktop := false -}}
+{{- $modernCli := false -}}
+{{- if hasKey . "packages" -}}
+  {{- if hasKey .packages "dev_desktop" }}{{- $devDesktop = .packages.dev_desktop }}{{- end -}}
+  {{- if hasKey .packages "modern_cli" }}{{- $modernCli = .packages.modern_cli }}{{- end -}}
+{{- end }}
 [user]
 {{- if $simpleName }}
     name = {{ $simpleName | quote }}
@@ -71,13 +77,13 @@
     #   nvim               Neovim (fast, terminal-native)
     #   vim                Vim (always available)
     autocrlf = input
-{{- if or $isWsl $isDevcontainer (and (hasKey . "packages") .packages.install_desktop) (lookPath "code") }}
+{{- if or $isWsl $isDevcontainer $devDesktop (lookPath "code") }}
     # Requires VS Code in PATH (code command)
     editor = code --wait
 {{- else }}
     editor = vim
 {{- end }}
-{{- if and (hasKey . "packages") .packages.install_modern }}
+{{- if $modernCli }}
     pager = delta
 {{- end }}
 {{- if $simpleKey }}
