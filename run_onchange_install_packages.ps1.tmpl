@@ -849,6 +849,38 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
+
+    # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
+    # agent search and install skills from skills.sh mid-session.
+    Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
+    # automation: navigate, click, fill, scrape, screenshot.
+    Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # skill-creator (anthropics/skills, 380K installs) - Anthropic's
+    # skill-authoring lifecycle tool with benchmarks and eval viewer.
+    Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's
+    # skill-writing craft guide.
+    Write-Host "  Installing Matt Pocock's writing-great-skills skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "writing-great-skills skill install" -Seconds 300 -Action {
+        npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
 }
 {{- end }}
 
