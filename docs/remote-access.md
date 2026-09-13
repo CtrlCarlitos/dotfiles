@@ -195,3 +195,71 @@ Access), then the OpenCode password.
 | Run tunnel | `cloudflared tunnel run ai-dev` |
 | Install as service | `sudo cloudflared service install && sudo systemctl enable cloudflared` |
 | Start OpenCode web | `OPENCODE_SERVER_PASSWORD=<secret> opencode web --port 4096` |
+
+---
+
+## Why Tailscale AND Cloudflare Tunnel (not either/or)
+
+The two tools answer different questions. **Tailscale is for you** (personal
+phone/laptop access — WireGuard mesh, zero public surface, carries SSH and
+everything else). **Cloudflare Tunnel is for them** (students, collaborators —
+browser-only, email-verified, no VPN client to install). Running both is safe:
+`tailscaled` and `cloudflared` are independent outbound daemons with no port
+conflicts or routing overlap.
+
+```
+phone/laptop ── tailscale ──▶ desktop          (private: SSH, opencode web, everything)
+students     ── browser ──▶ CF Access ──▶ cloudflared ──▶ opencode web :4096
+```
+
+### Comparison
+
+| Dimension | Tailscale (personal) | Cloudflare Tunnel + Access (sharing) |
+|---|---|---|
+| Client needed | Tailscale app | Browser only |
+| Transport | WireGuard mesh, p2p direct when possible | Cloudflare edge relay (335+ cities) |
+| Attack surface | Nothing public | Public URL; safe only with Access policy |
+| Auth model | Device identity (WireGuard keys) | Email OTP / GitHub / Google identity |
+| Sharing granularity | Per-machine, quarantined, port-scoped ACLs | Per-app, up to 1,000 emails per rule |
+| Free tier | 6 users, 100 devices | 50 Zero Trust users, unlimited tunnels |
+| Non-HTTP protocols | Any IP protocol (SSH, VNC) | HTTP/WSS primarily |
+| Latency | Lowest (direct p2p when UDP works) | Always edge-relayed (excellent, not p2p) |
+
+### Why not code-server?
+
+`opencode web` is already touch-native (designed for phone browsers);
+code-server costs ~1 GB RAM / 2 vCPU, uses single-password auth (2
+logins/min rate limit, not multi-tenant), and VS Code's desktop UI isn't
+touch-optimized. Adopt only if you need VS Code extensions or Open-VSX.
+
+### Why not a reverse proxy (Caddy/Traefik/nginx)?
+
+TLS termination, auth middleware, and routing are already handled by
+Tailscale serve (auto-TLS) and Cloudflare Tunnel + Access (edge TLS +
+email OTP). A proxy adds a daemon to maintain, risks breaking OpenCode's
+SSE streaming (buffering/timeout misconfiguration), and solves a problem
+that doesn't exist at 1-3 services. Add Caddy later if you hit 5+ web
+services on one hostname.
+
+### Third-party sharing decision tree
+
+- **"Watch my coding session" (read-only)** → `opencode share` command
+  (zero infrastructure, public `opncd.ai/s/<id>` link) or Tailscale Funnel
+  (live but unauthenticated, bandwidth-capped)
+- **"Give my student interactive access"** → Cloudflare Tunnel + Access
+  (they verify email, get a browser session — no install, no VPN)
+- **"Give my collaborator SSH/terminal access"** → Tailscale device sharing
+  (they install Tailscale, get quarantined access to one machine with
+  port-scoped ACLs — best isolation)
+- **Never** expose a bare tunnel URL without an Access policy —
+  `opencode web`'s only native auth is one shared password
+
+### Sources
+
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/)
+- [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+- [Tailscale Funnel](https://tailscale.com/kb/1223/tailscale-funnel)
+- [Tailscale device sharing](https://tailscale.com/kb/1084/sharing-tailnet-machines)
+- [Tailscale pricing](https://tailscale.com/pricing)
+- [code-server](https://github.com/coder/code-server)
+- [OpenCode web](https://opencode.ai/docs/web/)
