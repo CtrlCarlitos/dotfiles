@@ -58,7 +58,7 @@ jobs:
         # wrapper's SARIF upload exits 1 on clean scans; the binary is
         # deterministic and the version pin is the URL itself).
         run: |
-          curl -sSF -L https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
             | tar -xzf - -C /tmp gitleaks
           /tmp/gitleaks detect --source . --redact -v --no-git
 
