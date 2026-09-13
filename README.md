@@ -89,7 +89,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 
 | Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer* |
 |-------|-------------|:-----:|:-----:|:-------:|:---:|:--------------:|
-| **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | `node` |
+| **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | `runtime_core` |
 | **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | `modern-cli` |
 | **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | `nerd-font` |
 | **agent_toolkit** | Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `graft` `playwright` |
