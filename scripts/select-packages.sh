@@ -39,7 +39,8 @@ PKG_GROUPS=(core modern_cli fonts agent_toolkit claude_cli claude_desktop \
 
 # Preset → pre-check sets (spec §3). Presets are NOT persisted.
 preset_set() {
-    # one key per line so callers can mapfile it into a proper array
+    # one key per line so callers read it into an array with while-read
+    # (bash-3.2-safe: no mapfile on stock macOS /bin/bash)
     case "$1" in
     minimal) printf '%s\n' "core" ;;
     standard) printf '%s\n' core modern_cli fonts agent_toolkit claude_cli guardrail ;;
@@ -75,10 +76,18 @@ fi
 
 # ---------------------------------------------------------- pre-check -------
 
+# bash-3.2 note: no mapfile on stock macOS /bin/bash (fresh Macs have no brew
+# bash yet when install.sh runs this) — output is read into arrays with
+# while-read loops over herestrings, which keeps the loop body in this shell
+# (a pipe would run it in a subshell and lose the array).
 if has_packages_section; then
     # Re-run: the user's current keys ARE the pre-check (one Enter accepts
     # unchanged). No preset prompt — presets are first-run scaffolding only.
-    mapfile -t precheck < <(existing_true_keys)
+    precheck=()
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        precheck+=("$key")
+    done <<<"$(existing_true_keys)"
 else
     preset="$(gum choose \
         --header "Preset? minimal=core only | standard=recommended | full=everything | custom=hand-pick" \
@@ -86,7 +95,11 @@ else
         warn "preset prompt canceled - config unchanged"
         exit 0
     }
-    mapfile -t precheck < <(preset_set "$preset")
+    precheck=()
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        precheck+=("$key")
+    done <<<"$(preset_set "$preset")"
 fi
 
 # ------------------------------------------------------------- menu ---------
@@ -104,24 +117,32 @@ if ! chosen_raw="$(gum choose "${menu_args[@]}" "${PKG_GROUPS[@]}")"; then
     exit 0
 fi
 
-# Map chosen lines back to known keys (ignore anything unrecognized).
-declare -A chosen=()
+# Map chosen lines back to known keys (ignore anything unrecognized). Keys
+# hold the selection as a space-delimited membership string (bash 3.2 has no
+# associative arrays) — same case-membership pattern as the loop above; group
+# names are identifiers, so spaces cannot occur inside a key.
+chosen_keys=" "
 while IFS= read -r line; do
     [ -n "$line" ] || continue
     case " ${PKG_GROUPS[*]} " in
-    *" $line "*) chosen["$line"]=1 ;;
+    *" $line "*) chosen_keys="$chosen_keys$line " ;;
     esac
 done <<<"$chosen_raw"
 
 # ------------------------------------------------------------ persist -------
 
 section="[data.packages]"
+true_keys=""
 for group in "${PKG_GROUPS[@]}"; do
-    if [ -n "${chosen[$group]:-}" ]; then
+    case "$chosen_keys" in
+    *" $group "*)
         section+=$'\n  '"$group"' = true'
-    else
+        true_keys="${true_keys:+$true_keys }$group"
+        ;;
+    *)
         section+=$'\n  '"$group"' = false'
-    fi
+        ;;
+    esac
 done
 
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -153,8 +174,4 @@ else
     trap - EXIT
 fi
 
-true_keys=()
-for group in "${PKG_GROUPS[@]}"; do
-    [ -n "${chosen[$group]:-}" ] && true_keys+=("$group")
-done
-info "saved [data.packages]: ${true_keys[*]:-none} (chezmoi apply installs the difference)"
+info "saved [data.packages]: ${true_keys:-none} (chezmoi apply installs the difference)"
