@@ -3,14 +3,14 @@
 _Added 2026-09-13 with the package-groups project
 (docs/research/package-groups-spec.md)._
 
-How this repo decides what to install. The 12 groups below are the single
+How this repo decides what to install. The 14 groups below are the single
 vocabulary shared by everything that touches packages: the interactive menu
 (`scripts/select-packages.{sh,ps1}`), the config template's `promptBoolOnce`
 keys, the installer templates' gates, and the CI seeds all use the same key
 names — `tests/check_workflow_config_keys.sh` exists to keep them from
 drifting apart.
 
-## The 12 groups
+## The 14 groups
 
 The "menu line" is the group's one-line description (what the config-template
 prompts show). The gum menu itself lists the bare keys in this order under
@@ -23,7 +23,9 @@ the persisted `[data.packages]` section is emitted in.
 | `core` | Terminal fundamentals | git, zsh, tmux/psmux, node 24, python, neovim, ripgrep, gh, jq, fzf, 7zip… |
 | `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt |
 | `fonts` | Nerd Fonts | MesloLGS NF |
-| `agent_toolkit` | Cross-vendor agent layer | OpenCode, Serena, Graft, act, Playwright Chromium, superpowers+skills wiring for OpenCode |
+| `agent_toolkit` | Cross-vendor agent layer | Serena, Graft, act, Playwright Chromium |
+| `opencode_cli` | OpenCode CLI + Superpowers + skills + guardrail | OpenCode CLI (native installer / choco) + superpowers plugin + curated skills + guardrail opencode plane |
+| `opencode_desktop` | OpenCode Desktop app | Win choco `opencode-desktop`; mac brew cask `opencode-desktop`; Linux GitHub-release .deb (amd64) |
 | `claude_cli` | Claude Code | Claude Code CLI + superpowers plugin + curated skills + guardrail claude plane |
 | `claude_desktop` | Claude Desktop app | Win choco `claude`; mac brew cask `claude`; Linux: none exists (info line, no-op) |
 | `chatgpt_cli` | Codex CLI | `@openai/codex` npm. Zero wiring by design (superpowers/skills/guardrail have no codex surface) |
@@ -41,10 +43,9 @@ line goes in that vendor's group (Claude Code → `claude_cli`, Claude Desktop
 Playwright Chromium). Something a *human* uses → `dev_desktop` (e.g. Chrome).
 
 **Wiring keys off CLI groups only.** The superpowers plugins, the curated
-skills pass, and the guardrail planes gate on `claude_cli`,
-`antigravity_cli`, and `agent_toolkit` (for OpenCode) — never on the desktop
-groups. Desktop groups are pure installs: the app lands, nothing gets wired
-into it.
+skills pass, and the guardrail planes gate on `claude_cli`, `opencode_cli`,
+`antigravity_cli`, and `agent_toolkit` — never on the desktop groups. Desktop
+groups are pure installs: the app lands, nothing gets wired into it.
 
 **The menu owns `[data.packages]`.** Re-running the menu rewrites the whole
 section — hand-edited keys inside it are intentionally overwritten (that's
@@ -67,7 +68,7 @@ config template. The flow by entry point:
   (no dependencies — naked-machine safe) → gum bootstrap (pinned static
   download if `gum` isn't on PATH; best-effort, warns and continues on
   failure) → preset pick (`minimal` / `standard` / `full` / `custom`) → the
-  12-group multi-select, pre-checked per the preset → `chezmoi init --apply`
+  14-group multi-select, pre-checked per the preset → `chezmoi init --apply`
   (accounts still prompted by chezmoi itself).
 - **Re-run:** your existing `[data.packages]` keys arrive pre-checked — one
   Enter accepts them unchanged. No preset prompt; presets are first-run
@@ -75,11 +76,11 @@ config template. The flow by entry point:
 - **Standalone re-choose:** run `scripts/select-packages.sh` (or `.ps1`)
   directly at any time, then `chezmoi apply` installs the difference.
 - **Bare `chezmoi init` (no installer, no gum):** the config template's
-  `promptBoolOnce` prompts take over — same 12 keys, one question each,
+  `promptBoolOnce` prompts take over — same 14 keys, one question each,
   defaults = the standard preset. Non-interactive renders (CI, containers,
   no TTY) take `false` for every key: explicit seeds and prompts are the
   only sources of truth.
-- **CI:** workflow configs are pre-seeded with all 12 keys and the menu
+- **CI:** workflow configs are pre-seeded with all 14 keys and the menu
   self-skips (no TTY / `$env:CI` set / no gum → prints "skipping menu",
   exits 0, never prompts).
 
@@ -88,12 +89,12 @@ config template. The flow by entry point:
 | Preset | Pre-checks |
 |---|---|
 | `minimal` | `core` |
-| `standard` | `core`, `modern_cli`, `fonts`, `agent_toolkit`, `claude_cli`, `guardrail` |
-| `full` | all 12 |
+| `standard` | `core`, `modern_cli`, `fonts`, `agent_toolkit`, `opencode_cli`, `claude_cli`, `guardrail` |
+| `full` | all 14 |
 | `custom` | nothing — hand-pick in the multi-select |
 
 Presets are **not persisted** — they're pre-check sets for the menu only.
-What lands in the config is always the 12 explicit booleans; the config
+What lands in the config is always the 14 explicit booleans; the config
 template's prompt defaults equal the standard preset.
 
 ## Rename map (clean break)
@@ -117,7 +118,7 @@ old keys are simply ignored if they're still lying around in a config:
 — menu options, config keys, and CI seeds are the same names, and one test
 enforces that. Per-package keys would multiply the prompts, the CI seeds,
 and the drift surface without adding control the groups don't already give;
-twelve lines is also what a person will actually read in a menu.
+fourteen lines is also what a person will actually read in a menu.
 
 **Does turning a group off uninstall anything?** No — disabling never
 uninstalls (see ground rules). Uninstalling stays manual.

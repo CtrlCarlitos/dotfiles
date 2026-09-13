@@ -30,10 +30,11 @@ function Fail([string]$name, [string]$detail) {
     if ($detail) { Write-Host $detail -ForegroundColor DarkGray }
 }
 
-# The 12 groups in taxonomy order — plan Global Constraints.
-$TestGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'claude_cli',
-    'claude_desktop', 'chatgpt_cli', 'chatgpt_desktop', 'antigravity_cli',
-    'antigravity_desktop', 'dev_desktop', 'guardrail')
+# The 14 groups in taxonomy order — plan Global Constraints.
+$TestGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
+    'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
+    'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
+    'guardrail')
 
 $nl = [Environment]::NewLine
 
@@ -229,15 +230,15 @@ $SeedNoPackages = @"
 "@ + $nl
 
 try {
-    # --- (a) fresh machine, no config: file created with exactly the 12 keys
-    Write-Host '[1] fresh run creates the config with the 12 keys'
+    # --- (a) fresh machine, no config: file created with exactly the 14 keys
+    Write-Host '[1] fresh run creates the config with the 14 keys'
     $H1 = Join-Path $Tmp 'home1'
     New-Item -ItemType Directory -Force -Path $H1 | Out-Null
     $r = Invoke-Menu $H1 'core fonts guardrail'
     if ($r.Exit -ne 0) { Fail 'fresh run exits 0' "exit=$($r.Exit) out=$($r.Output)" } else { Ok 'fresh run exits 0' }
     $cfg = Join-Path $H1 '.config/chezmoi/chezmoi.toml'
     if (-not (Test-Path $cfg)) { Fail 'config created' 'file missing' } else {
-        Assert-FileEquals $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 12 keys written with correct values'
+        Assert-FileEquals $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 14 keys written with correct values'
     }
     $log = @(Get-Content $GumLog)
     if ($log.Count -eq 2) { Ok 'preset prompt shown when no existing section' } else { Fail 'preset prompt shown' "gum calls: $($log.Count)" }
@@ -278,7 +279,7 @@ try {
     $r = Invoke-Menu $H4 ($TestGroups -join ' ') 'standard'
     $log = @(Get-Content $GumLog)
     if ($log.Count -eq 2) { Ok 'preset + groups calls on fresh run' } else { Fail 'preset + groups calls' "gum calls: $($log.Count)" }
-    if ($log -match '--selected core,modern_cli,fonts,agent_toolkit,claude_cli,guardrail ') { Ok 'standard preset --selected set' } else { Fail 'standard preset --selected set' ($log -join $nl) }
+    if ($log -match '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,claude_cli,guardrail ') { Ok 'standard preset --selected set' } else { Fail 'standard preset --selected set' ($log -join $nl) }
     $cfg = Join-Path $H4 '.config/chezmoi/chezmoi.toml'
     Assert-FileEquals $cfg (ExpectedSection $TestGroups) 'full selection persisted'
 

@@ -67,6 +67,8 @@ jobs:
             modern_cli = true
             fonts = true
             agent_toolkit = true
+            opencode_cli = true
+            opencode_desktop = true
             claude_cli = true
             claude_desktop = true
             chatgpt_cli = true
@@ -195,6 +197,8 @@ jobs:
             modern_cli = true
             fonts = true
             agent_toolkit = true
+            opencode_cli = true
+            opencode_desktop = true
             claude_cli = true
             claude_desktop = true
             chatgpt_cli = true
@@ -284,6 +288,8 @@ jobs:
             modern_cli = true
             fonts = true
             agent_toolkit = true
+            opencode_cli = true
+            opencode_desktop = true
             claude_cli = true
             claude_desktop = true
             chatgpt_cli = true

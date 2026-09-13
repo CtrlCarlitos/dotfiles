@@ -17,7 +17,7 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-{{/* 12-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
+{{/* 14-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
@@ -26,6 +26,8 @@ fi
 {{- $modern_cli := false -}}
 {{- $fonts := false -}}
 {{- $agent_toolkit := false -}}
+{{- $opencode_cli := false -}}
+{{- $opencode_desktop := false -}}
 {{- $claude_cli := false -}}
 {{- $claude_desktop := false -}}
 {{- $chatgpt_cli := false -}}
@@ -39,6 +41,8 @@ fi
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
   {{- if hasKey .packages "fonts" }}{{- $fonts = .packages.fonts }}{{- end -}}
   {{- if hasKey .packages "agent_toolkit" }}{{- $agent_toolkit = .packages.agent_toolkit }}{{- end -}}
+  {{- if hasKey .packages "opencode_cli" }}{{- $opencode_cli = .packages.opencode_cli }}{{- end -}}
+  {{- if hasKey .packages "opencode_desktop" }}{{- $opencode_desktop = .packages.opencode_desktop }}{{- end -}}
   {{- if hasKey .packages "claude_cli" }}{{- $claude_cli = .packages.claude_cli }}{{- end -}}
   {{- if hasKey .packages "claude_desktop" }}{{- $claude_desktop = .packages.claude_desktop }}{{- end -}}
   {{- if hasKey .packages "chatgpt_cli" }}{{- $chatgpt_cli = .packages.chatgpt_cli }}{{- end -}}
@@ -604,7 +608,7 @@ install_linux_desktop() {
 }
 
 install_apt() {
-{{- if or $core $modern_cli $fonts $agent_toolkit $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $guardrail }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $guardrail }}
     info "Updating apt..."
     $SUDO apt update -y || true
     info "Upgrading installed packages..."
@@ -850,10 +854,10 @@ install_apt() {
 {{- end }}
 
 {{- if $agent_toolkit }}
-    # Agent toolkit (spec §2: the cross-vendor agent layer - OpenCode, Serena,
-    # Graft, act, Playwright Chromium, superpowers-for-OpenCode wiring. Codex
-    # moved to chatgpt_cli, Claude Code to claude_cli, agy to antigravity_cli:
-    # vendor products live in vendor groups per the spec's placement rule).
+    # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
+    # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
+    # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli: vendor
+    # products live in vendor groups per the spec's placement rule).
     install_node
 
     # Ollama - needs zstd (added to core's apt list above) to extract its release
@@ -878,48 +882,15 @@ install_apt() {
     fi
 
     if command -v npm &>/dev/null; then
-        info "Installing agent toolkit (OpenCode, superpowers, Playwright)..."
+        info "Installing agent toolkit (Playwright)..."
         NPM_BIN="$(which npm)"
-        
+
         # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
         # If path starts with /usr, valid to use sudo. Otherwise (home dir), drop sudo.
         local npm_sudo="$SUDO"
         if [[ "$NPM_BIN" != /usr* ]]; then
             warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
             npm_sudo=""
-        fi
-
-        # OpenCode (Official Install Script - ~180MB binary). The --version
-        # re-check matters: a legacy npm-global opencode-ai shim can sit on
-        # PATH with a dead binary inside (its postinstall never fetched the
-        # platform binary - confirmed live 2026-08-31: "opencode-ai's
-        # postinstall script was not run"), and `command -v` alone treats
-        # that as installed and never fixes it. The npm rm removes the shim
-        # so it can't shadow the native binary the installer just laid down
-        # (~/.opencode/bin or ~/bin, depending on what exists).
-        if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
-             info "Installing OpenCode..."
-             net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
-             npm rm -g opencode-ai &>/dev/null || true
-        fi
-
-        # Superpowers skills for OpenCode (separate mechanism from Claude
-        # Code's plugin marketplace, which lives in the claude_cli section
-        # now - OpenCode reads its own opencode.json config). jq merges into
-        # the plugin array without clobbering any other settings already in
-        # the file.
-        if command -v opencode &>/dev/null; then
-            info "Configuring Superpowers for OpenCode..."
-            command -v jq &>/dev/null || $SUDO apt install -y jq
-            local oc_config_dir="$HOME/.config/opencode"
-            local oc_config="$oc_config_dir/opencode.json"
-            local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
-            mkdir -p "$oc_config_dir"
-            if [[ ! -f "$oc_config" ]]; then
-                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
-            elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
-                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
-            fi
         fi
 
         # Playwright Chromium - headless browser for coding-agent browser
@@ -1045,6 +1016,48 @@ PYEOF
     info "Agent toolkit disabled in config"
 {{- end }}
 
+{{- if $opencode_cli }}
+    # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
+    # split out of agent_toolkit per the spec's placement rule). Native
+    # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
+    # stays presence-gated in the guardrail section, and the Serena MCP
+    # registration into opencode.json stays with Serena in agent_toolkit
+    # (same precedent as `serena setup claude-code`).
+    # The --version re-check matters: a legacy npm-global opencode-ai shim can
+    # sit on PATH with a dead binary inside (its postinstall never fetched the
+    # platform binary - confirmed live 2026-08-31: "opencode-ai's postinstall
+    # script was not run"), and `command -v` alone treats that as installed
+    # and never fixes it. The npm rm removes the shim so it can't shadow the
+    # native binary the installer just laid down (~/.opencode/bin or ~/bin,
+    # depending on what exists).
+    if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
+         info "Installing OpenCode..."
+         net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
+         npm rm -g opencode-ai &>/dev/null || true
+    fi
+
+    # Superpowers skills for OpenCode (separate mechanism from Claude
+    # Code's plugin marketplace, which lives in the claude_cli section
+    # now - OpenCode reads its own opencode.json config). jq merges into
+    # the plugin array without clobbering any other settings already in
+    # the file.
+    if command -v opencode &>/dev/null; then
+        info "Configuring Superpowers for OpenCode..."
+        command -v jq &>/dev/null || $SUDO apt install -y jq
+        local oc_config_dir="$HOME/.config/opencode"
+        local oc_config="$oc_config_dir/opencode.json"
+        local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
+        mkdir -p "$oc_config_dir"
+        if [[ ! -f "$oc_config" ]]; then
+            echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+        elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
+            jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+        fi
+    fi
+{{- else }}
+    info "OpenCode CLI disabled in config"
+{{- end }}
+
 {{- if $claude_cli }}
     # Claude Code (Native Installer - Recommended). Deliberately NOT nested
     # under an npm-presence check (its former home inside the old ai_tools
@@ -1136,14 +1149,15 @@ PYEOF
     info "Antigravity CLI disabled in config"
 {{- end }}
 
-{{- if or $claude_cli $antigravity_cli $agent_toolkit }}
+{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli }}
     # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
     # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
     # via the `skills` CLI - see install_agent_skills above. Cross-cutting
     # pass (spec §2 wiring rule): fires when ANY of its target groups
-    # (claude_cli / antigravity_cli / agent_toolkit) is enabled - the CLIs
-    # it writes to may have arrived from any of those gates, and the pass
-    # is idempotent either way. npx presence is checked inside the function.
+    # (claude_cli / antigravity_cli / agent_toolkit / opencode_cli) is
+    # enabled - the CLIs it writes to may have arrived from any of those
+    # gates, and the pass is idempotent either way. npx presence is checked
+    # inside the function.
     install_agent_skills
 {{- end }}
 
@@ -1211,8 +1225,9 @@ install_brew() {
 {{- end }}
 
 {{- if $agent_toolkit }}
-    # Agent toolkit (spec §2: the cross-vendor agent layer. Codex moved to
-    # chatgpt_cli, Claude Code to claude_cli, agy to antigravity_cli - vendor
+    # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
+    # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
+    # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli - vendor
     # products live in vendor groups per the spec's placement rule).
 
     # Ollama
@@ -1231,35 +1246,7 @@ install_brew() {
     fi
 
     if command -v npm &>/dev/null; then
-        info "Installing agent toolkit (OpenCode, superpowers, Playwright)..."
-        # OpenCode (Native Install Script - ~180MB binary). --version
-        # re-check + legacy npm shim removal: same rationale as the apt
-        # branch above (a dead npm-global opencode-ai on PATH otherwise
-        # counts as "installed" forever).
-        if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
-             info "Installing OpenCode..."
-             net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
-             npm rm -g opencode-ai &>/dev/null || true
-        fi
-
-        # Superpowers skills for OpenCode (separate mechanism from Claude
-        # Code's plugin marketplace, which lives in the claude_cli section
-        # now - OpenCode reads its own
-        # opencode.json config). jq merges into the plugin array without
-        # clobbering any other settings already in the file.
-        if command -v opencode &>/dev/null; then
-            info "Configuring Superpowers for OpenCode..."
-            command -v jq &>/dev/null || brew install jq
-            local oc_config_dir="$HOME/.config/opencode"
-            local oc_config="$oc_config_dir/opencode.json"
-            local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
-            mkdir -p "$oc_config_dir"
-            if [[ ! -f "$oc_config" ]]; then
-                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
-            elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
-                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
-            fi
-        fi
+        info "Installing agent toolkit (Playwright)..."
 
         # Playwright Chromium - headless browser for coding-agent browser
         # automation. Deliberately here, not under dev_desktop: that's
@@ -1363,6 +1350,45 @@ PYEOF
     info "Agent toolkit disabled in config"
 {{- end }}
 
+{{- if $opencode_cli }}
+    # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
+    # split out of agent_toolkit per the spec's placement rule). Native
+    # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
+    # stays presence-gated in the guardrail section, and the Serena MCP
+    # registration into opencode.json stays with Serena in agent_toolkit
+    # (same precedent as `serena setup claude-code`). No Node prerequisite:
+    # the native installer is curl|sh, so this section works standalone even
+    # with core/agent_toolkit off (the sh twin of claude_cli's arrangement).
+    # --version re-check + legacy npm shim removal: a dead npm-global
+    # opencode-ai on PATH otherwise counts as "installed" forever.
+    if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
+         info "Installing OpenCode..."
+         net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
+         npm rm -g opencode-ai &>/dev/null || true
+    fi
+
+    # Superpowers skills for OpenCode (separate mechanism from Claude
+    # Code's plugin marketplace, which lives in the claude_cli section
+    # now - OpenCode reads its own opencode.json config). jq merges into
+    # the plugin array without clobbering any other settings already in
+    # the file.
+    if command -v opencode &>/dev/null; then
+        info "Configuring Superpowers for OpenCode..."
+        command -v jq &>/dev/null || brew install jq
+        local oc_config_dir="$HOME/.config/opencode"
+        local oc_config="$oc_config_dir/opencode.json"
+        local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
+        mkdir -p "$oc_config_dir"
+        if [[ ! -f "$oc_config" ]]; then
+            echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+        elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
+            jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+        fi
+    fi
+{{- else }}
+    info "OpenCode CLI disabled in config"
+{{- end }}
+
 {{- if $claude_cli }}
     # Claude Code (Native Installer - Recommended). Not nested under an
     # npm-presence check (its former home inside the old ai_tools npm
@@ -1440,14 +1466,15 @@ PYEOF
     info "Antigravity CLI disabled in config"
 {{- end }}
 
-{{- if or $claude_cli $antigravity_cli $agent_toolkit }}
+{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli }}
     # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
     # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
     # via the `skills` CLI - see install_agent_skills above. Cross-cutting
     # pass (spec §2 wiring rule): fires when ANY of its target groups
-    # (claude_cli / antigravity_cli / agent_toolkit) is enabled - the CLIs
-    # it writes to may have arrived from any of those gates, and the pass
-    # is idempotent either way. npx presence is checked inside the function.
+    # (claude_cli / antigravity_cli / agent_toolkit / opencode_cli) is
+    # enabled - the CLIs it writes to may have arrived from any of those
+    # gates, and the pass is idempotent either way. npx presence is checked
+    # inside the function.
     install_agent_skills
 {{- end }}
 
@@ -1528,6 +1555,8 @@ PYEOF
 # Antigravity 2.0 under the antigravity_desktop group, from the new
 # antigravity-hub storage channel with the version pinned inside
 # install_antigravity_desktop (scripts/update-versions.sh re-checks that pin).
+# OpenCode Desktop joined as its own opencode_desktop group the same day -
+# the desktop half of the OpenCode vendor pair (the CLI half is opencode_cli).
 #-------------------------------------------------------------------------------
 
 # Claude Desktop - official Homebrew cask on macOS (spec §2: Win choco `claude`
@@ -1706,6 +1735,50 @@ install_antigravity_desktop() {
     esac
 }
 
+# OpenCode Desktop (opencode_desktop group - the OpenCode vendor pair's
+# desktop side, distinct from the OpenCode CLI in opencode_cli). macOS:
+# official Homebrew cask; the bundle lands as "OpenCode.app" (verified against
+# formulae.brew.sh's opencode-desktop cask artifacts, 2026-09-13). Linux:
+# official GitHub-release .deb. An arm64 .deb exists upstream too, but this
+# follows the repo's amd64 .deb precedent (Chrome/Termius/dust) until an
+# arm64 Linux target actually exists.
+install_opencode_desktop() {
+    case "$(uname -s)" in
+        Darwin)
+            if [[ -d "/Applications/OpenCode.app" ]]; then
+                info "OpenCode Desktop already installed (/Applications/OpenCode.app)"
+                return 0
+            fi
+            info "Installing OpenCode Desktop (brew cask opencode-desktop)..."
+            net_timeout 600 brew install --cask opencode-desktop || warn "OpenCode Desktop install failed or timed out - continuing"
+            ;;
+        Linux)
+            # Idempotence guard on the package + binary (same shape as
+            # Docker Desktop/Termius): skip if either reports present, so a
+            # .deb without a PATH binary can't trigger a ~120MB re-download
+            # on every apply.
+            if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then
+                info "OpenCode Desktop already installed"
+                return 0
+            fi
+            info "Installing OpenCode Desktop (.deb from GitHub releases)..."
+            # ~120MB download - net_timeout per the network-step contract
+            # (docs/tool-parity.md). "latest/download" floats with upstream;
+            # no pin to maintain (Windows floats via choco the same way).
+            if net_timeout 600 curl -fLo /tmp/opencode-desktop-linux-amd64.deb \
+                "https://github.com/anomalyco/opencode/releases/latest/download/opencode-desktop-linux-amd64.deb"; then
+                $SUDO apt install -y /tmp/opencode-desktop-linux-amd64.deb || warn "OpenCode Desktop install failed"
+            else
+                warn "OpenCode Desktop download failed or timed out - skipping"
+            fi
+            rm -f /tmp/opencode-desktop-linux-amd64.deb
+            ;;
+        *)
+            warn "opencode_desktop: unsupported OS $(uname -s) - skipping"
+            ;;
+    esac
+}
+
 setup_shell() {
     local target_shell
     target_shell="$(which zsh 2>/dev/null || true)"
@@ -1812,6 +1885,11 @@ main() {
     install_antigravity_desktop
 {{- else }}
     info "Antigravity Desktop disabled (WSL/Devcontainer/config)"
+{{- end }}
+{{- if and $opencode_desktop $isHost }}
+    install_opencode_desktop
+{{- else }}
+    info "OpenCode Desktop disabled (WSL/Devcontainer/config)"
 {{- end }}
 
     # Ensure zsh is default

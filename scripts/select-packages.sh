@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # select-packages.sh — interactive package-group menu (gum), persisting the
-# 12-group selection to [data.packages] in ~/.config/chezmoi/chezmoi.toml.
+# 14-group selection to [data.packages] in ~/.config/chezmoi/chezmoi.toml.
 #
 # Run standalone to re-choose groups at any time, or from install.sh before
 # `chezmoi init --apply` (spec §4). Design contracts:
@@ -31,11 +31,11 @@ warn() { printf '⚠ %s\n' "$1" >&2; }
 
 CONFIG_FILE="$HOME/.config/chezmoi/chezmoi.toml"
 
-# The 12 package groups, taxonomy order (docs/research/package-groups-spec.md §2).
+# The 14 package groups, taxonomy order (docs/research/package-groups-spec.md §2).
 # This is the single vocabulary shared with the config template, installers, and CI.
-PKG_GROUPS=(core modern_cli fonts agent_toolkit claude_cli claude_desktop \
-    chatgpt_cli chatgpt_desktop antigravity_cli antigravity_desktop \
-    dev_desktop guardrail)
+PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
+    claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
+    antigravity_desktop dev_desktop guardrail)
 
 # Preset → pre-check sets (spec §3). Presets are NOT persisted.
 preset_set() {
@@ -43,7 +43,7 @@ preset_set() {
     # (bash-3.2-safe: no mapfile on stock macOS /bin/bash)
     case "$1" in
     minimal) printf '%s\n' "core" ;;
-    standard) printf '%s\n' core modern_cli fonts agent_toolkit claude_cli guardrail ;;
+    standard) printf '%s\n' core modern_cli fonts agent_toolkit opencode_cli claude_cli guardrail ;;
     full) printf '%s\n' "${PKG_GROUPS[@]}" ;;
     *) return 0 ;; # custom (or anything unexpected): nothing pre-checked
     esac

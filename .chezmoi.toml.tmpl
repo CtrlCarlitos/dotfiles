@@ -52,7 +52,7 @@
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
   # All toggles are independent on all platforms (Linux, macOS, Windows).
-  # Clean break: the old six toggles became these 12 groups, no auto-migration
+  # Clean break: the old six toggles became these 14 groups, no auto-migration
   # - full rename map lives in docs/package-groups.md.
   # ==========================================================================
   [data.packages]
@@ -65,8 +65,15 @@
     # fonts - Nerd Fonts (MesloLGS NF), required for Starship
     fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
 
-    # agent_toolkit - cross-vendor agent layer (OpenCode, Serena, Graft, act)
-    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: OpenCode, Serena, Graft)?" true }}{{ else }}false{{ end }}
+    # agent_toolkit - cross-vendor agent layer (Serena, Graft, act, Playwright)
+    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, Graft, act)?" true }}{{ else }}false{{ end }}
+
+    # opencode_cli - OpenCode CLI + superpowers/skills/guardrail wiring.
+    # Not host-gated (applies on WSL too) - standard preset member.
+    opencode_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.opencode_cli" "Install opencode_cli (OpenCode CLI)?" true }}{{ else }}false{{ end }}
+
+    # opencode_desktop - OpenCode Desktop app (host only)
+    opencode_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.opencode_desktop" "Install opencode_desktop (OpenCode Desktop app)?" false }}{{ else }}false{{ end }}
 
     # claude_cli - Claude Code CLI + superpowers/skills/guardrail wiring
     claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)?" true }}{{ else }}false{{ end }}

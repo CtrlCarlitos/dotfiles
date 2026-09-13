@@ -6,7 +6,7 @@ set -euo pipefail
 # The script's contract (docs/research/package-groups-spec.md §4):
 #   - no TTY or no gum  -> exit 0, "skipping menu", config untouched (CI-safe)
 #   - fresh config      -> preset prompt (gum choose), then group multi-select,
-#                          then write [data.packages] with exactly the 12 keys
+#                          then write [data.packages] with exactly the 14 keys
 #   - existing section  -> NO preset prompt; current true keys become the gum
 #                          --selected pre-check set; rewrite ONLY the section
 #   - gum canceled      -> exit 0, config untouched
@@ -27,11 +27,11 @@ fail() {
 pass_count=0
 ok() { printf '  ok: %s\n' "$1"; pass_count=$((pass_count + 1)); }
 
-# The 12 groups in taxonomy order — the single vocabulary shared by menu,
+# The 14 groups in taxonomy order — the single vocabulary shared by menu,
 # config, and CI (plan Global Constraints).
-PKG_GROUPS=(core modern_cli fonts agent_toolkit claude_cli claude_desktop \
-    chatgpt_cli chatgpt_desktop antigravity_cli antigravity_desktop \
-    dev_desktop guardrail)
+PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
+    claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
+    antigravity_desktop dev_desktop guardrail)
 
 # Canonical section body the script is expected to write.
 expected_section() { # $@ = keys that are true
@@ -125,15 +125,15 @@ SEED='# seeded by the test
   secrets = "warning"
 '
 
-# --- (a) fresh machine, no config: file created with exactly the 12 keys ----
-echo "[1] fresh run creates the config with the 12 keys"
+# --- (a) fresh machine, no config: file created with exactly the 14 keys ----
+echo "[1] fresh run creates the config with the 14 keys"
 H1="$TMP/home1"
 mkdir -p "$H1"
 run_menu "core fonts guardrail" custom "$H1" || fail "fresh run: script exited non-zero"
 CFG="$H1/.config/chezmoi/chezmoi.toml"
 [ -f "$CFG" ] || fail "fresh run: $CFG was not created"
 assert_file_equals "$CFG" "$(expected_section core fonts guardrail)" "(a) fresh config content"
-ok "12 keys written, correct true/false values"
+ok "14 keys written, correct true/false values"
 
 # preset prompt happened (section was absent): 2 gum calls
 [ "$(wc -l <"$GUM_LOG")" -eq 2 ] || fail "fresh run: expected preset + groups calls, got $(wc -l <"$GUM_LOG")"
@@ -169,17 +169,17 @@ grep -q -- '--selected core,fonts,guardrail ' "$GUM_LOG" ||
     fail "(d): --selected set is not the existing keys: $(cat "$GUM_LOG")"
 ok "existing true keys became --selected, preset prompt skipped"
 
-# --- preset mapping: standard pre-checks exactly its six groups ------------
+# --- preset mapping: standard pre-checks exactly its seven groups -----------
 echo "[5] standard preset pre-checks its set"
 H3="$TMP/home3"
 mkdir -p "$H3"
 run_menu "${PKG_GROUPS[*]}" standard "$H3" || fail "preset run: script exited non-zero"
 [ "$(wc -l <"$GUM_LOG")" -eq 2 ] || fail "preset run: expected 2 gum calls, got $(wc -l <"$GUM_LOG")"
 head -1 "$GUM_LOG" | grep -qv -- '--no-limit' || fail "preset run: first call was not the preset prompt"
-grep -q -- '--selected core,modern_cli,fonts,agent_toolkit,claude_cli,guardrail ' "$GUM_LOG" ||
+grep -q -- '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,claude_cli,guardrail ' "$GUM_LOG" ||
     fail "preset run: standard --selected set wrong: $(cat "$GUM_LOG")"
 assert_file_equals "$H3/.config/chezmoi/chezmoi.toml" "$(expected_section "${PKG_GROUPS[@]}")" "preset run: all true"
-ok "standard preset maps to its six groups; full selection persisted"
+ok "standard preset maps to its seven groups; full selection persisted"
 
 # --- gum cancel: config untouched ------------------------------------------
 echo "[6] canceled menu leaves the config untouched"

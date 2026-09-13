@@ -30,7 +30,7 @@ That's it. You'll be asked to confirm, then a **menu appears** — pick what you
 
 ### Don't know what to pick?
 
-Use the **standard** preset (the default). You get a full terminal setup — git, zsh, neovim, tmux, modern CLI tools, Nerd Fonts, Claude Code, and agent guardrails. Add ChatGPT, Antigravity, or desktop apps later by re-running the menu.
+Use the **standard** preset (the default). You get a full terminal setup — git, zsh, neovim, tmux, modern CLI tools, Nerd Fonts, Claude Code, OpenCode, and agent guardrails. Add ChatGPT, Antigravity, or desktop apps later by re-running the menu.
 
 ### Change your selections later
 ```sh
@@ -74,7 +74,7 @@ $PAT="your_github_pat_here"; iex "& {$(irm -Headers @{Authorization="token $PAT"
 <summary><strong>What does the installer actually do?</strong></summary>
 
 1. Installs `chezmoi` if missing
-2. Asks for consent, then shows the package-group menu (preset → 12 groups)
+2. Asks for consent, then shows the package-group menu (preset → 14 groups)
 3. Installs your selected packages and applies the configuration
 4. Generates git identities, SSH keys, shell profiles, and AI tool wiring
 
@@ -85,14 +85,16 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 
 ## 📦 What gets installed
 
-12 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
+14 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
 
 | Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer |
 |-------|-------------|:-----:|:-----:|:-------:|:---:|:------------:|
 | **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | seed-only |
 | **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **agent_toolkit** | OpenCode, Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **agent_toolkit** | Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **opencode_cli** | OpenCode CLI + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **opencode_desktop** | OpenCode Desktop app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **claude_cli** | Claude Code + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **claude_desktop** | Claude Desktop app | ❌ | ✅ | ✅ | ❌ | ❌ |
 | **chatgpt_cli** | Codex CLI | ✅ | ✅ | ✅ | ✅ | ❌ |
@@ -161,7 +163,7 @@ New to zsh, tmux, or neovim? Start here:
 
 | Doc | What's in it |
 |-----|-------------|
-| [Package Groups](docs/package-groups.md) | The 12-group taxonomy, presets, and how to customize |
+| [Package Groups](docs/package-groups.md) | The 14-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
@@ -225,12 +227,12 @@ install.sh / install.ps1            # Universal bootstrap (consent → gum → m
 scripts/select-packages.{sh,ps1}    # The package-group menu (gum multi-select)
 scripts/update-versions.sh          # Weekly auto-updater (chezmoi + Antigravity 2.0 pins)
 scripts/update_ai_tools.{sh,ps1}    # AI tool upgrade commands
-run_onchange_install_packages.*     # Platform installers (12-group gated)
+run_onchange_install_packages.*     # Platform installers (14-group gated)
 run_onchange_generate_identities.*  # Git identity + SSH key generation
 dot_zshrc / dot_gitconfig.tmpl      # Shell and git configuration
 dot_config/nvim/                    # Neovim (Lazy.nvim)
 private_dot_ssh/                    # SSH config (templated, mode 600)
-.chezmoi.toml.tmpl                  # Config template (12 promptBoolOnce groups)
+.chezmoi.toml.tmpl                  # Config template (14 promptBoolOnce groups)
 tests/                              # CI test suite (menu, config keys, skills args)
 docs/                               # You are here
 ```

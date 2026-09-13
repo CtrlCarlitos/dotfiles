@@ -17,7 +17,7 @@
 # ==============================================================================
 # Toggle what gets installed. Runs via `chezmoi apply`.
 #
-# The 12 package groups — one vocabulary shared by the menu
+# The 14 package groups — one vocabulary shared by the menu
 # (scripts/select-packages.*), these keys, and CI seeds. Full table, menu
 # flow, presets, and the rename map from the old install_* toggles:
 # docs/package-groups.md.
@@ -39,10 +39,19 @@
     # fonts — Nerd Fonts: MesloLGS NF (for terminal/Starship)
     fonts = true
 
-    # agent_toolkit — Cross-vendor agent layer: OpenCode, Serena, Graft,
-    #                 act, Playwright Chromium, superpowers+skills wiring
-    #                 for OpenCode. Not host-gated (applies on WSL too).
+    # agent_toolkit — Cross-vendor agent layer: Serena, Graft, act,
+    #                 Playwright Chromium. Not host-gated (applies on
+    #                 WSL too).
     agent_toolkit = true
+
+    # opencode_cli — OpenCode CLI + Superpowers + skills + guardrail
+    #                wiring. Not host-gated (applies on WSL too).
+    opencode_cli = true
+
+    # opencode_desktop — OpenCode Desktop app. Host only; installs on all
+    #                    three OSs (mac brew cask / Linux GitHub .deb /
+    #                    Win choco).
+    opencode_desktop = false
 
     # claude_cli — Claude Code CLI + superpowers plugin + curated skills +
     #              guardrail claude plane
