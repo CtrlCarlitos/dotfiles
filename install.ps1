@@ -52,6 +52,13 @@ $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 # no real stdin - confirmed live: a Windows Installer Test run hung 40+ minutes here.
 $IsNonInteractive = ($env:CI -eq 'true') -or ($env:CHEZMOI_TEST_MINIMAL -eq 'true')
 
+# Devcontainer detection (mirrors install.sh): skip gum bootstrap AND the
+# package menu entirely — the non-interactive path renders all groups false
+# (config-only apply), and downloading gum just to have the menu self-skip
+# wastes bandwidth on every container start. Tools in devcontainers come
+# from devcontainer-features during image build, not from here.
+$IsDevcontainer = ($env:DEVCONTAINER -eq 'true') -or ($env:REMOTE_CONTAINERS -eq 'true')
+
 # 0.1 Consent - ask before touching anything. Non-interactive environments
 # (matched above) auto-proceed without prompting.
 if (-not $IsNonInteractive) {
@@ -110,26 +117,31 @@ try {
     # self-skips non-interactive or without gum; chezmoi's native config
     # prompts are always the fallback. Spawned as a child process because
     # select-packages.ps1 exits on completion and must not end this installer.
-    Bootstrap-Gum
-    $selectPackages = $null
-    if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'scripts\select-packages.ps1'))) {
-        $selectPackages = Join-Path $PSScriptRoot 'scripts\select-packages.ps1'
-    } elseif (Test-Path '.\scripts\select-packages.ps1') {
-        $selectPackages = (Resolve-Path '.\scripts\select-packages.ps1').Path
-    } elseif (Test-Path "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1") {
-        $selectPackages = "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1"
-    }
-    if ($selectPackages) {
-        try {
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $selectPackages
-            if ($LASTEXITCODE -ne 0) {
-                Write-Info "Package menu exited with $LASTEXITCODE - continuing with chezmoi config prompts."
+    # In devcontainers: skipped entirely (see $IsDevcontainer above).
+    if (-not $IsDevcontainer) {
+        Bootstrap-Gum
+        $selectPackages = $null
+        if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'scripts\select-packages.ps1'))) {
+            $selectPackages = Join-Path $PSScriptRoot 'scripts\select-packages.ps1'
+        } elseif (Test-Path '.\scripts\select-packages.ps1') {
+            $selectPackages = (Resolve-Path '.\scripts\select-packages.ps1').Path
+        } elseif (Test-Path "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1") {
+            $selectPackages = "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1"
+        }
+        if ($selectPackages) {
+            try {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $selectPackages
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Info "Package menu exited with $LASTEXITCODE - continuing with chezmoi config prompts."
+                }
+            } catch {
+                Write-Info "Package menu could not run: $_ - continuing with chezmoi config prompts."
             }
-        } catch {
-            Write-Info "Package menu could not run: $_ - continuing with chezmoi config prompts."
+        } else {
+            Write-Info "Package menu script not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
         }
     } else {
-        Write-Info "Package menu script not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
+        Write-Info "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
     }
 
     # 1. Install Chezmoi if missing
