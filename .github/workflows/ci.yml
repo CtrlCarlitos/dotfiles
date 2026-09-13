@@ -13,7 +13,7 @@ jobs:
     name: Lint & Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -51,6 +51,14 @@ jobs:
       - name: Test workflow configs cover every prompted key
         run: bash tests/check_workflow_config_keys.sh
 
+      - name: Secret/PII scan (gitleaks)
+        # The tree-result.log class: debug dumps, machine paths, anything
+        # credential-shaped - caught at PR time instead of after a manual
+        # audit. Pinned to a release SHA like every third-party action.
+        uses: gitleaks/gitleaks-action@ff98106e8c3f100c3c76b433ac3c8e0e841ae836 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Validate TOML files
         run: |
           pip install toml
@@ -70,7 +78,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install chezmoi
         run: |
@@ -121,7 +129,7 @@ jobs:
     name: Test (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install chezmoi
         run: |
@@ -206,7 +214,7 @@ jobs:
     env:
       DEVCONTAINER: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Syntax check devcontainer/install.sh
         run: |
@@ -256,7 +264,7 @@ jobs:
     container:
       image: ubuntu:22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install dependencies
         run: |
@@ -328,7 +336,7 @@ jobs:
     name: Integration Test (Account System)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install chezmoi
         run: |
@@ -446,7 +454,7 @@ jobs:
     name: Minimal Config Test (Backward Compat)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
@@ -509,7 +517,7 @@ jobs:
     name: Windows Installer Test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       
       - name: Create minimal config (disable desktop apps)
         run: |
