@@ -38,7 +38,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # script is dot-sourced from one) `2>$null` doesn't stop that promoting to a
 # terminating error - keep stderr empty instead (see installer for full notes).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    Write-Host "✨ Updating curated agent skills (Matt Pocock + frontend-design)..." -ForegroundColor Yellow
+    Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
     $skAgents = @('claude-code', 'opencode', 'antigravity')
     npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
@@ -64,6 +64,19 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
     npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  frontend-design update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+
+    # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
+    npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  find-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
+    npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  agent-browser update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
+    npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's skill-writing craft guide
+    npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a $skAgents -g -y --copy 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  writing-great-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
 }
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.ps1.tmpl

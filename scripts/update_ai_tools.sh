@@ -27,7 +27,7 @@ fi
 # per-run "npm notice run ..." stderr hint; </dev/null keeps any prompt from
 # ever holding the terminal (see installer for full notes).
 if command -v npx &>/dev/null; then
-    echo "✨ Updating curated agent skills (Matt Pocock + frontend-design)..."
+    echo "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..."
     SK="npx --yes --loglevel=error skills@latest"
     AGENTS="claude-code opencode antigravity"
     $SK add mattpocock/skills \
@@ -57,6 +57,14 @@ if command -v npx &>/dev/null; then
     fi
     rm -rf "$sk_tmp"
     $SK add anthropics/skills -s frontend-design -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   frontend-design update failed - skipping"
+    # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
+    $SK add vercel-labs/skills -s find-skills -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   find-skills update failed - skipping"
+    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
+    $SK add vercel-labs/agent-browser -s agent-browser -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   agent-browser update failed - skipping"
+    # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
+    $SK add anthropics/skills -s skill-creator -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   skill-creator update failed - skipping"
+    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's skill-writing craft guide
+    $SK add mattpocock/skills -s writing-great-skills -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   writing-great-skills update failed - skipping"
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

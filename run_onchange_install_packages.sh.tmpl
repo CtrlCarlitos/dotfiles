@@ -307,6 +307,30 @@ install_agent_skills() {
     info "Installing Anthropic's frontend-design skill..."
     net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null \
         || warn "frontend-design skill install failed or timed out - continuing"
+
+    # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
+    # agent search and install skills from skills.sh mid-session.
+    info "Installing find-skills skill..."
+    net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "find-skills skill install failed or timed out - continuing"
+
+    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
+    # automation: navigate, click, fill, scrape, screenshot.
+    info "Installing agent-browser skill..."
+    net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "agent-browser skill install failed or timed out - continuing"
+
+    # skill-creator (anthropics/skills, 380K installs) - Anthropic's
+    # skill-authoring lifecycle tool with benchmarks and eval viewer.
+    info "Installing Anthropic's skill-creator skill..."
+    net_timeout 300 "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "skill-creator skill install failed or timed out - continuing"
+
+    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's
+    # skill-writing craft guide.
+    info "Installing Matt Pocock's writing-great-skills skill..."
+    net_timeout 300 "${SK[@]}" add mattpocock/skills -s writing-great-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null \
+        || warn "writing-great-skills skill install failed or timed out - continuing"
 }
 
 # agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.
