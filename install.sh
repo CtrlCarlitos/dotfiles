@@ -170,22 +170,33 @@ fi
 # selection lands in ~/.config/chezmoi/chezmoi.toml ahead of the config
 # template. The menu self-skips without a TTY or gum; chezmoi's native config
 # prompts are always the fallback.
-export PATH="$HOME/.local/bin:$PATH" # moved up from the chezmoi block: a bootstrapped gum is usable immediately
-bootstrap_gum
+#
+# In devcontainers: skip both the gum bootstrap AND the menu entirely — the
+# non-interactive path renders all groups false (config-only apply), and
+# downloading gum just to have the menu self-skip wastes bandwidth on every
+# container start. Tools in devcontainers come from devcontainer-features
+# during image build, not from here.
+IS_DEVCONTAINER="${DEVCONTAINER:-}${REMOTE_CONTAINERS:-}"
+if [ -z "$IS_DEVCONTAINER" ]; then
+    export PATH="$HOME/.local/bin:$PATH" # moved up from the chezmoi block: a bootstrapped gum is usable immediately
+    bootstrap_gum
 
-SELECT_PACKAGES=""
-if [ -f "scripts/select-packages.sh" ]; then
-    SELECT_PACKAGES="scripts/select-packages.sh"
-elif [ -f "$HOME/.local/share/chezmoi/scripts/select-packages.sh" ]; then
-    SELECT_PACKAGES="$HOME/.local/share/chezmoi/scripts/select-packages.sh"
-fi
-if [ -n "$SELECT_PACKAGES" ]; then
-    # never fatal: a failed menu just falls through to chezmoi's prompts
-    if ! bash "$SELECT_PACKAGES"; then
-        echo "Warning: package menu failed - continuing with chezmoi config prompts."
+    SELECT_PACKAGES=""
+    if [ -f "scripts/select-packages.sh" ]; then
+        SELECT_PACKAGES="scripts/select-packages.sh"
+    elif [ -f "$HOME/.local/share/chezmoi/scripts/select-packages.sh" ]; then
+        SELECT_PACKAGES="$HOME/.local/share/chezmoi/scripts/select-packages.sh"
+    fi
+    if [ -n "$SELECT_PACKAGES" ]; then
+        # never fatal: a failed menu just falls through to chezmoi's prompts
+        if ! bash "$SELECT_PACKAGES"; then
+            echo "Warning: package menu failed - continuing with chezmoi config prompts."
+        fi
+    else
+        echo "Note: package menu not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
     fi
 else
-    echo "Note: package menu not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
+    echo "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
 fi
 
 # 2. Install Chezmoi if missing

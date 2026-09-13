@@ -2,37 +2,26 @@
 
 Use your dotfiles automatically in VS Code devcontainers.
 
-## How It Works
+## The Architecture (two layers, different jobs)
 
-| Component | Installed By | Configured By |
-|-----------|--------------|---------------|
-| Zsh + Oh-My-Zsh | **Chezmoi (Externals)** | Dotfiles |
-| Starship | **Chezmoi (Packages)** | run_onchange_install... |
-| Zsh plugins | **Chezmoi (Externals)** | Dotfiles (.zshrc) |
-| Git | **Features** | Dotfiles |
-| AI Tools (Codex, Claude, OpenCode, Antigravity, Superpowers, Playwright, act, ...) | **Devcontainer Features** (not dotfiles) | - |
-| MesloLGS NF | **Host machine** | - |
-| Your aliases & config | - | **Dotfiles** |
+| Layer | Mechanism | When it runs | What it does | Cost |
+|-------|-----------|-------------|--------------|------|
+| **Tools** (node, serena, claude, etc.) | devcontainer-features (`features` block) | Container **build** (Docker image layer) | Installs binaries into the image | Cached — subsequent starts skip it |
+| **Config** (aliases, profiles, git identities) | VS Code dotfiles (`dotfiles.repository`) | Container **start** (every time) | Runs `install.sh` → `chezmoi init --apply` | Cheap — file copies only |
 
-> **Note:** In devcontainers, **every** package category defaults to `false` -
-> Core, Modern CLI, Fonts, AI Tools, Desktop, and Antigravity IDE alike (verified
-> against `.chezmoi.toml.tmpl`: `$isDevcontainer` forces `$interactive` false,
-> and every category's non-interactive literal is `false`, `install_core`
-> included as of this session - it used to be the one exception that
-> defaulted `true` even non-interactively, which silently overrode a CI test
-> config; fixed to match the other five). Nothing from
-> `run_onchange_install_packages.*` runs in a devcontainer by default - git,
-> zsh, AI tools, everything comes from devcontainer Features or Chezmoi's own
-> Externals mechanism instead (see the table above and the example below).
+The dotfiles installer **does not install packages** in devcontainers — `chezmoi init` renders all groups false non-interactively (CI=true), so only configuration files are applied. This is by design: installing packages on every container start would be wasteful since they're already in the Docker image via features.
+
+If you want a tool in your devcontainer, add it as a feature. If you want your aliases, git identity, and shell profile in your devcontainer, wire the dotfiles.
 
 ## Setup
 
 ### 1. Add Features to devcontainer.json
 
+Available features: [github.com/CtrlCarlitos/devcontainer-features](https://github.com/CtrlCarlitos/devcontainer-features)
+
 ```json
 {
   "features": {
-    // Shell setup
     "ghcr.io/devcontainers/features/common-utils": {
       "installZsh": true,
       "installOhMyZsh": true,
@@ -40,18 +29,22 @@ Use your dotfiles automatically in VS Code devcontainers.
       "installOhMyZshConfig": false
     },
 
-    "ghcr.io/devcontainers-extra/features/zsh-plugins": {
-      "plugins": "zsh-autosuggestions zsh-syntax-highlighting zsh-completions"
+    "ghcr.io/CtrlCarlitos/devcontainer-features/runtime_core:1": {
+      "version": "22"
     },
-    
-    // Git (if not in base image)
-    "ghcr.io/devcontainers/features/git:1": {},
-    
-    // AI tools (optional)
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+
+    "ghcr.io/CtrlCarlitos/devcontainer-features/claude-code:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/opencode:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/antigravity-cli:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/serena:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/graft:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/modern-cli:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/nerd-font:1": {}
   }
 }
 ```
+
+Pick only what you need — features are opt-in per tool.
 
 ### 2. Add Dotfiles Configuration
 
@@ -63,8 +56,7 @@ Add to the same `devcontainer.json`:
     "vscode": {
       "settings": {
         "dotfiles.repository": "CtrlCarlitos/dotfiles",
-        "dotfiles.targetPath": "~/dotfiles",
-        "dotfiles.installCommand": "devcontainer/install.sh"
+        "dotfiles.installCommand": "install.sh"
       }
     }
   }
@@ -75,7 +67,7 @@ Or use VS Code global settings (applies to all devcontainers):
 1. Open VS Code Settings (`Ctrl+,`)
 2. Search for "dotfiles"
 3. Set **Repository**: `CtrlCarlitos/dotfiles`
-4. Set **Install Command**: `devcontainer/install.sh`
+4. Set **Install Command**: `install.sh`
 
 ### 3. Complete Example
 
@@ -83,7 +75,7 @@ Or use VS Code global settings (applies to all devcontainers):
 {
   "name": "My Project",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  
+
   "features": {
     "ghcr.io/devcontainers/features/common-utils": {
       "installZsh": true,
@@ -92,37 +84,35 @@ Or use VS Code global settings (applies to all devcontainers):
       "installOhMyZshConfig": false
     },
 
-    "ghcr.io/devcontainers-extra/features/zsh-plugins": {
-      "plugins": "zsh-autosuggestions zsh-syntax-highlighting zsh-completions"
-    },
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/node:1": {}
+    "ghcr.io/CtrlCarlitos/devcontainer-features/runtime_core:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/claude-code:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/modern-cli:1": {}
   },
-  
+
   "customizations": {
     "vscode": {
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",
         "dotfiles.repository": "CtrlCarlitos/dotfiles",
-        "dotfiles.installCommand": "devcontainer/install.sh"
+        "dotfiles.installCommand": "install.sh"
       }
     }
   }
 }
 ```
 
-### What the Dotfiles Script Does
-In devcontainers, `devcontainer/install.sh` delegates to the universal installer, which:
-1. Runs `chezmoi apply`
-2. Installs Oh-My-Zsh & plugins (via `.chezmoiexternal.toml`)
-3. Links configuration files (`.zshrc`)
+### What happens on container start
 
-This means you do **not** need to use devcontainer features for Zsh/OMZ if you use this repository.
+The dotfiles `install.sh` detects the devcontainer environment (`DEVCONTAINER=true` or `REMOTE_CONTAINERS=true`) and:
+1. Skips the consent prompt (non-interactive)
+2. Skips the gum bootstrap and package menu (saves bandwidth — tools come from features)
+3. Runs `chezmoi init --apply` — applies your shell config, git identities, aliases, and profiles
+
+No packages are installed. Only configuration is applied. This runs on every container start (fast — it's file copies, not package downloads).
 
 ## SSH Keys in Devcontainers
 
 Your SSH keys from the host are automatically forwarded if you:
-
 1. Have SSH agent running on host
 2. Have keys loaded: `ssh-add ~/.ssh/id_*`
 
@@ -139,7 +129,7 @@ ssh -T git@github.com   # Should authenticate
 
 ### Fonts not displaying correctly
 
-The Nerd Font must be installed on your **host machine** (Windows/Mac), not in the container. VS Code uses the host's fonts.
+The Nerd Font must be installed on your **host machine** (Windows/Mac), not in the container. VS Code uses the host's fonts. Or add the `nerd-font` feature for terminal-only font rendering.
 
 ### Oh-My-Zsh not found
 
@@ -147,7 +137,7 @@ Make sure `common-utils` feature has `"installOhMyZsh": true`.
 
 ### Slow container startup
 
-Features add ~30-60 seconds on first build. Subsequent rebuilds are faster.
+Features add ~30-60 seconds on first build. Subsequent rebuilds are faster (Docker layer caching). The dotfiles config application adds < 5 seconds on each start.
 
 ### zsh-z not working
 
