@@ -1,11 +1,40 @@
 # Dotfiles (Chezmoi Managed)
 
-This repository contains my personal dotfiles, managed by [Chezmoi](https://www.chezmoi.io/).  
-It supports **Linux**, **macOS**, **Windows**, and **Devcontainers**.
+[![CI](https://github.com/CtrlCarlitos/dotfiles/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlCarlitos/dotfiles/actions/workflows/ci.yml)
+[![Full Install](https://github.com/CtrlCarlitos/dotfiles/actions/workflows/full-install-test.yml/badge.svg?event=workflow_dispatch)](https://github.com/CtrlCarlitos/dotfiles/actions/workflows/full-install-test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## 🚀 Quick Start
+Cross-platform dotfiles for **Linux, macOS, Windows, WSL, and Devcontainers** — one command, a menu, and your entire dev environment is set up: shell, editor, git identities, modern CLI tools, AI coding agents, and the wiring between them all.
 
-### Universal Installer (Recommended)
+## 🚀 Quick Start (Students)
+
+One command. Answer the menu. Done.
+
+**Linux / macOS / WSL / Devcontainer:**
+```sh
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.sh)"
+```
+
+**Windows (PowerShell, as Administrator):**
+```powershell
+iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
+```
+
+What happens:
+1. You'll be asked to **confirm** the install.
+2. A **menu appears** — pick the groups you want (start with the defaults; you can re-run anytime).
+3. Packages install, dotfiles apply, and you get a working environment with git identities, SSH keys, shell profiles, and AI tools wired up.
+
+**Don't know what to pick?** Use the **standard** preset (the default) — it gives you a terminal with all the essentials plus Claude Code. You can always add ChatGPT, Antigravity, or desktop apps later by re-running the installer.
+
+To change your selections later:
+```sh
+bash ~/.local/share/chezmoi/scripts/select-packages.sh   # reopens the menu
+chezmoi apply                                            # installs newly-enabled groups
+```
+
+### Private Fork / Mirror Access (Optional)
+If you fork or mirror this repository **privately**, the one-liners above need a **Personal Access Token (PAT)** with repo read access.
 
 > **Prerequisites:**
 > *   **Linux/macOS:** `curl` and `git` must be installed.
@@ -46,9 +75,6 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main
 ```powershell
 iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
 ```
-
-### Private Fork / Mirror Access (Optional)
-If you fork or mirror this repository **privately**, the one-liners above need a **Personal Access Token (PAT)** with repo read access.
 
 **Windows (PowerShell) with PAT**
 ```powershell

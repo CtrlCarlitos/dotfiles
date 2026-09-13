@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Third-party actions are pinned to commit SHAs (see ci.yml / auto-update.yml)
+  # for supply-chain safety; Dependabot watches the upstream repos and opens
+  # PRs to bump the pins when new versions release. The gitleaks binary in the
+  # lint step is version-pinned in its download URL — update manually there.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
