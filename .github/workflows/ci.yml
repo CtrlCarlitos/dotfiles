@@ -115,6 +115,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
@@ -171,6 +173,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
@@ -308,6 +312,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
@@ -376,6 +382,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
@@ -478,6 +486,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
@@ -539,6 +549,8 @@ jobs:
             modern_cli = false
             fonts = false
             agent_toolkit = false
+            opencode_cli = false
+            opencode_desktop = false
             claude_cli = false
             claude_desktop = false
             chatgpt_cli = false
