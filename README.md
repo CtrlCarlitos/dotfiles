@@ -136,14 +136,14 @@ Every account in your `chezmoi.toml` gets:
 The `devprofile` CLI handles the exceptions (repos outside any mapped path, verifying the active identity, creating new accounts):
 
 ```sh
-devprofile                    # Which identity is active in this repo?
-devprofile list               # All configured accounts and their keys
-devprofile use <username>     # Override identity for this repo only
-devprofile init <name> <email> --passphrase   # New account with fresh keys
-devprofile verify --install-hook              # Sanity check + pre-commit safety net
+devprofile                                  # Which identity is active in this repo?
+devprofile list                             # All configured accounts and their keys
+devprofile use <username>                   # Override identity for this repo only
+devprofile init <name> <email> --passphrase # New account with fresh keys
+devprofile verify --install-hook            # Sanity check + pre-commit safety net
 ```
 
-Full documentation: [docs/windows.md](docs/windows.md) (the identity system is cross-platform, but the deepest write-up lives there).
+Full documentation: [docs/devprofile.md](docs/devprofile.md) — cross-platform.
 </details>
 
 ---
@@ -163,6 +163,7 @@ New to zsh, tmux, or neovim? Start here:
 |-----|-------------|
 | [Package Groups](docs/package-groups.md) | The 12-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
+| [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
 | [Menu Demo](docs/menu-demo.md) | What the selection menu looks like |
 | [Config Example](docs/chezmoi.toml.example) | Complete chezmoi.toml with all options |
@@ -207,11 +208,11 @@ Docker Desktop needs the `kvm` group. The installer adds you automatically, but 
 ## 🔄 Day-to-Day Commands
 
 ```sh
-chezmoi apply       # apply pending changes (after editing config or pulling)
-chezmoi update      # pull the latest from this repo and apply
-chezmoi edit ~/.zshrc  # edit any managed file in your $EDITOR, then chezmoi apply
-chezmoi diff        # preview what would change
-chezmoi doctor      # health check
+chezmoi apply          # apply pending changes (after editing config or pulling)
+chezmoi update         # pull the latest from this repo and apply
+chezmoi edit ~/.zshrc # edit any managed file in your $EDITOR, then chezmoi apply
+chezmoi diff          # preview what would change
+chezmoi doctor        # health check
 ```
 
 ## 📂 Repository Structure
@@ -220,18 +221,18 @@ chezmoi doctor      # health check
 <summary><strong>For contributors and the curious</strong></summary>
 
 ```
-install.sh / install.ps1          # Universal bootstrap (consent → gum → menu → chezmoi init)
-scripts/select-packages.{sh,ps1}  # The package-group menu (gum multi-select)
-scripts/update-versions.sh        # Weekly auto-updater (chezmoi + Antigravity 2.0 pins)
-scripts/update_ai_tools.{sh,ps1}  # AI tool upgrade commands
-run_onchange_install_packages.*   # Platform installers (12-group gated)
-run_onchange_generate_identities.* # Git identity + SSH key generation
-dot_zshrc / dot_gitconfig.tmpl    # Shell and git configuration
-dot_config/nvim/                  # Neovim (Lazy.nvim)
-private_dot_ssh/                  # SSH config (templated, mode 600)
-.chezmoi.toml.tmpl                # Config template (12 promptBoolOnce groups)
-tests/                            # CI test suite (menu, config keys, skills args)
-docs/                             # You are here
+install.sh / install.ps1            # Universal bootstrap (consent → gum → menu → chezmoi init)
+scripts/select-packages.{sh,ps1}    # The package-group menu (gum multi-select)
+scripts/update-versions.sh          # Weekly auto-updater (chezmoi + Antigravity 2.0 pins)
+scripts/update_ai_tools.{sh,ps1}    # AI tool upgrade commands
+run_onchange_install_packages.*     # Platform installers (12-group gated)
+run_onchange_generate_identities.*  # Git identity + SSH key generation
+dot_zshrc / dot_gitconfig.tmpl      # Shell and git configuration
+dot_config/nvim/                    # Neovim (Lazy.nvim)
+private_dot_ssh/                    # SSH config (templated, mode 600)
+.chezmoi.toml.tmpl                  # Config template (12 promptBoolOnce groups)
+tests/                              # CI test suite (menu, config keys, skills args)
+docs/                               # You are here
 ```
 </details>
 
