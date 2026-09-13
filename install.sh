@@ -73,6 +73,78 @@ install_package() {
     fi
 }
 
+# Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
+# only: every failure warns and continues - without gum the menu self-skips
+# and chezmoi's native config prompts take over.
+bootstrap_gum() {
+    if command -v gum >/dev/null 2>&1; then
+        return 0
+    fi
+
+    GUM_OS="$(uname -s)"
+    GUM_ARCH="$(uname -m)"
+
+    if [ "$GUM_OS" = "Darwin" ]; then
+        case "$GUM_ARCH" in
+        arm64)
+            GUM_URL="https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Darwin_arm64.tar.gz"
+            ;;
+        x86_64)
+            GUM_URL="https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Darwin_x86_64.tar.gz"
+            ;;
+        *)
+            echo "Warning: no gum tarball for macOS/$GUM_ARCH - menu will self-skip."
+            return 0
+        esac
+        mkdir -p "$HOME/.local/bin"
+        GUM_TMP="$(mktemp -d)"
+        if _net 120 curl -fsSL -o "$GUM_TMP/gum.tar.gz" "$GUM_URL"; then
+            tar -xzf "$GUM_TMP/gum.tar.gz" -C "$GUM_TMP"
+            # tarball layout varies (flat vs nested dir) - locate the binary
+            GUM_BIN="$(find "$GUM_TMP" -type f -name gum 2>/dev/null | head -n 1)"
+            if [ -n "$GUM_BIN" ]; then
+                mv -f "$GUM_BIN" "$HOME/.local/bin/gum"
+                echo "Bootstrapped gum to ~/.local/bin (package menu enabled)."
+            else
+                echo "Warning: gum binary not found in tarball - menu will self-skip."
+            fi
+        else
+            echo "Warning: gum download failed - menu will self-skip."
+        fi
+        rm -rf "$GUM_TMP"
+    elif [ "$GUM_OS" = "Linux" ] && [ "$GUM_ARCH" = "x86_64" ]; then
+        if _net 180 curl -fsSL -o /tmp/gum.deb "https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_amd64.deb"; then
+            if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+                SUDO="sudo"
+            else
+                SUDO=""
+            fi
+            if ! $SUDO apt-get install -y /tmp/gum.deb; then
+                echo "Warning: gum install failed - menu will self-skip."
+            fi
+            rm -f /tmp/gum.deb
+        else
+            echo "Warning: gum download failed - menu will self-skip."
+        fi
+    else
+        echo "Warning: no gum bootstrap for $GUM_OS/$GUM_ARCH - menu will self-skip."
+    fi
+}
+
+# 0.5 Consent - ask before touching anything. Interactive only: non-TTY stdin
+# (e.g. some curl|sh variants) and CI ($CHEZMOI_TEST_MINIMAL) auto-proceed.
+if [ -t 0 ] && [ -z "${CHEZMOI_TEST_MINIMAL:-}" ]; then
+    echo "This installer installs prerequisites (git, curl, ...), chezmoi, and"
+    echo "applies the CtrlCarlitos dotfiles to this machine."
+    # printf+read rather than `read -p`: dash < 0.5.11 lacks -p and dies under set -e
+    printf '%s' "Proceed? [Y/n] "
+    read -r reply || reply=""
+    if [ "$reply" = "n" ]; then
+        echo "Aborted - nothing was installed. Re-run any time."
+        exit 0
+    fi
+fi
+
 # 1. Prerequisites Check (Git, Curl, GPG, Wget, 7zip)
 if ! command -v git >/dev/null 2>&1; then
     install_package git
@@ -94,12 +166,33 @@ if ! command -v 7z >/dev/null 2>&1 && ! command -v 7zz >/dev/null 2>&1; then
     install_package p7zip-full
 fi
 
+# 1.5 Interactive package menu - runs BEFORE `chezmoi init --apply` so the
+# selection lands in ~/.config/chezmoi/chezmoi.toml ahead of the config
+# template. The menu self-skips without a TTY or gum; chezmoi's native config
+# prompts are always the fallback.
+export PATH="$HOME/.local/bin:$PATH" # moved up from the chezmoi block: a bootstrapped gum is usable immediately
+bootstrap_gum
+
+SELECT_PACKAGES=""
+if [ -f "scripts/select-packages.sh" ]; then
+    SELECT_PACKAGES="scripts/select-packages.sh"
+elif [ -f "$HOME/.local/share/chezmoi/scripts/select-packages.sh" ]; then
+    SELECT_PACKAGES="$HOME/.local/share/chezmoi/scripts/select-packages.sh"
+fi
+if [ -n "$SELECT_PACKAGES" ]; then
+    # never fatal: a failed menu just falls through to chezmoi's prompts
+    if ! bash "$SELECT_PACKAGES"; then
+        echo "Warning: package menu failed - continuing with chezmoi config prompts."
+    fi
+else
+    echo "Note: package menu not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
+fi
+
 # 2. Install Chezmoi if missing
 if ! command -v chezmoi >/dev/null 2>&1; then
   echo "Installing chezmoi..."
   # shellcheck disable=SC2016  # $HOME must expand inside the child sh, not here
   _net 180 sh -c 'curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"'
-  export PATH="$HOME/.local/bin:$PATH"
 fi
 
 # 2. Initialize & Apply
