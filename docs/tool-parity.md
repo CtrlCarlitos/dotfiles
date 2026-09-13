@@ -34,7 +34,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Curated skills** (Matt Pocock ×12 + Anthropic `frontend-design`) | `skills` CLI | `skills` CLI | `skills` CLI | `skills` CLI | ❌ | `npx skills@latest add …` (see below). Installed for **Claude Code + OpenCode + Antigravity** in one pass: one `skills add` writes `~/.agents/skills/<name>/` (OpenCode + Antigravity read this agent-compatible path natively) and `~/.claude/skills/<name>/` (Claude Code). `--copy` = real dirs, not symlinks. Update = re-run the same `skills add` |
 | **Superpowers (Codex CLI)** | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | ❌ | Not automated - confirmed via an isolated Docker test that the only scriptable option (`codex-plugin`, a third-party npm helper) expects a `plugins/<name>/` marketplace layout obra/superpowers doesn't use (root-level `.codex-plugin/plugin.json` instead), so it fails outright regardless of flags |
 | **Playwright Chromium** | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | ❌ | `npx playwright install chromium` |
-| **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `install_core`/`install_ai_tools`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
+| **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
 | **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Install also does the per-client MCP registration (claude/codex/opencode/agy): native `serena setup claude-code` / `serena setup codex`, JSON merge into opencode's global `mcp` key, `agy mcp add` - all idempotent. See docs/agent-context-tools.md |
 | **Graft** | `npm i -g @nanonets/graft` (with `--allow-scripts` allowlist for its tree-sitter native builds) | same | same | same | ❌ | `graft upgrade`. Per-repo activation is separate and manual: `graft init` (or e.g. `graft init --agents claude agents`) + `graft build` writes the gitignored local `graft/` graph. Telemetry disabled by the installer. See docs/agent-context-tools.md |
 | guardrail | GitHub release binary → `~/.local/bin` (checksum-verified) | same | GitHub release `.exe` → `%USERPROFILE%\.local\bin` (checksum + Unblock-File) | same as Linux | not installed (no `claude` there) | bump `GUARDRAIL_VERSION` in `run_onchange_install_packages.*.tmpl` + `scripts/update_ai_tools.*`, re-`chezmoi apply` |
@@ -51,19 +51,19 @@ This document outlines the tools installed by the dotfiles configuration across 
 > ```
 > Matt Pocock's `code-review` is staged as `mp-code-review` (renamed + `name:` frontmatter patched, then `skills add <local dir>`) to stay distinct from this repo's own `/code-review` command. `scripts/update_ai_tools.*` re-run the same commands. `--loglevel=error` is required: npm 12's npx prints a benign `npm notice run …` hint to stderr on every invocation, which kills the install on PS 5.1 under `$ErrorActionPreference=Stop` (see docs/skills-install-strategy.md's npm 12 gotchas). `-a antigravity` is the `skills` CLI's own Antigravity target (`~/.agents/skills/`) — verified working 2026-08-31 with agy installed on both Windows and WSL: agy loads the skills from there. Superpowers is unchanged (still `claude plugin install` / npm / `agy plugin install <url>` per its own rows).
 
-> **Note on Antigravity**: the desktop surfaces (IDE + hub app) were removed
-> from this repo on 2026-09-11 - VS Code + `agy` in a terminal cover that
-> workflow. `agy`, its Superpowers plugin, and the curated skills set all
-> live under `install_ai_tools`; the former `install_antigravity` toggle is
-> gone entirely.
+> **Note on Antigravity**: the old desktop surfaces (IDE + hub app) were
+> removed from this repo on 2026-09-11 (VS Code + `agy` in a terminal cover
+> that workflow); the 2.0 hub app came back on 2026-09-13 as its own
+> `antigravity_desktop` group. `agy`, its Superpowers plugin, and the
+> curated skills set all live under `antigravity_cli`.
 
-> **guardrail** is gated by `install_guardrail` (default true). It downloads the
+> **guardrail** is gated by the `guardrail` group (default true). It downloads the
 > pinned `CtrlCarlitos/agent-guardrails` release, verifies it against the release
 > `SHA256SUMS`, installs it to
 > `~/.local/bin/guardrail`, and wires all three planes it supports today —
 > Claude, OpenCode, and Antigravity — via `guardrail gen-config <plane> --merge …`,
 > each plane's wiring independently guarded on that tool being present.
-> Independent of `install_ai_tools` — the installer call sites are hoisted out of
+> Independent of `agent_toolkit` — the installer call sites are hoisted out of
 > that gate. See docs/guardrail-install.md. On stock macOS, checksum verification
 > falls back to `shasum -a 256` when GNU `sha256sum`/`gsha256sum` is unavailable.
 > The Linux/WSL shfmt release binary is also checksum-verified before installation.
@@ -82,15 +82,15 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Find replacement** | `fd` | `fd` | `fd` | `fd` | ❌ | ✅ Identical behavior |
 | **Diff** | `delta` | `delta` | `delta` | `delta` | ❌ | ✅ Identical git diffs |
 | **Scripting** | `gum` | `gum` | `gum` | `gum` | ❌ | ✅ Identical script inputs |
-| **GitHub CLI** | `gh` (official apt repo) | `gh` | `gh` | `gh` (apt) | ❌ | ✅ Gated by `install_core`, not `install_modern` - needed for basic repo access, e.g. `gh auth login` |
+| **GitHub CLI** | `gh` (official apt repo) | `gh` | `gh` | `gh` (apt) | ❌ | ✅ Gated by `core`, not `modern_cli` - needed for basic repo access, e.g. `gh auth login` |
 | **Cheatsheets** | `tealdeer` (`tldr`) | `tealdeer` | `tealdeer` | `tealdeer` | ❌ | ✅ Linux downloads the official static binary directly (not in apt until Ubuntu 23.04/lunar) |
-| **shellcheck** | `shellcheck` (apt) | `shellcheck` (brew) | `shellcheck` (choco) | `shellcheck` (apt) | ❌ | ✅ Gated by `install_modern`; available from each platform package manager |
-| **shfmt** | GitHub release binary (amd64/arm64) | `shfmt` (brew) | `shfmt` (choco) | GitHub release binary (amd64/arm64) | ❌ | ✅ Gated by `install_modern`; Linux/WSL verify the v3.8.0 release checksum on x86_64/amd64 and aarch64/arm64, and warn/skip unsupported architectures |
+| **shellcheck** | `shellcheck` (apt) | `shellcheck` (brew) | `shellcheck` (choco) | `shellcheck` (apt) | ❌ | ✅ Gated by `modern_cli`; available from each platform package manager |
+| **shfmt** | GitHub release binary (amd64/arm64) | `shfmt` (brew) | `shfmt` (choco) | GitHub release binary (amd64/arm64) | ❌ | ✅ Gated by `modern_cli`; Linux/WSL verify the v3.8.0 release checksum on x86_64/amd64 and aarch64/arm64, and warn/skip unsupported architectures |
 | **Du replacement** | `dust` | `dust` | `dust` | `dust` | ❌ | ✅ Aliased over `du` when present. Linux downloads the GitHub `.deb` directly (not in apt until Ubuntu 25.04/plucky) |
 | **Df replacement** | `duf` | `duf` | `duf` | `duf` | ❌ | ✅ Aliased over `df` when present |
 | **Ps replacement** | `procs` | `procs` | `procs` | `procs` | ❌ | ✅ Aliased over `ps` when present. Linux extracts the GitHub `.zip` directly (not in apt until Ubuntu 25.04/plucky) |
 | **Tab completion** | `fzf-tab` (zsh plugin) | `fzf-tab` (zsh plugin) | ❌ (PowerShell, no zsh) | `fzf-tab` (zsh plugin) | ❌ | Not gated by a package toggle - installed the same way as the other OMZ custom plugins (`.chezmoiexternal.toml`), zsh platforms only |
-| **Multiplexer** | `tmux` | `tmux` | `psmux` (choco; ships `psmux`/`pmux`/`tmux` commands, reads `.tmux.conf` - github.com/psmux/psmux) | `tmux` | ❌ | Windows finally has a real native tmux (Rust, ConPTY). Gated by `install_core`, right after powershell-core in the list (psmux recommends PS 7+) |
+| **Multiplexer** | `tmux` | `tmux` | `psmux` (choco; ships `psmux`/`pmux`/`tmux` commands, reads `.tmux.conf` - github.com/psmux/psmux) | `tmux` | ❌ | Windows finally has a real native tmux (Rust, ConPTY). Gated by `core`, right after powershell-core in the list (psmux recommends PS 7+) |
 
 ## Desktop Applications
 
@@ -99,8 +99,11 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Editor** | VS Code | VS Code | VS Code | `code` (Remote) | ❌ | WSL uses `code` CLI to open Host VS Code |
 | **Browser** | Chrome | Chrome | Chrome | ❌ | ❌ | Browsers run on Host |
 | **Container** | Docker Desktop | Docker Desktop | Docker Desktop | Docker (CLI) | ❌ | WSL connects to Docker Desktop Engine - requires WSL Integration enabled on the Windows side first. The WSL installer checks this before installing anything else and prompts whether to continue if it's off (default no); the Windows installer also reminds about it, listing detected distros. Linux host: installer adds the user to the **`kvm`** group (Desktop's VM backend), not `docker` - requires a logout/login to take effect |
-| **Mesh VPN** | Tailscale | Tailscale (`tailscale-app` cask, GUI) | Tailscale | *(via Host)* | ❌ | Bundled into `install_desktop` (a deliberate choice, not the default pattern - see README). **Never installed inside WSL**, on purpose: Tailscale's own docs recommend against it (breaks encrypted traffic if it's also running on the Windows host at the same time) and it's unnecessary - WSL already gets full tailnet access through whatever's running on the Windows host, zero extra setup. Requires an interactive login (`tailscale up`, or sign in via the app) - not automated, this repo never bakes in an authkey since it's a shared template |
-| **ScreenRec** | `.deb` / Apt | `.dmg` | `.exe` | ❌ | ❌ | Host Only. The Antigravity IDE and hub-app rows that used to sit here were removed with the desktop surfaces themselves (2026-09-11) - VS Code + agy cover that workflow |
+| **Mesh VPN** | Tailscale | Tailscale (`tailscale-app` cask, GUI) | Tailscale | *(via Host)* | ❌ | Bundled into `dev_desktop` (a deliberate choice, not the default pattern - see README). **Never installed inside WSL**, on purpose: Tailscale's own docs recommend against it (breaks encrypted traffic if it's also running on the Windows host at the same time) and it's unnecessary - WSL already gets full tailnet access through whatever's running on the Windows host, zero extra setup. Requires an interactive login (`tailscale up`, or sign in via the app) - not automated, this repo never bakes in an authkey since it's a shared template |
+| **AI Chat (Claude)** | ❌ (no official build - installer info-skips) | `brew install --cask claude` | `choco install claude` | ❌ | ❌ | `claude_desktop` group, host only. Claude *Code* (the CLI) is a separate `claude_cli` group - different software, different gate |
+| **AI Chat (ChatGPT)** | ❌ (no official build - installer info-skips) | `brew install --cask chatgpt` | `winget install --id 9NT1R1C2HH7J --source msstore` | ❌ | ❌ | `chatgpt_desktop` group, host only. The Codex CLI is separate (`chatgpt_cli`) |
+| **AI IDE (Antigravity 2.0)** | tar.gz (pinned hub-channel URL) | dmg (pinned hub-channel URL) | `choco install antigravity` | ❌ | ❌ | `antigravity_desktop` group, host only - distinct from the `agy` CLI (`antigravity_cli`). Pins live in `run_onchange_install_packages.sh.tmpl`; `scripts/update-versions.sh` re-checks them (Windows floats via choco) |
+| **ScreenRec** | `.deb` / Apt | `.dmg` | `.exe` | ❌ | ❌ | Host Only. The old Antigravity IDE row that used to sit here went with the IDE itself (2026-09-11); the 2.0 hub app has its own row above |
 | **Screenshot** | Flameshot | Flameshot | ShareX | ❌ | ❌ | Platform equivalents |
 | **Diff/Merge** | Meld | Meld | Meld | ❌ | ❌ | Standardized on one tool across all 3 platforms; WinMerge (Windows-only) dropped in favor of Meld, confirmed on Chocolatey |
 | **SFTP Client** | Termius | Termius | Termius | ❌ | ❌ | Standardized on one tool across all 3 platforms; replaced FileZilla after its Homebrew cask was pulled entirely on macOS (adware concerns) |
