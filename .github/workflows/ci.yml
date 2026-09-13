@@ -45,6 +45,9 @@ jobs:
       - name: Test skills CLI argument boundaries
         run: bash tests/install_agent_skills_arguments.sh
 
+      - name: Test package-group selection menu
+        run: bash tests/select_packages.sh
+
       - name: Test workflow configs cover every prompted key
         run: bash tests/check_workflow_config_keys.sh
 
@@ -97,12 +100,18 @@ jobs:
             dirs = []
           
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           EOF
 
       - name: Test chezmoi apply (dry-run)
@@ -147,12 +156,18 @@ jobs:
             dirs = ["scripts"]
           
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
       - name: Verify PowerShell script syntax
@@ -229,8 +244,8 @@ jobs:
           grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "✓ devcontainer@local email set" || exit 1
 
           echo "=== Package categories correctly defaulted non-interactive ==="
-          grep -q 'install_core = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ install_core defaulted false" || exit 1
-          grep -q 'install_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ install_desktop defaulted false" || exit 1
+          grep -q 'core = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ core defaulted false" || exit 1
+          grep -q 'dev_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ dev_desktop defaulted false" || exit 1
 
   #=============================================================================
   # TIER 1: Docker Smoke Test - Real chezmoi init/apply in fresh environment
@@ -278,12 +293,18 @@ jobs:
             dirs = ["projects/work"]
           
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           EOF
 
       - name: Run chezmoi apply
@@ -340,12 +361,18 @@ jobs:
             dirs = ["projects/bobcorp"]
           
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           EOF
 
       - name: Run chezmoi apply
@@ -436,12 +463,18 @@ jobs:
             email = "minimal@example.com"
 
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           EOF
 
       - name: Run install.sh (Universal Installer)
@@ -491,12 +524,18 @@ jobs:
             email = "ci@windows.local"
           
           [data.packages]
-            install_core = false
-            install_modern = false
-            install_fonts = false
-            install_ai_tools = false
-            install_guardrail = false
-            install_desktop = false
+            core = false
+            modern_cli = false
+            fonts = false
+            agent_toolkit = false
+            claude_cli = false
+            claude_desktop = false
+            chatgpt_cli = false
+            chatgpt_desktop = false
+            antigravity_cli = false
+            antigravity_desktop = false
+            dev_desktop = false
+            guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
       - name: Run install.ps1
