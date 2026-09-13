@@ -52,35 +52,49 @@
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
   # All toggles are independent on all platforms (Linux, macOS, Windows).
+  # Clean break: the old six toggles became these 12 groups, no auto-migration
+  # - full rename map lives in docs/package-groups.md.
   # ==========================================================================
   [data.packages]
-    # Core utilities (git, curl, zsh, tmux, etc.)
-    install_core = {{ if $interactive }}{{ promptBoolOnce . "packages.install_core" "Install core packages (git, curl, zsh, tmux)?" true }}{{ else }}false{{ end }}
-    
-    # Modern CLI tools (bat, eza, fd, zoxide, starship, direnv, lazygit, gum)
-    install_modern = {{ if $interactive }}{{ promptBoolOnce . "packages.install_modern" "Install modern CLI tools (zoxide, starship, bat, eza, etc)?" true }}{{ else }}false{{ end }}
-    
-    # Fonts (MesloLGS NF / Nerd Fonts) - Required for Starship
-    install_fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.install_fonts" "Install Nerd Fonts?" true }}{{ else }}false{{ end }}
-    
-    # AI Coding Tools
-    install_ai_tools = {{ if $interactive }}{{ promptBoolOnce . "packages.install_ai_tools" "Install AI coding tools?" true }}{{ else }}false{{ end }}
+    # core - terminal fundamentals (git, zsh, tmux, node, python, fzf, gh)
+    core = {{ if $interactive }}{{ promptBoolOnce . "packages.core" "Install core (terminal fundamentals: git, zsh, tmux)?" true }}{{ else }}false{{ end }}
 
-    # Agent guardrails (agent-guardrails release binary + Claude gen-config).
-    # Modifies ~/.claude/settings.json hooks — separate opt-in from install_ai_tools.
-    install_guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.install_guardrail" "Install agent guardrails (hook enforcement for Claude Code)?" true }}{{ else }}false{{ end }}
-    
-    # Desktop Apps (hosts only - not asked on WSL/containers, and enforced there
-    # too: run_onchange_install_packages.sh.tmpl gates the actual install on the
-    # same $isHost check, not just this prompt, so hand-editing this to `true` on
-    # WSL/in a container still won't install Chrome/VS Code/Docker Desktop/Mac
-    # casks there. That enforcement was added after finding WSLg sets $DISPLAY
-    # automatically, which used to be install_linux_desktop()'s only guard -
-    # $DISPLAY is now just a secondary safety net for genuine headless Linux hosts.
-    # Also includes Tailscale (deliberate choice - see docs/tool-parity.md's Mesh
-    # VPN row) - never inside WSL either way, same $isHost gate, and Tailscale's
-    # own docs recommend against running it there regardless of this toggle)
-    install_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.install_desktop" "Install Desktop Apps?" true }}{{ else }}false{{ end }}
+    # modern_cli - modern CLI replacements (bat, eza, fd, starship, zoxide, gum)
+    modern_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.modern_cli" "Install modern_cli (modern CLI replacements: bat, eza, starship)?" true }}{{ else }}false{{ end }}
+
+    # fonts - Nerd Fonts (MesloLGS NF), required for Starship
+    fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
+
+    # agent_toolkit - cross-vendor agent layer (OpenCode, Serena, Graft, act)
+    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: OpenCode, Serena, Graft)?" true }}{{ else }}false{{ end }}
+
+    # claude_cli - Claude Code CLI + superpowers/skills/guardrail wiring
+    claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)?" true }}{{ else }}false{{ end }}
+
+    # claude_desktop - Claude Desktop app (host only; Linux has no build)
+    claude_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.claude_desktop" "Install claude_desktop (Claude Desktop app)?" false }}{{ else }}false{{ end }}
+
+    # chatgpt_cli - Codex CLI (@openai/codex); zero wiring by design
+    chatgpt_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.chatgpt_cli" "Install chatgpt_cli (Codex CLI)?" false }}{{ else }}false{{ end }}
+
+    # chatgpt_desktop - ChatGPT Desktop app (host only; Linux has no build)
+    chatgpt_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.chatgpt_desktop" "Install chatgpt_desktop (ChatGPT Desktop app)?" false }}{{ else }}false{{ end }}
+
+    # antigravity_cli - Antigravity CLI (agy) + superpowers/skills/guardrail wiring
+    antigravity_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.antigravity_cli" "Install antigravity_cli (Antigravity CLI, agy)?" false }}{{ else }}false{{ end }}
+
+    # antigravity_desktop - Antigravity 2.0 app (host only)
+    antigravity_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.antigravity_desktop" "Install antigravity_desktop (Antigravity 2.0 app)?" false }}{{ else }}false{{ end }}
+
+    # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop, Tailscale.
+    # Host only: not prompted on WSL/containers, and enforced there too —
+    # the package-install template gates the actual install on the same
+    # $isHost check, not just this prompt, so hand-editing this to `true` on
+    # WSL/in a container still won't install desktop apps there.
+    dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
+
+    # guardrail - agent guardrails (guardrail binary + per-CLI planes)
+    guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
 
 {{- if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity

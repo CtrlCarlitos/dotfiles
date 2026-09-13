@@ -20,9 +20,9 @@ It supports **Linux**, **macOS**, **Windows**, and **Devcontainers**.
 > *   **Windows:** Yes - use an **elevated PowerShell** ("Run as Administrator").
 >     Chocolatey (this repo's package manager on Windows) requires admin rights to
 >     install anything; without it every package install fails immediately. (The
->     Antigravity CLI - `agy` - is a plain Chocolatey package with no
->     admin-refusal quirk; the Antigravity *desktop* apps are no longer installed
->     by this repo at all.)
+>     Antigravity CLI - `agy` - and the Antigravity 2.0 desktop app are plain
+>     Chocolatey packages with no admin-refusal quirk; both are optional
+>     groups.)
 
 > **WSL: enable Docker Desktop's WSL integration *before* running this.**
 > This repo never installs a Docker engine/CLI inside WSL - it's designed to
@@ -38,7 +38,7 @@ It supports **Linux**, **macOS**, **Windows**, and **Devcontainers**.
 ```sh
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.sh)"
 ```
-> **Note:** On Host and WSL, the installer will **prompt** you to select components (Core, Modern Tools, Fonts, AI, etc.).  
+> **Note:** On Host and WSL, the installer asks for consent, then shows an interactive **package-group menu** (preset → 12 groups) before applying.  
 > On Devcontainers and CI, it runs non-interactively with safe defaults.
 
 
@@ -64,17 +64,17 @@ sh -c "$(curl -H "Authorization: token $PAT" -fsLS https://raw.githubusercontent
 This script will:
 1.  Install `chezmoi` if missing.
 2.  Initialize this repository.
-3.  Prompt you to select package groups (Core, Modern CLI, Fonts, AI Tools, Desktop).
+3.  Ask consent, then walk you through package selection: a preset pick, then a 12-group menu (see [Package Groups](docs/package-groups.md)).
 4.  Install selected packages and apply the configuration.
 
-> **Tip:** On subsequent runs, chezmoi caches your selections — you won't be re-prompted.
+> **Tip:** Your selections persist in `chezmoi.toml` — re-runs show the menu pre-checked (one Enter accepts), and chezmoi won't re-prompt.
 
 ## ⚙️ Configuration
 
 After installation, your configuration is stored in **`~/.config/chezmoi/chezmoi.toml`**.
 You can edit this file to:
 *   Add more Git accounts/identities.
-*   Enable/Disable package groups (e.g. `install_ai_tools`).
+*   Enable/Disable any of the 12 package groups (e.g. `agent_toolkit`, `dev_desktop`) — or re-run the menu: `~/.local/share/chezmoi/scripts/select-packages.sh` (`.ps1` on Windows). See [Package Groups](docs/package-groups.md).
 *   Customize folder mappings.
 
 **First-time setup prompt**
@@ -91,16 +91,15 @@ chezmoi apply
 
 ## 📦 Platform Defaults
 
-The installer automatically detects your environment and sets the following defaults.
-You can override these in `~/.config/chezmoi/chezmoi.toml`.
+Interactive setup defaults to the **standard preset**: core, modern_cli, fonts, agent_toolkit, claude_cli, guardrail — everything else off.
+Change it any time via the menu or `~/.config/chezmoi/chezmoi.toml` (see [Package Groups](docs/package-groups.md)).
 
-| Feature | Windows / Mac / Linux (Host) | WSL | Devcontainer |
+| Feature | Windows / Mac / Linux (Host) | WSL | Devcontainer / CI |
 | :--- | :---: | :---: | :---: |
-| **Core Tools** (Git, Zsh, Tmux) | ✅ | ✅ | ✅ |
-| **Modern CLI** (Bat, Eza, Fd) | ✅ | ✅ | ✅ |
-| **Fonts** (Meslo Nerd Font) | ✅ | ✅ | ✅ |
-| **AI Tools** (Codex, etc.) | ✅ | ✅ | ✅ |
-| **Desktop Apps** (Chrome, VS Code) | ✅ | ❌ | ❌ |
+| **Core Tools** (Git, Zsh, Tmux) | ✅ | ✅ | ❌ (nothing installs unless seeded) |
+| **Modern CLI + Fonts** (Bat, Eza, Starship) | ✅ | ✅ | ❌ |
+| **Agent layer** (OpenCode, Serena, Claude Code, guardrail) | ✅ | ✅ | ❌ |
+| **Desktop apps** (Chrome, VS Code, AI desktop apps) | ❌ opt-in | ❌ | ❌ |
 | **Git Identity** | Prompted | Prompted | Auto (Dev User) |
 
 ---
@@ -327,8 +326,11 @@ This table lists all programs installed by your dotfiles across different enviro
 | | gum | ✅ 📦 | ✅ 📦 | ✅ 📦 | ✅ 📦 | ❌ |
 | **Fonts** | Meslo Nerd Font | ✅ 📦 | ✅ 🔧 | ✅ 🔧 | ✅ 📦 | ❌ |
 | **AI Tools** | @openai/codex | ✅ 🟢 | ✅ 🟢 | ✅ 🟢 | ✅ 🟢 | ❌ |
+| | ChatGPT Desktop | ✅ 📦 | ❌ | ❌ (no official build) | ✅ 📦 | ❌ |
 | | Antigravity CLI (agy) | ✅ 📦 | ✅ 🔧 | ✅ 🔧 | ✅ 📦 | ❌ |
+| | Antigravity 2.0 | ✅ 📦 | ❌ | ✅ 🔧 | ✅ 🔧 | ❌ |
 | | Claude Code | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
+| | Claude Desktop | ✅ 📦 | ❌ | ❌ (no official build) | ✅ 📦 | ❌ |
 | | OpenCode | ✅ 📦 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
 | | Superpowers (Claude Code) | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
 | | Superpowers (OpenCode) | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ✅ 🔧 | ❌ |
@@ -367,9 +369,9 @@ This table lists all programs installed by your dotfiles across different enviro
 > **Post-Install:** Launch Docker Desktop once from your applications menu (Start menu on Windows) to accept the EULA and start the engine, then confirm it works with `docker ps`.
 
 **Notes:**
-1. **Devcontainers**: By default, only "Core" packages are installed. Other categories are disabled unless explicitly enabled in `chezmoi.toml`.
+1. **Devcontainers**: Every group defaults to `false` there — nothing installs unless explicitly enabled in `chezmoi.toml` (see [devcontainer setup](docs/devcontainer.md)).
 2. **WSL**: Desktop apps are generally skipped in WSL unless manually enabled, even though WSLg supports them.
-3. **Antigravity**: Only the CLI (`agy`) is installed, everywhere `install_ai_tools` does (WSL included) - the desktop apps (IDE, hub) were removed from this repo; VS Code + `agy` in a terminal cover that workflow. Its skills (Superpowers plugin, curated `skills`-CLI set) also live under `install_ai_tools`.
+3. **Antigravity**: The CLI (`agy`) installs everywhere the agent layer does (WSL included) under `antigravity_cli`; the Antigravity 2.0 desktop app is its own `antigravity_desktop` group (host only, all three OSs). Superpowers and the curated skills ride the CLI group.
 
 ## 📂 Repository Structure
 
@@ -389,6 +391,7 @@ This table lists all programs installed by your dotfiles across different enviro
 *   [Windows Setup](docs/windows.md)
 *   [Devcontainer Setup](docs/devcontainer.md)
 *   [Backup & Restore](docs/backup-restore.md)
+*   [Package Groups](docs/package-groups.md)
 *   [Tool Parity](docs/tool-parity.md)
 
 ## ❓ Troubleshooting

@@ -17,19 +17,36 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-{{ $install_core := false -}}
-{{- $install_modern := false -}}
-{{- $install_fonts := false -}}
-{{- $install_ai_tools := false -}}
-{{- $install_guardrail := false -}}
-{{- $install_desktop := false -}}
+{{/* 12-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
+      Variable names = config keys = menu options = CI seeds, one vocabulary.
+      Old install_* keys: clean break, ignored (no migration) - rename map in
+      docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
+      non-interactive/bare-init applies install nothing beyond what's seeded. */}}
+{{ $core := false -}}
+{{- $modern_cli := false -}}
+{{- $fonts := false -}}
+{{- $agent_toolkit := false -}}
+{{- $claude_cli := false -}}
+{{- $claude_desktop := false -}}
+{{- $chatgpt_cli := false -}}
+{{- $chatgpt_desktop := false -}}
+{{- $antigravity_cli := false -}}
+{{- $antigravity_desktop := false -}}
+{{- $dev_desktop := false -}}
+{{- $guardrail := false -}}
 {{- if hasKey . "packages" -}}
-  {{- $install_core = .packages.install_core -}}
-  {{- $install_modern = .packages.install_modern -}}
-  {{- $install_fonts = .packages.install_fonts -}}
-  {{- $install_ai_tools = .packages.install_ai_tools -}}
-  {{- if hasKey .packages "install_guardrail" }}{{- $install_guardrail = .packages.install_guardrail }}{{- end -}}
-  {{- $install_desktop = .packages.install_desktop -}}
+  {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
+  {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
+  {{- if hasKey .packages "fonts" }}{{- $fonts = .packages.fonts }}{{- end -}}
+  {{- if hasKey .packages "agent_toolkit" }}{{- $agent_toolkit = .packages.agent_toolkit }}{{- end -}}
+  {{- if hasKey .packages "claude_cli" }}{{- $claude_cli = .packages.claude_cli }}{{- end -}}
+  {{- if hasKey .packages "claude_desktop" }}{{- $claude_desktop = .packages.claude_desktop }}{{- end -}}
+  {{- if hasKey .packages "chatgpt_cli" }}{{- $chatgpt_cli = .packages.chatgpt_cli }}{{- end -}}
+  {{- if hasKey .packages "chatgpt_desktop" }}{{- $chatgpt_desktop = .packages.chatgpt_desktop }}{{- end -}}
+  {{- if hasKey .packages "antigravity_cli" }}{{- $antigravity_cli = .packages.antigravity_cli }}{{- end -}}
+  {{- if hasKey .packages "antigravity_desktop" }}{{- $antigravity_desktop = .packages.antigravity_desktop }}{{- end -}}
+  {{- if hasKey .packages "dev_desktop" }}{{- $dev_desktop = .packages.dev_desktop }}{{- end -}}
+  {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
 {{- end -}}
 
 {{/* Computed inline (not read from stored data) so this is always live/correct on
@@ -38,13 +55,15 @@ fi
       really means "any container" (Docker specifically) by design - intentionally
       Docker-only for now, see .chezmoi.toml.tmpl's detection block for the planned
       rollout order if other runtimes are ever added. Computed once here and shared
-      by install_desktop's host-only gating (Chrome/VS Code/Docker Desktop on Linux,
-      Mac casks on Darwin) - install_desktop used to be gated only by a runtime
-      $DISPLAY check, which isn't sufficient: WSLg sets $DISPLAY automatically, so
-      on a WSLg-enabled machine that runtime check alone let Desktop Apps install
-      proceed *inside* WSL (confirmed live), duplicating Chrome/VS Code/Docker
-      Desktop the user already has on the Windows host. $DISPLAY is kept as a
-      second, genuine safety net for real headless Linux hosts. */}}
+      by the desktop groups' host-only gating (dev_desktop's Chrome/VS Code/Docker
+      Desktop on Linux, Mac casks on Darwin, and the three AI desktop apps - all
+      "never inside WSL/containers" per the spec's config-template rule). dev_desktop
+      (formerly install_desktop) used to be gated only by a runtime $DISPLAY check,
+      which isn't sufficient: WSLg sets $DISPLAY automatically, so on a WSLg-enabled
+      machine that runtime check alone let Desktop Apps install proceed *inside*
+      WSL (confirmed live), duplicating Chrome/VS Code/Docker Desktop the user
+      already has on the Windows host. $DISPLAY is kept as a second, genuine
+      safety net for real headless Linux hosts. */}}
 {{- $envDev := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") | default "" -}}
 {{- $isDevcontainer := or (eq $envDev "true") (eq $envDev "1") (stat "/.dockerenv" | not | not) -}}
 {{- $isWsl := false -}}
@@ -585,7 +604,7 @@ install_linux_desktop() {
 }
 
 install_apt() {
-{{- if or $install_core $install_modern $install_fonts $install_ai_tools $install_desktop }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $guardrail }}
     info "Updating apt..."
     $SUDO apt update -y || true
     info "Upgrading installed packages..."
@@ -594,7 +613,7 @@ install_apt() {
     info "No package categories enabled - skipping apt update/upgrade."
 {{- end }}
 
-{{- if $install_core }}
+{{- if $core }}
     info "Installing core packages..."
     $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd
 
@@ -635,7 +654,7 @@ install_apt() {
     info "Core packages disabled in config"
 {{- end }}
 
-{{- if $install_modern }}
+{{- if $modern_cli }}
     # Modern CLI tools
     $SUDO apt install -y bat fd-find || true
 
@@ -823,18 +842,21 @@ install_apt() {
     info "Modern CLI tools disabled in config"
 {{- end }}
 
-{{- if $install_fonts }}
+{{- if $fonts }}
     # Fonts - MesloLGS NF is great for Starship too
     install_fonts
 {{- else }}
     info "Fonts disabled in config"
 {{- end }}
 
-{{- if $install_ai_tools }}
-    # AI Coding Tools
+{{- if $agent_toolkit }}
+    # Agent toolkit (spec §2: the cross-vendor agent layer - OpenCode, Serena,
+    # Graft, act, Playwright Chromium, superpowers-for-OpenCode wiring. Codex
+    # moved to chatgpt_cli, Claude Code to claude_cli, agy to antigravity_cli:
+    # vendor products live in vendor groups per the spec's placement rule).
     install_node
 
-    # Ollama - needs zstd (added to install_core above) to extract its release
+    # Ollama - needs zstd (added to core's apt list above) to extract its release
     # archive; confirmed live on WSL that without it the installer fails outright
     # with "This version requires zstd for extraction" and ollama ends up
     # genuinely NOT installed, not a harmless post-install nag like the macOS
@@ -856,7 +878,7 @@ install_apt() {
     fi
 
     if command -v npm &>/dev/null; then
-        info "Installing AI coding tools..."
+        info "Installing agent toolkit (OpenCode, superpowers, Playwright)..."
         NPM_BIN="$(which npm)"
         
         # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
@@ -865,14 +887,6 @@ install_apt() {
         if [[ "$NPM_BIN" != /usr* ]]; then
             warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
             npm_sudo=""
-        fi
-
-        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
-        
-        # Claude Code (Native Installer - Recommended)
-        if ! command -v claude &>/dev/null; then
-             info "Installing Claude Code (Native)..."
-             net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
         fi
 
         # OpenCode (Official Install Script - ~180MB binary). The --version
@@ -889,28 +903,11 @@ install_apt() {
              npm rm -g opencode-ai &>/dev/null || true
         fi
 
-        # Antigravity CLI (agy) - official install script, no apt package.
-        # Google retired standalone Gemini Code Assist for individuals in
-        # favor of the Antigravity suite (see docs/tool-parity.md) - this
-        # repo no longer installs Gemini CLI, agy replaces it here.
-        if ! command -v agy &>/dev/null; then
-             info "Installing Antigravity CLI (agy)..."
-             net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
-        fi
-
-        # Superpowers skills plugin for Claude Code (global - active in every
-        # session once installed, via Claude Code's own plugin marketplace
-        # mechanism, not npm). Re-running add/install is safe if already present.
-        if command -v claude &>/dev/null; then
-            info "Installing Superpowers plugin for Claude Code..."
-            claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-            claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
-        fi
-
         # Superpowers skills for OpenCode (separate mechanism from Claude
-        # Code's plugin marketplace above - OpenCode reads its own
-        # opencode.json config). jq merges into the plugin array without
-        # clobbering any other settings already in the file.
+        # Code's plugin marketplace, which lives in the claude_cli section
+        # now - OpenCode reads its own opencode.json config). jq merges into
+        # the plugin array without clobbering any other settings already in
+        # the file.
         if command -v opencode &>/dev/null; then
             info "Configuring Superpowers for OpenCode..."
             command -v jq &>/dev/null || $SUDO apt install -y jq
@@ -925,41 +922,8 @@ install_apt() {
             fi
         fi
 
-        # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
-        # <url>` is the officially-documented mechanism (obra/superpowers'
-        # own README.md Antigravity section, confirmed against the locally-
-        # installed copy's docs) - NOT hand-copying skill files into a
-        # guessed plugin directory: Superpowers' own contributor docs
-        # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
-        # unsupported ("Everything arrives through the install mechanism -
-        # not by editing the user's config"). This also sidesteps needing to
-        # hardcode Antigravity's actual plugin storage path here (confirmed
-        # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
-        # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
-        # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
-        # not us, so it stays correct even if/when that path changes again.
-        if command -v agy &>/dev/null; then
-            info "Installing Superpowers plugin for Antigravity..."
-            agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
-        fi
-
-        # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-        # Anthropic's frontend-design) for Claude Code / OpenCode /
-        # Antigravity, via the `skills` CLI - see install_agent_skills above.
-        install_agent_skills
-
-        # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
-        # live via an isolated Docker test that the third-party `codex-plugin`
-        # npm helper (the only scriptable option) doesn't just prompt
-        # interactively - it expects a plugins/<name>/ marketplace layout
-        # that obra/superpowers doesn't use (it ships a root-level
-        # .codex-plugin/plugin.json manifest instead), so it fails outright
-        # regardless of flags. Codex's real install path for this plugin is
-        # its native in-app `/plugins` search UI - genuinely GUI/session-only,
-        # no config file or CLI command reaches it from outside a session.
-
         # Playwright Chromium - headless browser for coding-agent browser
-        # automation. Deliberately here, not under install_desktop: that's
+        # automation. Deliberately here, not under dev_desktop: that's
         # gated host-only ($isHost) and never runs on WSL/containers, exactly
         # where coding agents most often run. install-deps needs root for
         # system packages; the actual browser binary download must NOT run as
@@ -1065,7 +1029,7 @@ PYEOF
     # check treats any container as one (see .chezmoi.toml.tmpl) - so
     # $interactive can never be true under act, meaning it can validate
     # template/script syntax and the devcontainer code path, but can't
-    # exercise install_core/install_ai_tools/etc content. Confirmed this
+    # exercise the core/agent_toolkit/etc section content. Confirmed this
     # session testing a Superpowers install fix - had to fall back to
     # isolated `docker run` tests for that instead.
     # On WSL specifically: installing the binary here is harmless either way,
@@ -1078,10 +1042,112 @@ PYEOF
         net_timeout 180 bash -c 'curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | '"$SUDO"' bash -s -- -b /usr/local/bin' || warn "act install failed or timed out"
     fi
 {{- else }}
-    info "AI coding tools disabled in config"
+    info "Agent toolkit disabled in config"
 {{- end }}
 
-{{- if $install_guardrail }}
+{{- if $claude_cli }}
+    # Claude Code (Native Installer - Recommended). Deliberately NOT nested
+    # under an npm-presence check (its former home inside the old ai_tools
+    # npm block): the native installer is curl|sh and needs no Node - so
+    # claude_cli now works standalone even with core/agent_toolkit off.
+    if ! command -v claude &>/dev/null; then
+         info "Installing Claude Code (Native)..."
+         net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
+    fi
+
+    # Superpowers skills plugin for Claude Code (global - active in every
+    # session once installed, via Claude Code's own plugin marketplace
+    # mechanism, not npm). Re-running add/install is safe if already present.
+    if command -v claude &>/dev/null; then
+        info "Installing Superpowers plugin for Claude Code..."
+        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+    fi
+{{- else }}
+    info "Claude Code disabled in config"
+{{- end }}
+
+{{- if $chatgpt_cli }}
+    # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+    # superpowers/skills/guardrail have no codex surface (the guardrail and
+    # skills passes stay presence-gated on their own CLIs; only this npm
+    # install lives here).
+    install_node
+    if command -v npm &>/dev/null; then
+        info "Installing Codex CLI..."
+        NPM_BIN="$(which npm)"
+
+        # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
+        # If path starts with /usr, valid to use sudo. Otherwise (home dir), drop sudo.
+        local npm_sudo="$SUDO"
+        if [[ "$NPM_BIN" != /usr* ]]; then
+            warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
+            npm_sudo=""
+        fi
+
+        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
+    else
+        warn "npm not found - skipping Codex CLI"
+    fi
+
+    # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
+    # live via an isolated Docker test that the third-party `codex-plugin`
+    # npm helper (the only scriptable option) doesn't just prompt
+    # interactively - it expects a plugins/<name>/ marketplace layout
+    # that obra/superpowers doesn't use (it ships a root-level
+    # .codex-plugin/plugin.json manifest instead), so it fails outright
+    # regardless of flags. Codex's real install path for this plugin is
+    # its native in-app `/plugins` search UI - genuinely GUI/session-only,
+    # no config file or CLI command reaches it from outside a session.
+{{- else }}
+    info "Codex CLI disabled in config"
+{{- end }}
+
+{{- if $antigravity_cli }}
+    # Antigravity CLI (agy) - official install script, no apt package.
+    # Google retired standalone Gemini Code Assist for individuals in
+    # favor of the Antigravity suite (see docs/tool-parity.md) - this
+    # repo no longer installs Gemini CLI, agy replaces it here. Like
+    # Claude Code above, the install.sh is self-contained: no Node/npm
+    # prerequisite, so this section works standalone.
+    if ! command -v agy &>/dev/null; then
+         info "Installing Antigravity CLI (agy)..."
+         net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
+    fi
+
+    # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
+    # <url>` is the officially-documented mechanism (obra/superpowers'
+    # own README.md Antigravity section, confirmed against the locally-
+    # installed copy's docs) - NOT hand-copying skill files into a
+    # guessed plugin directory: Superpowers' own contributor docs
+    # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
+    # unsupported ("Everything arrives through the install mechanism -
+    # not by editing the user's config"). This also sidesteps needing to
+    # hardcode Antigravity's actual plugin storage path here (confirmed
+    # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
+    # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
+    # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
+    # not us, so it stays correct even if/when that path changes again.
+    if command -v agy &>/dev/null; then
+        info "Installing Superpowers plugin for Antigravity..."
+        agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
+    fi
+{{- else }}
+    info "Antigravity CLI disabled in config"
+{{- end }}
+
+{{- if or $claude_cli $antigravity_cli $agent_toolkit }}
+    # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
+    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
+    # via the `skills` CLI - see install_agent_skills above. Cross-cutting
+    # pass (spec §2 wiring rule): fires when ANY of its target groups
+    # (claude_cli / antigravity_cli / agent_toolkit) is enabled - the CLIs
+    # it writes to may have arrived from any of those gates, and the pass
+    # is idempotent either way. npx presence is checked inside the function.
+    install_agent_skills
+{{- end }}
+
+{{- if $guardrail }}
     # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
     install_agent_guardrails
 {{- end }}
@@ -1089,7 +1155,7 @@ PYEOF
     # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
     # is a second runtime check for genuine headless Linux hosts, not the
     # primary WSL/devcontainer guard anymore)
-{{- if and $install_desktop $isHost }}
+{{- if and $dev_desktop $isHost }}
     if [[ -n "${DISPLAY:-}" ]]; then
         install_linux_desktop
     fi
@@ -1122,29 +1188,32 @@ install_brew() {
         fi
     fi
 
-{{- if $install_core }}
+{{- if $core }}
     # Core packages. coreutils first: it provides `gtimeout`, which net_timeout
-    # needs to guard the download-heavy steps further down (modern tools, AI
-    # tools, ScreenRec/Antigravity .dmgs) - macOS has no `timeout` in the base OS.
+    # needs to guard the download-heavy steps further down (modern tools, the
+    # agent toolkit, ScreenRec's dmg, Antigravity 2.0's dmg) - macOS has no
+    # `timeout` in the base OS.
     brew install coreutils gcc git curl wget jq fzf zsh tmux neovim ripgrep htop tree node@24 python3 cmake ffmpeg sevenzip gh
     brew link --overwrite node@24 || true
 {{- else }}
     info "Core packages disabled in config"
 {{- end }}
 
-{{- if $install_modern }}
+{{- if $modern_cli }}
     # Modern CLI tools
     brew install bat eza fd git-delta zoxide starship direnv lazygit gum tealdeer dust duf procs || true
     brew install shellcheck shfmt || warn "shellcheck/shfmt install failed - continuing"
 {{- end }}
 
-{{- if $install_fonts }}
+{{- if $fonts }}
     # Fonts - MesloLGS NF is a great Nerd Font for Starship
     brew install --cask font-meslo-lg-nerd-font || true
 {{- end }}
 
-{{- if $install_ai_tools }}
-    # AI Coding Tools
+{{- if $agent_toolkit }}
+    # Agent toolkit (spec §2: the cross-vendor agent layer. Codex moved to
+    # chatgpt_cli, Claude Code to claude_cli, agy to antigravity_cli - vendor
+    # products live in vendor groups per the spec's placement rule).
 
     # Ollama
     if ! command -v ollama &>/dev/null; then
@@ -1162,15 +1231,7 @@ install_brew() {
     fi
 
     if command -v npm &>/dev/null; then
-        info "Installing AI coding tools..."
-        command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
-
-        # Claude Code (Native Installer - Recommended)
-        if ! command -v claude &>/dev/null; then
-             info "Installing Claude Code (Native)..."
-             net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
-        fi
-
+        info "Installing agent toolkit (OpenCode, superpowers, Playwright)..."
         # OpenCode (Native Install Script - ~180MB binary). --version
         # re-check + legacy npm shim removal: same rationale as the apt
         # branch above (a dead npm-global opencode-ai on PATH otherwise
@@ -1181,25 +1242,9 @@ install_brew() {
              npm rm -g opencode-ai &>/dev/null || true
         fi
 
-        # Antigravity CLI (agy) - Homebrew cask (v1.1.22, confirmed current
-        # on formulae.brew.sh, matching the exact version Chocolatey ships on
-        # Windows). Google retired standalone Gemini Code Assist for
-        # individuals in favor of the Antigravity suite (see
-        # docs/tool-parity.md) - this repo no longer installs Gemini CLI, agy
-        # replaces it here.
-        command -v agy &>/dev/null || brew install --cask antigravity-cli || warn "Antigravity CLI install failed - continuing"
-
-        # Superpowers skills plugin for Claude Code (global - active in every
-        # session once installed, via Claude Code's own plugin marketplace
-        # mechanism, not npm). Re-running add/install is safe if already present.
-        if command -v claude &>/dev/null; then
-            info "Installing Superpowers plugin for Claude Code..."
-            claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-            claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
-        fi
-
         # Superpowers skills for OpenCode (separate mechanism from Claude
-        # Code's plugin marketplace above - OpenCode reads its own
+        # Code's plugin marketplace, which lives in the claude_cli section
+        # now - OpenCode reads its own
         # opencode.json config). jq merges into the plugin array without
         # clobbering any other settings already in the file.
         if command -v opencode &>/dev/null; then
@@ -1216,41 +1261,8 @@ install_brew() {
             fi
         fi
 
-        # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
-        # <url>` is the officially-documented mechanism (obra/superpowers'
-        # own README.md Antigravity section, confirmed against the locally-
-        # installed copy's docs) - NOT hand-copying skill files into a
-        # guessed plugin directory: Superpowers' own contributor docs
-        # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
-        # unsupported ("Everything arrives through the install mechanism -
-        # not by editing the user's config"). This also sidesteps needing to
-        # hardcode Antigravity's actual plugin storage path here (confirmed
-        # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
-        # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
-        # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
-        # not us, so it stays correct even if/when that path changes again.
-        if command -v agy &>/dev/null; then
-            info "Installing Superpowers plugin for Antigravity..."
-            agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
-        fi
-
-        # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-        # Anthropic's frontend-design) for Claude Code / OpenCode /
-        # Antigravity, via the `skills` CLI - see install_agent_skills above.
-        install_agent_skills
-
-        # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
-        # live via an isolated Docker test that the third-party `codex-plugin`
-        # npm helper (the only scriptable option) doesn't just prompt
-        # interactively - it expects a plugins/<name>/ marketplace layout
-        # that obra/superpowers doesn't use (it ships a root-level
-        # .codex-plugin/plugin.json manifest instead), so it fails outright
-        # regardless of flags. Codex's real install path for this plugin is
-        # its native in-app `/plugins` search UI - genuinely GUI/session-only,
-        # no config file or CLI command reaches it from outside a session.
-
         # Playwright Chromium - headless browser for coding-agent browser
-        # automation. Deliberately here, not under install_desktop: that's
+        # automation. Deliberately here, not under dev_desktop: that's
         # gated host-only ($isHost) and never runs on WSL/containers, exactly
         # where coding agents most often run. No install-deps step on macOS -
         # that concept is apt-specific and unsupported/unneeded here.
@@ -1343,19 +1355,109 @@ PYEOF
     # check treats any container as one (see .chezmoi.toml.tmpl) - so
     # $interactive can never be true under act, meaning it can validate
     # template/script syntax and the devcontainer code path, but can't
-    # exercise install_core/install_ai_tools/etc content. Confirmed this
+    # exercise the core/agent_toolkit/etc section content. Confirmed this
     # session testing a Superpowers install fix - had to fall back to
     # isolated `docker run` tests for that instead.
     command -v act &>/dev/null || brew install act || warn "act install failed"
+{{- else }}
+    info "Agent toolkit disabled in config"
 {{- end }}
 
-{{- if $install_guardrail }}
+{{- if $claude_cli }}
+    # Claude Code (Native Installer - Recommended). Not nested under an
+    # npm-presence check (its former home inside the old ai_tools npm
+    # block): the native installer is curl|sh and needs no Node - so
+    # claude_cli now works standalone even with core/agent_toolkit off.
+    if ! command -v claude &>/dev/null; then
+         info "Installing Claude Code (Native)..."
+         net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
+    fi
+
+    # Superpowers skills plugin for Claude Code (global - active in every
+    # session once installed, via Claude Code's own plugin marketplace
+    # mechanism, not npm). Re-running add/install is safe if already present.
+    if command -v claude &>/dev/null; then
+        info "Installing Superpowers plugin for Claude Code..."
+        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+    fi
+{{- else }}
+    info "Claude Code disabled in config"
+{{- end }}
+
+{{- if $chatgpt_cli }}
+    # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+    # superpowers/skills/guardrail have no codex surface (the guardrail and
+    # skills passes stay presence-gated on their own CLIs; only this npm
+    # install lives here).
+    if command -v npm &>/dev/null; then
+        info "Installing Codex CLI..."
+        command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
+    else
+        warn "npm not found - skipping Codex CLI"
+    fi
+
+    # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
+    # live via an isolated Docker test that the third-party `codex-plugin`
+    # npm helper (the only scriptable option) doesn't just prompt
+    # interactively - it expects a plugins/<name>/ marketplace layout
+    # that obra/superpowers doesn't use (it ships a root-level
+    # .codex-plugin/plugin.json manifest instead), so it fails outright
+    # regardless of flags. Codex's real install path for this plugin is
+    # its native in-app `/plugins` search UI - genuinely GUI/session-only,
+    # no config file or CLI command reaches it from outside a session.
+{{- else }}
+    info "Codex CLI disabled in config"
+{{- end }}
+
+{{- if $antigravity_cli }}
+    # Antigravity CLI (agy) - Homebrew cask (v1.1.22, confirmed current
+    # on formulae.brew.sh, matching the exact version Chocolatey ships on
+    # Windows). Google retired standalone Gemini Code Assist for
+    # individuals in favor of the Antigravity suite (see
+    # docs/tool-parity.md) - this repo no longer installs Gemini CLI, agy
+    # replaces it here.
+    command -v agy &>/dev/null || net_timeout 600 brew install --cask antigravity-cli || warn "Antigravity CLI install failed or timed out - continuing"
+
+    # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
+    # <url>` is the officially-documented mechanism (obra/superpowers'
+    # own README.md Antigravity section, confirmed against the locally-
+    # installed copy's docs) - NOT hand-copying skill files into a
+    # guessed plugin directory: Superpowers' own contributor docs
+    # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
+    # unsupported ("Everything arrives through the install mechanism -
+    # not by editing the user's config"). This also sidesteps needing to
+    # hardcode Antigravity's actual plugin storage path here (confirmed
+    # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
+    # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
+    # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
+    # not us, so it stays correct even if/when that path changes again.
+    if command -v agy &>/dev/null; then
+        info "Installing Superpowers plugin for Antigravity..."
+        agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
+    fi
+{{- else }}
+    info "Antigravity CLI disabled in config"
+{{- end }}
+
+{{- if or $claude_cli $antigravity_cli $agent_toolkit }}
+    # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
+    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
+    # via the `skills` CLI - see install_agent_skills above. Cross-cutting
+    # pass (spec §2 wiring rule): fires when ANY of its target groups
+    # (claude_cli / antigravity_cli / agent_toolkit) is enabled - the CLIs
+    # it writes to may have arrived from any of those gates, and the pass
+    # is idempotent either way. npx presence is checked inside the function.
+    install_agent_skills
+{{- end }}
+
+{{- if $guardrail }}
     # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
     install_agent_guardrails
 {{- end }}
 
     # Mac Desktop Apps (Cask) - hosts only, see the top-of-file $isHost comment
-{{- if and $install_desktop $isHost }}
+{{- if and $dev_desktop $isHost }}
     info "Installing Mac Desktop Apps..."
     # filezilla intentionally omitted: confirmed removed from homebrew-cask
     # entirely (adware concerns, not a naming/renaming issue like Antigravity) -
@@ -1416,14 +1518,192 @@ PYEOF
 }
 
 #-------------------------------------------------------------------------------
-# Google Antigravity Desktop App was removed (2026-09-11): VS Code + the agy
-# CLI (installed under install_ai_tools, above) cover that workflow. This
-# function is kept as an explicit no-op so main()'s dispatch list and any
-# muscle memory stay honest; the Linux apt repo, macOS dmg pin, and the
-# install_antigravity config toggle are all gone.
+# AI desktop apps (spec §2: pure installs, zero wiring - superpowers, the
+# curated-skills pass and guardrail planes key off the CLI groups only, per
+# the spec's placement rule; nothing in these functions configures anything).
+#
+# History: the Google Antigravity Desktop App was removed 2026-09-11 (VS Code
+# + the agy CLI covered that workflow; the old Linux apt repo and the
+# "Antigravity IDE" dmg pin went with it) and is reinstated 2026-09-13 as
+# Antigravity 2.0 under the antigravity_desktop group, from the new
+# antigravity-hub storage channel with the version pinned inside
+# install_antigravity_desktop (scripts/update-versions.sh re-checks that pin).
 #-------------------------------------------------------------------------------
-install_antigravity() {
-    : # removed - see the comment above
+
+# Claude Desktop - official Homebrew cask on macOS (spec §2: Win choco `claude`
+# carries it there; Linux has no official build - info line, no-op, by spec).
+install_claude_desktop() {
+    case "$(uname -s)" in
+        Darwin)
+            if [[ -d "/Applications/Claude.app" ]]; then
+                info "Claude Desktop already installed (/Applications/Claude.app)"
+                return 0
+            fi
+            info "Installing Claude Desktop (brew cask claude)..."
+            net_timeout 600 brew install --cask claude || warn "Claude Desktop install failed or timed out - continuing"
+            ;;
+        Linux)
+            info "claude_desktop: no official Linux build - skipping"
+            ;;
+        *)
+            warn "claude_desktop: unsupported OS $(uname -s) - skipping"
+            ;;
+    esac
+}
+
+# ChatGPT Desktop - official Homebrew cask on macOS (spec §2: Win winget-msstore
+# carries it there; Linux has no official build - info line, no-op, by spec).
+install_chatgpt_desktop() {
+    case "$(uname -s)" in
+        Darwin)
+            if [[ -d "/Applications/ChatGPT.app" ]]; then
+                info "ChatGPT Desktop already installed (/Applications/ChatGPT.app)"
+                return 0
+            fi
+            info "Installing ChatGPT Desktop (brew cask chatgpt)..."
+            net_timeout 600 brew install --cask chatgpt || warn "ChatGPT Desktop install failed or timed out - continuing"
+            ;;
+        Linux)
+            info "chatgpt_desktop: no official Linux build - skipping"
+            ;;
+        *)
+            warn "chatgpt_desktop: unsupported OS $(uname -s) - skipping"
+            ;;
+    esac
+}
+
+# Antigravity 2.0 (the hub-channel desktop app - distinct from the agy CLI in
+# antigravity_cli). macOS: pinned dmg + hdiutil + runtime volume/.app discovery
+# (same pattern the legacy install_antigravity() used after Google's
+# "Antigravity"->"Antigravity IDE" rename broke hardcoded volume names: never
+# trust a guessed bundle name, discover it mounted). Linux: pinned tar.gz
+# extracted under ~/.local/share - no packaging, no launcher integration yet;
+# the extraction layout is logged verbatim below so the CI verify (and docs)
+# can be designed from real first-run evidence.
+install_antigravity_desktop() {
+    # Antigravity 2.0 hub release pin - single source of truth for both the
+    # macOS dmg and the Linux tar.gz below. scripts/update-versions.sh scrapes
+    # antigravity.google/download and re-checks both asset URLs before
+    # rewriting this line (Windows floats via choco, no pin needed there).
+    ANTIGRAVITY_HUB_VERSION="2.13.0-6362815968182272"
+    local ag_base="https://storage.googleapis.com/antigravity-public/antigravity-hub/${ANTIGRAVITY_HUB_VERSION}"
+
+    case "$(uname -s)" in
+        Darwin)
+            # 2.0 hub channel ships a plain "Antigravity.app" - unlike the
+            # legacy IDE guard, no dual pre-/post-rename name check needed.
+            if [[ -d "/Applications/Antigravity.app" ]]; then
+                info "Antigravity 2.0 already installed (/Applications/Antigravity.app)"
+                return 0
+            fi
+            local ag_arch
+            case "$(uname -m)" in
+                arm64) ag_arch="darwin-arm" ;;
+                x86_64) ag_arch="darwin-x64" ;;
+                *) warn "antigravity_desktop: unsupported macOS arch $(uname -m) - skipping"; return 0 ;;
+            esac
+            info "Downloading Antigravity 2.0 for macOS ($ag_arch)..."
+            if ! net_timeout 600 curl -fsSL -o /tmp/Antigravity.dmg "${ag_base}/${ag_arch}/Antigravity.dmg"; then
+                warn "Antigravity 2.0 dmg download failed or timed out - skipping"
+                rm -f /tmp/Antigravity.dmg
+                return 0
+            fi
+            # Mount and install. Runtime volume/.app discovery, not hardcoded
+            # names - the legacy lesson: Google renamed the bundle mid-channel
+            # and `cp /Volumes/Antigravity/Antigravity.app` broke live.
+            local mount_output volume_path
+            # Attach guarded: an unguarded failure would abort the whole
+            # remaining run under `set -euo pipefail` (warn-and-continue
+            # contract instead). grep's no-match exit is neutralized with
+            # `|| true` INSIDE the substitution so an empty result reaches
+            # the -z guard below instead of tripping pipefail first.
+            mount_output=$(hdiutil attach /tmp/Antigravity.dmg -nobrowse) \
+                || { warn "Failed to mount Antigravity 2.0 DMG"; rm -f /tmp/Antigravity.dmg; return 0; }
+            volume_path=$(echo "$mount_output" | grep -Eo '/Volumes/.*$' | tail -1 || true)
+            if [[ -z "$volume_path" ]]; then
+                warn "Could not determine mounted volume path for Antigravity 2.0 DMG"
+            else
+                local app_path
+                app_path=$(find "$volume_path" -maxdepth 1 -name "*.app" -print -quit)
+                if [[ -n "$app_path" ]]; then
+                    # Success line only on a confirmed copy - a failed cp
+                    # must not read as "installed" in the log.
+                    if cp -R "$app_path" /Applications/; then
+                        success "Antigravity 2.0 installed to /Applications"
+                    else
+                        warn "Failed to copy $(basename "$app_path") to /Applications"
+                    fi
+                else
+                    warn "No .app bundle found in mounted Antigravity 2.0 volume at $volume_path"
+                fi
+                hdiutil detach "$volume_path" -quiet || warn "Failed to detach Antigravity 2.0 volume at $volume_path"
+            fi
+            rm -f /tmp/Antigravity.dmg
+            ;;
+        Linux)
+            # Tarball install under ~/.local/share (the 2.0 hub channel ships
+            # no .deb/.AppImage). Idempotent guard: the install dir itself.
+            local ag_dir="$HOME/.local/share/antigravity-2.0"
+            if [[ -d "$ag_dir" ]]; then
+                info "Antigravity 2.0 already installed at $ag_dir - skipping"
+                return 0
+            fi
+            local ag_arch
+            case "$(uname -m)" in
+                x86_64|amd64) ag_arch="linux-x64" ;;
+                aarch64|arm64) ag_arch="linux-arm" ;;
+                *) warn "antigravity_desktop: unsupported Linux arch $(uname -m) - skipping"; return 0 ;;
+            esac
+            info "Downloading Antigravity 2.0 for Linux ($ag_arch)..."
+            local ag_tmp
+            ag_tmp="$(mktemp -d)"
+            if ! net_timeout 600 curl -fLo "$ag_tmp/Antigravity.tar.gz" "${ag_base}/${ag_arch}/Antigravity.tar.gz"; then
+                warn "Antigravity 2.0 tar.gz download failed or timed out - skipping"
+                rm -rf "$ag_tmp"
+                return 0
+            fi
+            mkdir -p "$ag_dir"
+            if ! tar -xzf "$ag_tmp/Antigravity.tar.gz" -C "$ag_dir"; then
+                warn "Antigravity 2.0 extraction failed - skipping"
+                rm -rf "$ag_dir" "$ag_tmp"
+                return 0
+            fi
+            rm -rf "$ag_tmp"
+
+            # Make discovered executables runnable: tar normally preserves
+            # modes, but storage-served tarballs can arrive flattened. `file`
+            # identifies binaries/scripts by CONTENT (ELF / "executable" /
+            # "script" in its output), so nothing gets +x by name-guessing.
+            if command -v file &>/dev/null; then
+                while IFS= read -r -d '' ag_f; do
+                    if file "$ag_f" | grep -qE 'ELF|executable|script'; then
+                        chmod +x "$ag_f" || true
+                    fi
+                done < <(find "$ag_dir" -type f -print0)
+            else
+                # No file(1) (unexpected on apt/brew systems): fall back to
+                # +x on everything so a flattened tarball still yields
+                # runnable binaries; data files stay openable regardless.
+                find "$ag_dir" -type f -exec chmod +x {} +
+            fi
+
+            # Log the extracted layout VERBATIM (unverified until the first
+            # real install): the CI verify step and docs are designed from
+            # this output - do not reformat it.
+            info "Antigravity 2.0 extracted to $ag_dir - layout (find $ag_dir -maxdepth 2):"
+            find "$ag_dir" -maxdepth 2
+
+            # PATH note: the tarball's launcher layout is unknown until the
+            # first real extraction (see the log above) - if it ships a CLI,
+            # its directory under $ag_dir must be added to PATH manually
+            # until docs/package-groups.md records the exact path.
+            info "If Antigravity 2.0 ships a CLI launcher, add its directory under $ag_dir to PATH (see layout above)."
+            success "Antigravity 2.0 installed to $ag_dir"
+            ;;
+        *)
+            warn "antigravity_desktop: unsupported OS $(uname -s) - skipping"
+            ;;
+    esac
 }
 
 setup_shell() {
@@ -1515,14 +1795,30 @@ main() {
         *)    warn "Skipping package installation (unsupported manager: $pkg_manager)" ;;
     esac
 
-    # Google Antigravity (hosts only)
-    install_antigravity
-    
+    # AI desktop apps (hosts only - the config template host-gates the
+    # desktop groups too, spec §3; dispatched here, after install_apt/
+    # install_brew, so brew is guaranteed present for the macOS casks)
+{{- if and $claude_desktop $isHost }}
+    install_claude_desktop
+{{- else }}
+    info "Claude Desktop disabled (WSL/Devcontainer/config)"
+{{- end }}
+{{- if and $chatgpt_desktop $isHost }}
+    install_chatgpt_desktop
+{{- else }}
+    info "ChatGPT Desktop disabled (WSL/Devcontainer/config)"
+{{- end }}
+{{- if and $antigravity_desktop $isHost }}
+    install_antigravity_desktop
+{{- else }}
+    info "Antigravity Desktop disabled (WSL/Devcontainer/config)"
+{{- end }}
+
     # Ensure zsh is default
     setup_shell
 
     success "Package installation complete!"
-{{- if and $install_desktop $isHost }}
+{{- if and $dev_desktop $isHost }}
     echo ""
     info "[Post-Install] Launch Docker Desktop once from your applications menu to accept the"
     info "  EULA and start the engine, then confirm it works with:  docker ps"

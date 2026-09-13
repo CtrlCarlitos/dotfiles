@@ -63,12 +63,18 @@ jobs:
             email = "ci-full-install@example.local"
 
           [data.packages]
-            install_core = true
-            install_modern = true
-            install_fonts = true
-            install_ai_tools = true
-            install_guardrail = true
-            install_desktop = true
+            core = true
+            modern_cli = true
+            fonts = true
+            agent_toolkit = true
+            claude_cli = true
+            claude_desktop = true
+            chatgpt_cli = true
+            chatgpt_desktop = true
+            antigravity_cli = true
+            antigravity_desktop = true
+            dev_desktop = true
+            guardrail = true
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
       - name: Run install.ps1 (full install)
@@ -112,9 +118,42 @@ jobs:
             }
           }
 
-          # Antigravity's desktop surfaces (IDE + hub app) were removed from
-          # this repo - agy (checked above) is the one Antigravity surface
-          # that remains. tmux is psmux's alias (the native Windows tmux).
+          # tmux is psmux's alias (the native Windows tmux). agy is the
+          # Antigravity CLI; the 2.0 desktop app is checked below.
+
+          # Claude Desktop: uninstall-registry entry (the desktop app; Claude
+          # Code is a CLI, checked via Get-Command above, and registers no
+          # ARP entry today).
+          $claudeReg = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -eq "Claude" }
+          if ($claudeReg) {
+            Write-Host "  OK: Claude Desktop"
+          } else {
+            Write-Host "::error::Claude Desktop not found in uninstall registry"
+            $failed = $true
+          }
+
+          # ChatGPT Desktop: msstore/winget appx package.
+          $gptPkg = $null
+          try { $gptPkg = Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue } catch {}
+          if ($gptPkg) {
+            Write-Host "  OK: ChatGPT Desktop"
+          } else {
+            Write-Host "::error::ChatGPT Desktop appx package not found"
+            $failed = $true
+          }
+
+          # Antigravity 2.0 (hub): 3-proof check (path / registry / choco).
+          $agExe = "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
+          $agReg = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "Antigravity*" -and $_.DisplayName -notlike "*IDE*" }
+          $agChoco = (choco list --exact antigravity 2>$null | Select-String "^antigravity\s")
+          if ((Test-Path $agExe) -or $agReg -or $agChoco) {
+            Write-Host "  OK: Antigravity 2.0"
+          } else {
+            Write-Host "::error::Antigravity 2.0 not found (path, registry, and choco list all empty)"
+            $failed = $true
+          }
 
           $chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
           if (Test-Path $chromeExe) {
@@ -152,12 +191,18 @@ jobs:
             email = "ci-full-install@example.local"
 
           [data.packages]
-            install_core = true
-            install_modern = true
-            install_fonts = true
-            install_ai_tools = true
-            install_guardrail = true
-            install_desktop = true
+            core = true
+            modern_cli = true
+            fonts = true
+            agent_toolkit = true
+            claude_cli = true
+            claude_desktop = true
+            chatgpt_cli = true
+            chatgpt_desktop = true
+            antigravity_cli = true
+            antigravity_desktop = true
+            dev_desktop = true
+            guardrail = true
           EOF
 
       - name: Install Xvfb (so install_desktop is real coverage, not a silent no-op)
@@ -196,8 +241,17 @@ jobs:
             check "$cmd"
           done
 
-          # Antigravity's desktop app was removed from this repo - agy
-          # (checked above) is the one Antigravity surface that remains.
+          # agy is the Antigravity CLI. Claude/ChatGPT Desktop have no
+          # official Linux builds (the installer info-skips by design) -
+          # nothing to check for them here. Antigravity 2.0 installs from
+          # the hub tarball:
+
+          if [ -d "$HOME/.local/share/antigravity-2.0" ] && find "$HOME/.local/share/antigravity-2.0" -maxdepth 2 -type f -perm -u+x | grep -q .; then
+            echo "  OK: Antigravity 2.0 (extracted with executables)"
+          else
+            echo "::error::Antigravity 2.0 not found at ~/.local/share/antigravity-2.0"
+            FAILED=1
+          fi
 
           if command -v google-chrome &>/dev/null; then
             echo "  OK: google-chrome"
@@ -226,12 +280,18 @@ jobs:
             email = "ci-full-install@example.local"
 
           [data.packages]
-            install_core = true
-            install_modern = true
-            install_fonts = true
-            install_ai_tools = true
-            install_guardrail = true
-            install_desktop = true
+            core = true
+            modern_cli = true
+            fonts = true
+            agent_toolkit = true
+            claude_cli = true
+            claude_desktop = true
+            chatgpt_cli = true
+            chatgpt_desktop = true
+            antigravity_cli = true
+            antigravity_desktop = true
+            dev_desktop = true
+            guardrail = true
           EOF
 
       - name: Run install.sh (full install)
@@ -258,8 +318,24 @@ jobs:
             check "$cmd"
           done
 
-          # Antigravity's desktop app was removed from this repo - agy
-          # (checked above) is the one Antigravity surface that remains.
+          # agy is the Antigravity CLI; the three AI desktop apps install
+          # via brew casks / the 2.0 dmg:
+
+          for app in "Claude" "ChatGPT"; do
+            if [ -d "/Applications/$app.app" ]; then
+              echo "  OK: $app Desktop"
+            else
+              echo "::error::$app Desktop not found in /Applications"
+              FAILED=1
+            fi
+          done
+
+          if [ -d "/Applications/Antigravity.app" ]; then
+            echo "  OK: Antigravity 2.0"
+          else
+            echo "::error::Antigravity 2.0 not found in /Applications"
+            FAILED=1
+          fi
 
           if [ -d "/Applications/Google Chrome.app" ]; then
             echo "  OK: Google Chrome"

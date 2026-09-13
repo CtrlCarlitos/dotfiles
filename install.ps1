@@ -7,6 +7,41 @@ function Write-Info { param([string]$Message) Write-Host "[:] $Message" -Foregro
 function Write-Success { param([string]$Message) Write-Host "[v] $Message" -ForegroundColor Green }
 function Write-Error { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
 
+# Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
+# only: on failure warn and continue - without gum the menu self-skips and
+# chezmoi's native config prompts take over.
+function Bootstrap-Gum {
+    if (Get-Command gum -ErrorAction SilentlyContinue) { return }
+
+    $gumDir = Join-Path $env:USERPROFILE '.local\bin'
+    $zipUrl = 'https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Windows_x86_64.zip'
+    try {
+        # PS 5.1 defaults can lack TLS 1.2 (same fix as the Chocolatey fetch)
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        New-Item -ItemType Directory -Force -Path $gumDir | Out-Null
+        # -TimeoutSec so a stalled download errors out instead of hanging
+        $zipPath = Join-Path $env:TEMP 'gum_2.0.1_Windows_x86_64.zip'
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
+        Expand-Archive -Path $zipPath -DestinationPath $gumDir -Force
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        # zip layout varies (flat vs nested dir) - ensure gum.exe lands at the root
+        if (-not (Test-Path (Join-Path $gumDir 'gum.exe'))) {
+            $nested = Get-ChildItem -Path $gumDir -Recurse -Filter 'gum.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($nested) { Move-Item -LiteralPath $nested.FullName -Destination (Join-Path $gumDir 'gum.exe') -Force }
+        }
+        # Session PATH: Machine+User rebuild (existing pattern) with the gum dir
+        # prepended - Windows never puts ~\.local\bin on PATH by default.
+        $env:Path = "$gumDir;" + [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
+        if (Get-Command gum -ErrorAction SilentlyContinue) {
+            Write-Success "Bootstrapped gum for the package menu."
+        } else {
+            Write-Info "gum extracted to $gumDir but not runnable - menu will self-skip."
+        }
+    } catch {
+        Write-Error "gum bootstrap failed: $_ - continuing (menu will self-skip)."
+    }
+}
+
 # 0. Setup
 $InstallerUrl = "https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1"
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -16,6 +51,16 @@ $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 # check, Read-Host below blocks forever with no error and no timeout in a runner with
 # no real stdin - confirmed live: a Windows Installer Test run hung 40+ minutes here.
 $IsNonInteractive = ($env:CI -eq 'true') -or ($env:CHEZMOI_TEST_MINIMAL -eq 'true')
+
+# 0.1 Consent - ask before touching anything. Non-interactive environments
+# (matched above) auto-proceed without prompting.
+if (-not $IsNonInteractive) {
+    $proceed = Read-Host "This installer installs Chocolatey packages, chezmoi, and applies the CtrlCarlitos dotfiles. Proceed? (Y/n)"
+    if ($proceed -eq 'n') {
+        Write-Info "Aborted - nothing was installed. Re-run any time."
+        exit 0
+    }
+}
 
 if (-not $IsAdmin) {
     Write-Info "Running without Administrator privileges."
@@ -58,6 +103,33 @@ try {
         if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
             throw "Chocolatey installation failed."
         }
+    }
+
+    # 0.7 Interactive package menu - runs BEFORE `chezmoi init --apply` so the
+    # selection lands in the config ahead of the config template. The menu
+    # self-skips non-interactive or without gum; chezmoi's native config
+    # prompts are always the fallback. Spawned as a child process because
+    # select-packages.ps1 exits on completion and must not end this installer.
+    Bootstrap-Gum
+    $selectPackages = $null
+    if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'scripts\select-packages.ps1'))) {
+        $selectPackages = Join-Path $PSScriptRoot 'scripts\select-packages.ps1'
+    } elseif (Test-Path '.\scripts\select-packages.ps1') {
+        $selectPackages = (Resolve-Path '.\scripts\select-packages.ps1').Path
+    } elseif (Test-Path "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1") {
+        $selectPackages = "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1"
+    }
+    if ($selectPackages) {
+        try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $selectPackages
+            if ($LASTEXITCODE -ne 0) {
+                Write-Info "Package menu exited with $LASTEXITCODE - continuing with chezmoi config prompts."
+            }
+        } catch {
+            Write-Info "Package menu could not run: $_ - continuing with chezmoi config prompts."
+        }
+    } else {
+        Write-Info "Package menu script not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
     }
 
     # 1. Install Chezmoi if missing
