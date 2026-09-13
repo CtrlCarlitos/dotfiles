@@ -27,6 +27,8 @@ What happens:
 
 **Don't know what to pick?** Use the **standard** preset (the default) — it gives you a terminal with all the essentials plus Claude Code. You can always add ChatGPT, Antigravity, or desktop apps later by re-running the installer.
 
+**What the menu looks like:** see [docs/menu-demo.md](docs/menu-demo.md) for a walkthrough of both prompts.
+
 To change your selections later:
 ```sh
 bash ~/.local/share/chezmoi/scripts/select-packages.sh   # reopens the menu
