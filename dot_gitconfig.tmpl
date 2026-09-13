@@ -3,12 +3,16 @@
 # Global settings - identity is set dynamically based on directory
 # Managed by chezmoi - accounts configured via chezmoi init
 #===============================================================================
-{{- /* Find default identity (use first account as default) */ -}}
+{{- /* Find default identity (use first account as default). hasKey, not bare
+      truthiness: a config with [data.packages] but no accounts key (our own
+      full-install CI configs, hand-rolled setups) would abort every apply at
+      this dereference - the same "map has no entry" class dot_gitconfig's
+      package reads hit before the 12-group migration hardened them. */ -}}
 {{- $simpleName := "" -}}
 {{- $simpleEmail := "" -}}
 {{- $simpleKey := "" -}}
 {{- $simpleSigningKey := "" -}}
-{{- if .accounts -}}
+{{- if and (hasKey . "accounts") .accounts -}}
 {{-   $first := first .accounts -}}
 {{-   if $first -}}
 {{-     $simpleName = $first.name -}}
