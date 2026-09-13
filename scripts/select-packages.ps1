@@ -8,11 +8,12 @@
 # Run standalone to re-choose groups at any time, or from install.ps1 before
 # `chezmoi init --apply` (spec §4). Design contracts (shared with the .sh twin):
 #
-#   - CI-safe: without an interactive session ($env:CI set, or
-#     [Environment]::UserInteractive false) or gum on PATH this is a no-op that
-#     exits 0 printing "skipping menu" — pre-seeded CI configs never prompt.
-#     (The .sh twin gates on stdin being a TTY; Windows has no cheap
-#     equivalent, so UserInteractive + no-$env:CI is the gate here.)
+#   - CI-safe: without an interactive stdin ($env:CI set, or stdin
+#     piped/redirected as under CI — [Console]::IsInputRedirected) or gum on
+#     PATH this is a no-op that exits 0 printing "skipping menu" — pre-seeded
+#     CI configs never prompt. (Same contract as the .sh twin's [ -t 0 ] gate;
+#     UserInteractive was wrong: GitHub Actions runners report it TRUE —
+#     run 34730549901's full-install hung gum on redirected stdin for 2h.)
 #   - The menu OWNS [data.packages]: a rewrite replaces the whole section
 #     (hand-edited keys inside it are intentionally overwritten — re-running
 #     the menu means re-choosing). Everything outside the section is
@@ -57,7 +58,11 @@ function Get-PresetSet([string]$preset) {
 # ---------------------------------------------------------------- gate ------
 
 $gum = Get-Command gum -ErrorAction SilentlyContinue
-if (-not [Environment]::UserInteractive -or $env:CI -or -not $gum) {
+# Stdin-tty gate, matching the .sh twin's [ -t 0 ]: IsInputRedirected is $true
+# whenever stdin is piped/redirected — every CI shape, even where
+# UserInteractive is $true (GH Actions window station) and $env:CI is blanked
+# (run 34730549901). $env:CI remains as a belt-and-suspenders hint.
+if ([Console]::IsInputRedirected -or $env:CI -or -not $gum) {
     Info 'skipping menu (no interactive terminal/gum) - config template prompts or existing config apply as-is'
     exit 0
 }

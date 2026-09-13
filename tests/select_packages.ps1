@@ -4,9 +4,14 @@
 # `choose` results and tees argv to $env:FAKE_GUM_LOG; a child pwsh runs the
 # script under test with HOME/USERPROFILE pointed at temp dirs.
 #
-# The script under test gates on [Environment]::UserInteractive + -not $env:CI
-# (the Windows-twin TTY check), so interactive scenarios must run from an
-# interactive session; the CI gate is exercised by setting $env:CI in a child.
+# The script under test gates on stdin being a real console
+# ([Console]::IsInputRedirected -eq $false — the [ -t 0 ] twin) plus
+# -not $env:CI, so interactive scenarios run the child under a pty via a
+# python3 helper (which also sets a 24x80 winsize: pwsh livelocks on a 0x0
+# pty, exactly what util-linux `script` allocates when its own stdin is not
+# a terminal). Hosts without python3 (e.g. Windows) invoke the child directly
+# and rely on the harness console. The no-TTY path is piped stdin into the
+# child; the $env:CI arm is exercised by setting CI in the child.
 
 $ErrorActionPreference = 'Stop'
 
@@ -77,9 +82,98 @@ fi
     chmod +x (Join-Path $Bin 'gum')
 }
 
+# Interactive runs need a real console stdin for the gate. Non-Windows
+# harnesses often have none (CI, agent shells), so spawn the child under a
+# pty. The helper sets a 24x80 winsize before exec — pwsh livelocks on a 0x0
+# pty, which is what util-linux `script` leaves when its own stdin is not a
+# terminal, so `script` cannot be used here. Windows (or python3-less hosts)
+# fall back to direct invocation, which works whenever the harness itself
+# runs from a console.
+$IsWinHost = ($IsWindows -or $env:OS -eq 'Windows_NT')
+$Python = $null
+$PtyRunner = $null
+if (-not $IsWinHost) {
+    $Python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $Python) { $Python = Get-Command python -ErrorAction SilentlyContinue }
+    if ($Python) {
+        $PtyRunner = Join-Path $Tmp 'ptyrun.py'
+        @'
+import fcntl, os, pty, select, signal, struct, sys, termios, time
+
+# ptyrun.py TIMEOUT CMD... — run CMD under a 24x80 pty, echo its output, exit
+# with the child's exit code (killed past TIMEOUT).
+timeout = float(sys.argv[1])
+cmd = sys.argv[2:]
+master, slave = pty.openpty()
+fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
+pid = os.fork()
+if pid == 0:
+    os.close(master)
+    os.setsid()
+    try:
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+    except OSError:
+        pass
+    os.dup2(slave, 0)
+    os.dup2(slave, 1)
+    os.dup2(slave, 2)
+    if slave > 2:
+        os.close(slave)
+    try:
+        os.execvp(cmd[0], cmd)
+    finally:
+        os._exit(127)
+os.close(slave)
+status = None
+deadline = time.monotonic() + timeout
+while status is None:
+    try:
+        wpid, st = os.waitpid(pid, os.WNOHANG)
+        if wpid:
+            status = st
+            break
+    except ChildProcessError:
+        status = 0
+        break
+    if time.monotonic() > deadline:
+        os.kill(pid, signal.SIGKILL)
+        _, status = os.waitpid(pid, 0)
+        break
+    try:
+        ready, _, _ = select.select([master], [], [], 0.2)
+    except OSError:
+        continue
+    if ready:
+        try:
+            data = os.read(master, 65536)
+        except OSError:
+            continue
+        if data:
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+while True:
+    try:
+        data = os.read(master, 65536)
+    except OSError:
+        break
+    if not data:
+        break
+    sys.stdout.buffer.write(data)
+sys.stdout.buffer.flush()
+if os.WIFEXITED(status):
+    sys.exit(os.WEXITSTATUS(status))
+if os.WIFSIGNALED(status):
+    sys.exit(128 + os.WTERMSIG(status))
+sys.exit(1)
+'@ | Set-Content -Path $PtyRunner -Encoding Ascii
+    }
+}
+
 # Run the script under test in a child pwsh with a swapped environment.
 # $FakeMulti = canned multi result (words), $FakePreset = canned preset answer.
-function Invoke-Menu([string]$homeDir, [string]$fakeMulti, [string]$fakePreset = 'custom', [switch]$CI) {
+# -NoTty pipes stdin into the child (the redirected/CI shape); -CI sets
+# $env:CI in the child instead of clearing it.
+function Invoke-Menu([string]$homeDir, [string]$fakeMulti, [string]$fakePreset = 'custom', [switch]$CI, [switch]$NoTty) {
     [IO.File]::WriteAllText($GumLog, '')
     $savedHome, $savedProfile, $savedPath, $savedCI = $env:HOME, $env:USERPROFILE, $env:PATH, $env:CI
     try {
@@ -91,7 +185,15 @@ function Invoke-Menu([string]$homeDir, [string]$fakeMulti, [string]$fakePreset =
         $env:FAKE_MULTI = $fakeMulti
         $env:FAKE_PRESET = $fakePreset
         if ($CI) { $env:CI = 'true' } else { Remove-Item Env:CI -ErrorAction SilentlyContinue }
-        $out = & pwsh -NoProfile -File $ScriptUnderTest 2>&1 | Out-String
+        if ($NoTty) {
+            # Piped stdin = IsInputRedirected $true = the no-console shape.
+            $out = '' | & pwsh -NoProfile -File $ScriptUnderTest 2>&1 | Out-String
+        } elseif ($PtyRunner) {
+            # Real console stdin via pty (python helper sets a sane winsize).
+            $out = & $Python $PtyRunner 30 pwsh -NoProfile -File $ScriptUnderTest 2>&1 | Out-String
+        } else {
+            $out = & pwsh -NoProfile -File $ScriptUnderTest 2>&1 | Out-String
+        }
         return [pscustomobject]@{ Exit = $LASTEXITCODE; Output = $out }
     } finally {
         $env:HOME, $env:USERPROFILE, $env:PATH, $env:CI = $savedHome, $savedProfile, $savedPath, $savedCI
@@ -187,15 +289,21 @@ try {
     if ($r.Exit -ne 0) { Fail 'cancel run exits 0' "exit=$($r.Exit)" } else { Ok 'cancel run exits 0' }
     Assert-FileEquals $H3Cfg $before 'cancel = no write'
 
-    # --- CI gate: skip without prompting
-    Write-Host '[7] CI env -> skipping menu'
+    # --- CI safety: redirected stdin (the GH Actions hang shape), or CI env --
+    Write-Host '[7] redirected stdin, CI unset -> skipping menu'
     $H5 = Join-Path $Tmp 'home5'
     New-Item -ItemType Directory -Force -Path $H5 | Out-Null
+    $r = Invoke-Menu $H5 'core' -NoTty
+    if ($r.Exit -ne 0) { Fail 'no-tty run exits 0' "exit=$($r.Exit) out=$($r.Output)" } else { Ok 'no-tty run exits 0' }
+    if ($r.Output -match 'skipping menu') { Ok 'no-tty skipping message printed' } else { Fail 'no-tty skipping message' $r.Output }
+    if (Test-Path (Join-Path $H5 '.config/chezmoi/chezmoi.toml')) { Fail 'no-tty run wrote config' 'file exists' } else { Ok 'no-tty: no config written' }
+    if ((Get-Item $GumLog).Length -eq 0) { Ok 'no-tty: gum never invoked' } else { Fail 'no-tty: gum invoked' (Get-Content $GumLog -Raw) }
+
+    Write-Host '[8] CI env set, console stdin -> skipping menu'
     $r = Invoke-Menu $H5 'core' -CI
     if ($r.Exit -ne 0) { Fail 'CI run exits 0' "exit=$($r.Exit)" } else { Ok 'CI run exits 0' }
-    if ($r.Output -match 'skipping menu') { Ok 'skipping message printed' } else { Fail 'skipping message' $r.Output }
-    if (Test-Path (Join-Path $H5 '.config/chezmoi/chezmoi.toml')) { Fail 'CI run wrote config' 'file exists' } else { Ok 'no config written' }
-    if ((Get-Item $GumLog).Length -eq 0) { Ok 'gum never invoked' } else { Fail 'gum invoked in CI' (Get-Content $GumLog -Raw) }
+    if ($r.Output -match 'skipping menu') { Ok 'CI skipping message printed' } else { Fail 'CI skipping message' $r.Output }
+    if ((Get-Item $GumLog).Length -eq 0) { Ok 'CI: gum never invoked' } else { Fail 'CI: gum invoked' (Get-Content $GumLog -Raw) }
 } finally {
     Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 }
