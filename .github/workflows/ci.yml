@@ -12,6 +12,12 @@ jobs:
   lint:
     name: Lint & Validate
     runs-on: ubuntu-latest
+    permissions:
+      # security-events: write is required by the gitleaks step's SARIF
+      # upload to code scanning - without it the action exits 1 even on a
+      # clean scan ("no leaks found" + "Unexpected exit code [1]").
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
