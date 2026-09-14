@@ -124,6 +124,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -182,6 +184,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
@@ -321,6 +325,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -391,6 +397,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -495,6 +503,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -558,6 +568,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 

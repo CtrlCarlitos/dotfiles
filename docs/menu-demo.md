@@ -25,6 +25,8 @@ When you run the installer, this is what you'll see:
   [x] antigravity_cli   Antigravity CLI (agy) + Superpowers + skills
   [ ] antigravity_desktop  Antigravity 2.0 app (all platforms)
   [ ] dev_desktop       Human desktop apps (Chrome, VS Code, Docker Desktop...)
+  [ ] remote_access     Tailscale and cloudflared tools (no sign-in or tunnel setup)
+  [ ] remote_access_server  OpenSSH-server prerequisites (manual setup required)
   [x] guardrail         Agent guardrails (hook enforcement)
 ```
 

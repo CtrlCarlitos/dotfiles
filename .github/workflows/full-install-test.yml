@@ -76,6 +76,8 @@ jobs:
             antigravity_cli = true
             antigravity_desktop = true
             dev_desktop = true
+            remote_access = true
+            remote_access_server = false
             guardrail = true
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
@@ -216,6 +218,8 @@ jobs:
             antigravity_cli = true
             antigravity_desktop = true
             dev_desktop = true
+            remote_access = true
+            remote_access_server = false
             guardrail = true
           EOF
 
@@ -318,6 +322,8 @@ jobs:
             antigravity_cli = true
             antigravity_desktop = true
             dev_desktop = true
+            remote_access = true
+            remote_access_server = false
             guardrail = true
           EOF
 

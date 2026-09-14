@@ -52,7 +52,7 @@
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
   # All toggles are independent on all platforms (Linux, macOS, Windows).
-  # Clean break: the old six toggles became these 14 groups, no auto-migration
+  # Clean break: the old six toggles became these 16 groups, no auto-migration
   # - full rename map lives in docs/package-groups.md.
   # ==========================================================================
   [data.packages]
@@ -93,12 +93,18 @@
     # antigravity_desktop - Antigravity 2.0 app (host only)
     antigravity_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.antigravity_desktop" "Install antigravity_desktop (Antigravity 2.0 app)?" false }}{{ else }}false{{ end }}
 
-    # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop, Tailscale.
+    # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
     # Host only: not prompted on WSL/containers, and enforced there too —
     # the package-install template gates the actual install on the same
     # $isHost check, not just this prompt, so hand-editing this to `true` on
     # WSL/in a container still won't install desktop apps there.
     dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
+
+    # remote_access - private mesh access and approved app tunneling; no login/config.
+    remote_access = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access" "Install remote_access (Tailscale, cloudflared; no login or tunnel setup)?" false }}{{ else }}false{{ end }}
+
+    # remote_access_server - explicit SSH-server prerequisite opt-in; never preset.
+    remote_access_server = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access_server" "Install remote_access_server prerequisites (manual SSH setup required)?" false }}{{ else }}false{{ end }}
 
     # guardrail - agent guardrails (guardrail binary + per-CLI planes)
     guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
