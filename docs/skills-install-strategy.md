@@ -40,7 +40,7 @@ Requires Node ≥ 22.20 (repo installs Node 24 — fine, but gate on `command -v
 | `--all` | `= --skill '*' --agent '*' -y` |
 
 Valid agent ids include: `claude-code`, `opencode`, `antigravity`,
-`antigravity-cli`, `codex`, `gemini-cli`, `cursor`, `windsurf`, `zed`, … (~75).
+`antigravity-cli`, `codex`, `cursor`, `windsurf`, `zed`, … (~75).
 
 Sources: `owner/repo`, full GitHub/GitLab URL, any git URL, local path, or a
 direct `SKILL.md` / archive URL.
