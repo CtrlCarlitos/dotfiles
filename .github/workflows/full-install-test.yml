@@ -267,10 +267,14 @@ jobs:
             FAILED=1
           fi
 
-          if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then
+          # The .deb registers as package "opencode" (not opencode-desktop),
+          # binary at /opt/OpenCode/ai.opencode.desktop with an alternatives
+          # link at /usr/bin/ai.opencode.desktop (observed live on the
+          # 2026-09-14 CI run).
+          if dpkg -s opencode &>/dev/null || command -v ai.opencode.desktop &>/dev/null || [ -d /opt/OpenCode ]; then
             echo "  OK: OpenCode Desktop"
           else
-            echo "::error::OpenCode Desktop not found (dpkg or binary)"
+            echo "::error::OpenCode Desktop not found (dpkg, binary, or /opt/OpenCode)"
             FAILED=1
           fi
 
