@@ -45,6 +45,9 @@ jobs:
       - name: Test skills CLI argument boundaries
         run: bash tests/install_agent_skills_arguments.sh
 
+      - name: Test Windows Graft installation contract
+        run: bash tests/graft_windows_install_contract.sh
+
       - name: Test package-group selection menu
         run: bash tests/select_packages.sh
 
