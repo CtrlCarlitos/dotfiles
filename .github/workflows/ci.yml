@@ -96,6 +96,10 @@ jobs:
       - name: Verify chezmoi version
         run: ~/.local/bin/chezmoi --version
 
+      - name: Test remote access package ownership
+        if: matrix.os == 'ubuntu-latest'
+        run: bash tests/remote_access_package_ownership.sh
+
       - name: Create test config
         run: |
           # Create minimal config to avoid prompts and provide all required data
@@ -124,6 +128,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -182,6 +188,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
@@ -321,6 +329,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -391,6 +401,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -495,6 +507,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           EOF
 
@@ -558,6 +572,8 @@ jobs:
             antigravity_cli = false
             antigravity_desktop = false
             dev_desktop = false
+            remote_access = false
+            remote_access_server = false
             guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 

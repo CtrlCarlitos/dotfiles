@@ -3,14 +3,14 @@
 _Added 2026-09-13 with the package-groups project
 (docs/research/package-groups-spec.md)._
 
-How this repo decides what to install. The 14 groups below are the single
+How this repo decides what to install. The 16 groups below are the single
 vocabulary shared by everything that touches packages: the interactive menu
 (`scripts/select-packages.{sh,ps1}`), the config template's `promptBoolOnce`
 keys, the installer templates' gates, and the CI seeds all use the same key
 names — `tests/check_workflow_config_keys.sh` exists to keep them from
 drifting apart.
 
-## The 14 groups
+## The 16 groups
 
 The "menu line" is the group's one-line description (what the config-template
 prompts show). The gum menu itself lists the bare keys in this order under
@@ -33,6 +33,8 @@ the persisted `[data.packages]` section is emitted in.
 | `antigravity_cli` | Antigravity CLI (agy) | choco `antigravity-cli` / brew cask / official script + superpowers + skills + guardrail antigravity plane |
 | `antigravity_desktop` | Antigravity 2.0 app | Win choco `antigravity`; mac 2.0 dmg; Linux 2.0 x64/arm64 (pinned hub-channel URLs) |
 | `dev_desktop` | Human desktop apps | Chrome, VS Code, Docker Desktop, ScreenRec, Termius, Handy… |
+| `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
+| `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
 | `guardrail` | Agent guardrails | guardrail binary; planes fire per present CLI (existing gating) |
 
 ## Ground rules
@@ -68,7 +70,7 @@ config template. The flow by entry point:
   (no dependencies — naked-machine safe) → gum bootstrap (pinned static
   download if `gum` isn't on PATH; best-effort, warns and continues on
   failure) → preset pick (`minimal` / `standard` / `full` / `custom`) → the
-  14-group multi-select, pre-checked per the preset → `chezmoi init --apply`
+  16-group multi-select, pre-checked per the preset → `chezmoi init --apply`
   (accounts still prompted by chezmoi itself).
 - **Re-run:** your existing `[data.packages]` keys arrive pre-checked — one
   Enter accepts them unchanged. No preset prompt; presets are first-run
@@ -76,11 +78,11 @@ config template. The flow by entry point:
 - **Standalone re-choose:** run `scripts/select-packages.sh` (or `.ps1`)
   directly at any time, then `chezmoi apply` installs the difference.
 - **Bare `chezmoi init` (no installer, no gum):** the config template's
-  `promptBoolOnce` prompts take over — same 14 keys, one question each,
+  `promptBoolOnce` prompts take over — same 16 keys, one question each,
   defaults = the standard preset. Non-interactive renders (CI, containers,
   no TTY) take `false` for every key: explicit seeds and prompts are the
   only sources of truth.
-- **CI:** workflow configs are pre-seeded with all 14 keys and the menu
+- **CI:** workflow configs are pre-seeded with all 16 keys and the menu
   self-skips (no TTY / `$env:CI` set / no gum → prints "skipping menu",
   exits 0, never prompts).
 
@@ -90,11 +92,11 @@ config template. The flow by entry point:
 |---|---|
 | `minimal` | `core` |
 | `standard` | `core`, `modern_cli`, `fonts`, `agent_toolkit`, `opencode_cli`, `claude_cli`, `guardrail` |
-| `full` | all 14 |
+| `full` | all groups except `remote_access_server` |
 | `custom` | nothing — hand-pick in the multi-select |
 
 Presets are **not persisted** — they're pre-check sets for the menu only.
-What lands in the config is always the 14 explicit booleans; the config
+What lands in the config is always the 16 explicit booleans; the config
 template's prompt defaults equal the standard preset.
 
 ## Rename map (clean break)
@@ -118,7 +120,7 @@ old keys are simply ignored if they're still lying around in a config:
 — menu options, config keys, and CI seeds are the same names, and one test
 enforces that. Per-package keys would multiply the prompts, the CI seeds,
 and the drift surface without adding control the groups don't already give;
-fourteen lines is also what a person will actually read in a menu.
+sixteen lines is also what a person will actually read in a menu.
 
 **Does turning a group off uninstall anything?** No — disabling never
 uninstalls (see ground rules). Uninstalling stays manual.

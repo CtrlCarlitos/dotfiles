@@ -30,11 +30,11 @@ function Fail([string]$name, [string]$detail) {
     if ($detail) { Write-Host $detail -ForegroundColor DarkGray }
 }
 
-# The 14 groups in taxonomy order — plan Global Constraints.
+# The 16 groups in taxonomy order — plan Global Constraints.
 $TestGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
     'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
     'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
-    'guardrail')
+    'remote_access', 'remote_access_server', 'guardrail')
 
 $nl = [Environment]::NewLine
 
@@ -230,15 +230,15 @@ $SeedNoPackages = @"
 "@ + $nl
 
 try {
-    # --- (a) fresh machine, no config: file created with exactly the 14 keys
-    Write-Host '[1] fresh run creates the config with the 14 keys'
+    # --- (a) fresh machine, no config: file created with exactly the 16 keys
+    Write-Host '[1] fresh run creates the config with the 16 keys'
     $H1 = Join-Path $Tmp 'home1'
     New-Item -ItemType Directory -Force -Path $H1 | Out-Null
     $r = Invoke-Menu $H1 'core fonts guardrail'
     if ($r.Exit -ne 0) { Fail 'fresh run exits 0' "exit=$($r.Exit) out=$($r.Output)" } else { Ok 'fresh run exits 0' }
     $cfg = Join-Path $H1 '.config/chezmoi/chezmoi.toml'
     if (-not (Test-Path $cfg)) { Fail 'config created' 'file missing' } else {
-        Assert-FileEquals $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 14 keys written with correct values'
+        Assert-FileEquals $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 16 keys written with correct values'
     }
     $log = @(Get-Content $GumLog)
     if ($log.Count -eq 2) { Ok 'preset prompt shown when no existing section' } else { Fail 'preset prompt shown' "gum calls: $($log.Count)" }
@@ -262,9 +262,9 @@ try {
     $oldSection = "[data.packages]$nl  core = true$nl  fonts = true$nl  guardrail = true$nl$nl"
     $suffix = "[[data.accounts]]$nl  name = `"Work Account`"$nl  email = `"work@example.com`"$nl$nl[add]$nl  secrets = `"warning`"$nl"
     [IO.File]::WriteAllText($H3Cfg, $prefix + $oldSection + $suffix, (New-Object Text.UTF8Encoding($false)))
-    $r = Invoke-Menu $H3 'dev_desktop antigravity_desktop'
+    $r = Invoke-Menu $H3 'dev_desktop remote_access_server antigravity_desktop'
     if ($r.Exit -ne 0) { Fail 'mid-file re-run exits 0' "exit=$($r.Exit)" } else { Ok 'mid-file re-run exits 0' }
-    Assert-FileEquals $H3Cfg ($prefix + (ExpectedSection @('dev_desktop', 'antigravity_desktop')) + $nl + $suffix) '(c) only [data.packages] swapped in place'
+    Assert-FileEquals $H3Cfg ($prefix + (ExpectedSection @('dev_desktop', 'remote_access_server', 'antigravity_desktop')) + $nl + $suffix) '(c) only [data.packages] swapped in place'
 
     # --- (d) existing keys become the --selected set; no preset on re-run
     Write-Host '[4] re-run pre-checks existing keys'
@@ -272,14 +272,14 @@ try {
     if ($log.Count -eq 1) { Ok 'no preset prompt on re-run' } else { Fail 'no preset prompt on re-run' "gum calls: $($log.Count)" }
     if ($log -match '--selected core,fonts,guardrail ') { Ok 'existing true keys became --selected' } else { Fail '--selected set wrong' ($log -join $nl) }
 
-    # --- preset mapping: standard pre-checks exactly its six groups
-    Write-Host '[5] standard preset pre-checks its set'
+    # --- preset mapping: full pre-checks all but the server opt-in
+    Write-Host '[5] full preset omits the server opt-in'
     $H4 = Join-Path $Tmp 'home4'
     New-Item -ItemType Directory -Force -Path $H4 | Out-Null
-    $r = Invoke-Menu $H4 ($TestGroups -join ' ') 'standard'
+    $r = Invoke-Menu $H4 ($TestGroups -join ' ') 'full'
     $log = @(Get-Content $GumLog)
     if ($log.Count -eq 2) { Ok 'preset + groups calls on fresh run' } else { Fail 'preset + groups calls' "gum calls: $($log.Count)" }
-    if ($log -match '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,claude_cli,guardrail ') { Ok 'standard preset --selected set' } else { Fail 'standard preset --selected set' ($log -join $nl) }
+    if ($log -match '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,opencode_desktop,claude_cli,claude_desktop,chatgpt_cli,chatgpt_desktop,antigravity_cli,antigravity_desktop,dev_desktop,remote_access,guardrail ') { Ok 'full preset omits remote_access_server' } else { Fail 'full preset --selected set' ($log -join $nl) }
     $cfg = Join-Path $H4 '.config/chezmoi/chezmoi.toml'
     Assert-FileEquals $cfg (ExpectedSection $TestGroups) 'full selection persisted'
 

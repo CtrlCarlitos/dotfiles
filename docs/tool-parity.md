@@ -102,7 +102,6 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Editor** | VS Code | VS Code | VS Code | `code` (Remote) | ❌ | WSL uses `code` CLI to open Host VS Code |
 | **Browser** | Chrome | Chrome | Chrome | ❌ | ❌ | Browsers run on Host |
 | **Container** | Docker Desktop | Docker Desktop | Docker Desktop | Docker (CLI) | ❌ | WSL connects to Docker Desktop Engine - requires WSL Integration enabled on the Windows side first. The WSL installer checks this before installing anything else and prompts whether to continue if it's off (default no); the Windows installer also reminds about it, listing detected distros. Linux host: installer adds the user to the **`kvm`** group (Desktop's VM backend), not `docker` - requires a logout/login to take effect |
-| **Mesh VPN** | Tailscale | Tailscale (`tailscale-app` cask, GUI) | Tailscale | *(via Host)* | ❌ | Bundled into `dev_desktop` (a deliberate choice, not the default pattern - see README). **Never installed inside WSL**, on purpose: Tailscale's own docs recommend against it (breaks encrypted traffic if it's also running on the Windows host at the same time) and it's unnecessary - WSL already gets full tailnet access through whatever's running on the Windows host, zero extra setup. Requires an interactive login (`tailscale up`, or sign in via the app) - not automated, this repo never bakes in an authkey since it's a shared template |
 | **AI Chat (Claude)** | ❌ (no official build - installer info-skips) | `brew install --cask claude` | `choco install claude` | ❌ | ❌ | `claude_desktop` group, host only. Claude *Code* (the CLI) is a separate `claude_cli` group - different software, different gate |
 | **AI Chat (ChatGPT)** | ❌ (no official build - installer info-skips) | `brew install --cask chatgpt` | `winget install --id 9NT1R1C2HH7J --source msstore` | ❌ | ❌ | `chatgpt_desktop` group, host only. The Codex CLI is separate (`chatgpt_cli`) |
 | **AI IDE (Antigravity 2.0)** | tar.gz (pinned hub-channel URL) | dmg (pinned hub-channel URL) | `choco install antigravity` | ❌ | ❌ | `antigravity_desktop` group, host only - distinct from the `agy` CLI (`antigravity_cli`). Pins live in `run_onchange_install_packages.sh.tmpl`; `scripts/update-versions.sh` re-checks them (Windows floats via choco) |
@@ -116,6 +115,14 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Torrent** | qBittorrent | qBittorrent | qBittorrent | ❌ | ❌ | |
 | **PDF** | Ghostscript | Ghostscript | Ghostscript | ❌ | ❌ | |
 | **Speech-to-Text** | Handy | Handy | Handy | ❌ | ❌ | [handy.computer](https://handy.computer) - offline Whisper/Parakeet dictation. Model choice (best for Spanish+English: Whisper Large or Turbo) is GUI-only, no scriptable pre-selection |
+
+## Remote Access
+
+| Tool | Linux (Host) | macOS | Windows (Host) | WSL | Devcontainer | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Mesh VPN** | Tailscale | Tailscale (`tailscale-app` cask, GUI) | Tailscale | *(via Host)* | ❌ | `remote_access` group. **Never installed inside WSL**: WSL uses the Windows host's tailnet connection. Login is manual; no authkey is stored in this shared template. |
+| **Application Tunnel** | cloudflared | cloudflared | cloudflared | cloudflared | ❌ | `remote_access` group. Tunnel login and service activation are manual. |
+| **SSH Server Prerequisite** | `openssh-server` | Remote Login built in | Windows OpenSSH Server capability | `openssh-server` | ❌ | `remote_access_server` installs prerequisites only. It deliberately does not create a reachable SSH service: activation, firewall, keys, and access configuration remain manual. |
 
 > **Post-Install:** Launch Docker Desktop once from your applications menu (Start menu on Windows) to accept the EULA and start the engine, then confirm it works with `docker ps`. On a Linux host the installer also adds you to the `kvm` group for Desktop's VM backend — that needs a logout/login.
 

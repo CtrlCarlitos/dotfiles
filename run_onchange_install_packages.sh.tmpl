@@ -35,6 +35,8 @@ fi
 {{- $antigravity_cli := false -}}
 {{- $antigravity_desktop := false -}}
 {{- $dev_desktop := false -}}
+{{- $remote_access := false -}}
+{{- $remote_access_server := false -}}
 {{- $guardrail := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
@@ -50,6 +52,8 @@ fi
   {{- if hasKey .packages "antigravity_cli" }}{{- $antigravity_cli = .packages.antigravity_cli }}{{- end -}}
   {{- if hasKey .packages "antigravity_desktop" }}{{- $antigravity_desktop = .packages.antigravity_desktop }}{{- end -}}
   {{- if hasKey .packages "dev_desktop" }}{{- $dev_desktop = .packages.dev_desktop }}{{- end -}}
+  {{- if hasKey .packages "remote_access" }}{{- $remote_access = .packages.remote_access }}{{- end -}}
+  {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
 {{- end -}}
 
@@ -77,6 +81,7 @@ fi
   {{- end -}}
 {{- end -}}
 {{- $isHost := and (not $isDevcontainer) (not $isWsl) -}}
+{{- $serverOnly := and $remote_access_server (not (or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail)) -}}
 
 #===============================================================================
 # CHEZMOI RUN_ONCHANGE: Install Packages (Linux/macOS)
@@ -610,45 +615,10 @@ install_linux_desktop() {
         fi
     fi
 
-    # 6. Tailscale (Official Install Script)
-    # Uses Tailscale's own official installer (sets up its apt repo per-distro
-    # itself) rather than a possibly-stale Ubuntu-provided package - same
-    # reasoning as Docker's official repo above. Deliberately never run inside
-    # WSL: this whole function is $isHost-gated already (see the top-of-file
-    # comment), and that's not just consistency with the other desktop
-    # apps here - Tailscale's own docs specifically recommend against running
-    # it inside WSL2 at all (breaks encrypted traffic if it's also running on
-    # the Windows host, which is the whole point of using WSL on a machine
-    # that has a Windows host). WSL gets full tailnet access automatically
-    # through whatever's running on the Windows host, no separate install
-    # needed.
-    if ! command -v tailscale &>/dev/null; then
-        info "Installing Tailscale..."
-        net_timeout 180 bash -c 'curl -fsSL https://tailscale.com/install.sh | sh' \
-            || warn "Tailscale install failed or timed out - continuing"
-    fi
-
-    # 7. cloudflared (Cloudflare Tunnel client) - outbound tunnel for sharing
-    # dev services (opencode web etc.) with third parties via Cloudflare
-    # Access. Named tunnels only; Quick Tunnels (trycloudflare.com) don't
-    # support SSE. Companion to Tailscale above (#6): Tailscale is the
-    # personal-device path, this is the share-with-outsiders path.
-    if command -v cloudflared &>/dev/null; then
-        info "cloudflared already installed. Skipping."
-    elif command -v apt-get &>/dev/null; then
-        info "Installing cloudflared..."
-        # Add the Cloudflare package signing key and repo
-        $SUDO mkdir -p --mode=0755 /usr/share/keyrings
-        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | $SUDO tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
-        $SUDO apt-get update -qq && $SUDO apt-get install -y cloudflared
-    else
-        warn "cloudflared: apt not found - manual install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
-    fi
 }
 
 install_apt() {
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $guardrail }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
     info "Updating apt..."
     $SUDO apt update -y || true
     info "Upgrading installed packages..."
@@ -696,6 +666,35 @@ install_apt() {
     fi
 {{- else }}
     info "Core packages disabled in config"
+{{- end }}
+
+{{- if $remote_access }}
+{{- if $isWsl }}
+    info "Tailscale remains on Windows; WSL uses the Windows host's tailnet connection."
+{{- else }}
+    if ! command -v tailscale &>/dev/null; then
+        info "Installing Tailscale..."
+        net_timeout 180 bash -c 'curl -fsSL https://tailscale.com/install.sh | sh' \
+            || warn "Tailscale install failed or timed out - continuing"
+    fi
+{{- end }}
+    if command -v cloudflared &>/dev/null; then
+        info "cloudflared already installed. Skipping."
+    elif command -v apt-get &>/dev/null; then
+        info "Installing cloudflared..."
+        $SUDO mkdir -p --mode=0755 /usr/share/keyrings
+        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | $SUDO tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
+        $SUDO apt-get update -qq && $SUDO apt-get install -y cloudflared
+    else
+        warn "cloudflared: apt not found - manual install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    fi
+{{- end }}
+
+{{- if $remote_access_server }}
+    info "Installing OpenSSH Server prerequisites..."
+    $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+    info "SSH service activation and access configuration remain manual. See docs/remote-access.md."
 {{- end }}
 
 {{- if $modern_cli }}
@@ -1264,6 +1263,15 @@ install_brew() {
     brew install --cask font-meslo-lg-nerd-font || true
 {{- end }}
 
+{{- if $remote_access }}
+    brew install --cask tailscale-app || warn "tailscale-app install failed - continuing"
+    brew install cloudflared || warn "cloudflared install failed - continuing"
+{{- end }}
+
+{{- if $remote_access_server }}
+    info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
+{{- end }}
+
 {{- if $agent_toolkit }}
     # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
     # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
@@ -1542,19 +1550,9 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    # tailscale-app specifically (not the bare "tailscale" formula, which is
-    # the headless CLI-only daemon with no menu-bar app) - matches how every
-    # other tool in this list is a GUI app, not a CLI daemon.
-    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany tailscale-app; do
+    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
-
-    # cloudflared (Cloudflare Tunnel client) - a formula, not a cask: it's the
-    # headless CLI daemon with no GUI app for /Applications, which is what
-    # every entry in the cask list above is. Companion to tailscale-app in
-    # that list - see install_linux_desktop's cloudflared block for the
-    # personal-device vs share-with-outsiders rationale.
-    command -v cloudflared &>/dev/null || brew install cloudflared || warn "cloudflared install failed - continuing"
 
     # ScreenRec (Manual Install - No Homebrew Cask)
     if [[ ! -d "/Applications/ScreenRec.app" ]]; then
@@ -1872,6 +1870,20 @@ setup_shell() {
 }
 
 main() {
+{{- if $serverOnly }}
+{{- if eq .chezmoi.os "darwin" }}
+    info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
+{{- else }}
+    if command -v apt &>/dev/null; then
+        info "Installing OpenSSH Server prerequisites..."
+        $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+    else
+        warn "OpenSSH Server prerequisite install requires apt; install it manually."
+    fi
+    info "SSH service activation and access configuration remain manual. See docs/remote-access.md."
+{{- end }}
+    success "Package installation complete!"
+{{- else }}
 {{- if $isWsl }}
     # Docker Desktop's WSL Integration has to be turned on from the Windows
     # side (Docker Desktop > Settings > Resources > WSL Integration) before
@@ -1947,14 +1959,19 @@ main() {
     echo ""
     info "[Post-Install] Launch Docker Desktop once from your applications menu to accept the"
     info "  EULA and start the engine, then confirm it works with:  docker ps"
+{{- end }}
+{{- if $remote_access }}
     echo ""
-    # Tailscale needs an interactive login (browser-based device auth, or a
-    # private authkey this repo deliberately never bakes in - it's a shared
-    # template, not just one person's machines) - install can't do this step
-    # for you. Deliberately never installed inside WSL at all - see the
-    # comment on the install step itself for why.
-    info "[Post-Install] Sign in to Tailscale to connect this machine:  sudo tailscale up"
-    info "  (or open the Tailscale app/menu-bar icon and sign in there)"
+{{- if $isWsl }}
+    info "[Post-Install] Tailscale remains on Windows; no WSL Tailscale install was performed."
+{{- else }}
+    info "[Post-Install] Sign in to Tailscale manually to connect this machine."
+{{- end }}
+    info "  Login and any cloudflared service activation are manual. See docs/remote-access.md."
+{{- end }}
+{{- if $remote_access_server }}
+    info "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md."
+{{- end }}
 {{- end }}
 }
 

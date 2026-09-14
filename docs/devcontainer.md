@@ -9,7 +9,7 @@ Use your dotfiles automatically in VS Code devcontainers.
 | **Tools** (runtime core, serena, claude, etc.) | devcontainer-features (`features` block) | Container **build** (Docker image layer) | Installs binaries into the image | Cached — subsequent starts skip it |
 | **Config** (aliases, profiles, git identities) | VS Code dotfiles (`dotfiles.repository`) | Container **start** (every time) | Runs `install.sh` → `chezmoi init --apply` | Cheap — file copies only |
 
-The dotfiles installer **does not install packages** in devcontainers — `chezmoi init` renders all groups false non-interactively (CI=true), so only configuration files are applied. This is by design: installing packages on every container start would be wasteful since they're already in the Docker image via features.
+The dotfiles installer **does not install packages** in devcontainers — `chezmoi init` renders all groups false non-interactively (CI=true), so only configuration files are applied. This is by design: installing packages on every container start would be wasteful since they're already in the Docker image via features. Devcontainers do not own, start, or configure host remote-access services; set those up manually on the host with the [remote-access guide](remote-access.md).
 
 If you want a tool in your devcontainer, add it as a feature. If you want your aliases, git identity, and shell profile in your devcontainer, wire the dotfiles.
 

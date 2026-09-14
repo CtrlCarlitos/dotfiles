@@ -74,7 +74,7 @@ $PAT="your_github_pat_here"; iex "& {$(irm -Headers @{Authorization="token $PAT"
 <summary><strong>What does the installer actually do?</strong></summary>
 
 1. Installs `chezmoi` if missing
-2. Asks for consent, then shows the package-group menu (preset → 14 groups)
+2. Asks for consent, then shows the package-group menu (preset → 16 groups)
 3. Installs your selected packages and applies the configuration
 4. Generates git identities, SSH keys, shell profiles, and AI tool wiring
 
@@ -85,7 +85,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 
 ## 📦 What gets installed
 
-14 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
+16 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
 
 | Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer* |
 |-------|-------------|:-----:|:-----:|:-------:|:---:|:--------------:|
@@ -102,6 +102,8 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **dev_desktop** | Chrome, VS Code, Docker Desktop, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **remote_access_server** | OpenSSH-server prerequisites only; server setup is deliberately manual. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |
 
 > \* **In devcontainers**, these tools install via [devcontainer-features](https://github.com/CtrlCarlitos/devcontainer-features) instead of the dotfiles installer — add individual features to your `devcontainer.json`. The dotfiles installer renders all groups false non-interactively in containers (they're ephemeral; a full install on every rebuild wastes time). Desktop groups (❌) stay off — no GUI in containers.
@@ -174,7 +176,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Windows Setup](docs/windows.md) | Windows-specific details, troubleshooting, devprofile |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
-| [Remote Access](docs/remote-access.md) | Phone + third-party access via Tailscale + Cloudflare Tunnel |
+| [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
 | [Guardrail Install](docs/guardrail-install.md) | The agent-guardrails system's design doc |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
 
