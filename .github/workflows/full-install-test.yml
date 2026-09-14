@@ -122,6 +122,21 @@ jobs:
             }
           }
 
+          # Get-Command only proves a graft shim exists. This exercises the
+          # native tree-sitter modules that have historically failed to build.
+          try {
+            graft --version 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "  OK: graft --version"
+            } else {
+              Write-Host "::error::graft --version failed (exit $LASTEXITCODE)"
+              $failed = $true
+            }
+          } catch {
+            Write-Host "::error::graft --version failed: $_"
+            $failed = $true
+          }
+
           # tmux is psmux's alias (the native Windows tmux). agy is the
           # Antigravity CLI; the 2.0 desktop app is checked below.
 

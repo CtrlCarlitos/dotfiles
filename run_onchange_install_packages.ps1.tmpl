@@ -39,6 +39,8 @@ function Invoke-WithTimeout {
         Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
         if ($job.State -eq 'Failed') {
             Write-Host "  Warning: $Description - failed" -ForegroundColor Red
+            $reason = $job.ChildJobs[0].JobStateInfo.Reason
+            if ($reason) { Write-Host "    $reason" -ForegroundColor Red }
         }
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
@@ -585,25 +587,72 @@ if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -Er
 #     allowlist is the exact list npm's own warning prints for this graft
 #     version; if a graft update changes its parser set, npm's error output
 #     prints the new list to paste here. (Single-quoted because PS 5.1
-#     splits unquoted commas into multiple native args.)
-if (Get-Command npm -ErrorAction SilentlyContinue) {
-    if (-not (Get-Command graft -ErrorAction SilentlyContinue)) {
-        Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
-            npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
-            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+#     splits unquoted commas into multiple native args.) A command shim is not
+#     sufficient proof of health: native parser failures leave graft.cmd on
+#     PATH but make every real command fail.
+$graftWorks = $false
+if (Get-Command graft -ErrorAction SilentlyContinue) {
+    try { graft --version 2>&1 | Out-Null; $graftWorks = ($LASTEXITCODE -eq 0) } catch { $graftWorks = $false }
+}
+if (-not $graftWorks) {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Host "  Warning: npm not found - skipping Graft" -ForegroundColor Red
+    } else {
+        $pythonPath = ""
+        $pythonCandidate = ""
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+            try { $pythonCandidate = (& python -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim() } catch { $pythonCandidate = "" }
+        }
+        # The official Python installer commonly exposes only the `py` launcher
+        # in a fresh session. Give node-gyp the resolved interpreter path rather
+        # than assuming its directory has already reached PATH.
+        if (-not $pythonCandidate -and (Get-Command py -ErrorAction SilentlyContinue)) {
+            try { $pythonCandidate = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim() } catch { $pythonCandidate = "" }
+        }
+        if (Test-Path $pythonCandidate) {
+            try {
+                $pythonSupported = (& $pythonCandidate -c "import sys; print('supported' if sys.version_info >= (3, 8) else 'unsupported')" 2>$null | Out-String).Trim()
+                if ($pythonSupported -eq "supported") { $pythonPath = $pythonCandidate }
+            } catch { $pythonPath = "" }
+        }
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vcToolsPath = ""
+        if (Test-Path $vswhere) {
+            try { $vcToolsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Out-String).Trim() } catch { $vcToolsPath = "" }
+        }
+        if (-not (Test-Path $pythonPath)) {
+            Write-Host "  Warning: Graft needs Python 3.8+ for native parser builds - skipping Graft" -ForegroundColor Red
+            Write-Host "    Install Python manually: winget install Python.Python.3.13" -ForegroundColor Yellow
+        } elseif (-not $vcToolsPath) {
+            Write-Host "  Warning: Graft needs the C++ Build Tools for native parser builds - skipping Graft" -ForegroundColor Red
+            Write-Host "    Install the C++ Build Tools manually: winget install Microsoft.VisualStudio.2022.BuildTools --override `"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
+            $priorNpmConfigPython = $env:NPM_CONFIG_PYTHON
+            $env:NPM_CONFIG_PYTHON = $pythonPath
+            Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
+                $graftInstallOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE): $($graftInstallOutput.Trim())" }
+            }
+            if ($null -eq $priorNpmConfigPython) {
+                Remove-Item Env:\NPM_CONFIG_PYTHON -ErrorAction SilentlyContinue
+            } else {
+                $env:NPM_CONFIG_PYTHON = $priorNpmConfigPython
+            }
+            # Rebuild so the fresh graft shim resolves in this session. npm/npx
+            # steps below use the same Machine+User rebuild.
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            if (Get-Command graft -ErrorAction SilentlyContinue) {
+                try { graft --version 2>&1 | Out-Null; $graftWorks = ($LASTEXITCODE -eq 0) } catch { $graftWorks = $false }
+            }
+            if (-not $graftWorks) {
+                Write-Host "  Warning: Graft install did not produce a working CLI; inspect the npm output above, repair prerequisites, then rerun chezmoi apply" -ForegroundColor Red
+            }
         }
     }
-    # Rebuild so the fresh graft shim resolves in this session. npm/npx steps
-    # DO follow this point now (the cross-cutting skills pass below uses npx),
-    # but they resolve through the same Machine+User rebuild, so nothing is
-    # stranded.
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    if (Get-Command graft -ErrorAction SilentlyContinue) {
-        Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
-    }
-} else {
-    Write-Host "  Warning: npm not found - skipping Graft" -ForegroundColor Red
+}
+if ($graftWorks) {
+    Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
 {{- end }}
 
