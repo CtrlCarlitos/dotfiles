@@ -137,13 +137,14 @@ jobs:
             $failed = $true
           }
 
-          # ChatGPT Desktop: msstore/winget appx package.
+          # ChatGPT Work/Codex: current msstore/winget appx package. The
+          # similarly named ChatGPT Classic is a separate legacy product.
           $gptPkg = $null
-          try { $gptPkg = Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue } catch {}
+          try { $gptPkg = Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue } catch {}
           if ($gptPkg) {
-            Write-Host "  OK: ChatGPT Desktop"
+            Write-Host "  OK: ChatGPT Work/Codex"
           } else {
-            Write-Host "::error::ChatGPT Desktop appx package not found"
+            Write-Host "::error::ChatGPT Work/Codex appx package not found"
             $failed = $true
           }
 

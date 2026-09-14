@@ -101,7 +101,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **chatgpt_desktop** | ChatGPT Desktop app | ❌ | ✅ | ✅ | ❌ | ❌ |
 | **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **dev_desktop** | Chrome, VS Code, Docker Desktop, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **dev_desktop** | Chrome, VS Code, Docker Desktop, CodexBar, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | cloudflared only | ❌ |
 | **remote_access_server** | OpenSSH-server prerequisites only; server setup is deliberately manual. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |

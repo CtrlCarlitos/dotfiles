@@ -1127,38 +1127,55 @@ if (-not (Test-Path $chromeExe)) {
 }
 {{- end }}
 
-# ChatGPT Desktop (spec §5) - Microsoft Store package via winget's msstore
-# source, not Chocolatey: the Store MSIX is the officially-supported Windows
-# distribution and choco has no maintained package for it. Idempotence guard
-# is Get-AppxPackage, not `choco list`/the uninstall-registry cache - Store
-# installs register as Appx packages, a surface both of those checks are
-# blind to. winget/msstore on CI runners is unproven in this repo (spec §10)
-# - warn-and-continue keeps a flaky Store interaction from aborting the rest.
+# ChatGPT Work/Codex - current Microsoft Store app via winget's msstore source.
+# ChatGPT Classic is product 9NT1R1C2HH7J; do not install or remove it here.
+# The new app is OpenAI.Codex (9PLM9XGG6VKS) and can coexist with Classic.
 {{- if $chatgpt_desktop }}
-if (Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue) {
-    Write-Host "ChatGPT Desktop already installed" -ForegroundColor Green
+if (Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue) {
+    Write-Host "ChatGPT Work/Codex already installed" -ForegroundColor Green
 } elseif (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Write-Host "  Warning: winget not found - cannot install ChatGPT Desktop" -ForegroundColor Red
+    Write-Host "  Warning: winget not found - cannot install ChatGPT Work/Codex" -ForegroundColor Red
 } else {
     try {
-        Write-Host "Installing ChatGPT Desktop (winget msstore)..." -ForegroundColor Cyan
+        Write-Host "Installing ChatGPT Work/Codex (winget msstore)..." -ForegroundColor Cyan
         # All arguments are literals, so the job scriptblock is already
         # self-contained without the $env: handoff the choco/guardrail blocks
         # need (jobs inherit $env, not session variables - nothing
         # session-side to pass here). The exit-code throw inside marks the
         # job Failed on a real winget error; Invoke-WithTimeout surfaces that
         # as a warning and never throws itself.
-        Invoke-WithTimeout -Description "ChatGPT Desktop install" -Seconds 300 -Action {
-            winget install --id 9NT1R1C2HH7J --source msstore --accept-package-agreements --accept-source-agreements
+        Invoke-WithTimeout -Description "ChatGPT Work/Codex install" -Seconds 300 -Action {
+            winget install --id 9PLM9XGG6VKS --source msstore --silent --accept-package-agreements --accept-source-agreements
             if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
         }
-        if (Get-AppxPackage -Name "*ChatGPT*" -ErrorAction SilentlyContinue) {
-            Write-Host "  ChatGPT Desktop installed!" -ForegroundColor Green
+        if (Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue) {
+            Write-Host "  ChatGPT Work/Codex installed!" -ForegroundColor Green
         } else {
-            Write-Host "  Warning: winget reported success but no ChatGPT Appx package is registered" -ForegroundColor Yellow
+            Write-Host "  Warning: winget reported success but OpenAI.Codex is not registered" -ForegroundColor Yellow
         }
     } catch {
-        Write-Host "  Warning: Failed to install ChatGPT Desktop - $_" -ForegroundColor Red
+        Write-Host "  Warning: Failed to install ChatGPT Work/Codex - $_" -ForegroundColor Red
+    }
+}
+{{- end }}
+
+# Win-CodexBar is the native Windows CodexBar implementation. WinGet's
+# community manifest pins the release URL and installer SHA-256; do not fall
+# back to direct downloads because upstream installers are currently unsigned.
+{{- if $dev_desktop }}
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "  Warning: winget not found - cannot install Win-CodexBar" -ForegroundColor Red
+} elseif ((winget list --id Finesssee.Win-CodexBar --exact 2>$null | Out-String) -match 'Win-CodexBar') {
+    Write-Host "Win-CodexBar already installed" -ForegroundColor Green
+} else {
+    try {
+        Write-Host "Installing Win-CodexBar (winget)..." -ForegroundColor Cyan
+        Invoke-WithTimeout -Description "Win-CodexBar install" -Seconds 300 -Action {
+            winget install --id Finesssee.Win-CodexBar --exact --source winget --accept-package-agreements --accept-source-agreements
+            if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+        }
+    } catch {
+        Write-Host "  Warning: Failed to install Win-CodexBar - $_" -ForegroundColor Red
     }
 }
 {{- end }}
