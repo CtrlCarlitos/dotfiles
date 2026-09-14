@@ -29,7 +29,7 @@ the persisted `[data.packages]` section is emitted in.
 | `claude_cli` | Claude Code | Claude Code CLI + superpowers plugin + curated skills + guardrail claude plane |
 | `claude_desktop` | Claude Desktop app | Win choco `claude`; mac brew cask `claude`; Linux: none exists (info line, no-op) |
 | `chatgpt_cli` | Codex CLI | `@openai/codex` npm. Zero wiring by design (superpowers/skills/guardrail have no codex surface) |
-| `chatgpt_desktop` | ChatGPT Desktop app | Win winget msstore `9NT1R1C2HH7J`; mac brew cask `chatgpt`; Linux: none (no-op) |
+| `chatgpt_desktop` | ChatGPT desktop app | Win winget msstore `9PLM9XGG6VKS` (ChatGPT Work/Codex); mac brew cask `chatgpt`; Linux: none (no-op) |
 | `antigravity_cli` | Antigravity CLI (agy) | choco `antigravity-cli` / brew cask / official script + superpowers + skills + guardrail antigravity plane |
 | `antigravity_desktop` | Antigravity 2.0 app | Win choco `antigravity`; mac 2.0 dmg; Linux 2.0 x64/arm64 (pinned hub-channel URLs) |
 | `dev_desktop` | Human desktop apps | Chrome, VS Code, Docker Desktop, CodexBar, ScreenRec, Termius, Handy… |
