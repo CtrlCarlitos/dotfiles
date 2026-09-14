@@ -326,11 +326,9 @@ install_agent_skills() {
     net_timeout 300 "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null \
         || warn "skill-creator skill install failed or timed out - continuing"
 
-    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's
-    # skill-writing craft guide.
-    info "Installing Matt Pocock's writing-great-skills skill..."
-    net_timeout 300 "${SK[@]}" add mattpocock/skills -s writing-great-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "writing-great-skills skill install failed or timed out - continuing"
+    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
+    #  writing-for-agents, which is already in the batch above — the old name
+    #  failed silently on every run.)
 }
 
 # agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.

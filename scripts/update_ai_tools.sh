@@ -63,8 +63,9 @@ if command -v npx &>/dev/null; then
     $SK add vercel-labs/agent-browser -s agent-browser -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   agent-browser update failed - skipping"
     # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
     $SK add anthropics/skills -s skill-creator -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   skill-creator update failed - skipping"
-    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's skill-writing craft guide
-    $SK add mattpocock/skills -s writing-great-skills -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   writing-great-skills update failed - skipping"
+    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
+    #  writing-for-agents, which is already in the batch above — the old name
+    #  failed silently on every run.)
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl
