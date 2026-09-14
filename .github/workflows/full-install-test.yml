@@ -157,6 +157,16 @@ jobs:
             $failed = $true
           }
 
+          # OpenCode Desktop: choco `opencode-desktop` in the capped loop.
+          $ocReg = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "OpenCode*" }
+          if ($ocReg) {
+            Write-Host "  OK: OpenCode Desktop"
+          } else {
+            Write-Host "::error::OpenCode Desktop not found in uninstall registry"
+            $failed = $true
+          }
+
           $chromeExe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
           if (Test-Path $chromeExe) {
             Write-Host "  OK: Google Chrome"
@@ -248,12 +258,19 @@ jobs:
           # agy is the Antigravity CLI. Claude/ChatGPT Desktop have no
           # official Linux builds (the installer info-skips by design) -
           # nothing to check for them here. Antigravity 2.0 installs from
-          # the hub tarball:
+          # the hub tarball; OpenCode Desktop from the .deb.
 
           if [ -d "$HOME/.local/share/antigravity-2.0" ] && find "$HOME/.local/share/antigravity-2.0" -maxdepth 2 -type f -perm -u+x | grep -q .; then
             echo "  OK: Antigravity 2.0 (extracted with executables)"
           else
             echo "::error::Antigravity 2.0 not found at ~/.local/share/antigravity-2.0"
+            FAILED=1
+          fi
+
+          if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then
+            echo "  OK: OpenCode Desktop"
+          else
+            echo "::error::OpenCode Desktop not found (dpkg or binary)"
             FAILED=1
           fi
 
@@ -327,7 +344,7 @@ jobs:
           # agy is the Antigravity CLI; the three AI desktop apps install
           # via brew casks / the 2.0 dmg:
 
-          for app in "Claude" "ChatGPT"; do
+          for app in "Claude" "ChatGPT" "OpenCode"; do
             if [ -d "/Applications/$app.app" ]; then
               echo "  OK: $app Desktop"
             else
