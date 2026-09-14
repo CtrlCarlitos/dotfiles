@@ -92,7 +92,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | `runtime_core` |
 | **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | `modern-cli` |
 | **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | `nerd-font` |
-| **agent_toolkit** | Serena, Graft, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `graft` `playwright` |
+| **agent_toolkit** | Serena, Graft, curated skills, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `graft` `curated-skills` `playwright` |
 | **opencode_cli** | OpenCode CLI + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `opencode` |
 | **opencode_desktop** | OpenCode Desktop app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **claude_cli** | Claude Code + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `claude-code` |
