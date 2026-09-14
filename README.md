@@ -102,7 +102,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **dev_desktop** | Chrome, VS Code, Docker Desktop, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **remote_access_server** | OpenSSH-server prerequisites only; server setup is deliberately manual. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |
 
@@ -176,7 +176,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Windows Setup](docs/windows.md) | Windows-specific details, troubleshooting, devprofile |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
-| [Remote Access](docs/remote-access.md) | Phone + third-party access via Tailscale + Cloudflare Tunnel |
+| [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
 | [Guardrail Install](docs/guardrail-install.md) | The agent-guardrails system's design doc |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
 

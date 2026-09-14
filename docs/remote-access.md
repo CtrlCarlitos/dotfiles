@@ -1,265 +1,194 @@
-# Remote Access (Phone + Sharing)
+# Remote Access
 
-Reach your dev machine's OpenCode web UI from your phone, and share a running
-session with a collaborator or student — without opening a single router port.
+## 1. Scope and non-goals
 
-There are two paths, and they serve different people:
+This guide describes manual, machine-local setup after installing the optional
+package groups. Keep development-agent backends private: use a tailnet or a
+local console, never a public route. No Caddy, code-server, Tailscale Funnel,
+or public agent backends. Do not provide an external route to an agent backend.
 
-## Architecture (two paths, one service)
+Identities, credentials, tunnel definitions, SSH keys, and tailnet ACL values
+belong on the machine or in the provider dashboard, never in this repository.
 
-| Path | Tool | Who | Auth |
-|-----|------|-----|------|
-| Personal | Tailscale | You (phone) | WireGuard device identity |
-| Sharing | Cloudflare Tunnel + Access | Collaborators/students | Email OTP |
+## 2. Install-only package groups
 
-Both paths point at the same thing: `opencode web` listening on `localhost:4096`.
-Nothing is ever exposed directly — each path terminates an encrypted tunnel in
-front of it.
+`remote_access` installs only the Tailscale and cloudflared clients. It never
+signs in, creates tunnels, changes service state, or stores credentials.
 
-- **Tailscale** is your private tailnet: every device you sign in on can reach
-  every other, authenticated by device identity (WireGuard keys). Zero config,
-  zero ports, zero DNS.
-- **Cloudflare Tunnel** is for people you *don't* want on your tailnet: an
-  outbound-only tunnel from your machine to Cloudflare's edge, with an Access
-  policy (email OTP) deciding who may pass. Free tier: 50 users, $0 forever.
+`remote_access_server` installs only OpenSSH server prerequisites. It never
+enables a server, opens a firewall, writes SSH configuration or keys, or creates
+a portproxy. Selecting either group is not remote-access configuration.
 
-The two are completely independent — `tailscaled` and `cloudflared` don't know
-about each other, and running both is safe.
+## 3. Private OpenCode
 
----
+Run OpenCode only on loopback and protect it with a machine-local password.
 
-## Setup: Tailscale (personal phone access)
-
-### Desktop (one-time)
+**Manual, machine-local action:** start the private listener in the terminal
+where its password is available locally.
 
 ```bash
-# Install (this repo's dev_desktop group already does this on Linux/macOS/
-# Windows - run manually only if you skipped that group)
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Authenticate (opens a browser to sign in to your tailnet)
-sudo tailscale up
-
-# Enable Tailscale SSH (optional but recommended - lets you shell in from
-# the phone without managing host SSH keys)
-sudo tailscale set --ssh
+OPENCODE_SERVER_PASSWORD='<machine-local secret>' opencode web --hostname 127.0.0.1 --port 4096
 ```
 
-> **Note:** `tailscale up --ssh` is deprecated — use `tailscale set --ssh`.
-
-### Phone (one-time)
-
-1. Install the Tailscale app (iOS: App Store, Android: Play Store).
-2. Sign in with the **same account** as the desktop (Google/GitHub/etc).
-3. Toggle the VPN on. That's it — your phone is now on the tailnet.
-
-### Expose OpenCode web
+**Warning, manual machine-local service action:** after authenticating this
+machine to the tailnet, map the loopback listener with Tailscale Serve. Review
+the tailnet ACL before making it reachable.
 
 ```bash
-# Start OpenCode web (ALWAYS with a password - see Security notes)
-OPENCODE_SERVER_PASSWORD=<secret> opencode web --port 4096
-
-# Serve it over HTTPS on your tailnet (--bg = background + persist across reboots)
-sudo tailscale serve --bg 4096
-
-# Find your hostname
-tailscale status
-# or, machine-readable:
-tailscale status --json | jq -r '.Self.DNSName'
+tailscale serve --https=443 http://127.0.0.1:4096
 ```
 
-Open `https://<machine>.<tailnet>.ts.net` on the phone, sign in to the
-tailnet's VPN, enter the OpenCode password — done. Tailscale's serve proxy
-gives you a valid HTTPS certificate automatically.
+Open the machine's tailnet HTTPS name from an authorized device. Do not publish
+the listener. To remove the mapping, manually run `tailscale serve off` on that
+machine.
 
-To stop serving:
+## 4. Native phone and browser agent paths
+
+Use each vendor's authenticated remote-control path rather than exposing its
+backend:
+
+- **Claude Remote Control:** pair and approve the device through Claude's
+  native remote-control flow.
+- **Codex Remote:** use the paired Mac or Windows ChatGPT desktop bridge; keep
+  its pairing and account state on those devices.
+- **Antigravity Remote Control:** use the session-scoped remote-control flow
+  and revoke the session when it is no longer needed.
+- **Universal fallback:** run work in tmux and connect through private SSH.
+
+These are manual, machine-local choices. Vendor pairing, tokens, and session
+approvals must not be copied into dotfiles or shared configuration.
+
+## 5. Approved external app sharing
+
+Share only an approved non-agent web application through Cloudflare Access. Use
+one Access application per approved app, send cloudflared directly to that
+app's loopback origin, and end every ingress list with `http_status:404`.
+
+**Manual, machine-local action:** create the tunnel and its credentials through
+the provider's login flow on the host. Keep the resulting credential file local.
 
 ```bash
-sudo tailscale serve off
-```
-
----
-
-## Setup: Cloudflare Tunnel (sharing with third parties)
-
-Use this when a collaborator or student needs to watch or join a session and
-is *not* on your tailnet. **Named tunnels only** — Quick Tunnels
-(`trycloudflare.com`) don't support SSE, which OpenCode's UI needs.
-
-### Prerequisites
-
-- A domain on Cloudflare (any plan, free works).
-- `cloudflared` installed — this repo's `dev_desktop` group installs it
-  (verified version at time of writing: 2026.9.1).
-
-### Desktop (one-time)
-
-```bash
-# 1. Log in - opens a browser; pick your domain
 cloudflared tunnel login
-
-# 2. Create a named tunnel
-cloudflared tunnel create ai-dev
-#    Note the TUNNEL_ID it prints - you need it for the config below.
-
-# 3. Route DNS (CNAME) for the hostname you want
-cloudflared tunnel route dns ai-dev dev.yourdomain.com
+cloudflared tunnel create <approved-app>
 ```
 
-Create `~/.cloudflared/config.yml`:
+**Manual, machine-local action:** create the local tunnel configuration with a
+loopback origin for the approved app only.
 
 ```yaml
-tunnel: <TUNNEL_ID>
-credentials-file: /home/<user>/.cloudflared/<TUNNEL_ID>.json
+tunnel: <machine-local-tunnel-id>
+credentials-file: /home/<user>/.cloudflared/<machine-local-tunnel-id>.json
 ingress:
-  - hostname: dev.yourdomain.com
-    service: http://localhost:4096
+  - hostname: <approved-app.example.com>
+    service: http://127.0.0.1:<approved-app-port>
   - service: http_status:404
 ```
 
-Run it (foreground, for testing):
+Create a separate Cloudflare Access application and allow policy for that app.
+Keep its identities, policy values, and tunnel credentials in the dashboard or
+on the host. This workflow is never for an agent execution backend.
+
+## 6. SSH key boundaries
+
+Git authentication keys, Git signing keys, and `allowed_signers` files are not
+login keys. Create a dedicated, passphrase-protected SSH key pair for each
+device and target account. Keep private keys on the source device and add only
+the matching public key to the target account's local `authorized_keys` file.
+
+**Warning, manual machine-local authorized_keys action:** verify the target
+account and public-key fingerprint before adding it; never reuse a Git or
+signing key.
 
 ```bash
-cloudflared tunnel run ai-dev
+ssh-copy-id -i ~/.ssh/id_ed25519_<device>_access.pub <account>@<tailnet-host>
 ```
 
-Or as a boot-persistent service:
+## 7. Linux setup
+
+Use a non-root account, a reviewed Tailscale SSH policy, and tmux for durable
+sessions. Test changes from a second terminal before ending the current SSH
+session.
+
+**Warning, manual machine-local service action:** enable and check the SSH
+daemon only after placing the dedicated public key and reviewing the tailnet
+ACL that limits access.
 
 ```bash
-sudo cloudflared service install
-sudo systemctl enable cloudflared
+sudo systemctl enable --now ssh
+sudo systemctl status ssh --no-pager
+tmux new -s work
 ```
 
-### Cloudflare dashboard (Access policy)
+Keep normal elevation interactive with passworded `sudo`; do not permit root
+SSH or generic `NOPASSWD` rules.
 
-**Always** put an Access policy in front of the tunnel URL — without one,
-anyone who guesses the hostname gets in.
+## 8. Windows setup
 
-1. Zero Trust dashboard → **Access controls → Applications → Create new
-   application → Self-hosted and private** → **Add public hostname** →
-   `dev.yourdomain.com`.
-   (Heads-up: the old `/policies/access/` URL path 404s now; the current
-   path is `/access-controls/`.)
-2. **Policies → Add a policy** → Action: **Allow** → Include: **Emails** →
-   add your collaborator's/student's address.
-3. They'll get a one-time PIN by email at each visit (email OTP).
+Use **Windows :22** for Windows administration. Configure key-only OpenSSH,
+scope the Windows firewall and tailnet ACLs to approved devices, and use RDP
+**:3389** only for GUI work or WSL recovery.
 
-Free tier covers 50 users at $0 forever.
+**Warning, manual machine-local service, firewall, and SSH-configuration
+action:** confirm a dedicated public key works before disabling password login
+or changing the firewall. Apply these commands in an elevated local PowerShell
+session, not through an unattended installer.
 
-### Sharing a session
+```powershell
+Set-Service -Name sshd -StartupType Automatic
+Start-Service sshd
+New-NetFirewallRule -Name OpenSSH-Tailscale -DisplayName 'OpenSSH via Tailscale' -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -RemoteAddress <tailnet-ranges>
+notepad $env:ProgramData\ssh\sshd_config
+```
+
+Use a normal Windows account. For rare UAC work, use a local RDP session rather
+than Administrator SSH or agent forwarding.
+
+## 9. WSL setup
+
+Keep Tailscale on Windows only. Reach WSL sshd through a Windows Tailscale-IP
+portproxy at **WSL :2222**. Reconcile the portproxy when WSL reboots or its IP
+changes.
+
+**Warning, manual machine-local service, SSH-configuration, and portproxy
+action:** first configure WSL sshd for dedicated-key authentication, then obtain
+the current WSL IP and create the Windows-side mapping. Re-check it after every
+reboot or address change.
 
 ```bash
-# Desktop: start the service + web UI
-OPENCODE_SERVER_PASSWORD=<secret> opencode web --port 4096
-cloudflared tunnel run ai-dev   # or rely on the systemd service
+sudo systemctl enable --now ssh
+sudoedit /etc/ssh/sshd_config
+hostname -I
 ```
 
-Send the collaborator `https://dev.yourdomain.com` + the OpenCode password
-through separate channels. They authenticate twice: email OTP (Cloudflare
-Access), then the OpenCode password.
-
----
-
-## Security notes
-
-- **ALWAYS set `OPENCODE_SERVER_PASSWORD`** — OpenCode's docs warn explicitly
-  about unsecured servers; without it anyone reaching the port owns the
-  session (files, shell, agent).
-- **Use named tunnels, never Quick Tunnels** (`trycloudflare.com`) — they
-  don't support SSE, and the random URLs are public with zero auth.
-- **Always put an Access policy in front of a tunnel URL** — the tunnel
-  encrypts transport; Access decides who may use it.
-- **Prefer HTTPS serve** (`tailscale serve`, not `--http`) — OpenCode issue
-  [#47645](https://github.com/anomalyco/opencode/issues/47645) shows
-  `crypto.subtle` breaks file attachments on plain-HTTP remote hosts.
-- `cloudflared` and `tailscaled` are independent — running both is safe.
-- Known issue: SSE bug in OpenCode 1.18.25, tracked as
-  [#46733](https://github.com/anomalyco/opencode/issues/46733) — if the web
-  UI stalls/streams oddly, this is likely it, not your tunnel.
-
----
-
-## Quick reference
-
-| Action | Command |
-|--------|---------|
-| Tailscale auth | `sudo tailscale up` |
-| Tailscale SSH | `sudo tailscale set --ssh` |
-| Serve port 4096 (persistent) | `sudo tailscale serve --bg 4096` |
-| Stop serving | `sudo tailscale serve off` |
-| My tailnet hostname | `tailscale status --json \| jq -r '.Self.DNSName'` |
-| Phone URL | `https://<machine>.<tailnet>.ts.net` |
-| Cloudflare login | `cloudflared tunnel login` |
-| Create tunnel | `cloudflared tunnel create ai-dev` |
-| Route DNS | `cloudflared tunnel route dns ai-dev dev.yourdomain.com` |
-| Run tunnel | `cloudflared tunnel run ai-dev` |
-| Install as service | `sudo cloudflared service install && sudo systemctl enable cloudflared` |
-| Start OpenCode web | `OPENCODE_SERVER_PASSWORD=<secret> opencode web --port 4096` |
-
----
-
-## Why Tailscale AND Cloudflare Tunnel (not either/or)
-
-The two tools answer different questions. **Tailscale is for you** (personal
-phone/laptop access — WireGuard mesh, zero public surface, carries SSH and
-everything else). **Cloudflare Tunnel is for them** (students, collaborators —
-browser-only, email-verified, no VPN client to install). Running both is safe:
-`tailscaled` and `cloudflared` are independent outbound daemons with no port
-conflicts or routing overlap.
-
-```
-phone/laptop ── tailscale ──▶ desktop          (private: SSH, opencode web, everything)
-students     ── browser ──▶ CF Access ──▶ cloudflared ──▶ opencode web :4096
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=<windows-tailscale-ip> listenport=2222 connectaddress=<current-wsl-ip> connectport=22
+New-NetFirewallRule -Name WSL-SSH-Tailscale -DisplayName 'WSL SSH via Tailscale' -Direction Inbound -Protocol TCP -LocalPort 2222 -Action Allow -RemoteAddress <tailnet-ranges>
 ```
 
-### Comparison
+## 10. macOS setup
 
-| Dimension | Tailscale (personal) | Cloudflare Tunnel + Access (sharing) |
-|---|---|---|
-| Client needed | Tailscale app | Browser only |
-| Transport | WireGuard mesh, p2p direct when possible | Cloudflare edge relay (335+ cities) |
-| Attack surface | Nothing public | Public URL; safe only with Access policy |
-| Auth model | Device identity (WireGuard keys) | Email OTP / GitHub / Google identity |
-| Sharing granularity | Per-machine, quarantined, port-scoped ACLs | Per-app, up to 1,000 emails per rule |
-| Free tier | 6 users, 100 devices | 50 Zero Trust users, unlimited tunnels |
-| Non-HTTP protocols | Any IP protocol (SSH, VNC) | HTTP/WSS primarily |
-| Latency | Lowest (direct p2p when UDP works) | Always edge-relayed (excellent, not p2p) |
+Use the Tailscale app with Apple Remote Login/OpenSSH, dedicated login keys,
+and VS Code Remote-SSH. Use Screen Sharing only for recovery.
 
-### Why not code-server?
+**Warning, manual machine-local service and authorized_keys action:** enable
+Remote Login only after reviewing its allowed users and installing a dedicated
+public key for the target account.
 
-`opencode web` is already touch-native (designed for phone browsers);
-code-server costs ~1 GB RAM / 2 vCPU, uses single-password auth (2
-logins/min rate limit, not multi-tenant), and VS Code's desktop UI isn't
-touch-optimized. Adopt only if you need VS Code extensions or Open-VSX.
+```bash
+sudo systemsetup -setremotelogin on
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+```
 
-### Why not a reverse proxy (Caddy/Traefik/nginx)?
+## 11. Elevation
 
-TLS termination, auth middleware, and routing are already handled by
-Tailscale serve (auto-TLS) and Cloudflare Tunnel + Access (edge TLS +
-email OTP). A proxy adds a daemon to maintain, risks breaking OpenCode's
-SSE streaming (buffering/timeout misconfiguration), and solves a problem
-that doesn't exist at 1-3 services. Add Caddy later if you hit 5+ web
-services on one hostname.
+Use interactive, passworded `sudo` on Unix. Use user-scope installs on Windows
+where possible and RDP for rare Windows UAC. Never use root or Administrator
+SSH, generic `NOPASSWD`, or agent forwarding.
 
-### Third-party sharing decision tree
+## 12. Operations
 
-- **"Watch my coding session" (read-only)** → `opencode share` command
-  (zero infrastructure, public `opncd.ai/s/<id>` link) or Tailscale Funnel
-  (live but unauthenticated, bandwidth-capped)
-- **"Give my student interactive access"** → Cloudflare Tunnel + Access
-  (they verify email, get a browser session — no install, no VPN)
-- **"Give my collaborator SSH/terminal access"** → Tailscale device sharing
-  (they install Tailscale, get quarantined access to one machine with
-  port-scoped ACLs — best isolation)
-- **Never** expose a bare tunnel URL without an Access policy —
-  `opencode web`'s only native auth is one shared password
-
-### Sources
-
-- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/)
-- [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
-- [Tailscale Funnel](https://tailscale.com/kb/1223/tailscale-funnel)
-- [Tailscale device sharing](https://tailscale.com/kb/1084/sharing-tailnet-machines)
-- [Tailscale pricing](https://tailscale.com/pricing)
-- [code-server](https://github.com/coder/code-server)
-- [OpenCode web](https://opencode.ai/docs/web/)
+Keep credentials and keys machine-local. Rotate dedicated login keys, review
+tailnet ACLs and service logs, revoke vendor remote sessions, and regularly
+check that unattended hosts still have their expected power, network, disk,
+and recovery path. Remove Tailscale Serve mappings and external-app tunnels
+when they are no longer needed.
