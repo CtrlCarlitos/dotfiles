@@ -84,12 +84,13 @@ function Invoke-WithTimeout {
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
 {{- end }}
+{{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
 
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $remote_access_server $guardrail }}
+{{- if or $hasChocolateyPackages $remote_access_server }}
 # Check Admin Status
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
+{{- if $hasChocolateyPackages }}
 # Chocolatey install check (only if packages will be installed)
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     if ($IsAdmin) {
@@ -316,6 +317,7 @@ $packages += @("antigravity")
 $packages += @("opencode-desktop")
 {{- end }}
 
+{{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
 # `choco list --exact` only recognizes what Chocolatey itself installed - it's
 # blind to the same software installed any other way (direct installer,
@@ -366,6 +368,7 @@ foreach ($pkg in $packages) {
         Write-Host "  Warning: Failed to install $pkg - $_" -ForegroundColor Red
     }
 }
+{{- end }}
 
 {{- if $remote_access_server }}
 # Installing the optional server capability does not configure or expose SSH.

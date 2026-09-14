@@ -96,6 +96,10 @@ jobs:
       - name: Verify chezmoi version
         run: ~/.local/bin/chezmoi --version
 
+      - name: Test remote access package ownership
+        if: matrix.os == 'ubuntu-latest'
+        run: bash tests/remote_access_package_ownership.sh
+
       - name: Create test config
         run: |
           # Create minimal config to avoid prompts and provide all required data

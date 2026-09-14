@@ -81,6 +81,7 @@ fi
   {{- end -}}
 {{- end -}}
 {{- $isHost := and (not $isDevcontainer) (not $isWsl) -}}
+{{- $serverOnly := and $remote_access_server (not (or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail)) -}}
 
 #===============================================================================
 # CHEZMOI RUN_ONCHANGE: Install Packages (Linux/macOS)
@@ -617,7 +618,7 @@ install_linux_desktop() {
 }
 
 install_apt() {
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $remote_access_server $guardrail }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
     info "Updating apt..."
     $SUDO apt update -y || true
     info "Upgrading installed packages..."
@@ -1869,6 +1870,20 @@ setup_shell() {
 }
 
 main() {
+{{- if $serverOnly }}
+{{- if eq .chezmoi.os "darwin" }}
+    info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
+{{- else }}
+    if command -v apt &>/dev/null; then
+        info "Installing OpenSSH Server prerequisites..."
+        $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+    else
+        warn "OpenSSH Server prerequisite install requires apt; install it manually."
+    fi
+    info "SSH service activation and access configuration remain manual. See docs/remote-access.md."
+{{- end }}
+    success "Package installation complete!"
+{{- else }}
 {{- if $isWsl }}
     # Docker Desktop's WSL Integration has to be turned on from the Windows
     # side (Docker Desktop > Settings > Resources > WSL Integration) before
@@ -1956,6 +1971,7 @@ main() {
 {{- end }}
 {{- if $remote_access_server }}
     info "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md."
+{{- end }}
 {{- end }}
 }
 
