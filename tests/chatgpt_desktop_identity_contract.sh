@@ -25,4 +25,9 @@ if grep -Fq -- 'winget install --id 9NT1R1C2HH7J' "$repo_root/run_onchange_insta
     exit 1
 fi
 
+if grep -Fq -- 'existing ChatGPT Classic' "$repo_root/docs/tool-parity.md"; then
+    printf 'FAIL: documentation includes a ChatGPT Classic migration note\n' >&2
+    exit 1
+fi
+
 printf 'PASS: current ChatGPT Work/Codex desktop identity\n'
