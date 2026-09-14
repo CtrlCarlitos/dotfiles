@@ -17,7 +17,7 @@ If you want a tool in your devcontainer, add it as a feature. If you want your a
 
 ### 1. Add Features to devcontainer.json
 
-Available features: [github.com/CtrlCarlitos/devcontainer-features](https://github.com/CtrlCarlitos/devcontainer-features)
+Full feature inventory: [github.com/CtrlCarlitos/devcontainer-features](https://github.com/CtrlCarlitos/devcontainer-features). The following is a representative selection:
 
 ```json
 {
@@ -141,4 +141,4 @@ Features add ~30-60 seconds on first build. Subsequent rebuilds are faster (Dock
 
 ### zsh-z not working
 
-The `zsh-plugins` feature may not include zsh-z. Our dotfiles script installs it if missing.
+`zsh-z` is a SHA-pinned dotfiles external, installed when the dotfiles configuration is applied. Make sure the `dotfiles.repository` configuration above is present, then rebuild the container.
