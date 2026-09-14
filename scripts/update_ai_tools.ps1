@@ -74,9 +74,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
     npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
-    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's skill-writing craft guide
-    npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  writing-great-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
+    #  writing-for-agents, which is already in the batch above — the old name
+    #  failed silently on every run.)
 }
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.ps1.tmpl

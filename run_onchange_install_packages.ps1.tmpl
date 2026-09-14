@@ -874,13 +874,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
-    # writing-great-skills (mattpocock/skills, 323K installs) - Matt Pocock's
-    # skill-writing craft guide.
-    Write-Host "  Installing Matt Pocock's writing-great-skills skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "writing-great-skills skill install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-    }
+    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
+    #  writing-for-agents, which is already in the batch above — the old name
+    #  failed silently on every run.)
 }
 {{- end }}
 

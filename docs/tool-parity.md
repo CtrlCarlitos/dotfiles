@@ -51,7 +51,6 @@ This document outlines the tools installed by the dotfiles configuration across 
 > npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
 > npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
 > npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
-> npx --yes --loglevel=error skills@latest add mattpocock/skills -s writing-great-skills -a claude-code opencode antigravity -g -y --copy
 > ```
 > Matt Pocock's `code-review` is staged as `mp-code-review` (renamed + `name:` frontmatter patched, then `skills add <local dir>`) to stay distinct from this repo's own `/code-review` command. `scripts/update_ai_tools.*` re-run the same commands. `--loglevel=error` is required: npm 12's npx prints a benign `npm notice run …` hint to stderr on every invocation, which kills the install on PS 5.1 under `$ErrorActionPreference=Stop` (see docs/skills-install-strategy.md's npm 12 gotchas). `-a antigravity` is the `skills` CLI's own Antigravity target (`~/.agents/skills/`) — verified working 2026-08-31 with agy installed on both Windows and WSL: agy loads the skills from there. Superpowers is unchanged (still `claude plugin install` / npm / `agy plugin install <url>` per its own rows).
 
