@@ -102,7 +102,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **dev_desktop** | Chrome, VS Code, Docker Desktop, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | cloudflared only | ❌ |
 | **remote_access_server** | OpenSSH-server prerequisites only; server setup is deliberately manual. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |
 
@@ -167,7 +167,7 @@ New to zsh, tmux, or neovim? Start here:
 
 | Doc | What's in it |
 |-----|-------------|
-| [Package Groups](docs/package-groups.md) | The 14-group taxonomy, presets, and how to customize |
+| [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
@@ -232,12 +232,12 @@ install.sh / install.ps1            # Universal bootstrap (consent → gum → m
 scripts/select-packages.{sh,ps1}    # The package-group menu (gum multi-select)
 scripts/update-versions.sh          # Weekly auto-updater (chezmoi + Antigravity 2.0 pins)
 scripts/update_ai_tools.{sh,ps1}    # AI tool upgrade commands
-run_onchange_install_packages.*     # Platform installers (14-group gated)
+run_onchange_install_packages.*     # Platform installers (16-group gated)
 run_onchange_generate_identities.*  # Git identity + SSH key generation
 dot_zshrc / dot_gitconfig.tmpl      # Shell and git configuration
 dot_config/nvim/                    # Neovim (Lazy.nvim)
 private_dot_ssh/                    # SSH config (templated, mode 600)
-.chezmoi.toml.tmpl                  # Config template (14 promptBoolOnce groups)
+.chezmoi.toml.tmpl                  # Config template (16 promptBoolOnce groups)
 tests/                              # CI test suite (menu, config keys, skills args)
 docs/                               # You are here
 ```

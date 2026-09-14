@@ -18,6 +18,8 @@ When you run the installer, this is what you'll see:
   [x] modern_cli        Modern CLI replacements (bat, eza, starship, delta...)
   [x] fonts             Nerd Fonts (required for Starship icons)
   [x] agent_toolkit     Cross-vendor agent layer (OpenCode, Serena, Graft, act...)
+  [x] opencode_cli      OpenCode CLI + Superpowers + skills + guardrail
+  [ ] opencode_desktop  OpenCode Desktop app (all platforms)
   [x] claude_cli        Claude Code CLI + Superpowers + skills + guardrail
   [ ] claude_desktop    Claude Desktop app (Windows/macOS only)
   [ ] chatgpt_cli       Codex CLI (OpenAI)
