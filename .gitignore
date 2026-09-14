@@ -8,6 +8,7 @@ temp/
 # Local development
 .vscode/
 .idea/
+.worktrees/
 
 # OS files
 .DS_Store
