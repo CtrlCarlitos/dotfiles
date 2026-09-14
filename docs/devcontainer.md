@@ -6,7 +6,7 @@ Use your dotfiles automatically in VS Code devcontainers.
 
 | Layer | Mechanism | When it runs | What it does | Cost |
 |-------|-----------|-------------|--------------|------|
-| **Tools** (node, serena, claude, etc.) | devcontainer-features (`features` block) | Container **build** (Docker image layer) | Installs binaries into the image | Cached — subsequent starts skip it |
+| **Tools** (runtime core, serena, claude, etc.) | devcontainer-features (`features` block) | Container **build** (Docker image layer) | Installs binaries into the image | Cached — subsequent starts skip it |
 | **Config** (aliases, profiles, git identities) | VS Code dotfiles (`dotfiles.repository`) | Container **start** (every time) | Runs `install.sh` → `chezmoi init --apply` | Cheap — file copies only |
 
 The dotfiles installer **does not install packages** in devcontainers — `chezmoi init` renders all groups false non-interactively (CI=true), so only configuration files are applied. This is by design: installing packages on every container start would be wasteful since they're already in the Docker image via features.
