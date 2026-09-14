@@ -1550,7 +1550,7 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany; do
+    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
 

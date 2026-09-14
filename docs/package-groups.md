@@ -32,7 +32,7 @@ the persisted `[data.packages]` section is emitted in.
 | `chatgpt_desktop` | ChatGPT Desktop app | Win winget msstore `9NT1R1C2HH7J`; mac brew cask `chatgpt`; Linux: none (no-op) |
 | `antigravity_cli` | Antigravity CLI (agy) | choco `antigravity-cli` / brew cask / official script + superpowers + skills + guardrail antigravity plane |
 | `antigravity_desktop` | Antigravity 2.0 app | Win choco `antigravity`; mac 2.0 dmg; Linux 2.0 x64/arm64 (pinned hub-channel URLs) |
-| `dev_desktop` | Human desktop apps | Chrome, VS Code, Docker Desktop, ScreenRec, Termius, Handy… |
+| `dev_desktop` | Human desktop apps | Chrome, VS Code, Docker Desktop, CodexBar, ScreenRec, Termius, Handy… |
 | `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
 | `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
 | `guardrail` | Agent guardrails | guardrail binary; planes fire per present CLI (existing gating) |
