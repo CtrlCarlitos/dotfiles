@@ -881,10 +881,10 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    $skAgents = @('claude-code', 'opencode')
+    $skAgents = @('claude-code', 'opencode', 'codex')
     Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode')
+        $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -912,7 +912,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
         }
         Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
-            $skAgents = @('claude-code', 'opencode')
+            $skAgents = @('claude-code', 'opencode', 'codex')
             npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
         }
@@ -923,7 +923,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
     Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode')
+        $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -932,7 +932,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # agent search and install skills from skills.sh mid-session.
     Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode')
+        $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -941,7 +941,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # automation: navigate, click, fill, scrape, screenshot.
     Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode')
+        $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -950,7 +950,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode')
+        $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }

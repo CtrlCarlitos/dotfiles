@@ -57,6 +57,30 @@ verify_unix_no_npx_summaries() {
     done
 }
 
+verify_unix_summary_targets() {
+    local file harness output
+
+    for file in "${unix_files[@]}"; do
+        harness="$(mktemp)"
+        {
+            printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+                'AGENTS=(claude-code opencode)' \
+                'claude_installed=0; claude_skipped=0; claude_failed=0' \
+                'opencode_installed=0; opencode_skipped=0; opencode_failed=0' \
+                'codex_installed=0; codex_skipped=0; codex_failed=0'
+            awk '/^    record_cli_result\(\) \{/{copy=1} copy{print} copy && /^    }$/{exit}' "$repo_root/$file"
+            printf '%s\n' 'record_cli_result installed 1' \
+                'printf "%s %s %s\\n" "$claude_installed" "$opencode_installed" "$codex_installed"'
+        } > "$harness"
+        output="$(bash "$harness")"
+        rm -f "$harness"
+
+        if [[ "$output" != '1 1 0' ]]; then
+            fail "$file must not count Codex for a skills CLI operation that did not target it"
+        fi
+    done
+}
+
 verify_unix_skill_lifecycle() {
     local tmp config rendered harness output target
     tmp="$(mktemp -d)"
@@ -241,10 +265,12 @@ fi
 
 if [[ "$scope" != "windows" ]]; then
     verify_unix_no_npx_summaries
+    verify_unix_summary_targets
     verify_unix_skill_lifecycle
 
     for file in "${unix_files[@]}"; do
         require_contains "$file" 'curated-agent-skills.txt'
+        require_contains "$file" 'AGENTS=(claude-code opencode codex)'
         if grep -Fq -- '-a antigravity' "$repo_root/$file"; then
             fail "$file must not use the Antigravity skills CLI adapter"
         fi
@@ -288,7 +314,9 @@ if [[ "$scope" != "unix" ]]; then
             require_contains "$file" "$target"
         done
 
-        require_contains "$file" "\$skAgents = @('claude-code', 'opencode')"
+        if grep -F -- "\$skAgents = @(" "$repo_root/$file" | grep -Fvq -- "'codex'"; then
+            fail "$file must include codex in every skills CLI agent array"
+        fi
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" "\$markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\\r?$'"
         require_contains "$file" 'Get-ChildItem -Force -LiteralPath $source | Copy-Item'

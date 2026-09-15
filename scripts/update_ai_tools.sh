@@ -32,20 +32,26 @@ if command -v npx &>/dev/null; then
     SK=(npx --yes --loglevel=error skills@latest)
     # The CLI refreshes $HOME/.claude/skills and $HOME/.agents/skills. OpenCode
     # and Codex discover the shared directory; this is the explicit refresh path.
-    AGENTS=(claude-code opencode)
+    AGENTS=(claude-code opencode codex)
     claude_installed=0; claude_skipped=0; claude_failed=0
     opencode_installed=0; opencode_skipped=0; opencode_failed=0
     codex_installed=0; codex_skipped=0; codex_failed=0
     antigravity_installed=0; antigravity_skipped=0; antigravity_failed=0
     record_cli_result() {
         local status="$1" count="$2"
-        if [[ "$status" == installed ]]; then
-            ((claude_installed += count)); ((opencode_installed += count)); ((codex_installed += count))
-        elif [[ "$status" == skipped ]]; then
-            ((claude_skipped += count)); ((opencode_skipped += count)); ((codex_skipped += count))
-        else
-            ((claude_failed += count)); ((opencode_failed += count)); ((codex_failed += count))
-        fi
+        for agent in "${AGENTS[@]}"; do
+            case "$status:$agent" in
+                installed:claude-code) ((claude_installed += count)) ;;
+                installed:opencode) ((opencode_installed += count)) ;;
+                installed:codex) ((codex_installed += count)) ;;
+                skipped:claude-code) ((claude_skipped += count)) ;;
+                skipped:opencode) ((opencode_skipped += count)) ;;
+                skipped:codex) ((codex_skipped += count)) ;;
+                failed:claude-code) ((claude_failed += count)) ;;
+                failed:opencode) ((opencode_failed += count)) ;;
+                failed:codex) ((codex_failed += count)) ;;
+            esac
+        done
     }
     if "${SK[@]}" add mattpocock/skills \
         -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \

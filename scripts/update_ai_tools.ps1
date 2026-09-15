@@ -41,7 +41,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # terminating error - keep stderr empty instead (see installer for full notes).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
-    $skAgents = @('claude-code', 'opencode')
+    $skAgents = @('claude-code', 'opencode', 'codex')
     npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
 
