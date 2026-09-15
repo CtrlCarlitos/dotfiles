@@ -51,6 +51,7 @@ require docs/agent-skill-wiring-design.md "Codex has no generated command files.
 require docs/tool-parity.md "Only OpenCode receives generated command adapters."
 require docs/tool-parity.md "Codex has no generated command files."
 require docs/package-groups.md 'shared `~/.agents/skills` (OpenCode and Codex)'
+require docs/package-groups.md 'no generated command adapters'
 forbid docs/package-groups.md "Zero wiring by design"
 forbid docs/package-groups.md "no codex surface"
 require docs/menu-demo.md "opencode_cli"
