@@ -28,13 +28,16 @@ fi
 # ever holding the terminal (see installer for full notes).
 if command -v npx &>/dev/null; then
     echo "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..."
-    SK="npx --yes --loglevel=error skills@latest"
-    AGENTS="claude-code opencode antigravity"
-    $SK add mattpocock/skills \
+    catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
+    SK=(npx --yes --loglevel=error skills@latest)
+    # The CLI refreshes $HOME/.claude/skills, $HOME/.config/opencode/skills,
+    # and $HOME/.codex/skills. The explicit updater is the skill refresh path.
+    AGENTS=(claude-code opencode codex)
+    "${SK[@]}" add mattpocock/skills \
         -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
            prototype research grilling handoff teach writing-for-agents \
            resolving-merge-conflicts \
-        -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   Matt Pocock skills update failed - skipping"
+        -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   Matt Pocock skills update failed - skipping"
     sk_tmp="$(mktemp -d)"
     if git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" &>/dev/null; then
         src="$sk_tmp/repo/skills/engineering/code-review"
@@ -47,7 +50,7 @@ if command -v npx &>/dev/null; then
             # is missing (upstream layout drift) - mirrors the installer
             if [[ -f "$skf" ]]; then
                 sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                $SK add "$sk_tmp/stage" -s mp-code-review -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   mp-code-review update failed - skipping"
+                "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   mp-code-review update failed - skipping"
             else
                 echo "   Warning: SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
             fi
@@ -56,16 +59,61 @@ if command -v npx &>/dev/null; then
         fi
     fi
     rm -rf "$sk_tmp"
-    $SK add anthropics/skills -s frontend-design -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   frontend-design update failed - skipping"
+    "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   frontend-design update failed - skipping"
     # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
-    $SK add vercel-labs/skills -s find-skills -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   find-skills update failed - skipping"
+    "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   find-skills update failed - skipping"
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
-    $SK add vercel-labs/agent-browser -s agent-browser -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   agent-browser update failed - skipping"
+    "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   agent-browser update failed - skipping"
     # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
-    $SK add anthropics/skills -s skill-creator -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   skill-creator update failed - skipping"
+    "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null || echo "   skill-creator update failed - skipping"
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    if [[ ! -r "$catalog" ]]; then
+        echo "   Warning: curated skill catalog is not readable: $catalog"
+    else
+        while IFS= read -r skill || [[ -n "$skill" ]]; do
+            [[ -z "$skill" || "$skill" == \#* ]] && continue
+
+            source="$HOME/.claude/skills/$skill"
+            target="$HOME/.gemini/antigravity-cli/skills/$skill"
+            if [[ -f "$source/SKILL.md" ]]; then
+                mkdir -p "$HOME/.gemini/antigravity-cli/skills"
+                tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
+                if cp -R "$source/." "$tmp/"; then
+                    rm -rf "$target"
+                    mv "$tmp" "$target"
+                else
+                    rm -rf "$tmp"
+                    echo "   Warning: failed to copy curated skill for Antigravity: $skill"
+                fi
+            else
+                echo "   Warning: Claude skill missing; skipping Antigravity copy: $skill"
+            fi
+
+            command_dir="$HOME/.config/opencode/commands"
+            command_file="$command_dir/$skill.md"
+            source="$HOME/.config/opencode/skills/$skill"
+            if [[ -f "$source/SKILL.md" ]]; then
+                mkdir -p "$command_dir"
+                if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+                    echo "   Warning: OpenCode command is user-managed; leaving unchanged: $command_file"
+                else
+                    tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
+                    {
+                        printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
+                        printf 'description: Run the %s skill\n' "$skill"
+                        printf '%s\n' '---'
+                        printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
+                    } > "$tmp"
+                    mv "$tmp" "$command_file"
+                fi
+            elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+                rm -f "$command_file"
+            fi
+        done < "$catalog"
+    fi
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

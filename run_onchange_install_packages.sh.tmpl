@@ -238,20 +238,12 @@ install_node() {
     fi
 }
 
-# Curated third-party agent skills, installed with the `skills` CLI
-# (vercel-labs/skills) rather than hand-staged per agent. One `skills add`
-# writes ~/.agents/skills/<name>/ (OpenCode and Antigravity read this
-# agent-compatible path natively) and ~/.claude/skills/<name>/ (Claude Code).
-# --copy makes real directories, not symlinks into an npm cache that won't
-# survive. Replaces the old clone + hand-copy + plugin.json + `agy plugin
-# install` staging, which only reached Antigravity.
-#
-# Antigravity note: `-a antigravity` is the `skills` CLI's own Antigravity
-# target (~/.agents/skills/). Not yet re-verified with `agy` actually present
-# on a box; if agy turns out not to read that path, add back an
-# `agy plugin install <staged dir>` for the Antigravity leg only.
+# Curated third-party agent skills are installed to each supported tool's native
+# directory. Antigravity receives verified copies from Claude's native target.
 install_agent_skills() {
     command -v npx &>/dev/null || { warn "npx not found - skipping curated agent skills"; return; }
+    local catalog
+    catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
     # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /
     # npm notice run 'skills' add ..." hint to stderr on every invocation -
     # pure console noise here, suppressed like the Windows side does.
@@ -263,7 +255,9 @@ install_agent_skills() {
     # complete non-interactively in ~5s (verified: 8 skills + mp-code-review +
     # frontend-design). net_timeout stays as the wall-clock backstop.
     local -a SK=(npx --yes --loglevel=error skills@latest)
-    local -a AGENTS=(claude-code opencode antigravity)
+    # The CLI writes the native targets: $HOME/.claude/skills,
+    # $HOME/.config/opencode/skills, and $HOME/.codex/skills.
+    local -a AGENTS=(claude-code opencode codex)
 
     # Matt Pocock's engineering/productivity skills - 11 installed as-is.
     # teach + writing-for-agents live under skills/productivity/, the rest under
@@ -334,6 +328,53 @@ install_agent_skills() {
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    if [[ ! -r "$catalog" ]]; then
+        warn "Curated skill catalog is not readable: $catalog"
+        return
+    fi
+
+    local skill source target tmp command_dir command_file
+    while IFS= read -r skill || [[ -n "$skill" ]]; do
+        [[ -z "$skill" || "$skill" == \#* ]] && continue
+
+        source="$HOME/.claude/skills/$skill"
+        target="$HOME/.gemini/antigravity-cli/skills/$skill"
+        if [[ -f "$source/SKILL.md" ]]; then
+            mkdir -p "$HOME/.gemini/antigravity-cli/skills"
+            tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
+            if cp -R "$source/." "$tmp/"; then
+                rm -rf "$target"
+                mv "$tmp" "$target"
+            else
+                rm -rf "$tmp"
+                warn "Failed to copy curated skill for Antigravity: $skill"
+            fi
+        else
+            warn "Claude skill missing; skipping Antigravity copy: $skill"
+        fi
+
+        command_dir="$HOME/.config/opencode/commands"
+        command_file="$command_dir/$skill.md"
+        source="$HOME/.config/opencode/skills/$skill"
+        if [[ -f "$source/SKILL.md" ]]; then
+            mkdir -p "$command_dir"
+            if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+                warn "OpenCode command is user-managed; leaving unchanged: $command_file"
+            else
+                tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
+                {
+                    printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
+                    printf 'description: Run the %s skill\n' "$skill"
+                    printf '%s\n' '---'
+                    printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
+                } > "$tmp"
+                mv "$tmp" "$command_file"
+            fi
+        elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+            rm -f "$command_file"
+        fi
+    done < "$catalog"
 }
 
 # agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.
