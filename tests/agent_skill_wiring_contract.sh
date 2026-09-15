@@ -54,7 +54,7 @@ $fixtureHome = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-skill-wiring-
 $expected = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the handoff skill`r`n---`r`nLoad the native ``handoff`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
 
 try {
-    foreach ($generator in $env:TEST_GENERATORS -split [IO.Path]::PathSeparator) {
+    foreach ($generator in $args) {
         $line = (Select-String -Path $generator -Pattern '^\s+\$command = ').Line
         if (-not $line) { throw "command generator not found: $generator" }
         $skill = 'handoff'
@@ -82,7 +82,7 @@ try {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
-    TEST_GENERATORS="$repo_root/run_onchange_install_packages.ps1.tmpl:$repo_root/scripts/update_ai_tools.ps1" pwsh -NoProfile -File "$fixture"
+    pwsh -NoProfile -File "$fixture" "$repo_root/run_onchange_install_packages.ps1.tmpl" "$repo_root/scripts/update_ai_tools.ps1"
     rm -f "$fixture"
 }
 
