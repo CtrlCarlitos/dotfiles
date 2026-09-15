@@ -266,9 +266,10 @@ if [[ "$scope" != "windows" ]]; then
         require_contains "$file" 'mv "$backup" "$target"'
         require_contains "$file" 'rm -rf "$backup"'
         for agent in 'Claude Code' OpenCode Antigravity Codex; do
-            require_contains "$file" "Curated skills: $agent installed="
+        require_contains "$file" "Curated skills: $agent installed="
         done
     done
+    require_contains 'run_onchange_install_packages.sh.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"'\\\"'\\\"'\" }}"
 fi
 
 if [[ "$scope" != "unix" ]]; then
@@ -301,6 +302,7 @@ if [[ "$scope" != "unix" ]]; then
 
     verify_windows_command_generation
     require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
+    require_contains 'run_onchange_install_packages.ps1.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"''\" }}"
 fi
 
 if [[ "$failed" == true ]]; then
