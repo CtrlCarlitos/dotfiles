@@ -38,13 +38,23 @@ Full feature inventory: [github.com/CtrlCarlitos/devcontainer-features](https://
     "ghcr.io/CtrlCarlitos/devcontainer-features/antigravity-cli:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/serena:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/graft:1": {},
-    "ghcr.io/CtrlCarlitos/devcontainer-features/modern-cli:1": {},
-    "ghcr.io/CtrlCarlitos/devcontainer-features/nerd-font:1": {}
+    "ghcr.io/CtrlCarlitos/devcontainer-features/modern-cli:1": {}
   }
 }
 ```
 
 Pick only what you need — features are opt-in per tool.
+
+### Compatibility and reproducibility
+
+The examples intentionally use Debian/Ubuntu images. `runtime_core` and
+`nerd-font` require an APT-based image, while several other features assume
+Linux build tools or package managers. `guardrail` currently supports Linux
+x86_64 only, so omit it on arm64 containers.
+
+The `:1` references select the latest compatible feature release, not an
+immutable tool image. Pin feature options where reproducibility matters and
+expect APT, npm, and upstream installers to change independently.
 
 ### 2. Add Dotfiles Configuration
 
@@ -101,6 +111,76 @@ Or use VS Code global settings (applies to all devcontainers):
 }
 ```
 
+### 4. Agent-workstation profile (optional)
+
+The complete example is deliberately lightweight. Add this profile only when a
+container needs the full agent workstation. Individual CLI features install
+only their named CLI: skills, browser automation, and Guardrail are separate
+features.
+
+```json
+{
+  "features": {
+    "ghcr.io/CtrlCarlitos/devcontainer-features/runtime_core:1": {
+      "version": "22"
+    },
+    "ghcr.io/CtrlCarlitos/devcontainer-features/claude-code:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/opencode:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/antigravity-cli:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/codex:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/serena:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/graft:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/curated-skills:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/guardrail:1": {},
+    "ghcr.io/CtrlCarlitos/devcontainer-features/playwright:1": {
+      "browser": "chromium"
+    }
+  }
+}
+```
+
+This maps dotfiles' `agent_toolkit` bundle to Serena, Graft, and optional
+Playwright. CLI features map to their individual CLIs; `curated-skills` and
+`guardrail` provide the cross-agent integrations. Playwright downloads a
+browser and should be omitted from containers that do not need browser
+automation. `act` has no devcontainer feature; install it in the base image or
+project Dockerfile when local GitHub Actions execution is required.
+
+### 5. OpenCode server safety
+
+Keep OpenCode's feature server disabled unless the container explicitly needs
+it, and bind any enabled server to `127.0.0.1` unless an authenticated proxy is
+deliberately configured. `serverPassword` must not be stored in a feature
+option: the feature persists that value in a world-readable file. Provide a
+password through the runtime environment or your platform's secret mechanism,
+not the image build configuration.
+
+### 6. Persist agent authentication and configuration
+
+Feature installation is cached in the image, but agent authentication and
+configuration live in the remote user's home directory. Use named volumes when
+they should survive a rebuild: `~/.claude`, `~/.codex`, and
+`~/.config/opencode`. This example assumes the standard `vscode`
+remote user from the base image; change the target paths if your `remoteUser`
+differs.
+
+```json
+{
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=devcontainer-claude,target=/home/vscode/.claude,type=volume",
+    "source=devcontainer-codex,target=/home/vscode/.codex,type=volume",
+    "source=devcontainer-opencode-config,target=/home/vscode/.config/opencode,type=volume",
+    "source=devcontainer-opencode-data,target=/home/vscode/.local/share/opencode,type=volume"
+  ]
+}
+```
+
+Claude also stores user settings in `~/.claude.json`. Docker named volumes are
+directories, so do not mount one at that file path. If that file must persist,
+create a host file outside the repository and bind mount it explicitly, for
+example `source=/absolute/host/path/claude.json,target=/home/vscode/.claude.json,type=bind`.
+
 ### What happens on container start
 
 The dotfiles `install.sh` detects the devcontainer environment (`DEVCONTAINER=true` or `REMOTE_CONTAINERS=true`) and:
@@ -129,7 +209,7 @@ ssh -T git@github.com   # Should authenticate
 
 ### Fonts not displaying correctly
 
-The Nerd Font must be installed on your **host machine** (Windows/Mac), not in the container. VS Code uses the host's fonts. Or add the `nerd-font` feature for terminal-only font rendering.
+The Nerd Font must be installed on your **host machine** (Windows/Mac), not in the container. VS Code uses the host's fonts, so a container-installed Nerd Font does not affect VS Code's integrated terminal. Use the `nerd-font` feature only for GUI software that renders inside the container.
 
 ### Oh-My-Zsh not found
 

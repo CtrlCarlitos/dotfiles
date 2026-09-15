@@ -48,6 +48,9 @@ jobs:
       - name: Test Windows Graft installation contract
         run: bash tests/graft_windows_install_contract.sh
 
+      - name: Test devcontainer documentation contract
+        run: bash tests/devcontainer_docs_contract.sh
+
       - name: Test package-group selection menu
         run: bash tests/select_packages.sh
 
