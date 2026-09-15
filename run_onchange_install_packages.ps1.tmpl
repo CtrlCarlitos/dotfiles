@@ -1029,7 +1029,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             foreach ($agent in $agentTargets.Keys) {
                 if ($agent -eq 'Antigravity') {
                     $skillSummary[$agent][$antigravityStatus]++
-                } else {
+                } elseif ($agent -ne 'Codex' -or $skAgents -contains 'codex') {
                     $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
                     if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
                         $skillSummary[$agent].installed++

@@ -202,7 +202,7 @@ try {
             $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
             if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
 
-            $lifecycleBody = $match.Value -replace '(?m)^    \$catalog =', @'
+            $lifecycleBody = "`$skAgents = @('claude-code', 'opencode')`n" + ($match.Value -replace '(?m)^    \$catalog =', @'
     function Move-Item {
         param($LiteralPath, $Destination, $ErrorAction)
         if ($LiteralPath -like '*.handoff.tmp.*' -and $Destination -eq $antigravitySkill) {
@@ -212,8 +212,12 @@ try {
     }
     $catalog =
 '@
+            )
             $output = & ([scriptblock]::Create($lifecycleBody)) 6>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
+            }
+            if (($output -join "`n") -notmatch 'Curated skills: Codex installed=0 skipped=0 failed=0') {
+                throw "Codex summary counted a shared OpenCode skill for an OpenCode-only operation: $lifecycle"
             }
             if (($output -join "`n") -notmatch 'Curated skills: Antigravity installed=0 .* failed=1') {
                 throw "Antigravity summary reported stale skill as installed: $lifecycle"
