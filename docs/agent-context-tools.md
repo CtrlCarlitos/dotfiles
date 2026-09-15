@@ -29,7 +29,7 @@ left to you.
 | | Serena | Graft |
 | :--- | :--- | :--- |
 | Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) | `npm i -g @nanonets/graft` (with npm's `--allow-scripts` allowlist for its tree-sitter native builds) |
-| Client wiring | Registered as an MCP server per client: native `serena setup claude-code` / `serena setup codex`, JSON merge into opencode's global `mcp` key, `agy mcp add serena …` — all idempotent | None needed (it's a CLI); `graft mcp` exists if you want it as an MCP server |
+| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex`, JSON merge into OpenCode's global `mcp` key, and `agy mcp add serena …` complete the remaining clients | None needed (it's a CLI); `graft mcp` exists if you want it as an MCP server |
 | Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional | `graft init` + `graft build` (see below) |
 | Telemetry | n/a | Disabled by the installer (`graft telemetry disable`) |
 | Upgrade | `uv tool upgrade serena-agent` (also run by `scripts/update_ai_tools.*`) | `graft upgrade` (also run by `scripts/update_ai_tools.*`) |

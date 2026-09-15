@@ -7,19 +7,24 @@ skills without the whole thing.
 ## TL;DR
 
 - The repository-owned curated-skill catalog uses `~/.claude/skills`, the
-  shared `~/.agents/skills`, and `~/.gemini/antigravity-cli/skills`.
-- The `skills` CLI is used with the Claude Code and OpenCode adapters. OpenCode and Codex discover
-  `~/.agents/skills`; the verified Claude Code copy supplies
+  shared `~/.agents/skills` for OpenCode and Codex, and
+  `~/.gemini/antigravity-cli/skills` for Antigravity.
+- The `skills` CLI is used with the Claude Code, OpenCode, and Codex adapters.
+  OpenCode and Codex discover `~/.agents/skills`; the verified Claude Code copy supplies
   Antigravity because the Antigravity adapter has an incompatible destination.
 - The installer verifies every `<target>/<name>/SKILL.md`, then generates an
-  OpenCode command at `~/.config/opencode/commands/<name>.md`. For example,
-  `/teach <topic>` loads the native `teach` skill.
+  OpenCode-only command at `~/.config/opencode/commands/<name>.md`. Claude
+  Code, Antigravity CLI, and OpenCode use `/teach <topic>`; Codex uses
+  `/skills`, then `$teach <topic>`.
+- Only OpenCode receives generated command adapters. Codex discovers the shared
+  skill catalog but has no generated command files.
 - Generated commands carry a dotfiles ownership marker. Refresh replaces or
   removes only marker-owned commands; a user-owned name conflict is preserved
   with a warning.
 - Refresh explicitly with `scripts/update_ai_tools.sh` on Linux/macOS/WSL or
-  `scripts/update_ai_tools.ps1` on Windows, then restart OpenCode. `chezmoi
-  apply` is not a reliable upstream-skill refresh trigger.
+  `scripts/update_ai_tools.ps1` on Windows, then restart OpenCode. Start a new
+  Claude Code, Antigravity CLI, or Codex CLI session before using a refreshed
+  skill. `chezmoi apply` is not a reliable upstream-skill refresh trigger.
 - New installs refresh catalog-managed entries in `~/.agents/skills` without
   deleting other content there.
 

@@ -31,11 +31,11 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Superpowers (Claude Code)** | `claude plugin install` | `claude plugin install` | `claude plugin install` | `claude plugin install` | ❌ | `claude plugin update superpowers -y` |
 | **Superpowers (OpenCode)** | `npm i --prefix ~/.config/opencode` | `npm i --prefix ~/.config/opencode` | `npm i --prefix %USERPROFILE%\.config\opencode` | `npm i --prefix ~/.config/opencode` | ❌ | Re-run the same `npm install` (no version pin, pulls latest commit) |
 | **Superpowers (Antigravity)** | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | ❌ | Re-run `agy plugin install https://github.com/obra/superpowers` (idempotent - installs and updates are the same command). The officially-documented mechanism per obra/superpowers' own README.md, not hand-copying skill files into a guessed plugin directory |
-| **Curated skills** (repository catalog) | shared-location fan-out | shared-location fan-out | shared-location fan-out | shared-location fan-out | ❌ | Run `scripts/update_ai_tools.sh` or `scripts/update_ai_tools.ps1`. Curated skills land in `~/.claude/skills`, `~/.agents/skills`, and `~/.gemini/antigravity-cli/skills`; OpenCode and Codex discover the shared directory, and `--copy` creates real directories, not symlinks. |
+| **Curated skills** (repository catalog) | shared-location fan-out | shared-location fan-out | shared-location fan-out | shared-location fan-out | ❌ | Run `scripts/update_ai_tools.sh` or `scripts/update_ai_tools.ps1`. Curated skills land in `~/.claude/skills`, shared `~/.agents/skills` (OpenCode and Codex), and `~/.gemini/antigravity-cli/skills`; `--copy` creates real directories, not symlinks. |
 | **Superpowers (Codex CLI)** | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | ❌ | Not automated - confirmed via an isolated Docker test that the only scriptable option (`codex-plugin`, a third-party npm helper) expects a `plugins/<name>/` marketplace layout obra/superpowers doesn't use (root-level `.codex-plugin/plugin.json` instead), so it fails outright regardless of flags |
 | **Playwright Chromium** | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | ❌ | `npx playwright install chromium` |
 | **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
-| **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Install also does the per-client MCP registration (claude/codex/opencode/agy): native `serena setup claude-code` / `serena setup codex`, JSON merge into opencode's global `mcp` key, `agy mcp add` - all idempotent. See docs/agent-context-tools.md |
+| **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Claude checks `claude mcp get serena` before `serena setup claude-code`; Codex uses `serena setup codex`, OpenCode merges its global `mcp` key, and Antigravity uses `agy mcp add`. See docs/agent-context-tools.md |
 | **Graft** | `npm i -g @nanonets/graft` (with `--allow-scripts` allowlist for its tree-sitter native builds) | same | same | same | ❌ | `graft upgrade`. Per-repo activation is separate and manual: `graft init` (or e.g. `graft init --agents claude agents`) + `graft build` writes the gitignored local `graft/` graph. Telemetry disabled by the installer. See docs/agent-context-tools.md |
 | guardrail | GitHub release binary → `~/.local/bin` (checksum-verified) | same | GitHub release `.exe` → `%USERPROFILE%\.local\bin` (checksum + Unblock-File) | same as Linux | not installed (no `claude` there) | bump `GUARDRAIL_VERSION` in `run_onchange_install_packages.*.tmpl` + `scripts/update_ai_tools.*`, re-`chezmoi apply` |
 
@@ -44,12 +44,16 @@ This document outlines the tools installed by the dotfiles configuration across 
 > **Curated skills:** the installer refreshes the repository catalog and fans it
 > out to each native target. It verifies each `SKILL.md` before generating the
 > matching OpenCode command in `~/.config/opencode/commands`; `/teach <topic>`
-> is one example. Generated command files are marker-owned, so refresh may
+> is one example. Claude Code, Antigravity CLI, and OpenCode use `/teach
+> <topic>`; Codex uses `/skills`, then `$teach <topic>`.
+> Only OpenCode receives generated command adapters. Codex has no generated command files. Generated
+> command files are marker-owned, so refresh may
 > update them safely but preserves a user-owned command conflict with a warning.
 > Use `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
 > Linux/macOS/WSL or `& (Join-Path (chezmoi source-path)
 > 'scripts\update_ai_tools.ps1')` on Windows for explicit updates, then restart
-> OpenCode. OpenCode and Codex discover the catalog-managed shared
+> OpenCode and start a new Claude Code, Antigravity CLI, or Codex CLI session
+> before using a refreshed skill. OpenCode and Codex discover the catalog-managed shared
 > `~/.agents/skills` directory; other existing content there is not deleted.
 > Superpowers is unchanged
 > (still `claude plugin install` / npm / `agy plugin install <url>` per its own

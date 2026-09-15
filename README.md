@@ -53,10 +53,14 @@ chezmoi apply
 The curated skill catalog uses the `skills` CLI's supported destinations:
 
 - Claude Code: `~/.claude/skills`
-- OpenCode and Codex discover `~/.agents/skills`. OpenCode also receives
-  generated slash commands in `~/.config/opencode/commands`, such as
-  `/teach <topic>`.
+- OpenCode and Codex discover the shared `~/.agents/skills` catalog. Only
+  OpenCode receives generated command adapters in
+  `~/.config/opencode/commands`.
 - Antigravity CLI: `~/.gemini/antigravity-cli/skills`
+
+Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`. Codex CLI:
+open `/skills`, then enter `$teach <topic>`.
+Only OpenCode receives generated command adapters. Codex has no generated command files.
 
 Refresh curated skills explicitly after installation or whenever you want the
 latest catalog:
@@ -69,10 +73,11 @@ bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"
 & (Join-Path (chezmoi source-path) 'scripts\update_ai_tools.ps1')
 ```
 
-After installing or refreshing, restart OpenCode so it loads its updated skills
-and generated commands. The updater refreshes the catalog-managed skill
-directories in `~/.agents/skills`; it does not remove other user-managed
-content there.
+After installing or refreshing, restart OpenCode so it reloads updated skills
+and generated commands. Start a new Claude Code, Antigravity CLI, or Codex CLI
+session before using a refreshed skill. The updater refreshes the
+catalog-managed skill directories in `~/.agents/skills`; it does not remove
+other user-managed content there.
 
 ### Prerequisites & platform notes
 

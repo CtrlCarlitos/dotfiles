@@ -4,8 +4,8 @@
 
 Install the same curated skill set globally for Claude Code, OpenCode,
 Antigravity CLI, and Codex CLI. Claude uses its native directory; OpenCode and
-Codex discover the `skills` CLI's shared directory. OpenCode additionally
-exposes every curated skill as a slash command, such as `/teach`.
+Codex discover the `skills` CLI's shared directory. Only OpenCode additionally
+exposes every curated skill as a generated slash command, such as `/teach`.
 
 This design uses `~/.agents/skills` for the shared OpenCode and Codex catalog.
 It does not delete existing user-managed content there.
@@ -25,7 +25,6 @@ Out of scope:
 - Symlinks between agent directories.
 - Changing Superpowers, Guardrail, MCP, or agent-plugin installation.
 - Removing pre-existing `~/.agents/skills` content.
-- Claiming Codex discovery is confirmed before the requested user test.
 
 ## Native Targets
 
@@ -36,9 +35,15 @@ Out of scope:
 | Antigravity CLI | `~/.gemini/antigravity-cli/skills/<name>/SKILL.md` | copy the fetched curated skill directories to the documented CLI path |
 | Codex CLI | `~/.agents/skills/<name>/SKILL.md` | discovers the shared `skills` CLI destination |
 
-The installer calls `skills add -a claude-code opencode -g --copy`, which
+The installer calls `skills add -a claude-code opencode codex -g --copy`, which
 produces Claude's native target and the shared target. Antigravity's adapter is
 not used as its final destination.
+
+## Invocation
+
+Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`. Codex CLI
+uses `/skills`, then `$teach <topic>`.
+Only OpenCode receives generated command adapters. Codex has no generated command files.
 
 ## Curated Catalog
 
@@ -117,8 +122,8 @@ Load the native `<name>` skill with the skill tool, then follow it for: $ARGUMEN
 ```
 
 This makes `/teach <topic>`, `/research <question>`, and every other curated
-skill directly invokable. Commands are generated after skill verification, so
-a missing skill never receives a dangling command.
+skill directly invokable in OpenCode. Commands are generated after skill
+verification, so a missing skill never receives a dangling command.
 
 Generated files include a dotfiles ownership marker. On refresh, the
 generator may replace or remove only marker-owned files. If a user-owned
@@ -126,7 +131,9 @@ command already uses a curated skill name, preserve it, emit a warning, and do
 not overwrite it.
 
 OpenCode reads configuration and command files at startup. Documentation must
-tell users to restart OpenCode after installation or refresh.
+tell users to restart OpenCode after installation or refresh, and users should
+start a new Claude Code, Antigravity CLI, or Codex CLI session before using a
+refreshed skill.
 
 ## Migration
 
@@ -141,10 +148,10 @@ that is fragile across Windows and Unix hosts.
 The README gains a concise Agent Skills section covering:
 
 - Claude's native, the shared OpenCode/Codex, and Antigravity target directories;
-- OpenCode's generated slash commands and examples;
+- OpenCode-only generated slash commands and examples, plus Codex's `/skills`
+  then `$teach <topic>` flow;
 - the Linux/macOS/WSL and Windows refresh commands;
-- restart requirements; and
-- the Codex target's trial status pending user validation.
+- restart requirements.
 
 The detailed skill-install strategy document is updated to remove stale claims
 that one `skills add` command universally writes `~/.agents/skills` or that
@@ -155,7 +162,8 @@ all agents discover it.
 Automated contracts must verify:
 
 - all four installer/update paths target the curated catalog;
-- OpenCode and Codex discover the shared `~/.agents/skills` target;
+- OpenCode and Codex discover the shared `~/.agents/skills` target, while only
+  OpenCode receives generated command adapters;
 - Antigravity receives its documented CLI path;
 - OpenCode commands are generated only after a matching `SKILL.md` exists;
 - marker-owned commands update safely and user-owned conflicts are preserved;
@@ -165,5 +173,7 @@ Manual acceptance on the WSL host:
 
 1. Run the updater.
 2. Restart Claude Code, OpenCode, Antigravity CLI, and Codex CLI.
-3. Invoke `/teach` and one additional curated command in each agent.
-4. Report Codex behavior before treating its Vercel target as established.
+3. Invoke `/teach <topic>` in Claude Code, Antigravity CLI, and OpenCode. In
+   Codex, open `/skills` and enter `$teach <topic>`; do not expect an OpenCode
+   command adapter.
+4. Confirm Codex loads the shared skill through its `/skills` interface.
