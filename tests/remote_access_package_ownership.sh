@@ -8,6 +8,8 @@ template="$repo_root/run_onchange_install_packages.sh.tmpl"
 windows_template="$repo_root/run_onchange_install_packages.ps1.tmpl"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+config="$tmp/chezmoi.toml"
+: >"$config"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -15,12 +17,12 @@ fail() {
 }
 
 render() { # $1 = fixture JSON, $2 = output filename
-    chezmoi execute-template --source "$repo_root" --override-data "$1" \
+    chezmoi execute-template --config "$config" --source "$repo_root" --override-data "$1" \
         <"$template" >"$tmp/$2"
 }
 
 render_windows() { # $1 = fixture JSON, $2 = output filename
-    chezmoi execute-template --source "$repo_root" --override-data "$1" \
+    chezmoi execute-template --config "$config" --source "$repo_root" --override-data "$1" \
         <"$windows_template" >"$tmp/$2"
 }
 
