@@ -48,6 +48,33 @@ chezmoi apply
 chezmoi apply
 ```
 
+### Agent skills
+
+The curated skill catalog is installed into each agent's native directory:
+
+- Claude Code: `~/.claude/skills`
+- OpenCode: `~/.config/opencode/skills`, with generated slash commands in
+  `~/.config/opencode/commands` such as `/teach <topic>`
+- Antigravity CLI: `~/.gemini/antigravity-cli/skills`
+- Codex CLI: `~/.codex/skills`
+
+Refresh curated skills explicitly after installation or whenever you want the
+latest catalog:
+
+```sh
+bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"
+```
+
+```powershell
+& (Join-Path (chezmoi source-path) 'scripts\update_ai_tools.ps1')
+```
+
+After installing or refreshing, restart OpenCode so it loads its updated skills
+and generated commands. The Codex `~/.codex/skills` target resolves there on
+WSL, but remains a user-validation trial until discovery is confirmed in a
+running Codex CLI session. Existing `~/.agents/skills` content is left
+untouched and is not populated by new installs.
+
 ### Prerequisites & platform notes
 
 <details>

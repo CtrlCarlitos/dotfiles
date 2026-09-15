@@ -31,7 +31,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Superpowers (Claude Code)** | `claude plugin install` | `claude plugin install` | `claude plugin install` | `claude plugin install` | ❌ | `claude plugin update superpowers -y` |
 | **Superpowers (OpenCode)** | `npm i --prefix ~/.config/opencode` | `npm i --prefix ~/.config/opencode` | `npm i --prefix %USERPROFILE%\.config\opencode` | `npm i --prefix ~/.config/opencode` | ❌ | Re-run the same `npm install` (no version pin, pulls latest commit) |
 | **Superpowers (Antigravity)** | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | ❌ | Re-run `agy plugin install https://github.com/obra/superpowers` (idempotent - installs and updates are the same command). The officially-documented mechanism per obra/superpowers' own README.md, not hand-copying skill files into a guessed plugin directory |
-| **Curated skills** (Matt Pocock ×13 + Anthropic ×2 + Vercel Labs ×2) | `skills` CLI | `skills` CLI | `skills` CLI | `skills` CLI | ❌ | `npx skills@latest add …` (see below). Installed for **Claude Code + OpenCode + Antigravity** in one pass: one `skills add` writes `~/.agents/skills/<name>/` (OpenCode + Antigravity read this agent-compatible path natively) and `~/.claude/skills/<name>/` (Claude Code). `--copy` = real dirs, not symlinks. Update = re-run the same `skills add` |
+| **Curated skills** (repository catalog) | native-target fan-out | native-target fan-out | native-target fan-out | native-target fan-out | ❌ | Run `scripts/update_ai_tools.sh` or `scripts/update_ai_tools.ps1`. Curated skills land in `~/.claude/skills`, `~/.config/opencode/skills`, `~/.gemini/antigravity-cli/skills`, and `~/.codex/skills`; `--copy` creates real directories, not symlinks. |
 | **Superpowers (Codex CLI)** | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | ❌ | Not automated - confirmed via an isolated Docker test that the only scriptable option (`codex-plugin`, a third-party npm helper) expects a `plugins/<name>/` marketplace layout obra/superpowers doesn't use (root-level `.codex-plugin/plugin.json` instead), so it fails outright regardless of flags |
 | **Playwright Chromium** | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | ❌ | `npx playwright install chromium` |
 | **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
@@ -41,18 +41,19 @@ This document outlines the tools installed by the dotfiles configuration across 
 
 > **Note on Updates**: Most AI tools do not have a built-in auto-updater. We recommend running `npm update -g` regularly for the npm-based tools. For native tools like Claude and OpenCode, re-running the installation command usually fetches the latest version.
 
-> **Curated skills — the `skills` CLI** ([`vercel-labs/skills`](https://github.com/vercel-labs/skills)): `install_agent_skills()` in `run_onchange_install_packages.sh.tmpl` (and the equivalent in `.ps1.tmpl`) runs, gated on `npx`:
-> ```
-> npx --yes --loglevel=error skills@latest add mattpocock/skills \
->   -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
->      prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts \
->   -a claude-code opencode antigravity -g -y --copy
-> npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a claude-code opencode antigravity -g -y --copy
-> npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
-> npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
-> npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
-> ```
-> Matt Pocock's `code-review` is staged as `mp-code-review` (renamed + `name:` frontmatter patched, then `skills add <local dir>`) to stay distinct from this repo's own `/code-review` command. `scripts/update_ai_tools.*` re-run the same commands. `--loglevel=error` is required: npm 12's npx prints a benign `npm notice run …` hint to stderr on every invocation, which kills the install on PS 5.1 under `$ErrorActionPreference=Stop` (see docs/skills-install-strategy.md's npm 12 gotchas). `-a antigravity` is the `skills` CLI's own Antigravity target (`~/.agents/skills/`) — verified working 2026-08-31 with agy installed on both Windows and WSL: agy loads the skills from there. Superpowers is unchanged (still `claude plugin install` / npm / `agy plugin install <url>` per its own rows).
+> **Curated skills:** the installer refreshes the repository catalog and fans it
+> out to each native target. It verifies each `SKILL.md` before generating the
+> matching OpenCode command in `~/.config/opencode/commands`; `/teach <topic>`
+> is one example. Generated command files are marker-owned, so refresh may
+> update them safely but preserves a user-owned command conflict with a warning.
+> Use `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
+> Linux/macOS/WSL or `& (Join-Path (chezmoi source-path)
+> 'scripts\update_ai_tools.ps1')` on Windows for explicit updates, then restart
+> OpenCode. Existing `~/.agents/skills` content is not changed. Codex's
+> `~/.codex/skills` target resolves on WSL but remains a user-validation trial
+> until its discovery is confirmed in Codex CLI. Superpowers is unchanged
+> (still `claude plugin install` / npm / `agy plugin install <url>` per its own
+> rows).
 
 > **Note on Antigravity**: the old desktop surfaces (IDE + hub app) were
 > removed from this repo on 2026-09-11 (VS Code + `agy` in a terminal cover
