@@ -172,6 +172,9 @@ if [[ "$scope" != "windows" ]]; then
         require_contains "$file" 'mv "$target" "$backup"'
         require_contains "$file" 'mv "$backup" "$target"'
         require_contains "$file" 'rm -rf "$backup"'
+        for agent in 'Claude Code' OpenCode Antigravity Codex; do
+            require_contains "$file" "Curated skills: $agent installed="
+        done
     done
 fi
 

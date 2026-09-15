@@ -258,18 +258,37 @@ install_agent_skills() {
     # The CLI writes the native targets: $HOME/.claude/skills,
     # $HOME/.config/opencode/skills, and $HOME/.codex/skills.
     local -a AGENTS=(claude-code opencode codex)
+    local claude_installed=0 claude_skipped=0 claude_failed=0
+    local opencode_installed=0 opencode_skipped=0 opencode_failed=0
+    local codex_installed=0 codex_skipped=0 codex_failed=0
+    local antigravity_installed=0 antigravity_skipped=0 antigravity_failed=0
+
+    record_cli_result() {
+        local status="$1" count="$2"
+        if [[ "$status" == installed ]]; then
+            ((claude_installed += count)); ((opencode_installed += count)); ((codex_installed += count))
+        elif [[ "$status" == skipped ]]; then
+            ((claude_skipped += count)); ((opencode_skipped += count)); ((codex_skipped += count))
+        else
+            ((claude_failed += count)); ((opencode_failed += count)); ((codex_failed += count))
+        fi
+    }
 
     # Matt Pocock's engineering/productivity skills - 11 installed as-is.
     # teach + writing-for-agents live under skills/productivity/, the rest under
     # skills/engineering/; the CLI resolves by skill name, not path (grilling and
     # handoff are already productivity/ skills that resolve fine here).
     info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
-    net_timeout 300 "${SK[@]}" add mattpocock/skills \
+    if net_timeout 300 "${SK[@]}" add mattpocock/skills \
         -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
            prototype research grilling handoff teach writing-for-agents \
            resolving-merge-conflicts \
-        -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "Matt Pocock skills install failed or timed out - continuing"
+        -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 11
+    else
+        record_cli_result failed 11
+        warn "Matt Pocock skills install failed or timed out - continuing"
+    fi
 
     # code-review -> mp-code-review. The `skills` CLI has no rename flag, so
     # stage a renamed copy with its `name:` frontmatter patched and install
@@ -291,39 +310,64 @@ install_agent_skills() {
                 # set -e and abort the whole run - frontend-design, Playwright,
                 # act, desktop apps and shell setup all come after this.
                 sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-                    || warn "mp-code-review skill install failed - continuing"
+                if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+                    record_cli_result installed 1
+                else
+                    record_cli_result failed 1
+                    warn "mp-code-review skill install failed - continuing"
+                fi
             else
+                record_cli_result skipped 1
                 warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
             fi
         else
+            record_cli_result skipped 1
             warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
         fi
+    else
+        record_cli_result failed 1
+        warn "mp-code-review skill source clone failed or timed out - continuing"
     fi
     rm -rf "$sk_tmp"
 
     # Anthropic's frontend-design skill - distinctive visual direction for new UI.
     info "Installing Anthropic's frontend-design skill..."
-    net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "frontend-design skill install failed or timed out - continuing"
+    if net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        warn "frontend-design skill install failed or timed out - continuing"
+    fi
 
     # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
     # agent search and install skills from skills.sh mid-session.
     info "Installing find-skills skill..."
-    net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "find-skills skill install failed or timed out - continuing"
+    if net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        warn "find-skills skill install failed or timed out - continuing"
+    fi
 
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
     # automation: navigate, click, fill, scrape, screenshot.
     info "Installing agent-browser skill..."
-    net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "agent-browser skill install failed or timed out - continuing"
+    if net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        warn "agent-browser skill install failed or timed out - continuing"
+    fi
 
     # skill-creator (anthropics/skills, 380K installs) - Anthropic's
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     info "Installing Anthropic's skill-creator skill..."
-    net_timeout 300 "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null \
-        || warn "skill-creator skill install failed or timed out - continuing"
+    if net_timeout 300 "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        warn "skill-creator skill install failed or timed out - continuing"
+    fi
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
@@ -331,16 +375,21 @@ install_agent_skills() {
 
     if [[ ! -r "$catalog" ]]; then
         warn "Curated skill catalog is not readable: $catalog"
+        info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+        info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+        info "Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+        info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
         return
     fi
 
-    local skill source target tmp backup command_dir command_file
+    local skill source target tmp backup command_dir command_file antigravity_status
     while IFS= read -r skill || [[ -n "$skill" ]]; do
         [[ -z "$skill" || "$skill" == \#* ]] && continue
 
         source="$HOME/.claude/skills/$skill"
         target="$HOME/.gemini/antigravity-cli/skills/$skill"
         if [[ -f "$source/SKILL.md" ]]; then
+            antigravity_status=failed
             mkdir -p "$HOME/.gemini/antigravity-cli/skills"
             tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
             if cp -R "$source/." "$tmp/"; then
@@ -352,6 +401,7 @@ install_agent_skills() {
                     if mv "$target" "$backup"; then
                         if mv "$tmp" "$target"; then
                             rm -rf "$backup"
+                            antigravity_status=installed
                         else
                             rm -rf "$tmp"
                             warn "Failed to promote curated skill for Antigravity: $skill"
@@ -361,7 +411,9 @@ install_agent_skills() {
                         rm -rf "$tmp"
                         warn "Failed to back up existing Antigravity skill: $skill"
                     fi
-                elif ! mv "$tmp" "$target"; then
+                elif mv "$tmp" "$target"; then
+                    antigravity_status=installed
+                else
                     rm -rf "$tmp"
                     warn "Failed to promote curated skill for Antigravity: $skill"
                 fi
@@ -370,8 +422,15 @@ install_agent_skills() {
                 warn "Failed to copy curated skill for Antigravity: $skill"
             fi
         else
+            antigravity_status=skipped
             warn "Claude skill missing; skipping Antigravity copy: $skill"
         fi
+
+        case "$antigravity_status" in
+            installed) ((antigravity_installed += 1)) ;;
+            skipped) ((antigravity_skipped += 1)) ;;
+            *) ((antigravity_failed += 1)) ;;
+        esac
 
         command_dir="$HOME/.config/opencode/commands"
         command_file="$command_dir/$skill.md"
@@ -394,6 +453,11 @@ install_agent_skills() {
             rm -f "$command_file"
         fi
     done < "$catalog"
+
+    info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+    info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+    info "Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+    info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 }
 
 # agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.
