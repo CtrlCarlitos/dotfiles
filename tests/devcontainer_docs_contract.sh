@@ -66,7 +66,13 @@ if "has no devcontainer feature" not in profile:
 
 security = section("### 5. OpenCode server safety", "### 6. Persist")
 security = re.sub(r"\s+", " ", security)
-for phrase in ("serverPassword", "must not be stored in a feature option"):
+for phrase in (
+    "OPENCODE_SERVER_PASSWORD",
+    "0.0.0.0",
+    "container runtime",
+    "runtime environment",
+    "secret mechanism",
+):
     if phrase not in security:
         raise SystemExit(f"FAIL: OpenCode security guidance missing {phrase!r}")
 
@@ -83,10 +89,14 @@ for path in (
     "/home/vscode/.claude",
     "/home/vscode/.codex",
     "/home/vscode/.config/opencode",
-    "/home/vscode/.local/share/opencode",
 ):
     if not any(path in mount for mount in mounts):
         raise SystemExit(f"FAIL: persistence example missing {path}")
+
+if any("/home/vscode/.local/share/opencode" in mount for mount in mounts):
+    raise SystemExit("FAIL: OpenCode data path must not be a default persistence mount")
+if "optional user-managed data path" not in persistence_text:
+    raise SystemExit("FAIL: OpenCode data path must be documented as optional")
 
 if any(".claude.json" in mount and "type=volume" in mount for mount in mounts):
     raise SystemExit("FAIL: .claude.json must not be mounted as a named volume")
