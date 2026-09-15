@@ -56,5 +56,7 @@ docs/superpowers/
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
 
-# Serena's per-repository cache, memories, and local project state.
-/.serena/
+# Serena: share the project definition; retain machine-local state locally.
+/.serena/cache/
+/.serena/memories/
+/.serena/project.local.yml
