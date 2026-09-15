@@ -122,6 +122,7 @@ skill directly invokable. Commands are generated after skill verification, so
 a missing skill never receives a dangling command.
 
 Generated files include a dotfiles ownership marker. On refresh, the
+generator may replace or remove only marker-owned files. If a user-owned
 command already uses a curated skill name, preserve it, emit a warning, and do
 not overwrite it.
 
