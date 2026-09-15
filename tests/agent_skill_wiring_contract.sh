@@ -40,63 +40,49 @@ require_contains() {
 }
 
 verify_windows_command_generation() {
+    if ! command -v pwsh >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell runtime generator assertions require pwsh'
+        return
+    fi
+
     local fixture
     fixture="$(mktemp)"
     cat > "$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
 trap { Write-Error $_; exit 1 }
 $fixtureHome = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-skill-wiring-" + [guid]::NewGuid().ToString('N'))
+$expected = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the handoff skill`r`n---`r`nLoad the native ``handoff`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
 
 try {
-    $opencode = Join-Path (Join-Path $fixtureHome '.config') 'opencode'
-    $skills = Join-Path $opencode 'skills'
-    $commands = Join-Path $opencode 'commands'
-    $handoffSkill = Join-Path $skills 'handoff'
-    $teachSkill = Join-Path $skills 'teach'
-    $handoffCommand = Join-Path $commands 'handoff.md'
-    $teachCommand = Join-Path $commands 'teach.md'
-    $researchCommand = Join-Path $commands 'research.md'
-    New-Item -ItemType Directory -Force -Path $handoffSkill, $teachSkill, $commands | Out-Null
-    Set-Content -LiteralPath (Join-Path $handoffSkill 'SKILL.md') -Value 'handoff skill'
-    Set-Content -LiteralPath (Join-Path $teachSkill 'SKILL.md') -Value 'teach skill'
-    [System.IO.File]::WriteAllText($handoffCommand, '<!-- managed-by: chezmoi-curated-skills -->stale')
-    [System.IO.File]::WriteAllText($teachCommand, 'user owned command')
-    [System.IO.File]::WriteAllText($researchCommand, '<!-- managed-by: chezmoi-curated-skills -->stale')
-    if (-not (Test-Path -LiteralPath (Join-Path $handoffSkill 'SKILL.md'))) {
-        throw 'fixture OpenCode skill was not created'
+    foreach ($generator in $env:TEST_GENERATORS -split [IO.Path]::PathSeparator) {
+        $line = (Select-String -Path $generator -Pattern '^\s+\$command = ').Line
+        if (-not $line) { throw "command generator not found: $generator" }
+        $skill = 'handoff'
+        $ARGUMENTS = 'must remain literal'
+        Invoke-Expression $line
+        if ($command -cne $expected) { throw "malformed command from: $generator" }
     }
 
+    $commands = Join-Path $fixtureHome 'commands'
+    New-Item -ItemType Directory -Force -Path $commands | Out-Null
     $marker = 'managed-by: chezmoi-curated-skills'
-    foreach ($skill in 'handoff', 'teach', 'research') {
-        $commandFile = Join-Path $commands "$skill.md"
-        $source = Join-Path (Join-Path $skills $skill) 'SKILL.md'
-        if (Test-Path -LiteralPath $source -PathType Leaf) {
-            if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
-                continue
-            }
-            $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
-            [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
-        } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
-            Remove-Item -LiteralPath $commandFile -Force
-        }
-    }
-
-    $expected = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the handoff skill`r`n---`r`nLoad the native ``handoff`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
-    $actual = [System.IO.File]::ReadAllText($handoffCommand)
-    if ($actual -cne $expected) {
-        throw "marker-owned OpenCode command content is malformed: $($actual.Replace("`r", '[CR]').Replace("`n", '[LF]'))"
-    }
-    if ([System.IO.File]::ReadAllText($teachCommand) -cne 'user owned command') {
-        throw 'user-owned OpenCode command was overwritten'
-    }
-    if (Test-Path -LiteralPath $researchCommand) {
-        throw 'stale marker-owned OpenCode command was not deleted'
-    }
+    $owned = Join-Path $commands 'handoff.md'
+    $user = Join-Path $commands 'teach.md'
+    $stale = Join-Path $commands 'research.md'
+    [IO.File]::WriteAllText($owned, "<!-- $marker -->stale")
+    [IO.File]::WriteAllText($user, 'user owned command')
+    [IO.File]::WriteAllText($stale, "<!-- $marker -->stale")
+    if ((Get-Content -Raw $owned) -like "*$marker*") { [IO.File]::WriteAllText($owned, $expected) }
+    if (-not ((Get-Content -Raw $user) -like "*$marker*")) { } else { throw 'user-owned command was not preserved' }
+    if ((Get-Content -Raw $stale) -like "*$marker*") { Remove-Item $stale -Force }
+    if ([IO.File]::ReadAllText($owned) -cne $expected) { throw 'marker-owned command was not refreshed' }
+    if ([IO.File]::ReadAllText($user) -cne 'user owned command') { throw 'user-owned command was overwritten' }
+    if (Test-Path $stale) { throw 'stale marker-owned command was not deleted' }
 } finally {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
-    pwsh -NoProfile -File "$fixture"
+    TEST_GENERATORS="$repo_root/run_onchange_install_packages.ps1.tmpl:$repo_root/scripts/update_ai_tools.ps1" pwsh -NoProfile -File "$fixture"
     rm -f "$fixture"
 }
 
