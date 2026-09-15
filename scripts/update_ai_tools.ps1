@@ -102,6 +102,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             $targetRoot = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
             $target = Join-Path $targetRoot $skill
             if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
+                $antigravityStatus = 'failed'
                 New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
                 $temporary = Join-Path $targetRoot ".${skill}.tmp.$([guid]::NewGuid().ToString('N'))"
                 $backup = Join-Path $targetRoot ".${skill}.backup.$([guid]::NewGuid().ToString('N'))"
@@ -113,6 +114,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                         try {
                             Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
                             Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+                            $antigravityStatus = 'installed'
                         } catch {
                             Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
                             Move-Item -LiteralPath $backup -Destination $target -ErrorAction SilentlyContinue
@@ -120,12 +122,14 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                         }
                     } else {
                         Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
+                        $antigravityStatus = 'installed'
                     }
                 } catch {
                     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
                     Write-Host "  Warning: failed to copy curated skill for Antigravity: $skill" -ForegroundColor Yellow
                 }
             } else {
+                $antigravityStatus = 'skipped'
                 Write-Host "  Warning: Claude skill missing; skipping Antigravity copy: $skill" -ForegroundColor Yellow
             }
 
@@ -145,13 +149,15 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             }
 
             foreach ($agent in $agentTargets.Keys) {
-                $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
-                if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
-                    $skillSummary[$agent].installed++
-                } elseif ($agent -eq 'Antigravity' -and -not (Test-Path -LiteralPath "$env:USERPROFILE\.claude\skills\$skill\SKILL.md" -PathType Leaf)) {
-                    $skillSummary[$agent].skipped++
+                if ($agent -eq 'Antigravity') {
+                    $skillSummary[$agent][$antigravityStatus]++
                 } else {
-                    $skillSummary[$agent].failed++
+                    $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
+                    if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+                        $skillSummary[$agent].installed++
+                    } else {
+                        $skillSummary[$agent].failed++
+                    }
                 }
             }
         }

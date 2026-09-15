@@ -68,16 +68,18 @@ try {
     $claudeSkill = Join-Path $fixtureHome '.claude\skills\handoff'
     $openCodeSkill = Join-Path $fixtureHome '.config\opencode\skills\handoff'
     $teachSkill = Join-Path $fixtureHome '.config\opencode\skills\teach'
+    $antigravitySkill = Join-Path $fixtureHome '.gemini\antigravity-cli\skills\handoff'
     $commands = Join-Path $fixtureHome '.config\opencode\commands'
     $owned = Join-Path $commands 'handoff.md'
     $user = Join-Path $commands 'teach.md'
     $stale = Join-Path $commands 'research.md'
-    New-Item -ItemType Directory -Force -Path $catalogDir, $claudeSkill, $openCodeSkill, $teachSkill, $commands | Out-Null
+    New-Item -ItemType Directory -Force -Path $catalogDir, $claudeSkill, $openCodeSkill, $teachSkill, $antigravitySkill, $commands | Out-Null
     [IO.File]::WriteAllText((Join-Path $catalogDir 'curated-agent-skills.txt'), "handoff`nteach`nresearch`n")
     [IO.File]::WriteAllText((Join-Path $claudeSkill 'SKILL.md'), 'claude handoff')
     [IO.File]::WriteAllText((Join-Path $claudeSkill '.hidden'), 'must be copied')
     [IO.File]::WriteAllText((Join-Path $openCodeSkill 'SKILL.md'), 'opencode handoff')
     [IO.File]::WriteAllText((Join-Path $teachSkill 'SKILL.md'), 'opencode teach')
+    [IO.File]::WriteAllText((Join-Path $antigravitySkill 'SKILL.md'), 'stale antigravity handoff')
     [IO.File]::WriteAllText($owned, "<!-- managed-by: chezmoi-curated-skills -->`nstale")
     [IO.File]::WriteAllText($user, 'user text mentioning managed-by: chezmoi-curated-skills is not an ownership marker')
     [IO.File]::WriteAllText($stale, "<!-- managed-by: chezmoi-curated-skills -->`nstale")
@@ -88,13 +90,32 @@ try {
         $fixtureRepo
     }
 
-    $updater = Get-Content -Raw -LiteralPath $args[1]
-    $match = [regex]::Match($updater, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
-    if (-not $match.Success) { throw 'curated skill lifecycle not found in updater' }
     $previousHome = $env:USERPROFILE
     try {
         $env:USERPROFILE = $fixtureHome
-        & ([scriptblock]::Create($match.Value))
+        foreach ($lifecycle in $args) {
+            $source = Get-Content -Raw -LiteralPath $lifecycle
+            $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
+            if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
+
+            $lifecycleBody = $match.Value -replace '(?m)^    \$catalog =', @'
+    function Move-Item {
+        param($LiteralPath, $Destination, $ErrorAction)
+        if ($LiteralPath -like '*.handoff.tmp.*' -and $Destination -eq $antigravitySkill) {
+            throw 'simulated Antigravity promotion failure'
+        }
+        Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+    }
+    $catalog =
+'@
+            $output = & ([scriptblock]::Create($lifecycleBody)) 6>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
+            }
+            if (($output -join "`n") -notmatch 'Curated skills: Antigravity installed=0 .* failed=1') {
+                throw "Antigravity summary reported stale skill as installed: $lifecycle"
+            }
+            & ([scriptblock]::Create($match.Value)) | Out-Null
+        }
     } finally {
         $env:USERPROFILE = $previousHome
     }
