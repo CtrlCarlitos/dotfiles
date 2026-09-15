@@ -238,8 +238,8 @@ install_node() {
     fi
 }
 
-# Curated third-party agent skills are installed to each supported tool's native
-# directory. Antigravity receives verified copies from Claude's native target.
+# Curated third-party agent skills use the skills CLI's shared destination for
+# OpenCode and Codex. Antigravity receives verified copies from Claude's native target.
 install_agent_skills() {
     if ! command -v npx &>/dev/null; then
         warn "npx not found - skipping curated agent skills"
@@ -262,9 +262,9 @@ install_agent_skills() {
     # complete non-interactively in ~5s (verified: 8 skills + mp-code-review +
     # frontend-design). net_timeout stays as the wall-clock backstop.
     local -a SK=(npx --yes --loglevel=error skills@latest)
-    # The CLI writes the native targets: $HOME/.claude/skills,
-    # $HOME/.config/opencode/skills, and $HOME/.codex/skills.
-    local -a AGENTS=(claude-code opencode codex)
+    # The CLI writes $HOME/.claude/skills and $HOME/.agents/skills; OpenCode
+    # and Codex discover the latter.
+    local -a AGENTS=(claude-code opencode)
     local claude_installed=0 claude_skipped=0 claude_failed=0
     local opencode_installed=0 opencode_skipped=0 opencode_failed=0
     local codex_installed=0 codex_skipped=0 codex_failed=0
@@ -441,7 +441,7 @@ install_agent_skills() {
 
         command_dir="$HOME/.config/opencode/commands"
         command_file="$command_dir/$skill.md"
-        source="$HOME/.config/opencode/skills/$skill"
+        source="$HOME/.agents/skills/$skill"
         if [[ -f "$source/SKILL.md" ]]; then
             mkdir -p "$command_dir"
             if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
@@ -1101,8 +1101,9 @@ install_apt() {
         fi
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
-            # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when claude absent - benign skip)
-            command -v claude &>/dev/null && net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
+            if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
+                net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
+            fi
             # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when codex absent - benign skip)
             command -v codex &>/dev/null && net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
         fi
@@ -1453,8 +1454,9 @@ install_brew() {
         fi
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
-            # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when claude absent - benign skip)
-            command -v claude &>/dev/null && net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
+            if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
+                net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
+            fi
             # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when codex absent - benign skip)
             command -v codex &>/dev/null && net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
         fi

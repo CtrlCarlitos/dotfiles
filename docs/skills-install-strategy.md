@@ -6,11 +6,10 @@ skills without the whole thing.
 
 ## TL;DR
 
-- The repository-owned curated-skill catalog is fanned out to each agent's
-  native target: `~/.claude/skills`, `~/.config/opencode/skills`,
-  `~/.gemini/antigravity-cli/skills`, and `~/.codex/skills`.
-- The `skills` CLI is used for Claude Code, OpenCode, and Codex where its
-  adapter output matches the target. The verified Claude Code copy supplies
+- The repository-owned curated-skill catalog uses `~/.claude/skills`, the
+  shared `~/.agents/skills`, and `~/.gemini/antigravity-cli/skills`.
+- The `skills` CLI is used with the Claude Code and OpenCode adapters. OpenCode and Codex discover
+  `~/.agents/skills`; the verified Claude Code copy supplies
   Antigravity because the Antigravity adapter has an incompatible destination.
 - The installer verifies every `<target>/<name>/SKILL.md`, then generates an
   OpenCode command at `~/.config/opencode/commands/<name>.md`. For example,
@@ -21,9 +20,8 @@ skills without the whole thing.
 - Refresh explicitly with `scripts/update_ai_tools.sh` on Linux/macOS/WSL or
   `scripts/update_ai_tools.ps1` on Windows, then restart OpenCode. `chezmoi
   apply` is not a reliable upstream-skill refresh trigger.
-- New installs do not write `~/.agents/skills`; existing content there remains
-  untouched. Codex's `~/.codex/skills` target resolves on WSL, but is a
-  user-validation trial until actual Codex discovery is confirmed.
+- New installs refresh catalog-managed entries in `~/.agents/skills` without
+  deleting other content there.
 
 ## The `skills` CLI
 
@@ -48,20 +46,16 @@ Valid agent ids include: `claude-code`, `opencode`, `antigravity`,
 Sources: `owner/repo`, full GitHub/GitLab URL, any git URL, local path, or a
 direct `SKILL.md` / archive URL.
 
-### Superseded shared-directory behaviour (historical record)
-
-The following observation describes the previous shared-directory approach. It
-is retained only as investigation history, not as current installation or
-update guidance.
+### Current shared-directory behaviour
 
 ```
-npx skills add mattpocock/skills -s retro -a antigravity claude-code opencode -g -y --copy
+npx skills add mattpocock/skills -s retro -a claude-code opencode -g -y --copy
 ```
-→ created **`~/.agents/skills/retro/SKILL.md`** and **`~/.claude/skills/retro/SKILL.md`**
-(both real dirs). Summary line: `copy → Antigravity, Claude Code, OpenCode`.
-It did **not** need `~/.config/opencode/skills/` or `~/.gemini/…/skills/` —
-those agents read `~/.agents/skills/`. Also runs a Socket/Snyk risk check per
-skill. `skills remove retro -g -y` cleaned it fully. (Test artifacts removed.)
+→ creates **`~/.agents/skills/retro/SKILL.md`** and
+**`~/.claude/skills/retro/SKILL.md`** (both real directories). OpenCode and
+Codex discover the shared directory; Antigravity receives its copy at
+`~/.gemini/antigravity-cli/skills`. The CLI also runs a Socket/Snyk risk check
+per skill.
 
 ### `--copy` vs symlink
 

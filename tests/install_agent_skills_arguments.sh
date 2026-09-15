@@ -37,7 +37,7 @@ fi
 agents_found=false
 for ((i = 0; i < ${#args[@]}; i++)); do
     if [[ "${args[i]}" == "-a" ]]; then
-        if [[ "${args[i + 1]-}" == "claude-code" && "${args[i + 2]-}" == "opencode" && "${args[i + 3]-}" == "codex" && "${args[i + 4]-}" == "-g" ]]; then
+        if [[ "${args[i + 1]-}" == "claude-code" && "${args[i + 2]-}" == "opencode" && "${args[i + 3]-}" == "-g" ]]; then
             agents_found=true
         fi
         break

@@ -144,8 +144,8 @@ try {
     $fixtureRepo = Join-Path $fixtureHome 'repo'
     $catalogDir = Join-Path $fixtureRepo 'scripts'
     $claudeSkill = Join-Path $fixtureHome '.claude\skills\handoff'
-    $openCodeSkill = Join-Path $fixtureHome '.config\opencode\skills\handoff'
-    $teachSkill = Join-Path $fixtureHome '.config\opencode\skills\teach'
+    $openCodeSkill = Join-Path $fixtureHome '.agents\skills\handoff'
+    $teachSkill = Join-Path $fixtureHome '.agents\skills\teach'
     $antigravitySkill = Join-Path $fixtureHome '.gemini\antigravity-cli\skills\handoff'
     $commands = Join-Path $fixtureHome '.config\opencode\commands'
     $owned = Join-Path $commands 'handoff.md'
@@ -251,9 +251,8 @@ if [[ "$scope" != "windows" ]]; then
 
         for target in \
             '$HOME/.claude/skills' \
-            '$HOME/.config/opencode/skills' \
+            '$HOME/.agents/skills' \
             '$HOME/.gemini/antigravity-cli/skills' \
-            '$HOME/.codex/skills' \
             '$HOME/.config/opencode/commands'; do
             require_contains "$file" "$target"
         done
@@ -261,6 +260,7 @@ if [[ "$scope" != "windows" ]]; then
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" 'SKILL.md'
         require_contains "$file" '$ARGUMENTS'
+        require_contains "$file" '$HOME/.agents/skills/$skill'
         require_contains "$file" 'backup='
         require_contains "$file" 'mv "$target" "$backup"'
         require_contains "$file" 'mv "$backup" "$target"'
@@ -270,6 +270,7 @@ if [[ "$scope" != "windows" ]]; then
         done
     done
     require_contains 'run_onchange_install_packages.sh.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"'\\\"'\\\"'\" }}"
+    require_contains 'run_onchange_install_packages.sh.tmpl' 'claude mcp get serena'
 fi
 
 if [[ "$scope" != "unix" ]]; then
@@ -281,20 +282,20 @@ if [[ "$scope" != "unix" ]]; then
 
         for target in \
             '$env:USERPROFILE\.claude\skills' \
-            '$env:USERPROFILE\.config\opencode\skills' \
+            '$env:USERPROFILE\.agents\skills' \
             '$env:USERPROFILE\.gemini\antigravity-cli\skills' \
-            '$env:USERPROFILE\.codex\skills' \
             '$env:USERPROFILE\.config\opencode\commands'; do
             require_contains "$file" "$target"
         done
 
-        require_contains "$file" "\$skAgents = @('claude-code', 'opencode', 'codex')"
+        require_contains "$file" "\$skAgents = @('claude-code', 'opencode')"
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" "\$markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\\r?$'"
         require_contains "$file" 'Get-ChildItem -Force -LiteralPath $source | Copy-Item'
         require_contains "$file" 'Curated skills: $agent installed='
         require_contains "$file" '$ARGUMENTS'
         require_contains "$file" 'SKILL.md'
+        require_contains "$file" '$env:USERPROFILE\.agents\skills\$skill'
         if grep -Fq -- 'for: ```$ARGUMENTS' "$repo_root/$file"; then
             fail "$file must generate a literal $ARGUMENTS placeholder"
         fi
@@ -303,6 +304,7 @@ if [[ "$scope" != "unix" ]]; then
     verify_windows_command_generation
     require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
     require_contains 'run_onchange_install_packages.ps1.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"''\" }}"
+    require_contains 'run_onchange_install_packages.ps1.tmpl' 'claude mcp get serena'
 fi
 
 if [[ "$failed" == true ]]; then

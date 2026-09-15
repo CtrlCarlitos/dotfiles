@@ -3,12 +3,12 @@
 ## Goal
 
 Install the same curated skill set globally for Claude Code, OpenCode,
-Antigravity CLI, and Codex CLI. Each tool must load skills from its own
-configured directory. OpenCode must additionally expose every curated skill as
-a slash command, such as `/teach`.
+Antigravity CLI, and Codex CLI. Claude uses its native directory; OpenCode and
+Codex discover the `skills` CLI's shared directory. OpenCode additionally
+exposes every curated skill as a slash command, such as `/teach`.
 
-This design replaces new writes to `~/.agents/skills`. It does not delete an
-existing directory there because it may contain user-managed skills.
+This design uses `~/.agents/skills` for the shared OpenCode and Codex catalog.
+It does not delete existing user-managed content there.
 
 ## Scope
 
@@ -32,14 +32,13 @@ Out of scope:
 | Tool | Curated skill target | Installation method |
 | --- | --- | --- |
 | Claude Code | `~/.claude/skills/<name>/SKILL.md` | `skills add -a claude-code -g --copy` |
-| OpenCode | `~/.config/opencode/skills/<name>/SKILL.md` | `skills add -a opencode -g --copy` |
+| OpenCode | `~/.agents/skills/<name>/SKILL.md` | discovers the shared `skills` CLI destination |
 | Antigravity CLI | `~/.gemini/antigravity-cli/skills/<name>/SKILL.md` | copy the fetched curated skill directories to the documented CLI path |
-| Codex CLI | `~/.codex/skills/<name>/SKILL.md` | `skills add -a codex -g --copy` for this trial |
+| Codex CLI | `~/.agents/skills/<name>/SKILL.md` | discovers the shared `skills` CLI destination |
 
-The official sources for these paths are Claude Code's skills guide,
-OpenCode's skills guide, Antigravity CLI's plugins guide, and Codex's skills
-guide. The `skills` CLI adapters are used only where their output matches the
-chosen target. The Antigravity adapter is not used as its final destination.
+The installer calls `skills add -a claude-code opencode -g --copy`, which
+produces Claude's native target and the shared target. Antigravity's adapter is
+not used as its final destination.
 
 ## Curated Catalog
 
@@ -77,10 +76,10 @@ their own subsets.
 Both platform installers and both AI-tool updaters use this order:
 
 1. Fetch or refresh every curated source.
-2. Install the fetched skills with the Claude Code, OpenCode, and Codex
-   adapters. The completed Claude Code copy is the verified source for the
-   Antigravity CLI copy, so Antigravity never depends on the `skills` CLI's
-   incompatible adapter destination.
+2. Install the fetched skills with the Claude Code and OpenCode adapters. The
+   completed Claude Code copy is the verified source for the Antigravity CLI
+   copy, so Antigravity never depends on the `skills` CLI's incompatible
+   adapter destination.
 3. Verify `<target>/<name>/SKILL.md` for every catalog entry.
 4. Generate or refresh OpenCode commands for verified OpenCode skills.
 5. Print a per-agent summary of installed, skipped, and failed skills.
@@ -101,8 +100,8 @@ bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"
 
 ## OpenCode Commands
 
-For each catalog entry with an existing
-`~/.config/opencode/skills/<name>/SKILL.md`, generate:
+For each catalog entry with an existing `~/.agents/skills/<name>/SKILL.md`,
+generate:
 
 ```text
 ~/.config/opencode/commands/<name>.md
@@ -131,9 +130,8 @@ tell users to restart OpenCode after installation or refresh.
 
 ## Migration
 
-New installs do not populate `~/.agents/skills`. Existing content at that path
-is left untouched. It can continue to be discovered by tools that support it
-until the user removes it after validating the native-target installation.
+New installs populate catalog-managed entries in `~/.agents/skills`. Existing
+content at that path is not deleted.
 
 This avoids deleting unknown user-managed skills and avoids symlink behavior
 that is fragile across Windows and Unix hosts.
@@ -142,7 +140,7 @@ that is fragile across Windows and Unix hosts.
 
 The README gains a concise Agent Skills section covering:
 
-- the four target directories;
+- Claude's native, the shared OpenCode/Codex, and Antigravity target directories;
 - OpenCode's generated slash commands and examples;
 - the Linux/macOS/WSL and Windows refresh commands;
 - restart requirements; and
@@ -157,9 +155,8 @@ all agents discover it.
 Automated contracts must verify:
 
 - all four installer/update paths target the curated catalog;
-- no new curated install targets `~/.agents/skills`;
+- OpenCode and Codex discover the shared `~/.agents/skills` target;
 - Antigravity receives its documented CLI path;
-- Codex receives the requested Vercel target;
 - OpenCode commands are generated only after a matching `SKILL.md` exists;
 - marker-owned commands update safely and user-owned conflicts are preserved;
 - README and strategy documentation state the supported refresh workflow.

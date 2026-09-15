@@ -30,9 +30,9 @@ if command -v npx &>/dev/null; then
     echo "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..."
     catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
     SK=(npx --yes --loglevel=error skills@latest)
-    # The CLI refreshes $HOME/.claude/skills, $HOME/.config/opencode/skills,
-    # and $HOME/.codex/skills. The explicit updater is the skill refresh path.
-    AGENTS=(claude-code opencode codex)
+    # The CLI refreshes $HOME/.claude/skills and $HOME/.agents/skills. OpenCode
+    # and Codex discover the shared directory; this is the explicit refresh path.
+    AGENTS=(claude-code opencode)
     claude_installed=0; claude_skipped=0; claude_failed=0
     opencode_installed=0; opencode_skipped=0; opencode_failed=0
     codex_installed=0; codex_skipped=0; codex_failed=0
@@ -173,7 +173,7 @@ if command -v npx &>/dev/null; then
 
             command_dir="$HOME/.config/opencode/commands"
             command_file="$command_dir/$skill.md"
-            source="$HOME/.config/opencode/skills/$skill"
+            source="$HOME/.agents/skills/$skill"
             if [[ -f "$source/SKILL.md" ]]; then
                 mkdir -p "$command_dir"
                 if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then

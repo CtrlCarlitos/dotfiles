@@ -33,16 +33,15 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
 # Re-running the same `skills add` re-fetches latest (--copy overwrites). Keep
 # this list in sync with run_onchange_install_packages.ps1.tmpl. The CLI
-# refreshes $env:USERPROFILE\.claude\skills,
-# $env:USERPROFILE\.config\opencode\skills, and
-# $env:USERPROFILE\.codex\skills before the Antigravity fan-out.
+# refreshes $env:USERPROFILE\.claude\skills and $env:USERPROFILE\.agents\skills
+# before the Antigravity fan-out. OpenCode and Codex discover the shared path.
 # --loglevel=error: npm 12's npx prints a benign "npm notice run ..." hint to
 # stderr on every run; under PS 5.1 + $ErrorActionPreference=Stop (if this
 # script is dot-sourced from one) `2>$null` doesn't stop that promoting to a
 # terminating error - keep stderr empty instead (see installer for full notes).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
-    $skAgents = @('claude-code', 'opencode', 'codex')
+    $skAgents = @('claude-code', 'opencode')
     npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
 
@@ -89,9 +88,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         $markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\r?$'
         $agentTargets = @{
             'Claude Code' = "$env:USERPROFILE\.claude\skills"
-            'OpenCode' = "$env:USERPROFILE\.config\opencode\skills"
+            'OpenCode' = "$env:USERPROFILE\.agents\skills"
             'Antigravity' = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
-            'Codex' = "$env:USERPROFILE\.codex\skills"
+            'Codex' = "$env:USERPROFILE\.agents\skills"
         }
         $skillSummary = @{}
         foreach ($agent in $agentTargets.Keys) {
@@ -135,7 +134,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
             $commandRoot = "$env:USERPROFILE\.config\opencode\commands"
             $commandFile = Join-Path $commandRoot "$skill.md"
-            $source = "$env:USERPROFILE\.config\opencode\skills\$skill"
+            $source = "$env:USERPROFILE\.agents\skills\$skill"
             if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
                 New-Item -ItemType Directory -Force -Path $commandRoot | Out-Null
                 if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -match $markerPattern)) {

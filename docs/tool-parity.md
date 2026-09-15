@@ -31,7 +31,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Superpowers (Claude Code)** | `claude plugin install` | `claude plugin install` | `claude plugin install` | `claude plugin install` | ❌ | `claude plugin update superpowers -y` |
 | **Superpowers (OpenCode)** | `npm i --prefix ~/.config/opencode` | `npm i --prefix ~/.config/opencode` | `npm i --prefix %USERPROFILE%\.config\opencode` | `npm i --prefix ~/.config/opencode` | ❌ | Re-run the same `npm install` (no version pin, pulls latest commit) |
 | **Superpowers (Antigravity)** | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | `agy plugin install <url>` | ❌ | Re-run `agy plugin install https://github.com/obra/superpowers` (idempotent - installs and updates are the same command). The officially-documented mechanism per obra/superpowers' own README.md, not hand-copying skill files into a guessed plugin directory |
-| **Curated skills** (repository catalog) | native-target fan-out | native-target fan-out | native-target fan-out | native-target fan-out | ❌ | Run `scripts/update_ai_tools.sh` or `scripts/update_ai_tools.ps1`. Curated skills land in `~/.claude/skills`, `~/.config/opencode/skills`, `~/.gemini/antigravity-cli/skills`, and `~/.codex/skills`; `--copy` creates real directories, not symlinks. |
+| **Curated skills** (repository catalog) | shared-location fan-out | shared-location fan-out | shared-location fan-out | shared-location fan-out | ❌ | Run `scripts/update_ai_tools.sh` or `scripts/update_ai_tools.ps1`. Curated skills land in `~/.claude/skills`, `~/.agents/skills`, and `~/.gemini/antigravity-cli/skills`; OpenCode and Codex discover the shared directory, and `--copy` creates real directories, not symlinks. |
 | **Superpowers (Codex CLI)** | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | ❌ | Not automated - confirmed via an isolated Docker test that the only scriptable option (`codex-plugin`, a third-party npm helper) expects a `plugins/<name>/` marketplace layout obra/superpowers doesn't use (root-level `.codex-plugin/plugin.json` instead), so it fails outright regardless of flags |
 | **Playwright Chromium** | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | ❌ | `npx playwright install chromium` |
 | **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
@@ -49,9 +49,9 @@ This document outlines the tools installed by the dotfiles configuration across 
 > Use `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
 > Linux/macOS/WSL or `& (Join-Path (chezmoi source-path)
 > 'scripts\update_ai_tools.ps1')` on Windows for explicit updates, then restart
-> OpenCode. Existing `~/.agents/skills` content is not changed. Codex's
-> `~/.codex/skills` target resolves on WSL but remains a user-validation trial
-> until its discovery is confirmed in Codex CLI. Superpowers is unchanged
+> OpenCode. OpenCode and Codex discover the catalog-managed shared
+> `~/.agents/skills` directory; other existing content there is not deleted.
+> Superpowers is unchanged
 > (still `claude plugin install` / npm / `agy plugin install <url>` per its own
 > rows).
 
