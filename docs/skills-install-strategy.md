@@ -16,8 +16,8 @@ skills without the whole thing.
   OpenCode-only command at `~/.config/opencode/commands/<name>.md`. Claude
   Code, Antigravity CLI, and OpenCode use `/teach <topic>`; Codex uses
   `/skills`, then `$teach <topic>`.
-- Only OpenCode receives generated command adapters. Codex discovers the shared
-  skill catalog but has no generated command files.
+- Only OpenCode receives generated command adapters.
+- Codex has no generated command files. It discovers the shared skill catalog.
 - Generated commands carry a dotfiles ownership marker. Refresh replaces or
   removes only marker-owned commands; a user-owned name conflict is preserved
   with a warning.

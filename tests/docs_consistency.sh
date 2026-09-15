@@ -13,7 +13,9 @@ require() {
 }
 
 forbid() {
-    grep -Fq -- "$2" "$repo_root/$1" && fail "$1: must not contain '$2'"
+    if grep -Fq -- "$2" "$repo_root/$1"; then
+        fail "$1: must not contain '$2'"
+    fi
 }
 
 require README.md "16-group taxonomy"
