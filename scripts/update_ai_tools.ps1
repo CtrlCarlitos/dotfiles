@@ -86,6 +86,17 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
     } else {
         $skills = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
+        $markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\r?$'
+        $agentTargets = @{
+            'Claude Code' = "$env:USERPROFILE\.claude\skills"
+            'OpenCode' = "$env:USERPROFILE\.config\opencode\skills"
+            'Antigravity' = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
+            'Codex' = "$env:USERPROFILE\.codex\skills"
+        }
+        $skillSummary = @{}
+        foreach ($agent in $agentTargets.Keys) {
+            $skillSummary[$agent] = @{ installed = 0; skipped = 0; failed = 0 }
+        }
         foreach ($skill in $skills) {
             $source = "$env:USERPROFILE\.claude\skills\$skill"
             $targetRoot = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
@@ -96,7 +107,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                 $backup = Join-Path $targetRoot ".${skill}.backup.$([guid]::NewGuid().ToString('N'))"
                 New-Item -ItemType Directory -Force -Path $temporary | Out-Null
                 try {
-                    Copy-Item (Join-Path $source '*') -Destination $temporary -Recurse -Force -ErrorAction Stop
+                    Get-ChildItem -Force -LiteralPath $source | Copy-Item -Destination $temporary -Recurse -Force -ErrorAction Stop
                     if (Test-Path -LiteralPath $target) {
                         Move-Item -LiteralPath $target -Destination $backup -ErrorAction Stop
                         try {
@@ -121,18 +132,31 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             $commandRoot = "$env:USERPROFILE\.config\opencode\commands"
             $commandFile = Join-Path $commandRoot "$skill.md"
             $source = "$env:USERPROFILE\.config\opencode\skills\$skill"
-            $marker = 'managed-by: chezmoi-curated-skills'
             if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
                 New-Item -ItemType Directory -Force -Path $commandRoot | Out-Null
-                if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -match $markerPattern)) {
                     Write-Host "  Warning: OpenCode command is user-managed; leaving unchanged: $commandFile" -ForegroundColor Yellow
                 } else {
                     $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
                     [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
                 }
-            } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+            } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -match $markerPattern)) {
                 Remove-Item -LiteralPath $commandFile -Force
             }
+
+            foreach ($agent in $agentTargets.Keys) {
+                $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
+                if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+                    $skillSummary[$agent].installed++
+                } elseif ($agent -eq 'Antigravity' -and -not (Test-Path -LiteralPath "$env:USERPROFILE\.claude\skills\$skill\SKILL.md" -PathType Leaf)) {
+                    $skillSummary[$agent].skipped++
+                } else {
+                    $skillSummary[$agent].failed++
+                }
+            }
+        }
+        foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
+            Write-Host "  Curated skills: $agent installed=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
         }
     }
 }

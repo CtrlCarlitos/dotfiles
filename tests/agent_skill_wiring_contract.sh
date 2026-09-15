@@ -63,21 +63,46 @@ try {
         if ($command -cne $expected) { throw "malformed command from: $generator" }
     }
 
-    $commands = Join-Path $fixtureHome 'commands'
-    New-Item -ItemType Directory -Force -Path $commands | Out-Null
-    $marker = 'managed-by: chezmoi-curated-skills'
+    $fixtureRepo = Join-Path $fixtureHome 'repo'
+    $catalogDir = Join-Path $fixtureRepo 'scripts'
+    $claudeSkill = Join-Path $fixtureHome '.claude\skills\handoff'
+    $openCodeSkill = Join-Path $fixtureHome '.config\opencode\skills\handoff'
+    $teachSkill = Join-Path $fixtureHome '.config\opencode\skills\teach'
+    $commands = Join-Path $fixtureHome '.config\opencode\commands'
     $owned = Join-Path $commands 'handoff.md'
     $user = Join-Path $commands 'teach.md'
     $stale = Join-Path $commands 'research.md'
-    [IO.File]::WriteAllText($owned, "<!-- $marker -->stale")
-    [IO.File]::WriteAllText($user, 'user owned command')
-    [IO.File]::WriteAllText($stale, "<!-- $marker -->stale")
-    if ((Get-Content -Raw $owned) -like "*$marker*") { [IO.File]::WriteAllText($owned, $expected) }
-    if (-not ((Get-Content -Raw $user) -like "*$marker*")) { } else { throw 'user-owned command was not preserved' }
-    if ((Get-Content -Raw $stale) -like "*$marker*") { Remove-Item $stale -Force }
+    New-Item -ItemType Directory -Force -Path $catalogDir, $claudeSkill, $openCodeSkill, $teachSkill, $commands | Out-Null
+    [IO.File]::WriteAllText((Join-Path $catalogDir 'curated-agent-skills.txt'), "handoff`nteach`nresearch`n")
+    [IO.File]::WriteAllText((Join-Path $claudeSkill 'SKILL.md'), 'claude handoff')
+    [IO.File]::WriteAllText((Join-Path $claudeSkill '.hidden'), 'must be copied')
+    [IO.File]::WriteAllText((Join-Path $openCodeSkill 'SKILL.md'), 'opencode handoff')
+    [IO.File]::WriteAllText((Join-Path $teachSkill 'SKILL.md'), 'opencode teach')
+    [IO.File]::WriteAllText($owned, "<!-- managed-by: chezmoi-curated-skills -->`nstale")
+    [IO.File]::WriteAllText($user, 'user text mentioning managed-by: chezmoi-curated-skills is not an ownership marker')
+    [IO.File]::WriteAllText($stale, "<!-- managed-by: chezmoi-curated-skills -->`nstale")
+
+    function chezmoi {
+        param([string]$Command)
+        if ($Command -ne 'source-path') { throw "unexpected chezmoi command: $Command" }
+        $fixtureRepo
+    }
+
+    $updater = Get-Content -Raw -LiteralPath $args[1]
+    $match = [regex]::Match($updater, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
+    if (-not $match.Success) { throw 'curated skill lifecycle not found in updater' }
+    $previousHome = $env:USERPROFILE
+    try {
+        $env:USERPROFILE = $fixtureHome
+        & ([scriptblock]::Create($match.Value))
+    } finally {
+        $env:USERPROFILE = $previousHome
+    }
+
     if ([IO.File]::ReadAllText($owned) -cne $expected) { throw 'marker-owned command was not refreshed' }
-    if ([IO.File]::ReadAllText($user) -cne 'user owned command') { throw 'user-owned command was overwritten' }
+    if ([IO.File]::ReadAllText($user) -ne 'user text mentioning managed-by: chezmoi-curated-skills is not an ownership marker') { throw 'substring marker command was overwritten' }
     if (Test-Path $stale) { throw 'stale marker-owned command was not deleted' }
+    if (-not (Test-Path (Join-Path $fixtureHome '.gemini\antigravity-cli\skills\handoff\.hidden'))) { throw 'hidden Antigravity skill file was not copied' }
 } finally {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -147,6 +172,9 @@ if [[ "$scope" != "unix" ]]; then
 
         require_contains "$file" "\$skAgents = @('claude-code', 'opencode', 'codex')"
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
+        require_contains "$file" "\$markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\\r?$'"
+        require_contains "$file" 'Get-ChildItem -Force -LiteralPath $source | Copy-Item'
+        require_contains "$file" 'Curated skills: $agent installed='
         require_contains "$file" '$ARGUMENTS'
         require_contains "$file" 'SKILL.md'
         if grep -Fq -- 'for: ```$ARGUMENTS' "$repo_root/$file"; then
@@ -155,6 +183,7 @@ if [[ "$scope" != "unix" ]]; then
     done
 
     verify_windows_command_generation
+    require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
 fi
 
 if [[ "$failed" == true ]]; then
