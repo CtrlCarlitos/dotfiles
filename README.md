@@ -33,9 +33,19 @@ That's it. You'll be asked to confirm, then a **menu appears** — pick what you
 Use the **standard** preset (the default). You get a full terminal setup — git, zsh, neovim, tmux, modern CLI tools, Nerd Fonts, Claude Code, OpenCode, and agent guardrails. Add ChatGPT, Antigravity, or desktop apps later by re-running the menu.
 
 ### Change your selections later
+
+**Linux/macOS/WSL**
+
 ```sh
-bash ~/.local/share/chezmoi/scripts/select-packages.sh   # reopens the menu (pre-checked)
-chezmoi apply                                            # installs newly-enabled groups
+bash "$(chezmoi source-path)/scripts/select-packages.sh"
+chezmoi apply
+```
+
+**Windows PowerShell**
+
+```powershell
+& (Join-Path (chezmoi source-path) 'scripts\select-packages.ps1')
+chezmoi apply
 ```
 
 ### Prerequisites & platform notes
