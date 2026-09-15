@@ -32,14 +32,17 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 
 # 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
 # Re-running the same `skills add` re-fetches latest (--copy overwrites). Keep
-# this list in sync with run_onchange_install_packages.ps1.tmpl.
+# this list in sync with run_onchange_install_packages.ps1.tmpl. The CLI
+# refreshes $env:USERPROFILE\.claude\skills,
+# $env:USERPROFILE\.config\opencode\skills, and
+# $env:USERPROFILE\.codex\skills before the Antigravity fan-out.
 # --loglevel=error: npm 12's npx prints a benign "npm notice run ..." hint to
 # stderr on every run; under PS 5.1 + $ErrorActionPreference=Stop (if this
 # script is dot-sourced from one) `2>$null` doesn't stop that promoting to a
 # terminating error - keep stderr empty instead (see installer for full notes).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
-    $skAgents = @('claude-code', 'opencode', 'antigravity')
+    $skAgents = @('claude-code', 'opencode', 'codex')
     npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
 
@@ -77,6 +80,61 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    $catalog = Join-Path (chezmoi source-path) 'scripts\curated-agent-skills.txt'
+    if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
+        Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
+    } else {
+        $skills = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
+        foreach ($skill in $skills) {
+            $source = "$env:USERPROFILE\.claude\skills\$skill"
+            $targetRoot = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
+            $target = Join-Path $targetRoot $skill
+            if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
+                New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
+                $temporary = Join-Path $targetRoot ".${skill}.tmp.$([guid]::NewGuid().ToString('N'))"
+                $backup = Join-Path $targetRoot ".${skill}.backup.$([guid]::NewGuid().ToString('N'))"
+                New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+                try {
+                    Copy-Item (Join-Path $source '*') -Destination $temporary -Recurse -Force -ErrorAction Stop
+                    if (Test-Path -LiteralPath $target) {
+                        Move-Item -LiteralPath $target -Destination $backup -ErrorAction Stop
+                        try {
+                            Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
+                            Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+                        } catch {
+                            Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+                            Move-Item -LiteralPath $backup -Destination $target -ErrorAction SilentlyContinue
+                            Write-Host "  Warning: failed to promote curated skill for Antigravity: $skill" -ForegroundColor Yellow
+                        }
+                    } else {
+                        Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
+                    }
+                } catch {
+                    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "  Warning: failed to copy curated skill for Antigravity: $skill" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  Warning: Claude skill missing; skipping Antigravity copy: $skill" -ForegroundColor Yellow
+            }
+
+            $commandRoot = "$env:USERPROFILE\.config\opencode\commands"
+            $commandFile = Join-Path $commandRoot "$skill.md"
+            $source = "$env:USERPROFILE\.config\opencode\skills\$skill"
+            $marker = 'managed-by: chezmoi-curated-skills'
+            if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
+                New-Item -ItemType Directory -Force -Path $commandRoot | Out-Null
+                if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                    Write-Host "  Warning: OpenCode command is user-managed; leaving unchanged: $commandFile" -ForegroundColor Yellow
+                } else {
+                    $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: ```$ARGUMENTS`r`n"
+                    [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
+                }
+            } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                Remove-Item -LiteralPath $commandFile -Force
+            }
+        }
+    }
 }
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.ps1.tmpl

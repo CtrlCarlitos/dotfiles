@@ -93,9 +93,15 @@ if [[ "$scope" != "unix" ]]; then
             '$env:USERPROFILE\.claude\skills' \
             '$env:USERPROFILE\.config\opencode\skills' \
             '$env:USERPROFILE\.gemini\antigravity-cli\skills' \
-            '$env:USERPROFILE\.codex\skills'; do
+            '$env:USERPROFILE\.codex\skills' \
+            '$env:USERPROFILE\.config\opencode\commands'; do
             require_contains "$file" "$target"
         done
+
+        require_contains "$file" "\$skAgents = @('claude-code', 'opencode', 'codex')"
+        require_contains "$file" 'managed-by: chezmoi-curated-skills'
+        require_contains "$file" '$ARGUMENTS'
+        require_contains "$file" 'SKILL.md'
     done
 fi
 

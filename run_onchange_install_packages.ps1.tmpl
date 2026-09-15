@@ -844,10 +844,10 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 {{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli }}
 # Curated third-party agent skills via the `skills` CLI (vercel-labs/skills):
 # Matt Pocock's 11 + mp-code-review + Anthropic's frontend-design, installed
-# for Claude Code / OpenCode / Antigravity in one pass. One `skills add`
-# writes ~\.agents\skills\<name>\ (OpenCode + Antigravity read it) and
-# ~\.claude\skills\<name>\ (Claude Code). --copy = real dirs, not symlinks.
-# Replaces the old per-agent hand-staging + `agy plugin install`.
+# for Claude Code, OpenCode, and Codex in one pass. The CLI writes
+# $env:USERPROFILE\.claude\skills, $env:USERPROFILE\.config\opencode\skills,
+# and $env:USERPROFILE\.codex\skills; the verified Claude copy is then fanned
+# out to Antigravity. --copy = real dirs, not symlinks.
 #
 # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
 # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli) is
@@ -876,10 +876,11 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    $skAgents = @('claude-code', 'opencode', 'antigravity')
+    $skAgents = @('claude-code', 'opencode', 'codex')
     Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
@@ -906,7 +907,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
         }
         Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
-            npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+            $skAgents = @('claude-code', 'opencode', 'codex')
+            npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
         }
     } else {
@@ -916,7 +918,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
     Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
@@ -924,7 +927,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # agent search and install skills from skills.sh mid-session.
     Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
@@ -932,7 +936,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # automation: navigate, click, fill, scrape, screenshot.
     Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
@@ -940,13 +945,69 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
-        npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy 2>&1 | Out-Null
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    $catalog = Join-Path (chezmoi source-path) 'scripts\curated-agent-skills.txt'
+    if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
+        Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
+    } else {
+        $skills = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
+        foreach ($skill in $skills) {
+            $source = "$env:USERPROFILE\.claude\skills\$skill"
+            $targetRoot = "$env:USERPROFILE\.gemini\antigravity-cli\skills"
+            $target = Join-Path $targetRoot $skill
+            if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
+                New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
+                $temporary = Join-Path $targetRoot ".${skill}.tmp.$([guid]::NewGuid().ToString('N'))"
+                $backup = Join-Path $targetRoot ".${skill}.backup.$([guid]::NewGuid().ToString('N'))"
+                New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+                try {
+                    Copy-Item (Join-Path $source '*') -Destination $temporary -Recurse -Force -ErrorAction Stop
+                    if (Test-Path -LiteralPath $target) {
+                        Move-Item -LiteralPath $target -Destination $backup -ErrorAction Stop
+                        try {
+                            Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
+                            Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+                        } catch {
+                            Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+                            Move-Item -LiteralPath $backup -Destination $target -ErrorAction SilentlyContinue
+                            Write-Host "  Warning: failed to promote curated skill for Antigravity: $skill" -ForegroundColor Yellow
+                        }
+                    } else {
+                        Move-Item -LiteralPath $temporary -Destination $target -ErrorAction Stop
+                    }
+                } catch {
+                    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "  Warning: failed to copy curated skill for Antigravity: $skill" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  Warning: Claude skill missing; skipping Antigravity copy: $skill" -ForegroundColor Yellow
+            }
+
+            $commandRoot = "$env:USERPROFILE\.config\opencode\commands"
+            $commandFile = Join-Path $commandRoot "$skill.md"
+            $source = "$env:USERPROFILE\.config\opencode\skills\$skill"
+            $marker = 'managed-by: chezmoi-curated-skills'
+            if (Test-Path -LiteralPath (Join-Path $source 'SKILL.md') -PathType Leaf) {
+                New-Item -ItemType Directory -Force -Path $commandRoot | Out-Null
+                if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                    Write-Host "  Warning: OpenCode command is user-managed; leaving unchanged: $commandFile" -ForegroundColor Yellow
+                } else {
+                    $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: ```$ARGUMENTS`r`n"
+                    [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
+                }
+            } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                Remove-Item -LiteralPath $commandFile -Force
+            }
+        }
+    }
 }
 {{- end }}
 
