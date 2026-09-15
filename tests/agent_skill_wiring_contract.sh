@@ -39,6 +39,67 @@ require_contains() {
     fi
 }
 
+verify_windows_command_generation() {
+    local fixture
+    fixture="$(mktemp)"
+    cat > "$fixture" <<'POWERSHELL'
+$ErrorActionPreference = 'Stop'
+trap { Write-Error $_; exit 1 }
+$fixtureHome = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-skill-wiring-" + [guid]::NewGuid().ToString('N'))
+
+try {
+    $opencode = Join-Path (Join-Path $fixtureHome '.config') 'opencode'
+    $skills = Join-Path $opencode 'skills'
+    $commands = Join-Path $opencode 'commands'
+    $handoffSkill = Join-Path $skills 'handoff'
+    $teachSkill = Join-Path $skills 'teach'
+    $handoffCommand = Join-Path $commands 'handoff.md'
+    $teachCommand = Join-Path $commands 'teach.md'
+    $researchCommand = Join-Path $commands 'research.md'
+    New-Item -ItemType Directory -Force -Path $handoffSkill, $teachSkill, $commands | Out-Null
+    Set-Content -LiteralPath (Join-Path $handoffSkill 'SKILL.md') -Value 'handoff skill'
+    Set-Content -LiteralPath (Join-Path $teachSkill 'SKILL.md') -Value 'teach skill'
+    [System.IO.File]::WriteAllText($handoffCommand, '<!-- managed-by: chezmoi-curated-skills -->stale')
+    [System.IO.File]::WriteAllText($teachCommand, 'user owned command')
+    [System.IO.File]::WriteAllText($researchCommand, '<!-- managed-by: chezmoi-curated-skills -->stale')
+    if (-not (Test-Path -LiteralPath (Join-Path $handoffSkill 'SKILL.md'))) {
+        throw 'fixture OpenCode skill was not created'
+    }
+
+    $marker = 'managed-by: chezmoi-curated-skills'
+    foreach ($skill in 'handoff', 'teach', 'research') {
+        $commandFile = Join-Path $commands "$skill.md"
+        $source = Join-Path (Join-Path $skills $skill) 'SKILL.md'
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+                continue
+            }
+            $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
+            [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
+        } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
+            Remove-Item -LiteralPath $commandFile -Force
+        }
+    }
+
+    $expected = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the handoff skill`r`n---`r`nLoad the native ``handoff`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
+    $actual = [System.IO.File]::ReadAllText($handoffCommand)
+    if ($actual -cne $expected) {
+        throw "marker-owned OpenCode command content is malformed: $($actual.Replace("`r", '[CR]').Replace("`n", '[LF]'))"
+    }
+    if ([System.IO.File]::ReadAllText($teachCommand) -cne 'user owned command') {
+        throw 'user-owned OpenCode command was overwritten'
+    }
+    if (Test-Path -LiteralPath $researchCommand) {
+        throw 'stale marker-owned OpenCode command was not deleted'
+    }
+} finally {
+    Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+POWERSHELL
+    pwsh -NoProfile -File "$fixture"
+    rm -f "$fixture"
+}
+
 if [[ ! -f "$catalog" ]]; then
     fail 'missing curated skill catalog'
 else
@@ -102,7 +163,12 @@ if [[ "$scope" != "unix" ]]; then
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" '$ARGUMENTS'
         require_contains "$file" 'SKILL.md'
+        if grep -Fq -- 'for: ```$ARGUMENTS' "$repo_root/$file"; then
+            fail "$file must generate a literal $ARGUMENTS placeholder"
+        fi
     done
+
+    verify_windows_command_generation
 fi
 
 if [[ "$failed" == true ]]; then

@@ -127,7 +127,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                 if ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and -not ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
                     Write-Host "  Warning: OpenCode command is user-managed; leaving unchanged: $commandFile" -ForegroundColor Yellow
                 } else {
-                    $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: ```$ARGUMENTS`r`n"
+                    $command = "<!-- managed-by: chezmoi-curated-skills -->`r`n---`r`ndescription: Run the $skill skill`r`n---`r`nLoad the native ``$skill`` skill with the skill tool, then follow it for: `$ARGUMENTS`r`n"
                     [System.IO.File]::WriteAllText($commandFile, $command, (New-Object System.Text.UTF8Encoding($false)))
                 }
             } elseif ((Test-Path -LiteralPath $commandFile -PathType Leaf) -and ((Get-Content -Raw -LiteralPath $commandFile) -like "*$marker*")) {
