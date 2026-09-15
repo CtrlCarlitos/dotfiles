@@ -53,7 +53,8 @@ node_modules/
 docs/research/
 docs/superpowers/
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
+# Graft: generated graph is local; `.graft` can contain Brain credentials.
+/.graft/
 /graft/
 
 # Serena: share the project definition; retain machine-local state locally.
