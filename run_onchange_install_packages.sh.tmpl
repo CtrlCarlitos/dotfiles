@@ -334,7 +334,7 @@ install_agent_skills() {
         return
     fi
 
-    local skill source target tmp command_dir command_file
+    local skill source target tmp backup command_dir command_file
     while IFS= read -r skill || [[ -n "$skill" ]]; do
         [[ -z "$skill" || "$skill" == \#* ]] && continue
 
@@ -344,8 +344,27 @@ install_agent_skills() {
             mkdir -p "$HOME/.gemini/antigravity-cli/skills"
             tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
             if cp -R "$source/." "$tmp/"; then
-                rm -rf "$target"
-                mv "$tmp" "$target"
+                backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
+                if ! rmdir "$backup"; then
+                    rm -rf "$tmp"
+                    warn "Failed to prepare Antigravity skill backup: $skill"
+                elif [[ -e "$target" || -L "$target" ]]; then
+                    if mv "$target" "$backup"; then
+                        if mv "$tmp" "$target"; then
+                            rm -rf "$backup"
+                        else
+                            rm -rf "$tmp"
+                            warn "Failed to promote curated skill for Antigravity: $skill"
+                            mv "$backup" "$target" || warn "Failed to restore Antigravity skill backup: $skill"
+                        fi
+                    else
+                        rm -rf "$tmp"
+                        warn "Failed to back up existing Antigravity skill: $skill"
+                    fi
+                elif ! mv "$tmp" "$target"; then
+                    rm -rf "$tmp"
+                    warn "Failed to promote curated skill for Antigravity: $skill"
+                fi
             else
                 rm -rf "$tmp"
                 warn "Failed to copy curated skill for Antigravity: $skill"

@@ -82,8 +82,27 @@ if command -v npx &>/dev/null; then
                 mkdir -p "$HOME/.gemini/antigravity-cli/skills"
                 tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
                 if cp -R "$source/." "$tmp/"; then
-                    rm -rf "$target"
-                    mv "$tmp" "$target"
+                    backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
+                    if ! rmdir "$backup"; then
+                        rm -rf "$tmp"
+                        echo "   Warning: failed to prepare Antigravity skill backup: $skill"
+                    elif [[ -e "$target" || -L "$target" ]]; then
+                        if mv "$target" "$backup"; then
+                            if mv "$tmp" "$target"; then
+                                rm -rf "$backup"
+                            else
+                                rm -rf "$tmp"
+                                echo "   Warning: failed to promote curated skill for Antigravity: $skill"
+                                mv "$backup" "$target" || echo "   Warning: failed to restore Antigravity skill backup: $skill"
+                            fi
+                        else
+                            rm -rf "$tmp"
+                            echo "   Warning: failed to back up existing Antigravity skill: $skill"
+                        fi
+                    elif ! mv "$tmp" "$target"; then
+                        rm -rf "$tmp"
+                        echo "   Warning: failed to promote curated skill for Antigravity: $skill"
+                    fi
                 else
                     rm -rf "$tmp"
                     echo "   Warning: failed to copy curated skill for Antigravity: $skill"

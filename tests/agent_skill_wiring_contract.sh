@@ -75,6 +75,10 @@ if [[ "$scope" != "windows" ]]; then
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" 'SKILL.md'
         require_contains "$file" '$ARGUMENTS'
+        require_contains "$file" 'backup='
+        require_contains "$file" 'mv "$target" "$backup"'
+        require_contains "$file" 'mv "$backup" "$target"'
+        require_contains "$file" 'rm -rf "$backup"'
     done
 fi
 
