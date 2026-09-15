@@ -150,10 +150,10 @@ project Dockerfile when local GitHub Actions execution is required.
 
 Keep OpenCode's feature server disabled unless the container explicitly needs
 it, and bind any enabled server to `127.0.0.1` unless an authenticated proxy is
-deliberately configured. `serverPassword` must not be stored in a feature
-option: the feature persists that value in a world-readable file. Provide a
-password through the runtime environment or your platform's secret mechanism,
-not the image build configuration.
+deliberately configured. Binding it to `0.0.0.0` requires
+`OPENCODE_SERVER_PASSWORD` at container runtime. Supply the password through
+the runtime environment or your platform's secret mechanism, not image build
+configuration or feature options.
 
 ### 6. Persist agent authentication and configuration
 
@@ -170,11 +170,13 @@ differs.
   "mounts": [
     "source=devcontainer-claude,target=/home/vscode/.claude,type=volume",
     "source=devcontainer-codex,target=/home/vscode/.codex,type=volume",
-    "source=devcontainer-opencode-config,target=/home/vscode/.config/opencode,type=volume",
-    "source=devcontainer-opencode-data,target=/home/vscode/.local/share/opencode,type=volume"
+    "source=devcontainer-opencode-config,target=/home/vscode/.config/opencode,type=volume"
   ]
 }
 ```
+
+`~/.local/share/opencode` is an optional user-managed data path. Mount it only
+when you intentionally need its contents to survive rebuilds.
 
 Claude also stores user settings in `~/.claude.json`. Docker named volumes are
 directories, so do not mount one at that file path. If that file must persist,
