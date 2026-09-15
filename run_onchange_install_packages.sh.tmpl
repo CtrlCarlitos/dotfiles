@@ -250,7 +250,7 @@ install_agent_skills() {
         return
     fi
     local catalog
-    catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
+    catalog="{{ .chezmoi.sourceDir }}/scripts/curated-agent-skills.txt"
     # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /
     # npm notice run 'skills' add ..." hint to stderr on every invocation -
     # pure console noise here, suppressed like the Windows side does.

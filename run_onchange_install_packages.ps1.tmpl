@@ -955,7 +955,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
 
-    $catalog = Join-Path (chezmoi source-path) 'scripts\curated-agent-skills.txt'
+    $catalog = Join-Path '{{ .chezmoi.sourceDir }}' 'scripts\curated-agent-skills.txt'
     if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
     } else {

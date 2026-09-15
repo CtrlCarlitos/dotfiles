@@ -58,11 +58,17 @@ verify_unix_no_npx_summaries() {
 }
 
 verify_unix_skill_lifecycle() {
-    local tmp harness output target
+    local tmp config rendered harness output target
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/home/.claude/skills/handoff" \
         "$tmp/home/.gemini/antigravity-cli/skills/handoff"
+    config="$tmp/chezmoi.toml"
+    : > "$config"
+    rendered="$tmp/installer.sh"
+    chezmoi execute-template --config "$config" --source "$tmp/repo" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
+        < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
     printf '%s\n' handoff > "$tmp/repo/scripts/curated-agent-skills.txt"
     printf '%s\n' fresh > "$tmp/home/.claude/skills/handoff/SKILL.md"
     printf '%s\n' stale > "$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
@@ -77,9 +83,10 @@ dest="${!#}"
 mkdir -p "$dest/skills/engineering/code-review"
 printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"
 EOF
-    cat > "$tmp/bin/chezmoi" <<EOF
+    cat > "$tmp/bin/chezmoi" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' '$tmp/repo'
+printf '%s\n' "FAIL: nested chezmoi invocation: $*" >&2
+exit 99
 EOF
     chmod +x "$tmp/bin/npx" "$tmp/bin/git" "$tmp/bin/chezmoi"
 
@@ -87,7 +94,7 @@ EOF
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
             'info() { printf "%s\\n" "$1"; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
-        awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl"
+        awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
         cat <<'EOF'
 mv() {
     if [[ "$1" == *'.handoff.tmp.'* && "$2" == "$HOME/.gemini/antigravity-cli/skills/handoff" ]]; then
@@ -96,7 +103,7 @@ mv() {
     command mv "$@"
 }
 EOF
-        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl"
+        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
         printf '%s\n' 'install_agent_skills'
     } > "$harness"
 
@@ -158,6 +165,7 @@ try {
     function chezmoi {
         param([string]$Command)
         if ($Command -ne 'source-path') { throw "unexpected chezmoi command: $Command" }
+        if ($script:rejectNestedChezmoi) { throw 'nested chezmoi invocation' }
         $fixtureRepo
     }
 
@@ -165,6 +173,7 @@ try {
     try {
         $env:USERPROFILE = $fixtureHome
         foreach ($lifecycle in $args) {
+            $script:rejectNestedChezmoi = ($lifecycle -eq $args[0])
             $source = Get-Content -Raw -LiteralPath $lifecycle
             $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
             if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
@@ -199,7 +208,17 @@ try {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
-    pwsh -NoProfile -File "$fixture" "$repo_root/run_onchange_install_packages.ps1.tmpl" "$repo_root/scripts/update_ai_tools.ps1"
+    local config rendered
+    local render_dir
+    render_dir="$(mktemp -d)"
+    config="$render_dir/chezmoi.toml"
+    rendered="$render_dir/installer.ps1"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
+    pwsh -NoProfile -File "$fixture" "$rendered" "$repo_root/scripts/update_ai_tools.ps1"
+    rm -rf "$render_dir"
     rm -f "$fixture"
 }
 
