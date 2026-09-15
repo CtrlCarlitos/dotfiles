@@ -241,7 +241,14 @@ install_node() {
 # Curated third-party agent skills are installed to each supported tool's native
 # directory. Antigravity receives verified copies from Claude's native target.
 install_agent_skills() {
-    command -v npx &>/dev/null || { warn "npx not found - skipping curated agent skills"; return; }
+    if ! command -v npx &>/dev/null; then
+        warn "npx not found - skipping curated agent skills"
+        info "Curated skills: Claude Code installed=0 skipped=16 failed=0"
+        info "Curated skills: OpenCode installed=0 skipped=16 failed=0"
+        info "Curated skills: Antigravity installed=0 skipped=16 failed=0"
+        info "Curated skills: Codex installed=0 skipped=16 failed=0"
+        return
+    fi
     local catalog
     catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
     # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /

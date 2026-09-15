@@ -197,6 +197,11 @@ if command -v npx &>/dev/null; then
     echo "   Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
     echo "   Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
     echo "   Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
+else
+    echo "   Curated skills: Claude Code installed=0 skipped=16 failed=0"
+    echo "   Curated skills: OpenCode installed=0 skipped=16 failed=0"
+    echo "   Curated skills: Antigravity installed=0 skipped=16 failed=0"
+    echo "   Curated skills: Codex installed=0 skipped=16 failed=0"
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

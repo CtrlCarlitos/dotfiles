@@ -39,6 +39,77 @@ require_contains() {
     fi
 }
 
+verify_unix_no_npx_summaries() {
+    local tmp harness output agent
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    mkdir -p "$tmp/bin"
+    harness="$tmp/updater.sh"
+
+    awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' \
+        "$repo_root/scripts/update_ai_tools.sh" > "$harness"
+    output="$(PATH="$tmp/bin" "$BASH" "$harness")"
+
+    for agent in 'Claude Code' OpenCode Antigravity Codex; do
+        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=16 failed=0" <<< "$output"; then
+            fail "Unix updater must report skipped curated skills without npx for $agent"
+        fi
+    done
+}
+
+verify_unix_skill_lifecycle() {
+    local tmp harness output target
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/home/.claude/skills/handoff" \
+        "$tmp/home/.gemini/antigravity-cli/skills/handoff"
+    printf '%s\n' handoff > "$tmp/repo/scripts/curated-agent-skills.txt"
+    printf '%s\n' fresh > "$tmp/home/.claude/skills/handoff/SKILL.md"
+    printf '%s\n' stale > "$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
+
+    cat > "$tmp/bin/npx" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    cat > "$tmp/bin/git" <<'EOF'
+#!/usr/bin/env bash
+dest="${!#}"
+mkdir -p "$dest/skills/engineering/code-review"
+printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"
+EOF
+    cat > "$tmp/bin/chezmoi" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' '$tmp/repo'
+EOF
+    chmod +x "$tmp/bin/npx" "$tmp/bin/git" "$tmp/bin/chezmoi"
+
+    harness="$tmp/lifecycle.sh"
+    {
+        printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+            'info() { printf "%s\\n" "$1"; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
+        awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl"
+        cat <<'EOF'
+mv() {
+    if [[ "$1" == *'.handoff.tmp.'* && "$2" == "$HOME/.gemini/antigravity-cli/skills/handoff" ]]; then
+        return 1
+    fi
+    command mv "$@"
+}
+EOF
+        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl"
+        printf '%s\n' 'install_agent_skills'
+    } > "$harness"
+
+    output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
+    if ! grep -Fqx -- 'Curated skills: Antigravity installed=0 skipped=0 failed=1' <<< "$output"; then
+        fail 'Unix lifecycle must report a failed Antigravity promotion'
+    fi
+    target="$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
+    if [[ ! -f "$target" || "$(<"$target")" != stale ]]; then
+        fail 'Unix lifecycle must restore the stale Antigravity target after promotion failure'
+    fi
+}
+
 verify_windows_command_generation() {
     if ! command -v pwsh >/dev/null 2>&1; then
         printf '%s\n' 'PASS/SKIP: PowerShell runtime generator assertions require pwsh'
@@ -150,6 +221,9 @@ else
 fi
 
 if [[ "$scope" != "windows" ]]; then
+    verify_unix_no_npx_summaries
+    verify_unix_skill_lifecycle
+
     for file in "${unix_files[@]}"; do
         require_contains "$file" 'curated-agent-skills.txt'
         if grep -Fq -- '-a antigravity' "$repo_root/$file"; then

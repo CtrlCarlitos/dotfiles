@@ -299,3 +299,7 @@ Not done / open:
   pass verified live; **the macOS/brew branch has never executed this code**
   — reasoning-only for BSD sed / `cp -r "$src/."` portability. Run one manual
   `install_agent_skills` on a Mac when available.
+- 2026-09-15 P2 follow-up: Unix updater and installer now report all four
+  curated-skill summaries as skipped when `npx` is unavailable. The wiring
+  contract executes the Unix lifecycle with a stale Antigravity target and a
+  simulated promotion failure, verifying both the failed summary and rollback.
