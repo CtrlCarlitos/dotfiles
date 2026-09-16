@@ -142,7 +142,10 @@ verify_unix_claude_attribution() {
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
             'warn() { printf "WARN: %s\\n" "$1" >&2; }' 'SUDO=' \
-            'PATH="'"$PATH"'"'
+            'PATH="'"$PATH"'"' \
+            'chmod() { [[ "$1" != --reference=* ]] || return 64; command chmod "$@"; }' \
+            'uname() { [[ "${CLAUDE_TEST_UNAME:-}" ]] && printf "%s\\n" "$CLAUDE_TEST_UNAME" || command uname "$@"; }' \
+            'stat() { if [[ "${CLAUDE_TEST_UNAME:-}" == Darwin && "$1" == -f && "$2" == %Lp ]]; then command stat -c "%a" "$3"; else command stat "$@"; fi; }'
         awk '/^    configure_claude_attribution\(\) \{/{copy=1} copy{print} copy && /^    }$/{exit}' "$rendered"
         printf '%s\n' 'configure_claude_attribution'
     } > "$harness"
@@ -192,6 +195,14 @@ verify_unix_claude_attribution() {
     mode="$(stat -c '%a' "$tmp/new/.claude/settings.json")"
     [[ "$mode" == 600 ]] || fail 'Unix Claude attribution must create restrictive new settings files'
 
+    settings="$tmp/darwin/.claude/settings.json"
+    mkdir -p "${settings%/*}"
+    printf '%s\n' '{}' > "$settings"
+    chmod 640 "$settings"
+    HOME="$tmp/darwin" CLAUDE_TEST_UNAME=Darwin bash "$harness"
+    mode="$(stat -c '%a' "$settings")"
+    [[ "$mode" == 640 ]] || fail 'Unix Claude attribution merge must preserve the original settings mode on macOS'
+
     settings="$tmp/nested/.claude/settings.json"
     jq -e '.permissions.allow == ["Bash(graft:*)"] and .attribution.extra == "keep"' "$settings" >/dev/null \
         || fail 'Unix Claude attribution merge must preserve nested settings'
@@ -217,6 +228,9 @@ $ErrorActionPreference = 'Stop'
 $source = Get-Content -Raw -LiteralPath $args[0]
 $match = [regex]::Match($source, '(?ms)^function Set-ClaudeAttribution \{.*?^\}')
 if (-not $match.Success) { throw 'Claude attribution merger not found' }
+$usesWindowsReplace = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+if ($usesWindowsReplace -and $match.Value -notmatch '\[System\.IO\.File\]::Replace\(\$temporary, \$settings, \$null\)') { throw 'Windows Claude attribution must atomically replace existing settings' }
+if (-not $usesWindowsReplace -and $match.Value -notmatch '\[System\.IO\.File\]::Move\(\$temporary, \$settings, \$true\)') { throw 'non-Windows Claude attribution must safely replace existing settings' }
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-attribution-' + [guid]::NewGuid().ToString('N'))
 try {
     foreach ($fixture in 'new', 'empty', 'zero-byte', 'nested', 'malformed') {

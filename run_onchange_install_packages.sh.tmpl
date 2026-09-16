@@ -1249,6 +1249,7 @@ PYEOF
         local settings_dir="$HOME/.claude"
         local settings="$settings_dir/settings.json"
         local temporary
+        local mode
 
         if ! command -v jq &>/dev/null; then
             $SUDO apt install -y jq || {
@@ -1273,7 +1274,12 @@ PYEOF
                 warn "Could not parse Claude Code settings - leaving them untouched"
                 return
             fi
-            if ! chmod --reference="$settings" "$temporary"; then
+            if [[ "$(uname -s)" == Darwin ]]; then
+                mode="$(stat -f '%Lp' "$settings")"
+            else
+                mode="$(stat -c '%a' "$settings")"
+            fi
+            if ! chmod "$mode" "$temporary"; then
                 rm -f "$temporary"
                 warn "Could not preserve Claude Code settings permissions"
                 return
