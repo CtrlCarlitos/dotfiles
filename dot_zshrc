@@ -9,6 +9,7 @@ export ZSH="$HOME/.oh-my-zsh"
 export DOTFILES_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi"
 
 # Theme
+# shellcheck disable=SC2034  # Consumed by Oh My Zsh when sourced below.
 ZSH_THEME=""
 
 #-------------------------------------------------------------------------------
@@ -83,12 +84,40 @@ fi
 #-------------------------------------------------------------------------------
 # Path
 #-------------------------------------------------------------------------------
+typeset -U path
+typeset -U fpath
+
+# Homebrew must initialize before local tool paths so their binaries win.
+if [[ -x "/opt/homebrew/bin/brew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+elif [[ -x "$HOME/.linuxbrew/bin/brew" ]]; then
+    eval "$("$HOME/.linuxbrew/bin/brew" shellenv)"
+fi
+
 # Local binaries
-[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
-[[ -d "$HOME/bin" ]] && export PATH="$HOME/bin:$PATH"
+[[ -d "$HOME/.local/bin" ]] && path=("$HOME/.local/bin" "${path[@]}")
+[[ -d "$HOME/bin" ]] && path=("$HOME/bin" "${path[@]}")
+
+# Node and OpenCode global binaries
+[[ -d "$HOME/.npm-global/bin" ]] && path=("$HOME/.npm-global/bin" "${path[@]}")
+[[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" "${path[@]}")
+
+# Language ecosystem binaries
+[[ -x /usr/local/go/bin/go ]] && path=(/usr/local/go/bin "${path[@]}")
+gopath_entries="${GOPATH:-$HOME/go}"
+gopath_bin="${gopath_entries%%:*}/bin"
+[[ -d "$gopath_bin" ]] && path=("$gopath_bin" "${path[@]}")
+[[ -d "$HOME/.dotnet" ]] && path=("$HOME/.dotnet" "${path[@]}")
+[[ -d "$HOME/.dotnet/tools" ]] && path=("$HOME/.dotnet/tools" "${path[@]}")
+[[ -d "$HOME/.mix/escripts" ]] && path=("$HOME/.mix/escripts" "${path[@]}")
+composer_home="${COMPOSER_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/composer}"
+[[ -d "$HOME/.composer/vendor/bin" ]] && path=("$HOME/.composer/vendor/bin" "${path[@]}")
+[[ -d "$composer_home/vendor/bin" ]] && path=("$composer_home/vendor/bin" "${path[@]}")
 
 # ZSH completions
-fpath+=($HOME/.zfunc)
+[[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 
 #-------------------------------------------------------------------------------
 # Aliases
@@ -99,6 +128,7 @@ fpath+=($HOME/.zfunc)
 # History
 #-------------------------------------------------------------------------------
 HISTSIZE=50000
+# shellcheck disable=SC2034  # Consumed by zsh's history subsystem.
 SAVEHIST=50000
 setopt NO_BANG_HIST           # Don't treat ! as special in commands
 setopt HIST_IGNORE_ALL_DUPS   # Don't record duplicates
@@ -141,18 +171,3 @@ fi
 if command -v direnv &>/dev/null; then
     eval "$(direnv hook zsh)"
 fi
-
-# Homebrew
-if [[ -x "/opt/homebrew/bin/brew" ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-elif [[ -x "$HOME/.linuxbrew/bin/brew" ]]; then
-    eval "$("$HOME/.linuxbrew/bin/brew" shellenv)"
-fi
-
-# Node and npm (global binaries)
-export PATH="$HOME/.npm-global/bin:$PATH"
-
-# opencode
-export PATH="$HOME/.opencode/bin:$PATH"

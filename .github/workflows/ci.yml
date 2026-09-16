@@ -60,6 +60,9 @@ jobs:
       - name: Test workflow configs cover every prompted key
         run: bash tests/check_workflow_config_keys.sh
 
+      - name: Test zsh startup contract
+        run: bash tests/zshrc_startup_contract.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
