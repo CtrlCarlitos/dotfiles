@@ -129,7 +129,7 @@ mv() {
 
 EOF
 verify_unix_claude_attribution() {
-    local tmp config rendered harness settings
+    local tmp config rendered harness settings warnings mode
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     config="$tmp/chezmoi.toml"
@@ -147,7 +147,7 @@ verify_unix_claude_attribution() {
         printf '%s\n' 'configure_claude_attribution'
     } > "$harness"
 
-    for fixture in new empty nested; do
+    for fixture in new empty zero-byte nested malformed mode; do
         rm -rf "$tmp/$fixture"
         mkdir -p "$tmp/$fixture"
         settings="$tmp/$fixture/.claude/settings.json"
@@ -156,15 +156,41 @@ verify_unix_claude_attribution() {
                 mkdir -p "${settings%/*}"
                 printf '%s\n' '{}' > "$settings"
                 ;;
+            zero-byte)
+                mkdir -p "${settings%/*}"
+                : > "$settings"
+                ;;
             nested)
                 mkdir -p "${settings%/*}"
                 printf '%s\n' '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}' > "$settings"
                 ;;
+            malformed)
+                mkdir -p "${settings%/*}"
+                printf '%s\n' '{not json' > "$settings"
+                cp "$settings" "$settings.original"
+                ;;
+            mode)
+                mkdir -p "${settings%/*}"
+                printf '%s\n' '{}' > "$settings"
+                chmod 640 "$settings"
+                ;;
         esac
+        if [[ "$fixture" == malformed ]]; then
+            warnings="$(HOME="$tmp/$fixture" bash "$harness" 2>&1)"
+            cmp -s "$settings" "$settings.original" || fail 'Unix malformed Claude settings must remain byte-for-byte unchanged'
+            grep -Fq 'Could not parse Claude Code settings - leaving them untouched' <<< "$warnings" \
+                || fail 'Unix malformed Claude settings must emit a warning'
+            continue
+        fi
         HOME="$tmp/$fixture" bash "$harness"
         jq -e '.attribution.commit == "" and .attribution.pr == "" and .attribution.sessionUrl == false' "$settings" >/dev/null \
             || fail "Unix Claude attribution must be disabled for $fixture settings"
     done
+
+    mode="$(stat -c '%a' "$tmp/mode/.claude/settings.json")"
+    [[ "$mode" == 640 ]] || fail 'Unix Claude attribution merge must preserve the original settings mode'
+    mode="$(stat -c '%a' "$tmp/new/.claude/settings.json")"
+    [[ "$mode" == 600 ]] || fail 'Unix Claude attribution must create restrictive new settings files'
 
     settings="$tmp/nested/.claude/settings.json"
     jq -e '.permissions.allow == ["Bash(graft:*)"] and .attribution.extra == "keep"' "$settings" >/dev/null \
@@ -193,18 +219,30 @@ $match = [regex]::Match($source, '(?ms)^function Set-ClaudeAttribution \{.*?^\}'
 if (-not $match.Success) { throw 'Claude attribution merger not found' }
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-attribution-' + [guid]::NewGuid().ToString('N'))
 try {
-    foreach ($fixture in 'new', 'empty', 'nested') {
+    foreach ($fixture in 'new', 'empty', 'zero-byte', 'nested', 'malformed') {
         $fixtureHome = Join-Path $fixtureRoot $fixture
         $settings = Join-Path $fixtureHome '.claude\settings.json'
         if ($fixture -eq 'empty') {
             New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
             [IO.File]::WriteAllText($settings, '{}')
+        } elseif ($fixture -eq 'zero-byte') {
+            New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+            [IO.File]::WriteAllText($settings, '')
         } elseif ($fixture -eq 'nested') {
             New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
             [IO.File]::WriteAllText($settings, '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}')
+        } elseif ($fixture -eq 'malformed') {
+            New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+            [IO.File]::WriteAllText($settings, '{not json')
+            Copy-Item -LiteralPath $settings -Destination "$settings.original"
         }
         $env:USERPROFILE = $fixtureHome
-        & ([scriptblock]::Create($match.Value + "`nSet-ClaudeAttribution"))
+        $warnings = & ([scriptblock]::Create($match.Value + "`nSet-ClaudeAttribution")) 3>&1 2>&1
+        if ($fixture -eq 'malformed') {
+            if ((Get-Content -Raw -LiteralPath $settings) -cne (Get-Content -Raw -LiteralPath "$settings.original")) { throw 'malformed settings changed' }
+            if ($warnings -notmatch 'Could not parse Claude Code settings - leaving them untouched') { throw 'malformed settings warning missing' }
+            continue
+        }
         $json = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
         if ($json.attribution.commit -ne '' -or $json.attribution.pr -ne '' -or $json.attribution.sessionUrl -ne $false) { throw "attribution not disabled: $fixture" }
     }

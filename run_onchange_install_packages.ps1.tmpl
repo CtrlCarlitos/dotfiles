@@ -782,10 +782,16 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
 function Set-ClaudeAttribution {
     $settingsDir = Join-Path $env:USERPROFILE '.claude'
     $settings = Join-Path $settingsDir 'settings.json'
+    $temporary = $null
     try {
         New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
         if (Test-Path $settings) {
-            $claudeSettings = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json -ErrorAction Stop
+            $contents = Get-Content -Raw -LiteralPath $settings
+            $claudeSettings = if ([string]::IsNullOrWhiteSpace($contents)) {
+                [pscustomobject]@{}
+            } else {
+                $contents | ConvertFrom-Json -ErrorAction Stop
+            }
         } else {
             $claudeSettings = [pscustomobject]@{}
         }
@@ -796,8 +802,23 @@ function Set-ClaudeAttribution {
         $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name pr -Value '' -Force
         $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name sessionUrl -Value $false -Force
         $merged = $claudeSettings | ConvertTo-Json -Depth 100
-        [System.IO.File]::WriteAllText($settings, $merged, (New-Object System.Text.UTF8Encoding($false)))
+        $temporary = Join-Path $settingsDir ('.settings.json.' + [guid]::NewGuid().ToString('N') + '.tmp')
+        [System.IO.File]::WriteAllText($temporary, $merged, (New-Object System.Text.UTF8Encoding($false)))
+        if (Test-Path $settings) {
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                [System.IO.File]::Replace($temporary, $settings, $null)
+            } else {
+                # Contract fixtures run under PowerShell on Unix, where Replace is unavailable.
+                [System.IO.File]::Move($temporary, $settings, $true)
+            }
+        } else {
+            [System.IO.File]::Move($temporary, $settings)
+        }
+        $temporary = $null
     } catch {
+        if ($null -ne $temporary -and (Test-Path $temporary)) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
         Write-Host "  Warning: Could not parse Claude Code settings - leaving them untouched" -ForegroundColor Yellow
     }
 }

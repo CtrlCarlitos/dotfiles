@@ -1248,7 +1248,7 @@ PYEOF
     configure_claude_attribution() {
         local settings_dir="$HOME/.claude"
         local settings="$settings_dir/settings.json"
-        local temporary="$settings.tmp"
+        local temporary
 
         if ! command -v jq &>/dev/null; then
             $SUDO apt install -y jq || {
@@ -1262,10 +1262,20 @@ PYEOF
         fi
 
         mkdir -p "$settings_dir"
-        if [[ -f "$settings" ]]; then
+        if ! temporary="$(mktemp "$settings_dir/.settings.json.XXXXXX")"; then
+            warn "Could not create temporary Claude Code settings"
+            return
+        fi
+
+        if [[ -s "$settings" ]]; then
             if ! jq '.attribution = ((.attribution // {}) + {commit: "", pr: "", sessionUrl: false})' "$settings" > "$temporary"; then
                 rm -f "$temporary"
                 warn "Could not parse Claude Code settings - leaving them untouched"
+                return
+            fi
+            if ! chmod --reference="$settings" "$temporary"; then
+                rm -f "$temporary"
+                warn "Could not preserve Claude Code settings permissions"
                 return
             fi
         else
@@ -1274,8 +1284,12 @@ PYEOF
                 warn "Could not create Claude Code settings"
                 return
             fi
+            chmod 600 "$temporary"
         fi
-        mv "$temporary" "$settings"
+        if ! mv -f "$temporary" "$settings"; then
+            rm -f "$temporary"
+            warn "Could not replace Claude Code settings"
+        fi
     }
 
     # Superpowers skills plugin for Claude Code (global - active in every
