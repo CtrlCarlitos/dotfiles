@@ -325,7 +325,7 @@ fi
 if command -v npm &>/dev/null; then
     NPM_BIN="$(command -v npm)"
     echo "🌐 Updating agent-browser..."
-    "$NPM_BIN" install -g agent-browser --loglevel=error --no-progress 2>/dev/null || echo "   agent-browser install failed - skipping"
+    "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>/dev/null || echo "   agent-browser install failed - skipping"
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
         "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"

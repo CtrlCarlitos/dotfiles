@@ -487,7 +487,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -Action { npx --yes playwright install chromium 2>$null }
 
     Write-Host "  Installing agent-browser..." -ForegroundColor Yellow
-    npm install -g agent-browser --loglevel=error --no-progress 2>$null
+    npm install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  Warning: agent-browser install failed (exit code $LASTEXITCODE) - continuing" -ForegroundColor Red
     } else {

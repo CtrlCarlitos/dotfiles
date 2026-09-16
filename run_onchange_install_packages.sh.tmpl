@@ -1114,7 +1114,7 @@ install_apt() {
         net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
 
         info "Installing agent-browser..."
-        net_timeout 300 $npm_sudo "$NPM_BIN" install -g agent-browser || warn "agent-browser install failed or timed out - continuing"
+        net_timeout 300 $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
         AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
         if [[ -x "$AGENT_BROWSER_BIN" ]]; then
             # Playwright Chromium is already available above; agent-browser
