@@ -485,6 +485,28 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # coding agents most often run.
     Write-Host "  Installing Playwright Chromium (headless browser for agent automation)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -Action { npx --yes playwright install chromium 2>$null }
+
+    Write-Host "  Installing agent-browser..." -ForegroundColor Yellow
+    npm install -g agent-browser --loglevel=error --no-progress 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Warning: agent-browser install failed (exit code $LASTEXITCODE) - continuing" -ForegroundColor Red
+    } else {
+        $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
+        if (Test-Path $agentBrowser) {
+            $env:AGENT_BROWSER = $agentBrowser
+            Invoke-WithTimeout -Description "agent-browser browser setup" -Seconds 600 -Action {
+                & $env:AGENT_BROWSER install
+                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+            }
+            Invoke-WithTimeout -Description "agent-browser verification" -Seconds 60 -Action {
+                & $env:AGENT_BROWSER doctor --json
+                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+            }
+            Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "  Warning: agent-browser command was not installed - skipping browser setup" -ForegroundColor Red
+        }
+    }
 }
 
 # Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/

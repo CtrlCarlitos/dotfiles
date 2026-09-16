@@ -1112,6 +1112,18 @@ install_apt() {
         # neither is present - so it's safe to reuse in the brew/macOS block too.
         net_timeout 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
         net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
+
+        info "Installing agent-browser..."
+        net_timeout 300 $npm_sudo "$NPM_BIN" install -g agent-browser || warn "agent-browser install failed or timed out - continuing"
+        AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
+        if [[ -x "$AGENT_BROWSER_BIN" ]]; then
+            # Playwright Chromium is already available above; agent-browser
+            # discovers it before downloading another browser.
+            net_timeout 600 "$AGENT_BROWSER_BIN" install || warn "agent-browser browser setup failed or timed out - continuing"
+            net_timeout 60 "$AGENT_BROWSER_BIN" doctor --json || warn "agent-browser verification failed - continuing"
+        else
+            warn "agent-browser command was not installed - skipping browser setup"
+        fi
     fi
 
     # Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/
