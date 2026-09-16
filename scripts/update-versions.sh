@@ -79,6 +79,52 @@ else
     echo "Warning: Could not derive Antigravity hub version from the download page - leaving pin unchanged."
 fi
 
+# 3. Update agent-guardrails only from a complete stable GitHub release. The
+# release API's `latest` endpoint excludes prereleases; validate again so a
+# malformed response can never promote an unreviewed build.
+GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+GUARDRAIL_ASSETS=(
+    guardrail_linux_amd64
+    guardrail_linux_arm64
+    guardrail_darwin_amd64
+    guardrail_darwin_arm64
+    guardrail_windows_amd64.exe
+    guardrail_windows_arm64.exe
+    SHA256SUMS
+)
+
+echo "Fetching latest stable agent-guardrails release..."
+if GUARDRAIL_RELEASE=$(curl -fsSL --max-time 30 "https://api.github.com/repos/${GUARDRAIL_REPO}/releases/latest" 2>/dev/null); then
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "Warning: jq is unavailable - leaving agent-guardrails pin unchanged."
+    else
+        GUARDRAIL_VERSION=$(jq -r 'if .draft == false and .prerelease == false then .tag_name // empty else empty end' <<<"$GUARDRAIL_RELEASE")
+        if [[ ! "$GUARDRAIL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Warning: No valid stable agent-guardrails release found - leaving pin unchanged."
+        else
+            GUARDRAIL_ASSETS_OK=true
+            for asset in "${GUARDRAIL_ASSETS[@]}"; do
+                if ! jq -e --arg asset "$asset" '.assets[]? | select(.name == $asset)' >/dev/null <<<"$GUARDRAIL_RELEASE"; then
+                    echo "  Warning: agent-guardrails ${GUARDRAIL_VERSION} is missing ${asset}"
+                    GUARDRAIL_ASSETS_OK=false
+                fi
+            done
+
+            if [ "$GUARDRAIL_ASSETS_OK" = true ]; then
+                GUARDRAIL_VERSION="$GUARDRAIL_VERSION" perl -pi -e 's/GUARDRAIL_VERSION="[^"]+"/GUARDRAIL_VERSION="$ENV{GUARDRAIL_VERSION}"/' \
+                    run_onchange_install_packages.sh.tmpl scripts/update_ai_tools.sh
+                GUARDRAIL_VERSION="$GUARDRAIL_VERSION" perl -pi -e 's/\$guardrailVersion = "[^"]+"/\$guardrailVersion = "$ENV{GUARDRAIL_VERSION}"/' \
+                    run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1
+                echo "Updated agent-guardrails pins to ${GUARDRAIL_VERSION}."
+            else
+                echo "Warning: Not updating agent-guardrails pin - release assets are incomplete."
+            fi
+        fi
+    fi
+else
+    echo "No stable agent-guardrails release found or GitHub is unavailable - leaving pin unchanged."
+fi
+
 # Note: Node.js is not dynamically bumped here. It is pinned to 24.x in
 # three installers by hand - run_onchange_install_packages.ps1.tmpl (choco
 # nodejs --version), the NodeSource setup_24.x script (Linux), and brew
