@@ -319,7 +319,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "🌐 Updating agent-browser..." -ForegroundColor Yellow
-    npm install -g agent-browser --loglevel=error --no-progress 2>$null
+    npm install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
     } else {
