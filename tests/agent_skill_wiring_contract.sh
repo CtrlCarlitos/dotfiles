@@ -573,7 +573,9 @@ if [[ "$scope" != "windows" ]]; then
     verify_unix_summary_targets
     verify_unix_supported_target_counts
     verify_unix_skill_lifecycle
-    verify_unix_claude_attribution
+    if command -v chezmoi >/dev/null 2>&1; then
+        verify_unix_claude_attribution
+    fi
 
     for file in "${unix_files[@]}"; do
         require_contains "$file" 'curated-agent-skills.txt'
@@ -637,8 +639,10 @@ if [[ "$scope" != "unix" ]]; then
     done
 
     verify_windows_command_generation
-    verify_windows_claude_attribution
-    verify_windows_summary_fallbacks
+    if command -v chezmoi >/dev/null 2>&1; then
+        verify_windows_claude_attribution
+        verify_windows_summary_fallbacks
+    fi
     require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
     require_contains 'run_onchange_install_packages.ps1.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"''\" }}"
     require_contains 'run_onchange_install_packages.ps1.tmpl' 'claude mcp get serena'
