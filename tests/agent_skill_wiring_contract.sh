@@ -503,6 +503,7 @@ try {
     $env:TEMP = $temporary
     Invoke-Lifecycle $args[0] 'no-npx'
     Invoke-Lifecycle $args[0] 'catalog-unavailable'
+    Invoke-Lifecycle $args[1] 'no-npx'
     Invoke-Lifecycle $args[1] 'catalog-unavailable'
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
