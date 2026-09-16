@@ -481,6 +481,7 @@ install_agent_skills() {
                     printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
                     printf 'description: Run the %s skill\n' "$skill"
                     printf '%s\n' '---'
+                    # shellcheck disable=SC2016 # OpenCode expands this placeholder at command invocation.
                     printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
                 } > "$tmp"
                 mv "$tmp" "$command_file"
