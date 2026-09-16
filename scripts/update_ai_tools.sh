@@ -321,7 +321,19 @@ if command -v npx &>/dev/null; then
     npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
 fi
 
-# 5. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
+# 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
+if command -v npm &>/dev/null; then
+    NPM_BIN="$(command -v npm)"
+    echo "🌐 Updating agent-browser..."
+    "$NPM_BIN" install -g agent-browser --loglevel=error --no-progress 2>/dev/null || echo "   agent-browser install failed - skipping"
+    AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
+    if [[ -x "$AGENT_BROWSER_BIN" ]]; then
+        "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
+        "$AGENT_BROWSER_BIN" doctor --json &>/dev/null || echo "   agent-browser verification failed - continuing"
+    fi
+fi
+
+# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
 command -v serena &>/dev/null && { uv tool upgrade serena-agent 2>/dev/null || echo "  Warning: serena upgrade failed - continuing"; }
 command -v graft &>/dev/null && { graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"; }
 

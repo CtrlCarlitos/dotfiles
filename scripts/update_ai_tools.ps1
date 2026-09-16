@@ -316,7 +316,26 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     npx --yes playwright install chromium 2>$null
 }
 
-# 5. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
+# 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Write-Host "🌐 Updating agent-browser..." -ForegroundColor Yellow
+    npm install -g agent-browser --loglevel=error --no-progress 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
+    } else {
+        $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
+        if (Test-Path $agentBrowser) {
+            $env:AGENT_BROWSER = $agentBrowser
+            & $env:AGENT_BROWSER install
+            if ($LASTEXITCODE -ne 0) { Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red }
+            & $env:AGENT_BROWSER doctor --json
+            if ($LASTEXITCODE -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
+            Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
 if (Get-Command serena -ErrorAction SilentlyContinue) {
     Write-Host "🧩 Updating Serena..." -ForegroundColor Yellow
     try {

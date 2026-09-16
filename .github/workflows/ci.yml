@@ -48,6 +48,9 @@ jobs:
       - name: Test agent skill wiring contract
         run: bash tests/agent_skill_wiring_contract.sh
 
+      - name: Test agent-browser provisioning contract
+        run: bash tests/agent_browser_provisioning_contract.sh
+
       - name: Test Windows Graft installation contract
         run: bash tests/graft_windows_install_contract.sh
 
