@@ -139,6 +139,10 @@ EOF
 
 verify_unix_skill_lifecycle() {
     local tmp config rendered harness output target
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: Unix lifecycle rendering requires chezmoi'
+        return
+    fi
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/home/.claude/skills/handoff" \
@@ -344,6 +348,10 @@ POWERSHELL
 verify_windows_command_generation() {
     if ! command -v pwsh >/dev/null 2>&1; then
         printf '%s\n' 'PASS/SKIP: PowerShell runtime generator assertions require pwsh'
+        return
+    fi
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell lifecycle rendering requires chezmoi'
         return
     fi
 
