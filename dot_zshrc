@@ -83,12 +83,28 @@ fi
 #-------------------------------------------------------------------------------
 # Path
 #-------------------------------------------------------------------------------
+typeset -U path
+typeset -U fpath
+
 # Local binaries
-[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
-[[ -d "$HOME/bin" ]] && export PATH="$HOME/bin:$PATH"
+[[ -d "$HOME/.local/bin" ]] && path=("$HOME/.local/bin" "${path[@]}")
+[[ -d "$HOME/bin" ]] && path=("$HOME/bin" "${path[@]}")
+
+# Node and OpenCode global binaries
+[[ -d "$HOME/.npm-global/bin" ]] && path=("$HOME/.npm-global/bin" "${path[@]}")
+[[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" "${path[@]}")
+
+# Language ecosystem binaries
+[[ -d "$HOME/sdk/go/bin" ]] && path=("$HOME/sdk/go/bin" "${path[@]}")
+[[ -d "${GOPATH:-$HOME/go}/bin" ]] && path=("${GOPATH:-$HOME/go}/bin" "${path[@]}")
+[[ -d "$HOME/.dotnet" ]] && path=("$HOME/.dotnet" "${path[@]}")
+[[ -d "$HOME/.dotnet/tools" ]] && path=("$HOME/.dotnet/tools" "${path[@]}")
+[[ -d "$HOME/.mix/escripts" ]] && path=("$HOME/.mix/escripts" "${path[@]}")
+[[ -d "$HOME/.config/composer/vendor/bin" ]] && path=("$HOME/.config/composer/vendor/bin" "${path[@]}")
+[[ -d "$HOME/.composer/vendor/bin" ]] && path=("$HOME/.composer/vendor/bin" "${path[@]}")
 
 # ZSH completions
-fpath+=($HOME/.zfunc)
+[[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 
 #-------------------------------------------------------------------------------
 # Aliases
@@ -127,6 +143,15 @@ setopt NUMERIC_GLOB_SORT      # Sort numbers numerically
 # Modern Tools Initialization
 #-------------------------------------------------------------------------------
 
+# Homebrew
+if [[ -x "/opt/homebrew/bin/brew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+elif [[ -x "$HOME/.linuxbrew/bin/brew" ]]; then
+    eval "$("$HOME/.linuxbrew/bin/brew" shellenv)"
+fi
+
 # Starship (Prompt)
 if command -v starship &>/dev/null; then
     eval "$(starship init zsh)"
@@ -141,18 +166,3 @@ fi
 if command -v direnv &>/dev/null; then
     eval "$(direnv hook zsh)"
 fi
-
-# Homebrew
-if [[ -x "/opt/homebrew/bin/brew" ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-elif [[ -x "$HOME/.linuxbrew/bin/brew" ]]; then
-    eval "$("$HOME/.linuxbrew/bin/brew" shellenv)"
-fi
-
-# Node and npm (global binaries)
-export PATH="$HOME/.npm-global/bin:$PATH"
-
-# opencode
-export PATH="$HOME/.opencode/bin:$PATH"
