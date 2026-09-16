@@ -1245,10 +1245,44 @@ PYEOF
          net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
     fi
 
+    configure_claude_attribution() {
+        local settings_dir="$HOME/.claude"
+        local settings="$settings_dir/settings.json"
+        local temporary="$settings.tmp"
+
+        if ! command -v jq &>/dev/null; then
+            $SUDO apt install -y jq || {
+                warn "jq is required to configure Claude Code attribution - skipping"
+                return
+            }
+        fi
+        if ! command -v jq &>/dev/null; then
+            warn "jq is required to configure Claude Code attribution - skipping"
+            return
+        fi
+
+        mkdir -p "$settings_dir"
+        if [[ -f "$settings" ]]; then
+            if ! jq '.attribution = ((.attribution // {}) + {commit: "", pr: "", sessionUrl: false})' "$settings" > "$temporary"; then
+                rm -f "$temporary"
+                warn "Could not parse Claude Code settings - leaving them untouched"
+                return
+            fi
+        else
+            if ! jq -n '{attribution: {commit: "", pr: "", sessionUrl: false}}' > "$temporary"; then
+                rm -f "$temporary"
+                warn "Could not create Claude Code settings"
+                return
+            fi
+        fi
+        mv "$temporary" "$settings"
+    }
+
     # Superpowers skills plugin for Claude Code (global - active in every
     # session once installed, via Claude Code's own plugin marketplace
     # mechanism, not npm). Re-running add/install is safe if already present.
     if command -v claude &>/dev/null; then
+        configure_claude_attribution
         info "Installing Superpowers plugin for Claude Code..."
         claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
         claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"

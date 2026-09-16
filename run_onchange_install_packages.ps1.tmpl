@@ -779,10 +779,34 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm https://claude.ai/install.ps1 | iex" }
 }
 
+function Set-ClaudeAttribution {
+    $settingsDir = Join-Path $env:USERPROFILE '.claude'
+    $settings = Join-Path $settingsDir 'settings.json'
+    try {
+        New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
+        if (Test-Path $settings) {
+            $claudeSettings = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json -ErrorAction Stop
+        } else {
+            $claudeSettings = [pscustomobject]@{}
+        }
+        if ($null -eq $claudeSettings.attribution) {
+            $claudeSettings | Add-Member -MemberType NoteProperty -Name attribution -Value ([pscustomobject]@{}) -Force
+        }
+        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name commit -Value '' -Force
+        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name pr -Value '' -Force
+        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name sessionUrl -Value $false -Force
+        $merged = $claudeSettings | ConvertTo-Json -Depth 100
+        [System.IO.File]::WriteAllText($settings, $merged, (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        Write-Host "  Warning: Could not parse Claude Code settings - leaving them untouched" -ForegroundColor Yellow
+    }
+}
+
 # Superpowers skills plugin for Claude Code (global - active in every
 # session once installed, via Claude Code's own plugin marketplace
 # mechanism, not npm). Re-running add/install is safe if already present.
 if (Get-Command claude -ErrorAction SilentlyContinue) {
+    Set-ClaudeAttribution
     Write-Host "  Installing Superpowers plugin for Claude Code..." -ForegroundColor Yellow
     Invoke-Quietly -Description "Failed to add Superpowers marketplace for Claude Code" -Action { claude plugin marketplace add obra/superpowers-marketplace 2>$null }
     Invoke-Quietly -Description "Failed to install Superpowers plugin for Claude Code" -Action { claude plugin install superpowers@superpowers-marketplace 2>$null }

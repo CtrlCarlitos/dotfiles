@@ -126,7 +126,99 @@ mv() {
     fi
     command mv "$@"
 }
+
 EOF
+verify_unix_claude_attribution() {
+    local tmp config rendered harness settings
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    config="$tmp/chezmoi.toml"
+    rendered="$tmp/installer.sh"
+    harness="$tmp/attribution.sh"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"claude_cli":true}}' \
+        < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
+    {
+        printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+            'warn() { printf "WARN: %s\\n" "$1" >&2; }' 'SUDO=' \
+            'PATH="'"$PATH"'"'
+        awk '/^    configure_claude_attribution\(\) \{/{copy=1} copy{print} copy && /^    }$/{exit}' "$rendered"
+        printf '%s\n' 'configure_claude_attribution'
+    } > "$harness"
+
+    for fixture in new empty nested; do
+        rm -rf "$tmp/$fixture"
+        mkdir -p "$tmp/$fixture"
+        settings="$tmp/$fixture/.claude/settings.json"
+        case "$fixture" in
+            empty)
+                mkdir -p "${settings%/*}"
+                printf '%s\n' '{}' > "$settings"
+                ;;
+            nested)
+                mkdir -p "${settings%/*}"
+                printf '%s\n' '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}' > "$settings"
+                ;;
+        esac
+        HOME="$tmp/$fixture" bash "$harness"
+        jq -e '.attribution.commit == "" and .attribution.pr == "" and .attribution.sessionUrl == false' "$settings" >/dev/null \
+            || fail "Unix Claude attribution must be disabled for $fixture settings"
+    done
+
+    settings="$tmp/nested/.claude/settings.json"
+    jq -e '.permissions.allow == ["Bash(graft:*)"] and .attribution.extra == "keep"' "$settings" >/dev/null \
+        || fail 'Unix Claude attribution merge must preserve nested settings'
+}
+
+verify_windows_claude_attribution() {
+    if ! command -v pwsh >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell Claude attribution fixtures require pwsh'
+        return
+    fi
+
+    local fixture config rendered render_dir
+    fixture="$(mktemp)"
+    render_dir="$(mktemp -d)"
+    config="$render_dir/chezmoi.toml"
+    rendered="$render_dir/installer.ps1"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"claude_cli":true}}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
+    cat > "$fixture" <<'POWERSHELL'
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -Raw -LiteralPath $args[0]
+$match = [regex]::Match($source, '(?ms)^function Set-ClaudeAttribution \{.*?^\}')
+if (-not $match.Success) { throw 'Claude attribution merger not found' }
+$fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-attribution-' + [guid]::NewGuid().ToString('N'))
+try {
+    foreach ($fixture in 'new', 'empty', 'nested') {
+        $fixtureHome = Join-Path $fixtureRoot $fixture
+        $settings = Join-Path $fixtureHome '.claude\settings.json'
+        if ($fixture -eq 'empty') {
+            New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+            [IO.File]::WriteAllText($settings, '{}')
+        } elseif ($fixture -eq 'nested') {
+            New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+            [IO.File]::WriteAllText($settings, '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}')
+        }
+        $env:USERPROFILE = $fixtureHome
+        & ([scriptblock]::Create($match.Value + "`nSet-ClaudeAttribution"))
+        $json = Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json
+        if ($json.attribution.commit -ne '' -or $json.attribution.pr -ne '' -or $json.attribution.sessionUrl -ne $false) { throw "attribution not disabled: $fixture" }
+    }
+    $nested = Get-Content -Raw -LiteralPath (Join-Path $fixtureRoot 'nested\.claude\settings.json') | ConvertFrom-Json
+    if ($nested.permissions.allow -cne 'Bash(graft:*)' -or $nested.attribution.extra -cne 'keep') { throw 'nested settings not preserved' }
+} finally {
+    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+POWERSHELL
+    pwsh -NoProfile -File "$fixture" "$rendered"
+    rm -rf "$render_dir"
+    rm -f "$fixture"
+}
+:
         awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
         printf '%s\n' 'install_agent_skills'
     } > "$harness"
@@ -271,6 +363,7 @@ if [[ "$scope" != "windows" ]]; then
     verify_unix_no_npx_summaries
     verify_unix_summary_targets
     verify_unix_skill_lifecycle
+    verify_unix_claude_attribution
 
     for file in "${unix_files[@]}"; do
         require_contains "$file" 'curated-agent-skills.txt'
@@ -334,6 +427,7 @@ if [[ "$scope" != "unix" ]]; then
     done
 
     verify_windows_command_generation
+    verify_windows_claude_attribution
     require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
     require_contains 'run_onchange_install_packages.ps1.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"''\" }}"
     require_contains 'run_onchange_install_packages.ps1.tmpl' 'claude mcp get serena'
