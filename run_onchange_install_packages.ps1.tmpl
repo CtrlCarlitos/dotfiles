@@ -925,6 +925,12 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # (stderr alone wouldn't, in the job's default EAP).
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
+function Write-CuratedSkillsSkippedSummary {
+    foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
+        Write-Host "  Curated skills: $agent installed=0 skipped=16 failed=0"
+    }
+}
+
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     $skAgents = @('claude-code', 'opencode', 'codex')
     Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
@@ -1007,6 +1013,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     $catalog = Join-Path '{{ .chezmoi.sourceDir | replace "'" "''" }}' 'scripts\curated-agent-skills.txt'
     if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
+        Write-CuratedSkillsSkippedSummary
     } else {
         $skills = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
         $markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\r?$'
@@ -1088,6 +1095,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             Write-Host "  Curated skills: $agent installed=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
         }
     }
+} else {
+    Write-CuratedSkillsSkippedSummary
 }
 {{- end }}
 

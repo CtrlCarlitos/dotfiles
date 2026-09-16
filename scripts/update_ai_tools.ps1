@@ -39,6 +39,12 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # stderr on every run; under PS 5.1 + $ErrorActionPreference=Stop (if this
 # script is dot-sourced from one) `2>$null` doesn't stop that promoting to a
 # terminating error - keep stderr empty instead (see installer for full notes).
+function Write-CuratedSkillsSkippedSummary {
+    foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
+        Write-Host "  Curated skills: $agent installed=0 skipped=16 failed=0"
+    }
+}
+
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
     $skAgents = @('claude-code', 'opencode', 'codex')
@@ -83,6 +89,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     $catalog = Join-Path (chezmoi source-path) 'scripts\curated-agent-skills.txt'
     if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
+        Write-CuratedSkillsSkippedSummary
     } else {
         $skills = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
         $markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\r?$'
@@ -164,6 +171,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             Write-Host "  Curated skills: $agent installed=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
         }
     }
+} else {
+    Write-CuratedSkillsSkippedSummary
 }
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.ps1.tmpl

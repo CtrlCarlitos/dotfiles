@@ -81,6 +81,62 @@ verify_unix_summary_targets() {
     done
 }
 
+verify_unix_supported_target_counts() {
+    local tmp config rendered harness updater_harness output agent
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/home/.claude/skills/handoff"
+    config="$tmp/chezmoi.toml"
+    rendered="$tmp/installer.sh"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$tmp/repo" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
+        < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
+    printf '%s\n' handoff > "$tmp/repo/scripts/curated-agent-skills.txt"
+    printf '%s\n' handoff > "$tmp/home/.claude/skills/handoff/SKILL.md"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$tmp/bin/npx"
+    cat > "$tmp/bin/git" <<'EOF'
+#!/usr/bin/env bash
+dest="${!#}"
+mkdir -p "$dest/skills/engineering/code-review"
+printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"
+EOF
+    chmod +x "$tmp/bin/npx" "$tmp/bin/git"
+    harness="$tmp/lifecycle.sh"
+    {
+        printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+            'info() { printf "%s\\n" "$1"; }' 'warn() { :; }'
+        awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
+        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
+        printf '%s\n' 'install_agent_skills'
+    } > "$harness"
+    output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
+    if ! grep -Fqx -- 'Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
+        fail 'Unix lifecycle must count only Claude skills with a supported SKILL.md target'
+    fi
+    for agent in OpenCode Codex; do
+        if ! grep -Fqx -- "Curated skills: $agent installed=0 skipped=0 failed=1" <<< "$output"; then
+            fail "Unix lifecycle must not count $agent installed when its shared SKILL.md target is missing"
+        fi
+    done
+
+    updater_harness="$tmp/updater.sh"
+    {
+        printf '%s\n' '#!/usr/bin/env bash' 'set -e' \
+            'chezmoi() { printf "%s\\n" "'"$tmp/repo"'"; }'
+        awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
+    } > "$updater_harness"
+    output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$updater_harness")"
+    if ! grep -Fqx -- '   Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
+        fail 'Unix updater must count only Claude skills with a supported SKILL.md target'
+    fi
+    for agent in OpenCode Codex; do
+        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=0 failed=1" <<< "$output"; then
+            fail "Unix updater must not count $agent installed when its shared SKILL.md target is missing"
+        fi
+    done
+}
+
 verify_unix_skill_lifecycle() {
     local tmp config rendered harness output target
     tmp="$(mktemp -d)"
@@ -380,6 +436,82 @@ try {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
+
+verify_windows_summary_fallbacks() {
+    if ! command -v pwsh >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell lifecycle fallback fixtures require pwsh'
+        return
+    fi
+
+    local fixture render_dir config rendered
+    fixture="$(mktemp)"
+    render_dir="$(mktemp -d)"
+    config="$render_dir/chezmoi.toml"
+    rendered="$render_dir/installer.ps1"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$render_dir" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
+    cat > "$fixture" <<'POWERSHELL'
+$ErrorActionPreference = 'Stop'
+$summaryRows = @(
+    'Curated skills: Claude Code installed=0 skipped=16 failed=0',
+    'Curated skills: OpenCode installed=0 skipped=16 failed=0',
+    'Curated skills: Antigravity installed=0 skipped=16 failed=0',
+    'Curated skills: Codex installed=0 skipped=16 failed=0'
+)
+
+function Invoke-Lifecycle {
+    param([string]$Script, [string]$Mode)
+    $source = Get-Content -Raw -LiteralPath $Script
+    if ($Script -like '*installer.ps1') {
+        $match = [regex]::Match($source, '(?ms)^function Write-CuratedSkillsSkippedSummary \{.*\z')
+    } else {
+        $match = [regex]::Match($source, '(?ms)^# 1b\. Curated third-party skills.*?^}\s*else\s*\{.*?^\}')
+    }
+    if (-not $match.Success) { throw "curated lifecycle not found: $Script" }
+
+    function Get-Command {
+        param([string]$Name)
+        if ($Name -eq 'npx') {
+            if ($Mode -eq 'no-npx') { return $null }
+            return [PSCustomObject]@{ Name = 'npx' }
+        }
+        return $null
+    }
+    function npx { $global:LASTEXITCODE = 0 }
+    function git { $global:LASTEXITCODE = 0 }
+    function chezmoi { $env:TEMP }
+    function Invoke-WithTimeout {
+        param([string]$Description, [int]$Seconds, [scriptblock]$Action)
+        & $Action
+    }
+
+    $output = & ([scriptblock]::Create($match.Value)) 6>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
+    }
+    foreach ($row in $summaryRows) {
+        if (($output -join "`n") -notmatch [regex]::Escape($row)) {
+            throw "missing summary row '$row' for $Script ($Mode)"
+        }
+    }
+}
+
+$temporary = Join-Path ([IO.Path]::GetTempPath()) ('agent-skills-no-catalog-' + [guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+    $env:TEMP = $temporary
+    Invoke-Lifecycle $args[0] 'no-npx'
+    Invoke-Lifecycle $args[0] 'catalog-unavailable'
+    Invoke-Lifecycle $args[1] 'catalog-unavailable'
+} finally {
+    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+}
+POWERSHELL
+    pwsh -NoProfile -File "$fixture" "$repo_root/scripts/update_ai_tools.ps1" "$rendered"
+    rm -rf "$render_dir"
+    rm -f "$fixture"
+}
     local config rendered
     local render_dir
     render_dir="$(mktemp -d)"
@@ -414,6 +546,7 @@ fi
 if [[ "$scope" != "windows" ]]; then
     verify_unix_no_npx_summaries
     verify_unix_summary_targets
+    verify_unix_supported_target_counts
     verify_unix_skill_lifecycle
     verify_unix_claude_attribution
 
@@ -480,6 +613,7 @@ if [[ "$scope" != "unix" ]]; then
 
     verify_windows_command_generation
     verify_windows_claude_attribution
+    verify_windows_summary_fallbacks
     require_contains 'run_onchange_install_packages.ps1.tmpl' '{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}'
     require_contains 'run_onchange_install_packages.ps1.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"''\" }}"
     require_contains 'run_onchange_install_packages.ps1.tmpl' 'claude mcp get serena'

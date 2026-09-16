@@ -128,8 +128,29 @@ if command -v npx &>/dev/null; then
     if [[ ! -r "$catalog" ]]; then
         echo "   Warning: curated skill catalog is not readable: $catalog"
     else
+        claude_reported="$claude_installed"; opencode_reported="$opencode_installed"; codex_reported="$codex_installed"
+        claude_installed=0; opencode_installed=0; codex_installed=0
         while IFS= read -r skill || [[ -n "$skill" ]]; do
             [[ -z "$skill" || "$skill" == \#* ]] && continue
+
+            # Count an agent installed only after its supported discovery
+            # target exists; the CLI exit status alone is insufficient.
+            if [[ -f "$HOME/.claude/skills/$skill/SKILL.md" ]]; then
+                claude_installed=$((claude_installed + 1))
+            elif ((claude_reported > 0)); then
+                claude_failed=$((claude_failed + 1))
+            fi
+            if [[ -f "$HOME/.agents/skills/$skill/SKILL.md" ]]; then
+                opencode_installed=$((opencode_installed + 1))
+                codex_installed=$((codex_installed + 1))
+            else
+                if ((opencode_reported > 0)); then
+                    opencode_failed=$((opencode_failed + 1))
+                fi
+                if ((codex_reported > 0)); then
+                    codex_failed=$((codex_failed + 1))
+                fi
+            fi
 
             source="$HOME/.claude/skills/$skill"
             target="$HOME/.gemini/antigravity-cli/skills/$skill"
