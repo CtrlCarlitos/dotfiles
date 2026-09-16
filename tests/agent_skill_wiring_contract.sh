@@ -83,6 +83,10 @@ verify_unix_summary_targets() {
 
 verify_unix_supported_target_counts() {
     local tmp config rendered harness updater_harness output agent
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: Unix target rendering requires chezmoi'
+        return
+    fi
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/home/.claude/skills/handoff"
@@ -190,6 +194,10 @@ mv() {
 EOF
 verify_unix_claude_attribution() {
     local tmp config rendered harness settings warnings mode
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: Unix attribution rendering requires chezmoi'
+        return
+    fi
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     config="$tmp/chezmoi.toml"
@@ -271,6 +279,10 @@ verify_unix_claude_attribution() {
 verify_windows_claude_attribution() {
     if ! command -v pwsh >/dev/null 2>&1; then
         printf '%s\n' 'PASS/SKIP: PowerShell Claude attribution fixtures require pwsh'
+        return
+    fi
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell attribution rendering requires chezmoi'
         return
     fi
 
@@ -448,6 +460,10 @@ POWERSHELL
 verify_windows_summary_fallbacks() {
     if ! command -v pwsh >/dev/null 2>&1; then
         printf '%s\n' 'PASS/SKIP: PowerShell lifecycle fallback fixtures require pwsh'
+        return
+    fi
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        printf '%s\n' 'PASS/SKIP: PowerShell summary rendering requires chezmoi'
         return
     fi
 
