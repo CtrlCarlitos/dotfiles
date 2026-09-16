@@ -28,13 +28,41 @@ fi
 # ever holding the terminal (see installer for full notes).
 if command -v npx &>/dev/null; then
     echo "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..."
-    SK="npx --yes --loglevel=error skills@latest"
-    AGENTS="claude-code opencode antigravity"
-    $SK add mattpocock/skills \
+    catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
+    SK=(npx --yes --loglevel=error skills@latest)
+    # The CLI refreshes $HOME/.claude/skills and $HOME/.agents/skills. OpenCode
+    # and Codex discover the shared directory; this is the explicit refresh path.
+    AGENTS=(claude-code opencode codex)
+    claude_installed=0; claude_skipped=0; claude_failed=0
+    opencode_installed=0; opencode_skipped=0; opencode_failed=0
+    codex_installed=0; codex_skipped=0; codex_failed=0
+    antigravity_installed=0; antigravity_skipped=0; antigravity_failed=0
+    record_cli_result() {
+        local status="$1" count="$2"
+        for agent in "${AGENTS[@]}"; do
+            case "$status:$agent" in
+                installed:claude-code) ((claude_installed += count)) ;;
+                installed:opencode) ((opencode_installed += count)) ;;
+                installed:codex) ((codex_installed += count)) ;;
+                skipped:claude-code) ((claude_skipped += count)) ;;
+                skipped:opencode) ((opencode_skipped += count)) ;;
+                skipped:codex) ((codex_skipped += count)) ;;
+                failed:claude-code) ((claude_failed += count)) ;;
+                failed:opencode) ((opencode_failed += count)) ;;
+                failed:codex) ((codex_failed += count)) ;;
+            esac
+        done
+    }
+    if "${SK[@]}" add mattpocock/skills \
         -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
            prototype research grilling handoff teach writing-for-agents \
            resolving-merge-conflicts \
-        -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   Matt Pocock skills update failed - skipping"
+        -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 11
+    else
+        record_cli_result failed 11
+        echo "   Matt Pocock skills update failed - skipping"
+    fi
     sk_tmp="$(mktemp -d)"
     if git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" &>/dev/null; then
         src="$sk_tmp/repo/skills/engineering/code-review"
@@ -47,25 +75,160 @@ if command -v npx &>/dev/null; then
             # is missing (upstream layout drift) - mirrors the installer
             if [[ -f "$skf" ]]; then
                 sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                $SK add "$sk_tmp/stage" -s mp-code-review -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   mp-code-review update failed - skipping"
+                if "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+                    record_cli_result installed 1
+                else
+                    record_cli_result failed 1
+                    echo "   mp-code-review update failed - skipping"
+                fi
             else
+                record_cli_result skipped 1
                 echo "   Warning: SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
             fi
         else
+            record_cli_result skipped 1
             echo "   Warning: code-review skill dir not found in mattpocock/skills - upstream layout changed?"
         fi
+    else
+        record_cli_result failed 1
+        echo "   Warning: mp-code-review skill source clone failed - continuing"
     fi
     rm -rf "$sk_tmp"
-    $SK add anthropics/skills -s frontend-design -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   frontend-design update failed - skipping"
+    if "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        echo "   frontend-design update failed - skipping"
+    fi
     # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
-    $SK add vercel-labs/skills -s find-skills -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   find-skills update failed - skipping"
+    if "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        echo "   find-skills update failed - skipping"
+    fi
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
-    $SK add vercel-labs/agent-browser -s agent-browser -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   agent-browser update failed - skipping"
+    if "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        echo "   agent-browser update failed - skipping"
+    fi
     # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
-    $SK add anthropics/skills -s skill-creator -a $AGENTS -g -y --copy < /dev/null &>/dev/null || echo "   skill-creator update failed - skipping"
+    if "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        echo "   skill-creator update failed - skipping"
+    fi
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    if [[ ! -r "$catalog" ]]; then
+        echo "   Warning: curated skill catalog is not readable: $catalog"
+    else
+        claude_reported="$claude_installed"; opencode_reported="$opencode_installed"; codex_reported="$codex_installed"
+        claude_installed=0; opencode_installed=0; codex_installed=0
+        while IFS= read -r skill || [[ -n "$skill" ]]; do
+            [[ -z "$skill" || "$skill" == \#* ]] && continue
+
+            # Count an agent installed only after its supported discovery
+            # target exists; the CLI exit status alone is insufficient.
+            if [[ -f "$HOME/.claude/skills/$skill/SKILL.md" ]]; then
+                claude_installed=$((claude_installed + 1))
+            elif ((claude_reported > 0)); then
+                claude_failed=$((claude_failed + 1))
+            fi
+            if [[ -f "$HOME/.agents/skills/$skill/SKILL.md" ]]; then
+                opencode_installed=$((opencode_installed + 1))
+                codex_installed=$((codex_installed + 1))
+            else
+                if ((opencode_reported > 0)); then
+                    opencode_failed=$((opencode_failed + 1))
+                fi
+                if ((codex_reported > 0)); then
+                    codex_failed=$((codex_failed + 1))
+                fi
+            fi
+
+            source="$HOME/.claude/skills/$skill"
+            target="$HOME/.gemini/antigravity-cli/skills/$skill"
+            if [[ -f "$source/SKILL.md" ]]; then
+                antigravity_status=failed
+                mkdir -p "$HOME/.gemini/antigravity-cli/skills"
+                tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
+                if cp -R "$source/." "$tmp/"; then
+                    backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
+                    if ! rmdir "$backup"; then
+                        rm -rf "$tmp"
+                        echo "   Warning: failed to prepare Antigravity skill backup: $skill"
+                    elif [[ -e "$target" || -L "$target" ]]; then
+                        if mv "$target" "$backup"; then
+                            if mv "$tmp" "$target"; then
+                                rm -rf "$backup"
+                                antigravity_status=installed
+                            else
+                                rm -rf "$tmp"
+                                echo "   Warning: failed to promote curated skill for Antigravity: $skill"
+                                mv "$backup" "$target" || echo "   Warning: failed to restore Antigravity skill backup: $skill"
+                            fi
+                        else
+                            rm -rf "$tmp"
+                            echo "   Warning: failed to back up existing Antigravity skill: $skill"
+                        fi
+                    elif mv "$tmp" "$target"; then
+                        antigravity_status=installed
+                    else
+                        rm -rf "$tmp"
+                        echo "   Warning: failed to promote curated skill for Antigravity: $skill"
+                    fi
+                else
+                    rm -rf "$tmp"
+                    echo "   Warning: failed to copy curated skill for Antigravity: $skill"
+                fi
+            else
+                antigravity_status=skipped
+                echo "   Warning: Claude skill missing; skipping Antigravity copy: $skill"
+            fi
+
+            case "$antigravity_status" in
+                installed) ((antigravity_installed += 1)) ;;
+                skipped) ((antigravity_skipped += 1)) ;;
+                *) ((antigravity_failed += 1)) ;;
+            esac
+
+            command_dir="$HOME/.config/opencode/commands"
+            command_file="$command_dir/$skill.md"
+            source="$HOME/.agents/skills/$skill"
+            if [[ -f "$source/SKILL.md" ]]; then
+                mkdir -p "$command_dir"
+                if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+                    echo "   Warning: OpenCode command is user-managed; leaving unchanged: $command_file"
+                else
+                    tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
+                    {
+                        printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
+                        printf 'description: Run the %s skill\n' "$skill"
+                        printf '%s\n' '---'
+                        printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
+                    } > "$tmp"
+                    mv "$tmp" "$command_file"
+                fi
+            elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
+                rm -f "$command_file"
+            fi
+        done < "$catalog"
+    fi
+    echo "   Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+    echo "   Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+    echo "   Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+    echo "   Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
+else
+    echo "   Curated skills: Claude Code installed=0 skipped=16 failed=0"
+    echo "   Curated skills: OpenCode installed=0 skipped=16 failed=0"
+    echo "   Curated skills: Antigravity installed=0 skipped=16 failed=0"
+    echo "   Curated skills: Codex installed=0 skipped=16 failed=0"
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

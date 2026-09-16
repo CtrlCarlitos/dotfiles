@@ -6,21 +6,27 @@ skills without the whole thing.
 
 ## TL;DR
 
-- **Use the `skills` CLI** ([`vercel-labs/skills`](https://github.com/vercel-labs/skills), `npx skills add …`).
-  One non-interactive command installs a chosen subset to a chosen set of
-  agents.
-- **One install covers Claude Code + OpenCode + Antigravity.** `skills add`
-  writes `~/.agents/skills/<name>/` (canonical) **and** `~/.claude/skills/<name>/`
-  (copy). OpenCode and Antigravity both read `~/.agents/skills/` natively;
-  Claude Code reads `~/.claude/skills/`. No per-agent path juggling.
-- **The current Matt Pocock block is stale.** Upstream flattened its
-  directory layout; the repo's hardcoded `skills/engineering/<x>` /
-  `skills/productivity/<x>` copy paths no longer exist. Switch it to the
-  `skills` CLI — which also fixes that it currently only reaches Antigravity.
-- **GStack cannot be subsetted.** Its skills are coupled to a full `./setup`
-  (shared `bin/gstack-*` helpers, a `browse` binary built with `bun`,
-  hardcoded `~/.claude/skills/gstack/…` paths). Don't wire it into the
-  dotfiles; document the manual command instead.
+- The repository-owned curated-skill catalog uses `~/.claude/skills`, the
+  shared `~/.agents/skills` for OpenCode and Codex, and
+  `~/.gemini/antigravity-cli/skills` for Antigravity.
+- The `skills` CLI is used with the Claude Code, OpenCode, and Codex adapters.
+  OpenCode and Codex discover `~/.agents/skills`; the verified Claude Code copy supplies
+  Antigravity because the Antigravity adapter has an incompatible destination.
+- The installer verifies every `<target>/<name>/SKILL.md`, then generates an
+  OpenCode-only command at `~/.config/opencode/commands/<name>.md`. Claude
+  Code, Antigravity CLI, and OpenCode use `/teach <topic>`; Codex uses
+  `/skills`, then `$teach <topic>`.
+- Only OpenCode receives generated command adapters.
+- Codex has no generated command files. It discovers the shared skill catalog.
+- Generated commands carry a dotfiles ownership marker. Refresh replaces or
+  removes only marker-owned commands; a user-owned name conflict is preserved
+  with a warning.
+- Refresh explicitly with `scripts/update_ai_tools.sh` on Linux/macOS/WSL or
+  `scripts/update_ai_tools.ps1` on Windows, then restart OpenCode. Start a new
+  Claude Code, Antigravity CLI, or Codex CLI session before using a refreshed
+  skill. `chezmoi apply` is not a reliable upstream-skill refresh trigger.
+- New installs refresh catalog-managed entries in `~/.agents/skills` without
+  deleting other content there.
 
 ## The `skills` CLI
 
@@ -45,16 +51,16 @@ Valid agent ids include: `claude-code`, `opencode`, `antigravity`,
 Sources: `owner/repo`, full GitHub/GitLab URL, any git URL, local path, or a
 direct `SKILL.md` / archive URL.
 
-### Verified behaviour (live, on the Linux test box)
+### Current shared-directory behaviour
 
 ```
-npx skills add mattpocock/skills -s retro -a antigravity claude-code opencode -g -y --copy
+npx skills add mattpocock/skills -s retro -a claude-code opencode -g -y --copy
 ```
-→ created **`~/.agents/skills/retro/SKILL.md`** and **`~/.claude/skills/retro/SKILL.md`**
-(both real dirs). Summary line: `copy → Antigravity, Claude Code, OpenCode`.
-It did **not** need `~/.config/opencode/skills/` or `~/.gemini/…/skills/` —
-those agents read `~/.agents/skills/`. Also runs a Socket/Snyk risk check per
-skill. `skills remove retro -g -y` cleaned it fully. (Test artifacts removed.)
+→ creates **`~/.agents/skills/retro/SKILL.md`** and
+**`~/.claude/skills/retro/SKILL.md`** (both real directories). OpenCode and
+Codex discover the shared directory; Antigravity receives its copy at
+`~/.gemini/antigravity-cli/skills`. The CLI also runs a Socket/Snyk risk check
+per skill.
 
 ### `--copy` vs symlink
 
@@ -85,7 +91,13 @@ fragility on Windows (see `run_onchange_generate_identities.ps1.tmpl`).
   completes non-interactively in ~5s. `net_timeout` stays as the wall-clock
   backstop for genuine network stalls.
 
-## Matt Pocock's skills — proposed change
+## Historical investigation notes (pre-native-target lifecycle)
+
+The remaining notes preserve prior source evaluation and implementation history.
+They do not describe the current installation destinations or refresh workflow;
+follow the TL;DR above for the supported lifecycle.
+
+### Matt Pocock's skills — proposed change
 
 > **Update (2026-09-02):** curated set widened from 9 → 12 (11 as-is +
 > `mp-code-review`). Added `teach` (`/teach`; user-invoked, scaffolds a
@@ -286,3 +298,7 @@ Not done / open:
   pass verified live; **the macOS/brew branch has never executed this code**
   — reasoning-only for BSD sed / `cp -r "$src/."` portability. Run one manual
   `install_agent_skills` on a Mac when available.
+- 2026-09-15 P2 follow-up: Unix updater and installer now report all four
+  curated-skill summaries as skipped when `npx` is unavailable. The wiring
+  contract executes the Unix lifecycle with a stale Antigravity target and a
+  simulated promotion failure, verifying both the failed summary and rollback.

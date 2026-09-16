@@ -37,7 +37,7 @@ fi
 agents_found=false
 for ((i = 0; i < ${#args[@]}; i++)); do
     if [[ "${args[i]}" == "-a" ]]; then
-        if [[ "${args[i + 1]-}" == "claude-code" && "${args[i + 2]-}" == "opencode" && "${args[i + 3]-}" == "antigravity" && "${args[i + 4]-}" == "-g" ]]; then
+        if [[ "${args[i + 1]-}" == "claude-code" && "${args[i + 2]-}" == "opencode" && "${args[i + 3]-}" == "codex" && "${args[i + 4]-}" == "-g" ]]; then
             agents_found=true
         fi
         break
@@ -49,7 +49,14 @@ printf '%s\n' "$result" >> "$SKILLS_ARGUMENT_RESULTS"
 [[ "$result" == PASS ]]
 EOF
 
-chmod +x "$tmp/bin/timeout" "$tmp/bin/git" "$tmp/bin/npx"
+cat > "$tmp/bin/chezmoi" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == "source-path" ]]
+printf '%s\n' "$CHEZMOI_SOURCE_PATH"
+EOF
+
+chmod +x "$tmp/bin/timeout" "$tmp/bin/git" "$tmp/bin/npx" "$tmp/bin/chezmoi"
 
 harness="$tmp/harness.sh"
 {
@@ -61,6 +68,7 @@ harness="$tmp/harness.sh"
 } > "$harness"
 
 export SKILLS_ARGUMENT_RESULTS="$tmp/results"
+export CHEZMOI_SOURCE_PATH="$repo_root"
 PATH="$tmp/bin:$PATH" bash "$harness"
 
 if [[ ! -f "$SKILLS_ARGUMENT_RESULTS" ]]; then
