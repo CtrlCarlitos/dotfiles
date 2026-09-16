@@ -105,7 +105,7 @@ fi
 [[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" "${path[@]}")
 
 # Language ecosystem binaries
-[[ -d "$HOME/sdk/go/bin" ]] && path=("$HOME/sdk/go/bin" "${path[@]}")
+[[ -x /usr/local/go/bin/go ]] && path=(/usr/local/go/bin "${path[@]}")
 gopath_entries="${GOPATH:-$HOME/go}"
 gopath_bin="${gopath_entries%%:*}/bin"
 [[ -d "$gopath_bin" ]] && path=("$gopath_bin" "${path[@]}")

@@ -12,7 +12,11 @@ fail() {
 
 [[ -f "$zshrc" ]] || fail "missing $zshrc"
 [[ -f "$ci_workflow" ]] || fail "missing $ci_workflow"
-zsh -n "$zshrc" || fail "dot_zshrc has invalid zsh syntax"
+if command -v zsh >/dev/null 2>&1; then
+    zsh -n "$zshrc" || fail "dot_zshrc has invalid zsh syntax"
+else
+    printf '%s\n' 'PASS/SKIP: zsh syntax check requires zsh'
+fi
 shellcheck -s bash -e SC1091 "$zshrc" || fail "dot_zshrc must be shellcheck-clean"
 grep -Fqx '        run: bash tests/zshrc_startup_contract.sh' "$ci_workflow" ||
     fail "CI must invoke the zsh startup contract"
@@ -32,7 +36,7 @@ require_line '[[ -d "$HOME/.local/bin" ]] && path=("$HOME/.local/bin" "${path[@]
 require_line '[[ -d "$HOME/bin" ]] && path=("$HOME/bin" "${path[@]}")'
 require_line '[[ -d "$HOME/.npm-global/bin" ]] && path=("$HOME/.npm-global/bin" "${path[@]}")'
 require_line '[[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" "${path[@]}")'
-require_line '[[ -d "$HOME/sdk/go/bin" ]] && path=("$HOME/sdk/go/bin" "${path[@]}")'
+require_line '[[ -x /usr/local/go/bin/go ]] && path=(/usr/local/go/bin "${path[@]}")'
 require_line 'gopath_entries="${GOPATH:-$HOME/go}"'
 require_line 'gopath_bin="${gopath_entries%%:*}/bin"'
 require_line '[[ -d "$gopath_bin" ]] && path=("$gopath_bin" "${path[@]}")'
