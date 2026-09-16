@@ -41,6 +41,8 @@ jobs:
             - **Chezmoi** (via GitHub Release API)
             - **Antigravity 2.0** (hub channel; mac/Linux pin URL-checked,
               Windows floats via Chocolatey)
+            - **agent-guardrails** (stable GitHub release only; all supported
+              platform binaries and `SHA256SUMS` must be present)
 
             *(Node.js remains pinned to v24 - see the comment in
             scripts/update-versions.sh for where the pin lives.)*

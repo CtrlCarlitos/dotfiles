@@ -63,6 +63,9 @@ jobs:
       - name: Test zsh startup contract
         run: bash tests/zshrc_startup_contract.sh
 
+      - name: Test stable guardrail release updates
+        run: bash tests/update_guardrail_versions.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
