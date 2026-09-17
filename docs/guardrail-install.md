@@ -21,7 +21,10 @@ _Added 2026-09-04 with Plan 3b of the agent-guardrails project; reworked
 - Every later bump on Unix goes through `guardrail update <exact-version>`:
   the binary re-verifies SHA256SUMS itself, verifies the replacement runs, and
   swaps itself atomically. A same-version call is a verified no-op. Bootstrap
-  (curl+SHA256SUMS) exists only for machines with no binary at all.
+  (curl+SHA256SUMS) exists for machines with no binary at all **and** for
+  binaries older than the self-update floor `v0.19.2-dev` (they exit 2 with
+  "unknown subcommand" on `update`, so the installer curl-bootstraps over
+  them instead).
 - Plane wiring is guardrail-owned since v0.19.2: `guardrail plane enable
   --all` regenerates each plane's floor idempotently (marker-based merges,
   ADR-0004) and reports planes it can't detect (`codex: unsupported`,

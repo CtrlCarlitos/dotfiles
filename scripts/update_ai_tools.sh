@@ -256,6 +256,18 @@ fi
 #     itself invoked through `chezmoi source-path`.
 GUARDRAIL_VERSION="$(chezmoi execute-template '{{ .guardrail.version }}' 2>/dev/null || true)"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+# Oldest release whose binary ships `guardrail update`; older binaries exit 2
+# ("unknown subcommand") on update, so they take the curl bootstrap instead.
+GUARDRAIL_UPDATE_FLOOR="v0.19.2-dev"
+# vMAJOR.MINOR.PATCH[-suffix] -> zero-padded comparable integer (portable:
+# sort -V is GNU-only, stock macOS ships BSD sort).
+guardrail_ver_num() {
+    local v="${1#v}"; v="${v%%-*}"
+    local IFS=.
+    # shellcheck disable=SC2086  # intentional word-splitting: fields of $v on IFS=.
+    set -- $v
+    printf '%d%04d%04d' "${1:-0}" "${2:-0}" "${3:-0}"
+}
 guardrail_dest="$HOME/.local/bin/guardrail"
 guardrail_enabled=false
 if [ -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
@@ -268,12 +280,16 @@ fi
 if [ "$guardrail_enabled" = "true" ] && [ -z "$GUARDRAIL_VERSION" ]; then
     echo "  guardrail: pin unavailable from chezmoi data - skipping guardrail steps"
 elif [ "$guardrail_enabled" = "true" ]; then
-    if [ -x "$guardrail_dest" ] && [ "$("$guardrail_dest" version 2>/dev/null)" = "guardrail ${GUARDRAIL_VERSION}" ]; then
+    guardrail_have=""
+    if [ -x "$guardrail_dest" ]; then guardrail_have="$("$guardrail_dest" version 2>/dev/null)"; fi
+    if [ "$guardrail_have" = "guardrail ${GUARDRAIL_VERSION}" ]; then
         echo "  guardrail ${GUARDRAIL_VERSION} already installed"
-    elif [ -x "$guardrail_dest" ]; then
+    elif [ -n "$guardrail_have" ] && [ "$(guardrail_ver_num "${guardrail_have#guardrail }")" -ge "$(guardrail_ver_num "$GUARDRAIL_UPDATE_FLOOR")" ]; then
         echo "  Updating guardrail to ${GUARDRAIL_VERSION} via self-update..."
         "$guardrail_dest" update "$GUARDRAIL_VERSION"
     else
+        # No binary, or one older than GUARDRAIL_UPDATE_FLOOR (which predates
+        # `guardrail update`): verified curl bootstrap - works for both.
         case "$(uname -s)" in Linux) gos=linux ;; Darwin) gos=darwin ;; *) gos= ;; esac
         case "$(uname -m)" in x86_64|amd64) garch=amd64 ;; aarch64|arm64) garch=arm64 ;; *) garch= ;; esac
         if [ -n "$gos" ] && [ -n "$garch" ]; then

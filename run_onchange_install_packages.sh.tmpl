@@ -503,6 +503,21 @@ install_agent_skills() {
 # that one line; this template must not hardcode a tag.
 GUARDRAIL_VERSION="{{ .guardrail.version }}"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+# Oldest release whose binary ships `guardrail update`. An installed binary
+# older than this floor exits 2 ("unknown subcommand") on update, so the
+# installer curl-bootstraps over it instead of self-updating.
+GUARDRAIL_UPDATE_FLOOR="v0.19.2-dev"
+
+# vMAJOR.MINOR.PATCH[-suffix] -> zero-padded comparable integer (sort -V is
+# GNU-only; stock macOS ships BSD sort without it, and bash test -ge parses
+# the result as decimal regardless of leading zeros).
+guardrail_ver_num() {
+    local v="${1#v}"; v="${v%%-*}"
+    local IFS=.
+    # shellcheck disable=SC2086  # intentional word-splitting: fields of $v on IFS=.
+    set -- $v
+    printf '%d%04d%04d' "${1:-0}" "${2:-0}" "${3:-0}"
+}
 # Desired enforcement state, rendered from packages.guardrail (single opt-in
 # flag - see .chezmoi.toml.tmpl):
 #   true  = ensure the binary at GUARDRAIL_VERSION, then enable every plane.
@@ -535,12 +550,17 @@ install_agent_guardrails() {
         return 0
     fi
 
-    if [ -x "$dest" ] && [ "$("$dest" version 2>/dev/null)" = "guardrail ${ver}" ]; then
+    local have=""
+    if [ -x "$dest" ]; then have="$("$dest" version 2>/dev/null)"; fi
+    if [ "$have" = "guardrail ${ver}" ]; then
         info "guardrail ${ver} already installed"
-    elif [ -x "$dest" ]; then
+    elif [ -n "$have" ] && [ "$(guardrail_ver_num "${have#guardrail }")" -ge "$(guardrail_ver_num "$GUARDRAIL_UPDATE_FLOOR")" ]; then
         info "Updating guardrail to ${ver} via self-update..."
         "$dest" update "$ver"
     else
+        # No binary at all, or one older than GUARDRAIL_UPDATE_FLOOR (which
+        # predates `guardrail update`): verified curl bootstrap is the only
+        # path that works for both.
         local os arch
         case "$(uname -s)" in
             Linux)  os="linux" ;;
