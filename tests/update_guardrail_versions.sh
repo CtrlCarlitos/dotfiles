@@ -1,158 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Guardrail pin single-source contract:
+#   - .chezmoidata.yaml guardrail.version is the ONLY place the release tag
+#     lives; bumps touch one line there.
+#   - Installer templates render the key at apply time; manual updaters read
+#     it at runtime via `chezmoi execute-template`.
+#   - No literal vX.Y.Z-dev pins scattered in the four consumers, and the
+#     auto-version script never rewrites the guardrail pin (never "latest").
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+data_file="$repo_root/.chezmoidata.yaml"
+sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
+ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
+sh_updater="$repo_root/scripts/update_ai_tools.sh"
+ps1_updater="$repo_root/scripts/update_ai_tools.ps1"
+version_script="$repo_root/scripts/update-versions.sh"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
     exit 1
 }
 
-prepare_repo() {
-    local destination="$1"
-    mkdir -p "$destination/scripts"
-    cp "$repo_root/scripts/update-versions.sh" "$destination/scripts/"
-    cp "$repo_root/.chezmoi-version" "$destination/"
-    cp "$repo_root/run_onchange_install_packages.sh.tmpl" "$destination/"
-    cp "$repo_root/run_onchange_install_packages.ps1.tmpl" "$destination/"
-    cp "$repo_root/scripts/update_ai_tools.sh" "$destination/scripts/"
-    cp "$repo_root/scripts/update_ai_tools.ps1" "$destination/scripts/"
-}
+# 1. Single source of truth carries exactly one valid exact-version pin.
+[ -f "$data_file" ] || fail ".chezmoidata.yaml missing - the pin has no home"
+pin="$(sed -n 's/^  version: \(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\(-[A-Za-z0-9.]\+\)\?\)$/\1/p' "$data_file")"
+[ -n "$pin" ] || fail ".chezmoidata.yaml: no 'guardrail: version: vX.Y.Z[-suffix]' pin found"
 
-write_fake_curl() {
-    local fixture="$1"
-    mkdir -p "$fixture/bin"
-    cat > "$fixture/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+# 2. Templates consume the data key (rendered by chezmoi at apply time).
+for file in "$sh_installer" "$ps1_installer"; do
+    grep -Fq -- '{{ .guardrail.version }}' "$file" ||
+        fail "$file: does not render {{ .guardrail.version }}"
+done
 
-url="${!#}"
-case "$url" in
-    *twpayne/chezmoi/releases/latest)
-        printf '%s\n' '{"tag_name": "v2.99.0"}'
-        ;;
-    *CtrlCarlitos/agent-guardrails/releases/latest)
-        case "${GUARDRAIL_FIXTURE:?}" in
-            complete)
-                cat <<'JSON'
-{"tag_name":"v1.2.3","draft":false,"prerelease":false,"assets":[{"name":"guardrail_linux_amd64"},{"name":"guardrail_linux_arm64"},{"name":"guardrail_darwin_amd64"},{"name":"guardrail_darwin_arm64"},{"name":"guardrail_windows_amd64.exe"},{"name":"guardrail_windows_arm64.exe"},{"name":"SHA256SUMS"}]}
-JSON
-                ;;
-            incomplete)
-                cat <<'JSON'
-{"tag_name":"v1.2.3","draft":false,"prerelease":false,"assets":[{"name":"guardrail_linux_amd64"},{"name":"SHA256SUMS"}]}
-JSON
-                ;;
-            malformed)
-                cat <<'JSON'
-{"tag_name":"v1.2.3-dev","draft":false,"prerelease":false,"assets":[{"name":"guardrail_linux_amd64"},{"name":"guardrail_linux_arm64"},{"name":"guardrail_darwin_amd64"},{"name":"guardrail_darwin_arm64"},{"name":"guardrail_windows_amd64.exe"},{"name":"guardrail_windows_arm64.exe"},{"name":"SHA256SUMS"}]}
-JSON
-                ;;
-            none)
-                exit 22
-                ;;
-        esac
-        ;;
-    *)
-        :
-        ;;
-esac
-EOF
-    chmod +x "$fixture/bin/curl"
-}
+# 3. Manual updaters read the same key at runtime (chezmoi is already a
+#    hard prerequisite of both scripts - they are invoked via source-path).
+for file in "$sh_updater" "$ps1_updater"; do
+    grep -Fq -- "chezmoi execute-template '{{ .guardrail.version }}'" "$file" ||
+        fail "$file: does not read the pin via chezmoi execute-template"
+done
 
-assert_guardrail_version() {
-    local directory="$1" expected="$2"
-    for file in \
-        run_onchange_install_packages.sh.tmpl \
-        run_onchange_install_packages.ps1.tmpl \
-        scripts/update_ai_tools.sh \
-        scripts/update_ai_tools.ps1; do
-        grep -Fq "$expected" "$directory/$file" ||
-            fail "$file did not contain $expected"
-        if [ "$expected" != 'v0.18.0-dev' ]; then
-            ! grep -Fq 'v0.18.0-dev' "$directory/$file" ||
-                fail "$file still contained the previous guardrail version"
-        fi
-    done
-}
+# 4. No stray literal pins anywhere in the four consumers.
+for file in "$sh_installer" "$ps1_installer" "$sh_updater" "$ps1_updater"; do
+    ! grep -Eq 'v[0-9]+\.[0-9]+\.[0-9]+-dev' "$file" ||
+        fail "$file: contains a hardcoded vX.Y.Z-dev pin - bump .chezmoidata.yaml instead"
+done
 
-snapshot_guardrail_files() {
-    local directory="$1"
-    mkdir -p "$directory/original"
-    for file in \
-        run_onchange_install_packages.sh.tmpl \
-        run_onchange_install_packages.ps1.tmpl \
-        scripts/update_ai_tools.sh \
-        scripts/update_ai_tools.ps1; do
-        cp "$directory/$file" "$directory/original/${file//\//_}"
-    done
-}
+# 5. The auto-version script must never touch the guardrail pin.
+! grep -Fq -- 'GUARDRAIL_VERSION' "$version_script" ||
+    fail "scripts/update-versions.sh still references GUARDRAIL_VERSION - guardrail is pinned by hand in .chezmoidata.yaml"
 
-assert_guardrail_files_unchanged() {
-    local directory="$1"
-    for file in \
-        run_onchange_install_packages.sh.tmpl \
-        run_onchange_install_packages.ps1.tmpl \
-        scripts/update_ai_tools.sh \
-        scripts/update_ai_tools.ps1; do
-        cmp -s "$directory/$file" "$directory/original/${file//\//_}" ||
-            fail "$file changed despite a no-op guardrail update"
-    done
-}
+# 6. Behavioral sanity when chezmoi is available: the template really renders
+#    the data pin into the script (skipped where chezmoi is absent).
+if command -v chezmoi >/dev/null 2>&1; then
+    rendered="$(chezmoi execute-template < "$sh_installer")"
+    grep -Fq -- "GUARDRAIL_VERSION=\"$pin\"" <<<"$rendered" ||
+        fail "rendered installer does not carry GUARDRAIL_VERSION=\"$pin\""
+fi
 
-complete_repo="$tmp/complete"
-prepare_repo "$complete_repo"
-write_fake_curl "$complete_repo"
-(
-    cd "$complete_repo"
-    PATH="$complete_repo/bin:$PATH" GUARDRAIL_FIXTURE=complete bash scripts/update-versions.sh
-)
-assert_guardrail_version "$complete_repo" 'v1.2.3'
-
-incomplete_repo="$tmp/incomplete"
-prepare_repo "$incomplete_repo"
-write_fake_curl "$incomplete_repo"
-snapshot_guardrail_files "$incomplete_repo"
-(
-    cd "$incomplete_repo"
-    PATH="$incomplete_repo/bin:$PATH" GUARDRAIL_FIXTURE=incomplete bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$incomplete_repo"
-
-no_release_repo="$tmp/no-release"
-prepare_repo "$no_release_repo"
-write_fake_curl "$no_release_repo"
-snapshot_guardrail_files "$no_release_repo"
-(
-    cd "$no_release_repo"
-    PATH="$no_release_repo/bin:$PATH" GUARDRAIL_FIXTURE=none bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$no_release_repo"
-
-malformed_repo="$tmp/malformed"
-prepare_repo "$malformed_repo"
-write_fake_curl "$malformed_repo"
-snapshot_guardrail_files "$malformed_repo"
-(
-    cd "$malformed_repo"
-    PATH="$malformed_repo/bin:$PATH" GUARDRAIL_FIXTURE=malformed bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$malformed_repo"
-
-no_jq_repo="$tmp/no-jq"
-prepare_repo "$no_jq_repo"
-write_fake_curl "$no_jq_repo"
-snapshot_guardrail_files "$no_jq_repo"
-ln -s "$(command -v bash)" "$no_jq_repo/bin/bash"
-ln -s "$(command -v grep)" "$no_jq_repo/bin/grep"
-ln -s "$(command -v head)" "$no_jq_repo/bin/head"
-(
-    cd "$no_jq_repo"
-    PATH="$no_jq_repo/bin" GUARDRAIL_FIXTURE=complete /bin/bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$no_jq_repo"
-
-printf 'PASS: stable agent-guardrails releases update all pins; no release is a no-op\n'
+printf 'PASS: guardrail pin lives only in .chezmoidata.yaml (%s)\n' "$pin"

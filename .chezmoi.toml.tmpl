@@ -107,6 +107,9 @@
     remote_access_server = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access_server" "Install remote_access_server prerequisites (manual SSH setup required)?" false }}{{ else }}false{{ end }}
 
     # guardrail - agent guardrails (guardrail binary + per-CLI planes)
+    # guardrail - agent guardrails, single desired-state flag: true = install
+    # binary + enable planes; false = never download, disable planes if a
+    # binary exists (binary is never auto-removed).
     guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
 
 {{- if $isDevcontainer }}

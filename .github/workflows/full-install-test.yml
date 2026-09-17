@@ -78,7 +78,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            guardrail = true
+            # plane enable --all needs an interactive WebAuthn approval that CI
+            # cannot complete (exit 2 on non-terminal stdin fails the run by
+            # contract) - guardrail is exercised on real machines instead.
+            guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
       - name: Run install.ps1 (full install)
@@ -236,7 +239,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            guardrail = true
+            # plane enable --all needs an interactive WebAuthn approval that CI
+            # cannot complete (exit 2 on non-terminal stdin fails the run by
+            # contract) - guardrail is exercised on real machines instead.
+            guardrail = false
           EOF
 
       - name: Install Xvfb (so install_desktop is real coverage, not a silent no-op)
@@ -340,7 +346,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            guardrail = true
+            # plane enable --all needs an interactive WebAuthn approval that CI
+            # cannot complete (exit 2 on non-terminal stdin fails the run by
+            # contract) - guardrail is exercised on real machines instead.
+            guardrail = false
           EOF
 
       - name: Run install.sh (full install)
