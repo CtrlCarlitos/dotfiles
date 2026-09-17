@@ -288,8 +288,8 @@ elif [ "$guardrail_enabled" = "true" ]; then
         echo "  Updating guardrail to ${GUARDRAIL_VERSION} via self-update..."
         "$guardrail_dest" update "$GUARDRAIL_VERSION"
     else
-        # No binary, or one older than GUARDRAIL_UPDATE_FLOOR: verified curl
-        # bootstrap (the only path that works for both).
+        # No binary, or one older than GUARDRAIL_UPDATE_FLOOR (which predates
+        # `guardrail update`): verified curl bootstrap - works for both.
         case "$(uname -s)" in Linux) gos=linux ;; Darwin) gos=darwin ;; *) gos= ;; esac
         case "$(uname -m)" in x86_64|amd64) garch=amd64 ;; aarch64|arm64) garch=arm64 ;; *) garch= ;; esac
         if [ -n "$gos" ] && [ -n "$garch" ]; then
