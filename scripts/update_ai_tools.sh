@@ -264,6 +264,7 @@ GUARDRAIL_UPDATE_FLOOR="v0.19.2-dev"
 guardrail_ver_num() {
     local v="${1#v}"; v="${v%%-*}"
     local IFS=.
+    # shellcheck disable=SC2086  # intentional word-splitting: fields of $v on IFS=.
     set -- $v
     printf '%d%04d%04d' "${1:-0}" "${2:-0}" "${3:-0}"
 }
