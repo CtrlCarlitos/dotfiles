@@ -1,0 +1,11 @@
+# Single source of truth for the agent-guardrails release pin.
+#
+# Consumed by:
+#   - run_onchange_install_packages.sh.tmpl / .ps1.tmpl  (rendered at apply time)
+#   - scripts/update_ai_tools.sh / .ps1                  (chezmoi execute-template at runtime)
+#   - tests/update_guardrail_versions.sh                 (single-pin contract)
+#
+# Never resolve "latest": every value here is a reviewed exact release tag
+# (assets + SHA256SUMS verified before pinning). Bumping = edit this one line.
+guardrail:
+  version: v0.19.6-dev

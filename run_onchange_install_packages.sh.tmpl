@@ -497,8 +497,11 @@ install_agent_skills() {
     info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 }
 
-# agent-guardrails release to bootstrap. Keep in sync with scripts/update_ai_tools.sh.
-GUARDRAIL_VERSION="v0.19.6-dev"
+# agent-guardrails release to bootstrap - single source of truth is
+# .chezmoidata.yaml guardrail.version (rendered here, read via
+# `chezmoi execute-template` in scripts/update_ai_tools.sh). Bumps touch
+# that one line; this template must not hardcode a tag.
+GUARDRAIL_VERSION="{{ .guardrail.version }}"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
 # Desired enforcement state, rendered from packages.guardrail (single opt-in
 # flag - see .chezmoi.toml.tmpl):

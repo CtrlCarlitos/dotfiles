@@ -250,8 +250,11 @@ fi
 #     config-merge wiring this replaces is guardrail-owned now. Windows keeps
 #     the curl+merge path in the .ps1 twin (plane commands exit 2 there and
 #     self-update can't rename a running exe).
-#     Keep GUARDRAIL_VERSION in sync with run_onchange_install_packages.sh.tmpl.
-GUARDRAIL_VERSION="v0.19.6-dev"
+#     Pin: single source of truth is .chezmoidata.yaml guardrail.version
+#     (the installer templates render the same key) - read at runtime via
+#     `chezmoi execute-template`, which this script can rely on because it is
+#     itself invoked through `chezmoi source-path`.
+GUARDRAIL_VERSION="$(chezmoi execute-template '{{ .guardrail.version }}' 2>/dev/null || true)"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
 guardrail_dest="$HOME/.local/bin/guardrail"
 guardrail_enabled=false
@@ -262,7 +265,9 @@ if [ -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
         insec && $0 ~ /^[[:space:]]*guardrail[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { print "true"; exit }
     ' "$HOME/.config/chezmoi/chezmoi.toml")
 fi
-if [ "$guardrail_enabled" = "true" ]; then
+if [ "$guardrail_enabled" = "true" ] && [ -z "$GUARDRAIL_VERSION" ]; then
+    echo "  guardrail: pin unavailable from chezmoi data - skipping guardrail steps"
+elif [ "$guardrail_enabled" = "true" ]; then
     if [ -x "$guardrail_dest" ] && [ "$("$guardrail_dest" version 2>/dev/null)" = "guardrail ${GUARDRAIL_VERSION}" ]; then
         echo "  guardrail ${GUARDRAIL_VERSION} already installed"
     elif [ -x "$guardrail_dest" ]; then

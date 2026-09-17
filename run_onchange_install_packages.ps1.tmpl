@@ -1132,7 +1132,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # 2 on Windows and self-update can't rename a running exe, so this block
 # stays curl+merge. Keep $guardrailVersion in sync with
 # scripts/update_ai_tools.ps1.
-$guardrailVersion = "v0.19.6-dev"
+# Pin rendered from .chezmoidata.yaml guardrail.version (single source of
+# truth - same key the sh template and the manual updaters use).
+$guardrailVersion = "{{ .guardrail.version }}"
 $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
 $guardrailDir     = "$env:USERPROFILE\.local\bin"
 $guardrailExe     = "$guardrailDir\guardrail.exe"

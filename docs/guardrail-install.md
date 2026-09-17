@@ -14,8 +14,8 @@ _Added 2026-09-04 with Plan 3b of the agent-guardrails project; reworked
     previous opt-in, run `guardrail plane disable --all`. The binary is never
     auto-removed in either state (no uninstall behavior by design).
 - First install bootstraps from the **pinned** `CtrlCarlitos/agent-guardrails`
-  release (`GUARDRAIL_VERSION` — check the templates for the current pin; it
-  moves often) — no "latest", per DESIGN.md Q16.
+  release (`guardrail.version` in `.chezmoidata.yaml` — the single source of
+  truth; it moves often) — no "latest", per DESIGN.md Q16.
 - **Checksum-verified** against the release `SHA256SUMS` before install; never
   installs an unverified binary.
 - Every later bump on Unix goes through `guardrail update <exact-version>`:
@@ -45,8 +45,8 @@ _Added 2026-09-04 with Plan 3b of the agent-guardrails project; reworked
 - The installer never opens a browser or enrolls an operator. It reminds an
   unenrolled operator to run `guardrail operator enroll`, then manually open
   the printed localhost URL to complete the passkey ceremony.
-- The pin is explicitly reviewed (`v0.19.6-dev`); the version updater never
-  follows GitHub's `latest` release endpoint for guardrail.
+- The pin is explicitly reviewed (currently `v0.19.6-dev`); the version
+  updater never follows GitHub's `latest` release endpoint for guardrail.
 
 ## Manual updater
 
@@ -59,9 +59,11 @@ curl+`gen-config` path when true.
 ## Bumping the version
 
 1. Tag a new `agent-guardrails` release (CI publishes the binaries + SHA256SUMS).
-2. Update `GUARDRAIL_VERSION` in `run_onchange_install_packages.sh.tmpl`,
-   `run_onchange_install_packages.ps1.tmpl`, `scripts/update_ai_tools.sh`,
-   `scripts/update_ai_tools.ps1` (they are not templated from one source).
+2. Update one line: `guardrail.version` in `.chezmoidata.yaml` — the single
+   source of truth. The installer templates render the key at apply time and
+   the manual updaters read it at runtime via `chezmoi execute-template`
+   (`tests/update_guardrail_versions.sh` enforces that no consumer hardcodes
+   a tag).
 3. Commit → `chezmoi update` re-fires the `run_onchange` script → Unix
    machines self-update via `guardrail update <pin>`; Windows machines
    re-download the pinned release.

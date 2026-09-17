@@ -203,7 +203,14 @@ if (Test-Path $guardrailConfig) {
 if (-not $guardrailEnabled) {
     Write-Host "  guardrail disabled in config - skipping guardrail steps"
 } else {
-$guardrailVersion = "v0.19.6-dev"
+# Pin: single source of truth is .chezmoidata.yaml guardrail.version - the
+# installer templates render the same key; read it at runtime (this script
+# already requires chezmoi - it is invoked through `chezmoi source-path`).
+$guardrailVersion = ''
+try { $guardrailVersion = (chezmoi execute-template '{{ .guardrail.version }}' | Out-String).Trim() } catch {}
+if (-not $guardrailVersion) {
+    Write-Host "  Warning: guardrail pin unavailable from chezmoi data - skipping guardrail steps" -ForegroundColor Red
+} else {
 $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
 $guardrailDir     = "$env:USERPROFILE\.local\bin"
 $guardrailExe     = "$guardrailDir\guardrail.exe"
@@ -327,6 +334,7 @@ if ($guardrailReady) {
     Write-Host "  If no authenticator is enrolled, run: guardrail operator enroll" -ForegroundColor Yellow
     Write-Host "  It prints a localhost URL; open it and complete the passkey ceremony manually." -ForegroundColor Yellow
 }
+} # end pin-available gate
 } # end guardrail-enabled gate
 
 # 2. Claude Code (Native)
