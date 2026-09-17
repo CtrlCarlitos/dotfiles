@@ -1124,11 +1124,15 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
 {{- if $guardrail }}
 # agent-guardrails hook-enforcement binary (guardrail.exe): pinned release
-# download, checksum-verified, then wired into Claude Code by `guardrail
-# gen-config claude --merge`. Windows twin of install_agent_guardrails() in
-# the sh installer. Keep $guardrailVersion in sync with
+# download, checksum-verified, then wired into each present plane by
+# `guardrail gen-config <plane> --merge`. Opt-in gate is packages.guardrail
+# (false = never download, do nothing - Windows has no plane lifecycle this
+# release, so there is no disable step here). The sh installer drives
+# `guardrail plane enable|disable --all` instead on Unix; plane commands exit
+# 2 on Windows and self-update can't rename a running exe, so this block
+# stays curl+merge. Keep $guardrailVersion in sync with
 # scripts/update_ai_tools.ps1.
-$guardrailVersion = "v0.18.0-dev"
+$guardrailVersion = "v0.19.6-dev"
 $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
 $guardrailDir     = "$env:USERPROFILE\.local\bin"
 $guardrailExe     = "$guardrailDir\guardrail.exe"
@@ -1136,7 +1140,7 @@ $guardrailTmp     = "$env:TEMP\guardrail-dl"
 $guardrailBase    = "https://github.com/$guardrailRepo/releases/download/$guardrailVersion"
 
 $haveVer = ""
-if (Get-Command guardrail -ErrorAction SilentlyContinue) {
+if (Test-Path $guardrailExe) {
     # try/catch, not a bare `2>$null`: under $ErrorActionPreference=Stop a
     # native command's stderr becomes a terminating error that the redirect
     # can't prevent (see the PS 5.1 note above Invoke-Quietly) - same shape
@@ -1199,6 +1203,15 @@ if ($haveVer -eq "guardrail $guardrailVersion") {
     # Reclaim the temp dir on every path: installed, mismatched, or failed.
     Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
 }
+$guardrailReady = $false
+if (Test-Path $guardrailExe) {
+    try { $guardrailReady = ((& $guardrailExe version 2>&1 | Out-String).Trim() -eq "guardrail $guardrailVersion") } catch {}
+}
+if (-not $guardrailReady) {
+    Write-Host "  Warning: installed guardrail did not report guardrail $guardrailVersion - skipping configuration" -ForegroundColor Red
+} else {
+    Write-Host "  guardrail version verified: guardrail $guardrailVersion" -ForegroundColor Green
+}
 
 # Wire into Claude Code (no-op-safe if claude is absent or already wired).
 # Always re-runs gen-config: its owned-entry merge is safe to repeat (same
@@ -1209,7 +1222,7 @@ if ($haveVer -eq "guardrail $guardrailVersion") {
 # success. The job's default-EAP session can't be killed by it, the trailing
 # exit-code throw keeps real failures visible as job failures, and 2>$null
 # keeps the stderr SUCCESS line from reading like failure noise.
-if ((Test-Path $guardrailExe) -and (Get-Command claude -ErrorAction SilentlyContinue)) {
+if ($guardrailReady -and (Get-Command claude -ErrorAction SilentlyContinue)) {
     Write-Host "  Configuring guardrail for Claude Code..." -ForegroundColor Yellow
     $env:GUARDRAIL_EXE = $guardrailExe
     Invoke-WithTimeout -Description "guardrail gen-config claude --merge" -Seconds 60 -Action {
@@ -1235,7 +1248,7 @@ if ((Test-Path $guardrailExe) -and (Get-Command claude -ErrorAction SilentlyCont
 # mkdirs run in-session - New-Item failures are .NET exceptions, not native
 # stderr, so the EAP=Stop trap doesn't apply - and the target paths inside
 # the jobs are literal $env: reads, which jobs DO inherit.
-if ((Test-Path $guardrailExe) -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
+if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
     Write-Host "  Configuring guardrail for OpenCode..." -ForegroundColor Yellow
     # --plugin-dir deploys the embedded hook adapter there; must exist first.
     New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\share\guardrail" | Out-Null
@@ -1259,7 +1272,7 @@ if ((Test-Path $guardrailExe) -and (Get-Command opencode -ErrorAction SilentlyCo
 # Antigravity: global hooks.json. No declarative floor exists for this plane
 # (see agent-guardrails ADR-0008) - the hook registration IS the entire
 # enforcement surface, so this is the only guardrail coverage it gets.
-if ((Test-Path $guardrailExe) -and (Get-Command agy -ErrorAction SilentlyContinue)) {
+if ($guardrailReady -and (Get-Command agy -ErrorAction SilentlyContinue)) {
     Write-Host "  Configuring guardrail for Antigravity..." -ForegroundColor Yellow
     New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\config" | Out-Null
     $env:GUARDRAIL_EXE = $guardrailExe
@@ -1272,6 +1285,17 @@ if ((Test-Path $guardrailExe) -and (Get-Command agy -ErrorAction SilentlyContinu
         }
     }
     Remove-Item Env:\GUARDRAIL_EXE -ErrorAction SilentlyContinue
+}
+if ($guardrailReady) {
+    Write-Host "  Running guardrail doctor..." -ForegroundColor Yellow
+    try {
+        & $guardrailExe doctor
+        if ($LASTEXITCODE -ne 0) { throw "doctor exited with code $LASTEXITCODE" }
+    } catch {
+        Write-Host "  Warning: guardrail doctor reported a problem - continuing" -ForegroundColor Red
+    }
+    Write-Host "  If no authenticator is enrolled, run: guardrail operator enroll" -ForegroundColor Yellow
+    Write-Host "  It prints a localhost URL; open it and complete the passkey ceremony manually." -ForegroundColor Yellow
 }
 {{- end }}
 

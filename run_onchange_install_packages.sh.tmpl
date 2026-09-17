@@ -497,22 +497,46 @@ install_agent_skills() {
     info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 }
 
-# agent-guardrails release to install. Keep in sync with scripts/update_ai_tools.sh.
-GUARDRAIL_VERSION="v0.18.0-dev"
+# agent-guardrails release to bootstrap. Keep in sync with scripts/update_ai_tools.sh.
+GUARDRAIL_VERSION="v0.19.6-dev"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
+# Desired enforcement state, rendered from packages.guardrail (single opt-in
+# flag - see .chezmoi.toml.tmpl):
+#   true  = ensure the binary at GUARDRAIL_VERSION, then enable every plane.
+#   false = never download; disable every plane if a binary exists.
+# The binary is never auto-removed in either state.
+GUARDRAIL_ENABLED="{{ $guardrail }}"
 
-# agent-guardrails: a single static Go binary ("guardrail") that enforces the
-# shared hook policy. Installed from the pinned GitHub release, checksum-verified
-# (the first asset-checksum check in this repo), then wired into Claude Code by
-# `guardrail gen-config claude --merge`. Idempotent: skips the download when the
-# installed binary already reports GUARDRAIL_VERSION; always re-runs gen-config
-# (its owned-entry merge is safe to repeat).
+# agent-guardrails: a single static Go binary ("guardrail") enforcing the
+# shared hook policy across planes. First install bootstraps from the pinned
+# GitHub release (checksum-verified); every later bump goes through
+# `guardrail update <pin>` (re-verifies SHA256SUMS, replaces itself atomically).
+# Plane wiring (formerly per-plane config-merge calls here) is guardrail-owned
+# now: `plane enable|disable --all` regenerates each floor idempotently and
+# reports planes it can't detect. Those commands print a WebAuthn approval URL
+# and block until the operator responds, so their output streams straight
+# through - never silence them. Any non-zero (denied/expired/timeout/no-TTY
+# exit 2) fails this script so chezmoi surfaces it rather than silently
+# "succeeding" (agent-guardrails contract, 2026-09).
 install_agent_guardrails() {
     local ver="$GUARDRAIL_VERSION" repo="$GUARDRAIL_REPO"
     local dest="$HOME/.local/bin/guardrail"
 
-    if command -v guardrail &>/dev/null && [ "$(guardrail version 2>/dev/null)" = "guardrail ${ver}" ]; then
+    if [ "$GUARDRAIL_ENABLED" != "true" ]; then
+        if [ -x "$dest" ]; then
+            info "guardrail disabled in config - disabling planes (binary stays installed)"
+            "$dest" plane disable --all
+        else
+            info "guardrail disabled in config - nothing to do"
+        fi
+        return 0
+    fi
+
+    if [ -x "$dest" ] && [ "$("$dest" version 2>/dev/null)" = "guardrail ${ver}" ]; then
         info "guardrail ${ver} already installed"
+    elif [ -x "$dest" ]; then
+        info "Updating guardrail to ${ver} via self-update..."
+        "$dest" update "$ver"
     else
         local os arch
         case "$(uname -s)" in
@@ -553,38 +577,18 @@ install_agent_guardrails() {
         info "guardrail installed to $dest"
     fi
 
-    # Wire into Claude Code (no-op-safe if claude is absent or already wired).
-    if command -v claude &>/dev/null; then
-        info "Configuring guardrail for Claude Code..."
-        "$dest" gen-config claude --merge "$HOME/.claude/settings.json" --binary "$dest" \
-            || warn "guardrail: gen-config claude --merge failed - continuing"
+    if [ ! -x "$dest" ] || [ "$("$dest" version 2>/dev/null)" != "guardrail ${ver}" ]; then
+        warn "guardrail: installed binary did not report guardrail ${ver} - skipping plane lifecycle"
+        return
     fi
+    info "guardrail version verified: $("$dest" version)"
 
-    # Wire into OpenCode: declarative permission.{bash,read,edit} + the
-    # embedded plugin (deployed alongside opencode.json, outside opencode's
-    # own config tree so it can't be mistaken for something opencode scans).
-    if command -v opencode &>/dev/null; then
-        info "Configuring guardrail for OpenCode..."
-        mkdir -p "$HOME/.local/share/guardrail"
-        "$dest" gen-config opencode \
-            --merge "$HOME/.config/opencode/opencode.json" \
-            --binary "$dest" \
-            --plugin-dir "$HOME/.local/share/guardrail" \
-            || warn "guardrail: gen-config opencode --merge failed - continuing"
-    fi
+    info "Enabling guardrail planes (approval URL prints here if WebAuthn is required)..."
+    "$dest" plane enable --all
 
-    # Wire into Antigravity: global hooks.json. No declarative floor exists
-    # for this plane (see agent-guardrails ADR-0008) - the hook registration
-    # IS the entire enforcement surface, so this is the only guardrail
-    # coverage Antigravity gets.
-    if command -v agy &>/dev/null; then
-        info "Configuring guardrail for Antigravity..."
-        mkdir -p "$HOME/.gemini/config"
-        "$dest" gen-config antigravity \
-            --merge "$HOME/.gemini/config/hooks.json" \
-            --binary "$dest" \
-            || warn "guardrail: gen-config antigravity --merge failed - continuing"
-    fi
+    "$dest" doctor || warn "guardrail: doctor reported a problem - continuing"
+    info "If no authenticator is enrolled, run: guardrail operator enroll"
+    info "It prints a localhost URL; open it and complete the passkey ceremony manually."
 }
 
 install_linux_desktop() {
@@ -1428,10 +1432,8 @@ PYEOF
     install_agent_skills
 {{- end }}
 
-{{- if $guardrail }}
-    # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
+    # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
     install_agent_guardrails
-{{- end }}
 
     # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
     # is a second runtime check for genuine headless Linux hosts, not the
@@ -1755,10 +1757,8 @@ PYEOF
     install_agent_skills
 {{- end }}
 
-{{- if $guardrail }}
-    # agent-guardrails hook-enforcement binary - see install_agent_guardrails above.
+    # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
     install_agent_guardrails
-{{- end }}
 
     # Mac Desktop Apps (Cask) - hosts only, see the top-of-file $isHost comment
 {{- if and $dev_desktop $isHost }}

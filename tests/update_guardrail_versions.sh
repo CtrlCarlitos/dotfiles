@@ -29,6 +29,7 @@ write_fake_curl() {
 set -euo pipefail
 
 url="${!#}"
+printf '%s\n' "$url" >> "${CURL_LOG:-/dev/null}"
 case "$url" in
     *twpayne/chezmoi/releases/latest)
         printf '%s\n' '{"tag_name": "v2.99.0"}'
@@ -72,87 +73,18 @@ assert_guardrail_version() {
         scripts/update_ai_tools.ps1; do
         grep -Fq "$expected" "$directory/$file" ||
             fail "$file did not contain $expected"
-        if [ "$expected" != 'v0.18.0-dev' ]; then
-            ! grep -Fq 'v0.18.0-dev' "$directory/$file" ||
-                fail "$file still contained the previous guardrail version"
-        fi
     done
 }
 
-snapshot_guardrail_files() {
-    local directory="$1"
-    mkdir -p "$directory/original"
-    for file in \
-        run_onchange_install_packages.sh.tmpl \
-        run_onchange_install_packages.ps1.tmpl \
-        scripts/update_ai_tools.sh \
-        scripts/update_ai_tools.ps1; do
-        cp "$directory/$file" "$directory/original/${file//\//_}"
-    done
-}
-
-assert_guardrail_files_unchanged() {
-    local directory="$1"
-    for file in \
-        run_onchange_install_packages.sh.tmpl \
-        run_onchange_install_packages.ps1.tmpl \
-        scripts/update_ai_tools.sh \
-        scripts/update_ai_tools.ps1; do
-        cmp -s "$directory/$file" "$directory/original/${file//\//_}" ||
-            fail "$file changed despite a no-op guardrail update"
-    done
-}
-
-complete_repo="$tmp/complete"
-prepare_repo "$complete_repo"
-write_fake_curl "$complete_repo"
+pin_repo="$tmp/pin"
+prepare_repo "$pin_repo"
+write_fake_curl "$pin_repo"
 (
-    cd "$complete_repo"
-    PATH="$complete_repo/bin:$PATH" GUARDRAIL_FIXTURE=complete bash scripts/update-versions.sh
+    cd "$pin_repo"
+    PATH="$pin_repo/bin:$PATH" GUARDRAIL_FIXTURE=complete CURL_LOG="$pin_repo/curl.log" bash scripts/update-versions.sh
 )
-assert_guardrail_version "$complete_repo" 'v1.2.3'
+assert_guardrail_version "$pin_repo" 'v0.19.6-dev'
+! grep -Fq 'CtrlCarlitos/agent-guardrails/releases/latest' "$pin_repo/curl.log" ||
+    fail 'version updater requested the unpinned agent-guardrails latest release'
 
-incomplete_repo="$tmp/incomplete"
-prepare_repo "$incomplete_repo"
-write_fake_curl "$incomplete_repo"
-snapshot_guardrail_files "$incomplete_repo"
-(
-    cd "$incomplete_repo"
-    PATH="$incomplete_repo/bin:$PATH" GUARDRAIL_FIXTURE=incomplete bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$incomplete_repo"
-
-no_release_repo="$tmp/no-release"
-prepare_repo "$no_release_repo"
-write_fake_curl "$no_release_repo"
-snapshot_guardrail_files "$no_release_repo"
-(
-    cd "$no_release_repo"
-    PATH="$no_release_repo/bin:$PATH" GUARDRAIL_FIXTURE=none bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$no_release_repo"
-
-malformed_repo="$tmp/malformed"
-prepare_repo "$malformed_repo"
-write_fake_curl "$malformed_repo"
-snapshot_guardrail_files "$malformed_repo"
-(
-    cd "$malformed_repo"
-    PATH="$malformed_repo/bin:$PATH" GUARDRAIL_FIXTURE=malformed bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$malformed_repo"
-
-no_jq_repo="$tmp/no-jq"
-prepare_repo "$no_jq_repo"
-write_fake_curl "$no_jq_repo"
-snapshot_guardrail_files "$no_jq_repo"
-ln -s "$(command -v bash)" "$no_jq_repo/bin/bash"
-ln -s "$(command -v grep)" "$no_jq_repo/bin/grep"
-ln -s "$(command -v head)" "$no_jq_repo/bin/head"
-(
-    cd "$no_jq_repo"
-    PATH="$no_jq_repo/bin" GUARDRAIL_FIXTURE=complete /bin/bash scripts/update-versions.sh
-)
-assert_guardrail_files_unchanged "$no_jq_repo"
-
-printf 'PASS: stable agent-guardrails releases update all pins; no release is a no-op\n'
+printf 'PASS: pinned agent-guardrails release is not auto-updated\n'

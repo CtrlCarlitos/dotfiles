@@ -35,7 +35,7 @@ the persisted `[data.packages]` section is emitted in.
 | `dev_desktop` | Human desktop apps | Chrome, VS Code, Docker Desktop, CodexBar, ScreenRec, Termius, Handy… |
 | `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
 | `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
-| `guardrail` | Agent guardrails | guardrail binary; planes fire per present CLI (existing gating) |
+| `guardrail` | Agent guardrails | opt-in desired state: true = ensure pinned binary + `guardrail plane enable --all`; false = never download, `plane disable --all` if a binary exists (never auto-removed) |
 
 ## Ground rules
 
