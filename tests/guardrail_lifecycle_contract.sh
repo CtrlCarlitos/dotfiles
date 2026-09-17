@@ -38,6 +38,9 @@ require "$sh_installer" 'GUARDRAIL_ENABLED="{{ $guardrail }}"'
 require "$sh_installer" 'plane enable --all'
 require "$sh_installer" 'plane disable --all'
 require "$sh_installer" 'update "$ver"'
+# Binaries older than the self-update floor (v0.19.2-dev introduced
+# `guardrail update`) must fall back to the curl+SHA256SUMS bootstrap.
+require "$sh_installer" 'GUARDRAIL_UPDATE_FLOOR'
 # gen-config wiring is guardrail's job now (plane enable regenerates the floor).
 forbid "$sh_installer" 'gen-config'
 
@@ -48,6 +51,7 @@ require "$sh_updater" '[data.packages]'
 require "$sh_updater" 'plane enable --all'
 require "$sh_updater" 'plane disable --all'
 require "$sh_updater" 'update "$GUARDRAIL_VERSION"'
+require "$sh_updater" 'GUARDRAIL_UPDATE_FLOOR'
 forbid "$sh_updater" 'gen-config'
 
 # --- Windows: curl + gen-config kept, plane/update never invoked -------------
