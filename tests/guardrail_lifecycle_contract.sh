@@ -41,6 +41,10 @@ require "$sh_installer" 'update "$ver"'
 # Binaries older than the self-update floor (v0.19.2-dev introduced
 # `guardrail update`) must fall back to the curl+SHA256SUMS bootstrap.
 require "$sh_installer" 'GUARDRAIL_UPDATE_FLOOR'
+# agy has no SessionStart surface, so antigravity MCP-config drift has no
+# "someone ran it" moment - coverage is gated at chezmoi reconciliation
+# time instead (exit 1 fails the run, right after plane enable).
+require "$sh_installer" 'doctor --coverage antigravity'
 # gen-config wiring is guardrail's job now (plane enable regenerates the floor).
 forbid "$sh_installer" 'gen-config'
 
@@ -52,6 +56,7 @@ require "$sh_updater" 'plane enable --all'
 require "$sh_updater" 'plane disable --all'
 require "$sh_updater" 'update "$GUARDRAIL_VERSION"'
 require "$sh_updater" 'GUARDRAIL_UPDATE_FLOOR'
+require "$sh_updater" 'doctor --coverage antigravity'
 forbid "$sh_updater" 'gen-config'
 
 # --- Windows: curl + gen-config kept, plane/update never invoked -------------

@@ -48,7 +48,7 @@ _Added 2026-09-04 with Plan 3b of the agent-guardrails project; reworked
 - The installer never opens a browser or enrolls an operator. It reminds an
   unenrolled operator to run `guardrail operator enroll`, then manually open
   the printed localhost URL to complete the passkey ceremony.
-- The pin is explicitly reviewed (currently `v0.20.2-dev`); the version
+- The pin is explicitly reviewed (currently `v0.20.17-dev`); the version
   updater never follows GitHub's `latest` release endpoint for guardrail.
 
 ## Manual updater

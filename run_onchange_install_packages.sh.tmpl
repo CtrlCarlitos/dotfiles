@@ -609,6 +609,11 @@ install_agent_guardrails() {
     info "Enabling guardrail planes (approval URL prints here if WebAuthn is required)..."
     "$dest" plane enable --all
 
+    # agy has no SessionStart surface, so antigravity MCP-config drift has no
+    # "someone ran it" moment - gate its coverage here instead (exit 1 fails
+    # the run; bare call, set -e enforces it).
+    "$dest" doctor --coverage antigravity
+
     "$dest" doctor || warn "guardrail: doctor reported a problem - continuing"
     info "If no authenticator is enrolled, run: guardrail operator enroll"
     info "It prints a localhost URL; open it and complete the passkey ceremony manually."
