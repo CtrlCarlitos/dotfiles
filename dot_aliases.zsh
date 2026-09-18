@@ -151,6 +151,13 @@ alias devprofiles='devprofile list'
 alias dp='devprofile'
 
 #-------------------------------------------------------------------------------
+# Agent CLIs
+#-------------------------------------------------------------------------------
+# Guardrail hooks.json remains the enforced boundary; see agent-guardrails
+# ADR-0008 — prompts off, guard on.
+alias agy='agy --dangerously-skip-permissions'
+
+#-------------------------------------------------------------------------------
 # Management
 #-------------------------------------------------------------------------------
 alias dotup='chezmoi update --apply'
