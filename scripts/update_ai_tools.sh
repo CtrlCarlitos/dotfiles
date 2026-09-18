@@ -323,6 +323,9 @@ elif [ "$guardrail_enabled" = "true" ]; then
     if [ -x "$guardrail_dest" ] && [ "$("$guardrail_dest" version 2>/dev/null)" = "guardrail ${GUARDRAIL_VERSION}" ]; then
         echo "  Enabling guardrail planes (approval URL prints here if WebAuthn is required)..."
         "$guardrail_dest" plane enable --all
+        # agy has no SessionStart surface - gate antigravity MCP-config
+        # coverage at reconciliation time (exit 1 fails this script).
+        "$guardrail_dest" doctor --coverage antigravity
     fi
 elif [ -x "$guardrail_dest" ]; then
     echo "  guardrail disabled in config - disabling planes (binary stays installed)"
