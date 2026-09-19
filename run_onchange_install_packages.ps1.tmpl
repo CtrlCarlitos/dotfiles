@@ -1297,6 +1297,30 @@ if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
     Remove-Item Env:\GUARDRAIL_EXE -ErrorAction SilentlyContinue
 }
 
+# Codex: same declarative floor as the planes above (gen-config codex since
+# guardrail v0.20.0-dev, agent-guardrails PR #29 - the PS1 path predated
+# codex becoming a plane). ADR-0014 caveats carry over unchanged: hosted
+# tools and write_stdin bypass pre-hooks, and the /hooks trust step inside
+# Codex on first use is Codex's own security gate - deliberately NOT
+# automated here. CODEX_HOME honored: the engine checks both locations.
+if ($guardrailReady -and (Get-Command codex -ErrorAction SilentlyContinue)) {
+    Write-Host "  Configuring guardrail for Codex..." -ForegroundColor Yellow
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
+    $env:GUARDRAIL_EXE = $guardrailExe
+    $env:GUARDRAIL_CODEX_HOOKS = Join-Path $codexHome 'hooks.json'
+    Invoke-WithTimeout -Description "guardrail gen-config codex --merge" -Seconds 60 -Action {
+        # Same capture-and-report-on-failure contract as the Claude block.
+        $gwOut = & "$env:GUARDRAIL_EXE" gen-config codex --merge "$env:GUARDRAIL_CODEX_HOOKS" --binary "$env:GUARDRAIL_EXE" 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "    gen-config said: $($gwOut.Trim())"
+            throw "gen-config exited with code $LASTEXITCODE"
+        }
+    }
+    Remove-Item Env:\GUARDRAIL_EXE, Env:\GUARDRAIL_CODEX_HOOKS -ErrorAction SilentlyContinue
+    Write-Host "  Note: run /hooks inside Codex once to trust the generated hooks (Codex's own gate)" -ForegroundColor Yellow
+}
+
 # Antigravity: global hooks.json. No declarative floor exists for this plane
 # (see agent-guardrails ADR-0008) - the hook registration IS the entire
 # enforcement surface, so this is the only guardrail coverage it gets.
