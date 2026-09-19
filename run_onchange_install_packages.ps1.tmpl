@@ -549,8 +549,14 @@ $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 if (Test-Path $vscodeSettings) {
     try {
         $vsJson = ConvertFrom-JsonC (Get-Content $vscodeSettings -Raw)
+        # StrictMode-safe keyed access: the key itself contains dots, and
+        # dotting into it navigates terminal -> integrated -> fontFamily
+        # ("property cannot be found" under StrictMode - confirmed live the
+        # moment JSONC parsing started succeeding). Probe PSObject.Properties
+        # by name instead; Add-Member -Force handles the dotted name fine.
         $fontKey = "terminal.integrated.fontFamily"
-        if ($vsJson.$fontKey -ne $desiredFont) {
+        $fontProp = $vsJson.PSObject.Properties[$fontKey]
+        if ($null -eq $fontProp -or $fontProp.Value -ne $desiredFont) {
             Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
             $vsJson | Add-Member -MemberType NoteProperty -Name $fontKey -Value $desiredFont -Force
             $vsJson | ConvertTo-Json -Depth 10 | Set-Content -Path $vscodeSettings -Encoding utf8
