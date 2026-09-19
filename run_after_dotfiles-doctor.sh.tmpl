@@ -6,16 +6,30 @@ set -euo pipefail
 # --fix (repairs stay a deliberate, human-reviewed act - a mixed-encoding
 # config must never be auto-transcoded, and CI runs this unattended).
 # Exit 1 fails the apply so problems surface here, with guidance, instead
-# of silently drifting. Note the boundary: a config with invalid encoding
-# kills chezmoi before any script runs - that class stays covered by the
-# manual invocation documented in docs/windows.md.
+# of silently drifting.
+#
+# Two in-apply realities (learned in CI, run 35427915642):
+#   1. `chezmoi source-path` inside a run_after script deadlocks on
+#      chezmoi's own persistent-state lock ("timeout obtaining persistent
+#      state lock") - the apply itself holds it. The source dir is
+#      therefore rendered at TEMPLATE time via .chezmoi.sourceDir.
+#   2. Sub-chezmoi calls (data/execute-template) hit the same lock, and
+#      would be tautological anyway (chezmoi already parsed the config to
+#      get this far, and is running from the source dir). In-apply mode
+#      (DOTFILES_DOCTOR_IN_APPLY=1) runs the file-level checks only;
+#      config-parse/source-dir/chezmoi-version/guardrail-pin run when the
+#      doctor is invoked standalone.
+# Also note the boundary: a config with invalid encoding kills chezmoi
+# before any script runs - that class stays covered by the manual
+# invocation documented in docs/windows.md.
 
-echo "▸ dotfiles health check (dotfiles-doctor)"
-if ! bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh"; then
+echo "▸ dotfiles health check (dotfiles-doctor, in-apply: file checks)"
+if ! DOTFILES_DOCTOR_IN_APPLY=1 bash "{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh"; then
     echo "" >&2
     echo "✗ dotfiles-doctor reported errors - apply stops here." >&2
     echo "  Inspect the results above, then either:" >&2
-    echo "    bash \"\$(chezmoi source-path)/scripts/dotfiles-doctor.sh\" --fix   # auto-repair what is safe" >&2
+    echo "    bash \"{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh\" --fix   # auto-repair what is safe" >&2
+    echo "    bash \"{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh\"         # full standalone run (all checks)" >&2
     echo "  or open ~/.config/chezmoi/chezmoi.toml in an editor (save as UTF-8)" >&2
     echo "  and re-run: chezmoi apply" >&2
     exit 1

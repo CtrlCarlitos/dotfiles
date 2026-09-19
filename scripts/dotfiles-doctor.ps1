@@ -15,6 +15,12 @@ param([switch]$Fix)
 
 $ErrorActionPreference = 'Stop'
 
+# In-apply mode: invoked by run_after_dotfiles-doctor.ps1 during a chezmoi
+# apply, which HOLDS chezmoi's persistent-state lock - sub-chezmoi calls
+# deadlock on it and are tautological mid-apply anyway. File-level checks
+# only in this mode (twin of the .sh DOTFILES_DOCTOR_IN_APPLY).
+$InApply = [bool]$env:DOTFILES_DOCTOR_IN_APPLY
+
 $isWin = ($env:OS -eq 'Windows_NT')
 $homeDir = if ($isWin) { $env:USERPROFILE } else { $env:HOME }
 $configDir = if ($env:CHEZMOI_CONFIG_DIR) { $env:CHEZMOI_CONFIG_DIR } else { Join-Path $homeDir '.config/chezmoi' }
@@ -92,7 +98,9 @@ if (-not (Test-Path -LiteralPath $config)) {
 
 # --- 2. Config parses --------------------------------------------------------
 
-if (Test-Path -LiteralPath $config) {
+if ($InApply) {
+    Result 'skip' 'config-parse' 'in-apply mode - chezmoi already parsed the config to get this far'
+} elseif (Test-Path -LiteralPath $config) {
     & chezmoi data *> $null
     if ($LASTEXITCODE -eq 0) {
         Result 'ok' 'config-parse' 'chezmoi loads the config'
@@ -131,6 +139,10 @@ if (Test-Path -LiteralPath $config) {
 
 # --- 4. Source directory present ---------------------------------------------
 
+if ($InApply) {
+    Result 'skip' 'source-dir' 'in-apply mode - running from it right now'
+} else {
+
 $src = ''
 try { $src = (& chezmoi source-path 2>$null | Out-String).Trim() } catch {}
 if ($src -and (Test-Path -LiteralPath $src)) {
@@ -148,7 +160,13 @@ if ($src -and (Test-Path -LiteralPath $src)) {
     Result 'warn' 'source-dir' 'source dir missing - run the installer or: chezmoi init CtrlCarlitos/dotfiles'
 }
 
+} # end not-in-apply (source-dir)
+
 # --- 5. Installed chezmoi vs the repo's .chezmoi-version pin ------------------
+
+if ($InApply) {
+    Result 'skip' 'chezmoi-version' 'in-apply mode - run standalone for version/pin drift checks'
+} else {
 
 $pinVersion = ''
 if (Test-Path (Join-Path $repoRoot '.chezmoi-version')) {
@@ -166,7 +184,13 @@ if ($pinVersion -and $installedVersion -and ($installedVersion -match '^v?\d+\.\
     Result 'skip' 'chezmoi-version' "cannot compare (installed: $(if ($installedVersion) { $installedVersion } else { '?' }), pin: $(if ($pinVersion) { $pinVersion } else { '?' }))"
 }
 
+} # end not-in-apply (chezmoi-version)
+
 # --- 6. Installed guardrail binary vs .chezmoidata.yaml pin -------------------
+
+if ($InApply) {
+    Result 'skip' 'guardrail-pin' 'in-apply mode - run standalone for version/pin drift checks'
+} else {
 
 $guardrailPin = ''
 try { $guardrailPin = (& chezmoi execute-template --source $repoRoot '{{ .guardrail.version }}' 2>$null | Out-String).Trim() } catch {}
@@ -191,6 +215,8 @@ if (-not $guardrailPin) {
         }
     }
 }
+
+} # end not-in-apply (guardrail-pin)
 
 if ($script:Errors -gt 0) {
     Write-Host ""

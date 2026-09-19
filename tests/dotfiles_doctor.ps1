@@ -117,6 +117,18 @@ $r = Invoke-Doctor $h
 if ($r.Code -eq 0) { Fail '[5] unparseable config must fail' }
 Write-Host '  ok: unparseable config reported'
 
+# [6] In-apply mode: sub-chezmoi checks skipped (state-lock deadlock twin).
+$h = Join-Path $Tmp 'inapply'; New-Item -ItemType Directory -Force -Path $h | Out-Null
+New-ValidConfig $h
+$env:HOME = $h; $env:USERPROFILE = $h; $env:CHEZMOI_CONFIG_DIR = $null; $env:DOTFILES_DOCTOR_IN_APPLY = '1'
+$out6 = & pwsh -NoProfile -File $Doctor 2>&1 | Out-String
+$rc6 = $LASTEXITCODE
+$env:DOTFILES_DOCTOR_IN_APPLY = $null
+if ($rc6 -ne 0) { Fail "[6] in-apply run should pass: $out6" }
+if ($out6 -notmatch 'in-apply mode') { Fail "[6] in-apply skips not reported: $out6" }
+if ($out6 -match 'chezmoi loads the config') { Fail '[6] in-apply must not invoke chezmoi data (state lock)' }
+Write-Host '  ok: in-apply mode skips chezmoi-invoking checks'
+
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
-Write-Host 'PASS: dotfiles-doctor.ps1 (5 scenarios)'
+Write-Host 'PASS: dotfiles-doctor.ps1 (6 scenarios)'
 exit 0
