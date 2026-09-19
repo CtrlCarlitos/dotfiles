@@ -37,6 +37,12 @@ fi
 {{- $dev_desktop := false -}}
 {{- $remote_access := false -}}
 {{- $remote_access_server := false -}}
+{{- $vscodeSettings := "true" -}}
+{{- if hasKey . "vscode_settings" -}}
+  {{- if not .vscode_settings -}}
+    {{- $vscodeSettings = "false" -}}
+  {{- end -}}
+{{- end -}}
 {{- $guardrail := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
@@ -524,6 +530,7 @@ guardrail_ver_num() {
 #   false = never download; disable every plane if a binary exists.
 # The binary is never auto-removed in either state.
 GUARDRAIL_ENABLED="{{ $guardrail }}"
+VSCODE_SETTINGS="{{ $vscodeSettings }}"
 
 # agent-guardrails: a single static Go binary ("guardrail") enforcing the
 # shared hook policy across planes. First install bootstraps from the pinned
@@ -1082,14 +1089,12 @@ install_apt() {
     # Fonts - MesloLGS NF is great for Starship too
     install_fonts
 
-    # VS Code integrated-terminal font - parity with the Windows installer's
-    # font step (same key, same value). User-level settings.json is JSONC
-    # (comments/trailing commas legal), so a python3 normalizer (same state
-    # machine as the .ps1 ConvertFrom-JsonC twin) feeds strict json. The file
-    # is CREATED with just the font key when missing - operator-confirmed
-    # semantics: these are the machine's global defaults, projects layer their
-    # own .vscode/settings.json on top. Existing values are never clobbered
-    # for other keys; the font key itself is forced (idempotent re-assert).
+    # VS Code global defaults (terminal + editor) - gated by the
+    # `vscode_settings` config key (hasKey pattern: default true, set
+    # `vscode_settings = false` in chezmoi.toml to opt out; no prompt, so no
+    # CI-seeding burden - see check_workflow_config_keys for that outage
+    # class). Semantics identical to the .ps1 twin: FORCED font keys,
+    # UPSERT-if-absent defaults, MERGE-only sub-keys for excludes.
     configure_vscode_font() {
         command -v python3 &>/dev/null || { warn "vscode: python3 required to edit settings.json - skipping"; return; }
         local settings
@@ -1099,8 +1104,44 @@ install_apt() {
             *) return ;;
         esac
         mkdir -p "$(dirname "$settings")"
+
+        # Curated GLOBAL defaults for human coding - deliberately stack-
+        # agnostic (no formatters/linters/interpreters: those are per-project
+        # concerns, and irrelevant to AI agents anyway). Semantics:
+        #   FORCED  - font keys, re-asserted every run (consistency mandate:
+        #             MesloLGS NF everywhere, matching the fonts group)
+        #   UPSERT  - every other key only when ABSENT (user values win;
+        #             project .vscode/settings.json still layers on top)
+        #   MERGE   - object keys (files.exclude/search.exclude) gain only
+        #             missing sub-keys
         python3 - "$settings" <<'PYEOF' || warn "vscode: could not update settings.json - leaving it untouched"
 import json, os, re, sys
+
+FORCED = {
+    "editor.fontFamily": "MesloLGS Nerd Font Mono",
+    "terminal.integrated.fontFamily": "MesloLGS Nerd Font Mono",
+}
+DEFAULTS = {
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 500,
+    "files.eol": "\n",
+    "files.insertFinalNewline": True,
+    "files.trimFinalNewlines": True,
+    "files.trimTrailingWhitespace": True,
+    "explorer.compactFolders": False,
+    "editor.minimap.enabled": False,
+    "editor.wordWrap": "on",
+    "editor.formatOnSave": True,
+    "diffEditor.ignoreTrimWhitespace": False,
+    "diffEditor.wordWrap": "on",
+    "workbench.startupEditor": "none",
+    "terminal.integrated.scrollback": 30000,
+    "terminal.integrated.shellIntegration.enabled": True,
+    "cSpell.language": "en,es",
+}
+JUNK = ["**/__pycache__/**", "**/.venv/**", "**/venv/**",
+        "**/node_modules/**", "**/*.pyc"]
+MERGES = {"files.exclude": JUNK, "search.exclude": JUNK}
 
 path = sys.argv[1]
 text = ""
@@ -1133,16 +1174,37 @@ while i < n:
 clean = re.sub(r",(\s*[}\]])", r"\1", "".join(out))
 
 data = json.loads(clean) if clean.strip() else {}
-data["terminal.integrated.fontFamily"] = "MesloLGS Nerd Font Mono"
-tmp = path + ".tmp"
-with open(tmp, "w", encoding="utf-8") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
-os.replace(tmp, path)
-print("  VS Code terminal font set to MesloLGS Nerd Font Mono (%s)" % path)
+changed = []
+for k, v in FORCED.items():
+    if data.get(k) != v:
+        data[k] = v; changed.append(k + " (forced)")
+for k, v in DEFAULTS.items():
+    if k not in data:
+        data[k] = v; changed.append(k)
+for k, subs in MERGES.items():
+    cur = data.setdefault(k, {})
+    for s in subs:
+        if s not in cur:
+            cur[s] = True; changed.append(k + "." + s)
+
+if not changed:
+    print("  VS Code settings already at defaults (%s)" % path)
+else:
+    if os.path.exists(path):
+        import shutil; shutil.copy2(path, path + ".bak")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, path)
+    print("  VS Code settings: %d change(s), backup at .bak (%s)" % (len(changed), path))
 PYEOF
     }
-    command -v code &>/dev/null && configure_vscode_font
+    if [ "$VSCODE_SETTINGS" = "true" ]; then
+        command -v code &>/dev/null && configure_vscode_font
+    else
+        info "VS Code settings defaults disabled in config"
+    fi
 {{- else }}
     info "Fonts disabled in config"
 {{- end }}

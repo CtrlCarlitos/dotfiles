@@ -37,9 +37,10 @@ require 'npm install failed'
 # and trailing commas; the installer must parse them tolerantly.
 require 'function ConvertFrom-JsonC'
 require 'Could not parse VS Code settings.json even as JSONC'
-# The dotted font key must be probed via PSObject.Properties, never dotted
-# into (StrictMode rejects the navigation - confirmed live).
-require '$vsJson.PSObject.Properties[$fontKey]'
+# Dotted keys (font, files.exclude members) must be probed via
+# PSObject.Properties, never dotted into (StrictMode rejects the navigation -
+# confirmed live).
+require '$vsJson.PSObject.Properties[$k]'
 
 grep -Fq -- 'bash tests/graft_windows_install_contract.sh' "$ci_workflow" || {
     printf 'FAIL: ci.yml: Windows Graft contract is not a PR CI check\n' >&2
