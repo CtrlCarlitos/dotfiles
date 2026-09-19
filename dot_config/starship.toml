@@ -49,6 +49,11 @@ format = '\[[$symbol($version)]($style)\]'
 format = '\[[$symbol($version)]($style)\]'
 
 [direnv]
+# Disabled: starship spawns direnv on every prompt with this module enabled,
+# and on Windows that produced constant "Select an app" ShellExecute popups
+# during plain directory navigation (confirmed live). The zsh hook in
+# dot_zshrc still loads .envrc on WSL - only this prompt badge is gone.
+disabled = true
 format = '\[[$symbol$loaded/$allowed]($style)\]'
 
 [docker_context]

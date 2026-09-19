@@ -14,26 +14,13 @@ if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (&zoxide init powershell | Out-String)
 }
 
-# Direnv (Using a helper or just checking hook)
-if (Get-Command direnv -ErrorAction SilentlyContinue) {
-    # PowerShell hook for direnv
-    function Invoke-DirenvHook {
-        $env:DIRENV_LOG_FORMAT = ""
-        $output = (direnv export json | ConvertFrom-Json)
-        if ($output) {
-             foreach ($prop in $output.PSObject.Properties) {
-                 if ($prop.Value -eq $null) {
-                     Remove-Item -Path "env:\$($prop.Name)"
-                 } else {
-                     Set-Item -Path "env:\$($prop.Name)" -Value $prop.Value
-                 }
-             }
-        }
-    }
-    # Register the hook but verify conflicts first needed? usually prompt hook
-    # Native hook is better:
-    Invoke-Expression "$(direnv hook pwsh)"
-}
+# Direnv: deliberately NOT initialized on Windows. Confirmed live on a
+# real machine: with the hook installed, plain directory navigation
+# triggered frequent "Select an app to open" ShellExecute popups the
+# operator cannot dismiss permanently - and direnv isn't used on the
+# Windows side anyway (the zsh/dot_zshrc hook covers WSL). The binary
+# stays installed; nothing initializes it here, and starship's direnv
+# module is disabled in starship.toml so nothing else spawns it either.
 
 
 
@@ -102,6 +89,14 @@ function get { curl.exe -sS @args }
 function post { curl.exe -sS -X POST @args }
 function devprofiles { devprofile list }
 function agy { agy.exe --dangerously-skip-permissions @args }
+# htop parity via pstop (psmux/pstop, Chocolatey "pstop") - gated so the
+# aliases simply don't exist before the first install completes. `ps` is
+# deliberately left as pwsh's built-in Get-Process alias (procs stays
+# available under its own name).
+if (Get-Command pstop -ErrorAction SilentlyContinue) {
+    function htop { pstop @args }
+    function top { pstop @args }
+}
 
 # Dotfiles parity with dot_aliases.zsh (the zsh file stays the source of
 # truth for Unix; only what maps cleanly to PowerShell lives here). Confirmed
