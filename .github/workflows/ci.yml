@@ -72,6 +72,12 @@ jobs:
       - name: Test guardrail plane lifecycle contract
         run: bash tests/guardrail_lifecycle_contract.sh
 
+      - name: Test dotfiles doctor
+        run: bash tests/dotfiles_doctor.sh
+
+      - name: Test dotfiles doctor (pwsh twin)
+        run: pwsh -NoProfile -File tests/dotfiles_doctor.ps1
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
