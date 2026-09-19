@@ -73,6 +73,12 @@ function ga { git add $args }
 function gcam { git commit -am $args }
 function gb { git branch $args }
 
+# Dotfiles parity with dot_aliases.zsh (the zsh file stays the source of
+# truth for Unix; only what maps cleanly to PowerShell lives here). Confirmed
+# live: dotup was zsh-only and a fresh Windows box had no way to update.
+function dotup { chezmoi update --apply @args }
+function dp { devprofile @args }
+
 # Navigation
 function .. { cd .. }
 function ... { cd ..\.. }
