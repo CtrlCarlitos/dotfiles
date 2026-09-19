@@ -310,6 +310,25 @@ if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: guardrail gen-config opencode --merge failed - continuing" -ForegroundColor Red
     }
 }
+# Codex plane: gen-config codex exists since agent-guardrails PR #29; the
+# PS1 path predated codex becoming a plane. ADR-0014 caveats carry over
+# (hosted tools / write_stdin bypass pre-hooks; /hooks trust inside Codex is
+# the user's own gate). CODEX_HOME honored like the engine does.
+if ($guardrailReady -and (Get-Command codex -ErrorAction SilentlyContinue)) {
+    Write-Host "  Configuring guardrail for Codex..." -ForegroundColor Yellow
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
+    try {
+        $gwOut = & $guardrailExe gen-config codex --merge (Join-Path $codexHome 'hooks.json') --binary $guardrailExe 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "    gen-config said: $($gwOut.Trim())" -ForegroundColor DarkGray
+            throw "gen-config exited with code $LASTEXITCODE"
+        }
+    } catch {
+        Write-Host "  Warning: guardrail gen-config codex --merge failed - continuing" -ForegroundColor Red
+    }
+    Write-Host "  Note: run /hooks inside Codex once to trust the generated hooks (Codex's own gate)" -ForegroundColor Yellow
+}
 if ($guardrailReady -and (Get-Command agy -ErrorAction SilentlyContinue)) {
     Write-Host "  Configuring guardrail for Antigravity..." -ForegroundColor Yellow
     New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\config" | Out-Null
