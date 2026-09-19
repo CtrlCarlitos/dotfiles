@@ -78,6 +78,9 @@ jobs:
       - name: Test dotfiles doctor (pwsh twin)
         run: pwsh -NoProfile -File tests/dotfiles_doctor.ps1
 
+      - name: Test PSModulePath guard contract
+        run: bash tests/ps_modulepath_contract.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual

@@ -12,6 +12,17 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Cross-generation PSModulePath guard (see run_onchange_generate_identities.
+# ps1.tmpl for the full story): this script's Get-FileHash/Unblock-File live
+# in Microsoft.PowerShell.Utility, the same broken-autoload class as
+# Security's Set-Acl when 5.1 inherits pwsh 7's module path. Strip the Core
+# module dirs under 5.1 so in-box modules resolve.
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    $env:PSModulePath = (($env:PSModulePath -split ';') |
+        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
+    Import-Module Microsoft.PowerShell.Security, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
+}
+
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with
