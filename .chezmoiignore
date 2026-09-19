@@ -30,6 +30,12 @@ scripts/update-versions.sh
 # silences the cosmetic warning.
 .chezmoi-version
 
+# Local scratch directory (screenshots, debug logs, config snapshots - see
+# .gitignore's temp/ entry). Confirmed live: `chezmoi doctor` flagged
+# temp/chezmoi.toml as a suspicious entry and nothing stopped apply from
+# copying this junk into $HOME.
+temp/**
+
 # Stray build/testing artifacts that don't belong in the source tree - this
 # repo's real managed executables live under dot_local/bin/ (with the proper
 # dot_ prefix), never a bare top-level bin/. Confirmed live: a stray chezmoi

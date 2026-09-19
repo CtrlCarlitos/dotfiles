@@ -163,6 +163,27 @@ Notes:
 - `devprofile use <account>` signs with that account's `signingKey` (falling back to `key` only if unset) - same key `chezmoi apply` wires up globally.
 - `devprofile verify`'s `Dir` row flags it if the active identity doesn't match what the current repo's path maps to in `dirs` - catches a `use` run in the wrong repo, or a repo moved under the wrong account's directory.
 
+### Editing `chezmoi.toml` on Windows — keep it UTF-8
+
+`~/.config/chezmoi/chezmoi.toml` must be **UTF-8**. Editors saving as
+Windows-1252/ANSI (Notepad's legacy mode, or a WinMerge copy session) turn
+the template's em dashes into single 0x97 bytes, and the very next
+`chezmoi init --apply` dies with `invalid UTF-8 byte` (confirmed live:
+mid-install, three retries, no hint of the cause). Use VS Code or PowerShell
+`Set-Content -Encoding utf8` — never "ANSI".
+
+After any hand-edit, run the repo's own doctor:
+
+```powershell
+pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1"        # check
+pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix   # repair pure ANSI saves
+```
+
+It checks config encoding/parseability, prompted-key completeness, source
+dir, chezmoi version drift vs `.chezmoi-version`, and the guardrail pin —
+the failure classes `chezmoi doctor` can't see. Unix twin:
+`bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh" [--fix]`.
+
 Existing keys without passphrases:
 ```powershell
 ssh-keygen -p -f "$env:USERPROFILE\.ssh\id_yourkey"

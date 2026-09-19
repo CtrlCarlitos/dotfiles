@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Behavioral tests for scripts/dotfiles-doctor.sh — the dotfiles-level
+# complement to `chezmoi doctor`, covering failure classes this repo has
+# actually hit live:
+#   - config saved as Windows-1252 (WinMerge/Notepad-ANSI edit class:
+#     one 0x97 em dash broke `chezmoi init --apply` mid-install on Windows)
+#   - config that doesn't parse at all
+#   - prompted keys missing from the live config (the "map has no entry for
+#     key" outage class; check_workflow_config_keys.sh guards CI seeds only)
+#
+# Runs the real script with HOME pointed at fixture dirs; the real chezmoi
+# binary handles parse/data checks (skip the suite if it's absent).
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+doctor="$repo_root/scripts/dotfiles-doctor.sh"
+
+command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed\n'; exit 0; }
+command -v iconv >/dev/null 2>&1 || { printf 'FAIL: iconv required\n' >&2; exit 1; }
+
+fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+[ -x "$doctor" ] || fail "scripts/dotfiles-doctor.sh missing or not executable"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# Full valid config: every prompted key present (primary* + 17 packages).
+valid_config() { # $1 = target dir
+    mkdir -p "$1/.config/chezmoi"
+    cat > "$1/.config/chezmoi/chezmoi.toml" <<'EOF'
+primaryName = "Probe User"
+primaryEmail = "probe@example.com"
+primaryUsername = "probe"
+primaryKey = "id_probe"
+
+[data.packages]
+core = true
+modern_cli = false
+fonts = false
+agent_toolkit = false
+opencode_cli = false
+opencode_desktop = false
+claude_cli = false
+claude_desktop = false
+chatgpt_cli = false
+chatgpt_desktop = false
+antigravity_cli = false
+antigravity_desktop = false
+dev_desktop = false
+remote_access = false
+remote_access_server = false
+guardrail = true
+EOF
+}
+
+# [1] Valid config: exit 0, no error results.
+H="$TMP/home-valid"; valid_config "$H"
+out="$(env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor")" ||
+    fail "[1] valid config should pass; got: $out"
+grep -q 'config-utf8' <<<"$out" || fail "[1] utf-8 check not reported: $out"
+echo "  ok: valid config passes"
+
+# [2] cp1252 config: detected, --fix converts, re-run passes.
+H="$TMP/home-cp1252"; valid_config "$H"
+printf '  # saved by an ANSI editor \x97 oops\n' >> "$H/.config/chezmoi/chezmoi.toml"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[2] cp1252 config must fail"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" --fix >/dev/null ||
+    fail "[2] --fix must succeed on pure cp1252"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null ||
+    fail "[2] config should pass after --fix"
+echo "  ok: cp1252 detected and fixed"
+
+# [3] Mixed encodings: --fix must refuse.
+H="$TMP/home-mixed"; valid_config "$H"
+printf '  # valid utf-8 em dash \xe2\x80\x94 here\n' >> "$H/.config/chezmoi/chezmoi.toml"
+printf '  # stray cp1252 byte \x97 here\n' >> "$H/.config/chezmoi/chezmoi.toml"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[3] mixed encoding must fail"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" --fix >/dev/null 2>&1 &&
+    fail "[3] --fix must refuse mixed encodings"
+# the stray byte must still be there (refused fix = no transcode): still fails
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[3] mixed file must still fail after refused fix"
+echo "  ok: mixed encodings refused"
+
+# [4] Missing prompted key: named in output, exit 1.
+H="$TMP/home-missing"; valid_config "$H"
+sed -i '/^guardrail = /d' "$H/.config/chezmoi/chezmoi.toml"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[4] missing key must fail"
+out4="$(env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" 2>&1 || true)"
+grep -q 'guardrail' <<<"$out4" || fail "[4] missing key not named in output: $out4"
+echo "  ok: missing prompted key reported"
+
+# [5] Unparseable TOML: parse check fails (independent of key presence).
+H="$TMP/home-broken"; valid_config "$H"
+printf 'this is not toml [[[\n' >> "$H/.config/chezmoi/chezmoi.toml"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[5] unparseable config must fail"
+echo "  ok: unparseable config reported"
+
+printf 'PASS: dotfiles-doctor.sh (5 scenarios)\n'
