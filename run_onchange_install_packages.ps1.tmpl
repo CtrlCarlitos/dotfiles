@@ -839,12 +839,23 @@ function Set-ClaudeAttribution {
         } else {
             $claudeSettings = [pscustomobject]@{}
         }
-        if ($null -eq $claudeSettings.attribution) {
+        # StrictMode-safe access: this script runs under Set-StrictMode
+        # -Version Latest, where READING a missing property on a
+        # PSCustomObject throws ("The property 'attribution' cannot be found
+        # on this object" - confirmed live on a fresh Windows box whose
+        # settings.json came from `claude plugin install` with no
+        # attribution key, killing the whole attribution step). Probe
+        # PSObject.Properties instead of dotting into the name.
+        $attrProp = $claudeSettings.PSObject.Properties['attribution']
+        if ($null -eq $attrProp -or $null -eq $attrProp.Value -or $attrProp.Value -isnot [pscustomobject]) {
+            # absent, null, or a non-object shape (string/array from another
+            # writer) - (re)create it as an object
             $claudeSettings | Add-Member -MemberType NoteProperty -Name attribution -Value ([pscustomobject]@{}) -Force
         }
-        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name commit -Value '' -Force
-        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name pr -Value '' -Force
-        $claudeSettings.attribution | Add-Member -MemberType NoteProperty -Name sessionUrl -Value $false -Force
+        $attribution = $claudeSettings.PSObject.Properties['attribution'].Value
+        $attribution | Add-Member -MemberType NoteProperty -Name commit -Value '' -Force
+        $attribution | Add-Member -MemberType NoteProperty -Name pr -Value '' -Force
+        $attribution | Add-Member -MemberType NoteProperty -Name sessionUrl -Value $false -Force
         $merged = $claudeSettings | ConvertTo-Json -Depth 100
         $temporary = Join-Path $settingsDir ('.settings.json.' + [guid]::NewGuid().ToString('N') + '.tmp')
         [System.IO.File]::WriteAllText($temporary, $merged, (New-Object System.Text.UTF8Encoding($false)))
