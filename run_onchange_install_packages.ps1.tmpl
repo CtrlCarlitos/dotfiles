@@ -488,6 +488,31 @@ $desiredFont = "MesloLGS Nerd Font Mono"
 # NOTE on write-back below: ConvertTo-Json re-emits strict JSON, which DROPS
 # the user's comments - the .bak backup exists for exactly this; restoring
 # comments is a documented one-time manual step if the user cares.
+# ConvertTo-SortedJson: deterministic serialization for settings.json -
+# keys alphabetically sorted at every level (VS Code's own editor canonical
+# order, and the operator's readability ask) and exactly 2-space indentation
+# (ConvertTo-Json cannot sort keys, and its indentation differs between
+# PS 5.1 and 7 - chezmoi may run either). Leaves (strings/numbers/bools/null)
+# delegate to ConvertTo-Json -Compress for correct escaping.
+function ConvertTo-SortedJson([object]$obj, [int]$depth = 0) {
+    $ind = '  ' * $depth
+    $ind2 = '  ' * ($depth + 1)
+    if ($obj -is [System.Management.Automation.PSCustomObject]) {
+        $props = @($obj.PSObject.Properties | Sort-Object Name)
+        if ($props.Count -eq 0) { return '{}' }
+        $parts = foreach ($p in $props) {
+            "$ind2$($p.Name | ConvertTo-Json -Compress): $(ConvertTo-SortedJson $p.Value ($depth + 1))"
+        }
+        return "{`n" + ($parts -join ",`n") + "`n$ind}"
+    }
+    if ($obj -is [System.Collections.IList] -and -not ($obj -is [string])) {
+        if ($obj.Count -eq 0) { return '[]' }
+        $parts = foreach ($v in $obj) { "$ind2$(ConvertTo-SortedJson $v ($depth + 1))" }
+        return "[`n" + ($parts -join ",`n") + "`n$ind]"
+    }
+    return ($obj | ConvertTo-Json -Compress)
+}
+
 function ConvertFrom-JsonC([string]$JsonCText) {
     $sb = New-Object System.Text.StringBuilder
     $i = 0; $n = $JsonCText.Length
@@ -671,7 +696,7 @@ if (-not $vsApply) {
             $new['files.exclude'][$s] = $true
             $new['search.exclude'][$s] = $true
         }
-        $new | ConvertTo-Json -Depth 10 | Set-Content -Path $vscodeSettings -Encoding utf8
+        (ConvertTo-SortedJson ([PSCustomObject]$new)) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
         Write-Host "  Created VS Code user settings with global defaults" -ForegroundColor Green
     }
 } else {
@@ -708,7 +733,7 @@ if (-not $vsApply) {
         }
         if ($vsChanged -gt 0) {
             Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
-            $vsJson | ConvertTo-Json -Depth 20 | Set-Content -Path $vscodeSettings -Encoding utf8
+            (ConvertTo-SortedJson $vsJson) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
             Write-Host "  VS Code settings: $vsChanged change(s) (backup: $vscodeSettings.bak)" -ForegroundColor Green
         } else {
             Write-Host "  VS Code settings already at defaults" -ForegroundColor Green

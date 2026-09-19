@@ -1222,8 +1222,11 @@ else:
     if os.path.exists(path):
         import shutil; shutil.copy2(path, path + ".bak")
     tmp = path + ".tmp"
+    # sort_keys: alphabetical at every nesting level - VS Code's own editor
+    # canonical order, and the operator's readability ask. 2-space indent is
+    # the JSON/VS Code standard.
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
+        json.dump(data, fh, indent=2, ensure_ascii=False, sort_keys=True)
         fh.write("\n")
     os.replace(tmp, path)
     print("  VS Code settings: %d change(s), backup at .bak (%s)" % (len(changed), path))
