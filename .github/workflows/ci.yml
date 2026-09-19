@@ -81,6 +81,9 @@ jobs:
       - name: Test PSModulePath guard contract
         run: bash tests/ps_modulepath_contract.sh
 
+      - name: Test SSH ACL contract
+        run: bash tests/ssh_acl_contract.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual

@@ -135,7 +135,17 @@ function Set-OwnerOnlyAcl {
         $acl = New-Object System.Security.AccessControl.FileSecurity
     }
     $acl.SetAccessRuleProtection($true, $false)
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+    # Inheritable on directories ("this folder, subfolders and files") -
+    # confirmed live: a this-folder-only rule orphans the children. Set-Acl
+    # (SetSecurityInfo) propagates parent DACL changes: stripping the old
+    # inheritable ACEs left every child that relied on inheritance - the
+    # *.pub files, deliberately excluded from the per-file owner-only pass -
+    # with an EMPTY DACL, denying even the owner's Get-Content. Private keys
+    # stay strictly owner-only: their explicit per-file DACL below is
+    # protected (no inheritance), overriding this inherited rule.
+    $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $prop = [System.Security.AccessControl.PropagationFlags]::None
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", $inherit, $prop, "Allow")
     $acl.AddAccessRule($rule)
     Set-Acl -Path $Path -AclObject $acl
 }
