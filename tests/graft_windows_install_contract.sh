@@ -21,11 +21,22 @@ require 'NPM_CONFIG_PYTHON'
 require 'sys.version_info >= (3, 8)'
 require 'graft telemetry disable'
 
-# The installer must diagnose prerequisites rather than silently downloading
-# a large compiler toolchain or hiding npm's native-build error.
+# 1.0.4 policy: with the elevation gate guaranteeing admin, the installer
+# installs the Build Tools workload itself (capped, streamed, announced)
+# instead of diagnosing-and-skipping - ONE elevated dotup does the whole
+# chain. The manual guidance survives as the fallback when the winget
+# attempt fails; npm's native-build errors are never hidden.
+require 'installing via winget (one-time, multi-GB, ~10-20 min)'
+require '"VS Build Tools install" -Seconds 1800'
+require 'Build Tools still not detected after the winget attempt'
 require 'Install the C++ Build Tools manually'
 require 'Install Python manually'
 require 'npm install failed'
+
+# JSONC: Windows Terminal and VS Code settings.json legally carry comments
+# and trailing commas; the installer must parse them tolerantly.
+require 'function ConvertFrom-JsonC'
+require 'Could not parse VS Code settings.json even as JSONC'
 
 grep -Fq -- 'bash tests/graft_windows_install_contract.sh' "$ci_workflow" || {
     printf 'FAIL: ci.yml: Windows Graft contract is not a PR CI check\n' >&2
