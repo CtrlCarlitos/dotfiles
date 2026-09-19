@@ -8,4 +8,4 @@
 # Never resolve "latest": every value here is a reviewed exact release tag
 # (assets + SHA256SUMS verified before pinning). Bumping = edit this one line.
 guardrail:
-  version: v0.21.0-dev
+  version: v0.21.2-dev
