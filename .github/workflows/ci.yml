@@ -87,6 +87,12 @@ jobs:
       - name: Test init-line-endings tool
         run: bash tests/init_line_endings.sh
 
+      - name: Test Windows elevation gate contract
+        run: bash tests/windows_elevation_contract.sh
+
+      - name: Test migrate-to-choco contract
+        run: bash tests/migrate_choco_contract.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual

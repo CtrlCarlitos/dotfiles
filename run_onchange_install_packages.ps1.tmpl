@@ -6,16 +6,35 @@
 .DESCRIPTION
     Installs Chocolatey packages and Oh My Posh on Windows systems.
     Runs whenever the package list changes.
-    Version: 1.0.2 (Force Re-run)
+    Version: 1.0.3 (Force Re-run)
     1.0.2: operator installed the VS C++ Build Tools after the initial
     install had skipped Graft for lack of them - re-run so the graft block
     sees the toolchain and installs it (dotup alone would not re-fire:
     run_onchange needs a content change, and prerequisite changes on the
     machine are invisible to the hash).
+    1.0.3: hard elevation gate. A non-admin dotup "succeeded" with degraded
+    warnings, chezmoi recorded the script hash, and the follow-up elevated
+    dotup had nothing left to fire (confirmed live). Non-admin runs now exit
+    1 BEFORE doing anything: chezmoi does not record failed scripts, so the
+    next elevated dotup re-fires the installer with admin steps intact.
 #>
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# Hard elevation gate - exit before ANY work. Chocolatey, capability
+# installs (OpenSSH), winget (VS Build Tools), and graft's native parser
+# builds all require Administrator; running degraded once silently burns
+# the run_onchange trigger for the elevated follow-up (see 1.0.3 note).
+# Pure .NET check - no module autoload, safe before the PSModulePath guard.
+$__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $__isAdmin) {
+    Write-Host "This installer requires an elevated PowerShell (Administrator)." -ForegroundColor Red
+    Write-Host "  Chocolatey, OpenSSH capabilities, winget, and graft's native builds all need it." -ForegroundColor Red
+    Write-Host "  Open a terminal as Administrator and re-run: dotup" -ForegroundColor Yellow
+    Write-Host "  (Nothing was changed - the installer will re-run fully once elevated.)" -ForegroundColor Yellow
+    exit 1
+}
 
 # Cross-generation PSModulePath guard (see run_onchange_generate_identities.
 # ps1.tmpl for the full story): this script's Get-FileHash/Unblock-File live
@@ -151,6 +170,9 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 {{- end }}
 {{- end }}
 
+# Package universe below is mirrored in scripts/migrate-to-choco.ps1
+# (MIGRATE-UNIVERSE-MARKER) - keep both lists in sync when adding a
+# Chocolatey-managed package.
 $packages = @()
 
 # On Windows PowerShell 5.1 (this script's target - see #Requires above),
@@ -362,6 +384,8 @@ foreach ($pkg in $packages) {
             $existing = $uninstallEntries | Where-Object { $normalizedPkg.Length -ge 3 -and $_.Normalized -like "*$normalizedPkg*" } | Select-Object -First 1
             if ($existing) {
                 Write-Host "  Skipping $pkg - '$($existing.Display)' is already installed (not via Chocolatey)" -ForegroundColor Yellow
+                if (-not (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue)) { $skippedNotChoco = @() }
+                $skippedNotChoco += $pkg
                 continue
             }
             Write-Host "  Installing $pkg..." -ForegroundColor Yellow
@@ -385,6 +409,16 @@ foreach ($pkg in $packages) {
     } catch {
         Write-Host "  Warning: Failed to install $pkg - $_" -ForegroundColor Red
     }
+}
+# Advisory for anything skipped above as "installed (not via Chocolatey)":
+# choco can't adopt an existing install - the opt-in migration script does
+# uninstall+reinstall per app, with confirmation and per-app risk notes.
+if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
+    Write-Host ""
+    Write-Host "  $($skippedNotChoco.Count) package(s) above are installed outside Chocolatey and stay unmanaged" -ForegroundColor Yellow
+    Write-Host "  (choco upgrade all will never cover them). To take them over (elevated, per-app confirm):" -ForegroundColor Yellow
+    $srcAdvisory = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
+    Write-Host "    pwsh -File `"$srcAdvisory\scripts\migrate-to-choco.ps1`" -ListOnly   # see candidates + risks first" -ForegroundColor Yellow
 }
 {{- end }}
 
