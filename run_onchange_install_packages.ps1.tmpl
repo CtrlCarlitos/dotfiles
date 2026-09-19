@@ -1296,8 +1296,8 @@ if ($guardrailReady) {
     } catch {
         Write-Host "  Warning: guardrail doctor reported a problem - continuing" -ForegroundColor Red
     }
-    Write-Host "  If no authenticator is enrolled, run: guardrail operator enroll" -ForegroundColor Yellow
-    Write-Host "  It prints a localhost URL; open it and complete the passkey ceremony manually." -ForegroundColor Yellow
+    # Enrollment guidance is guardrail's own UX now: the approval flow names
+    # its fix when no authenticator is enrolled.
 }
 {{- end }}
 
