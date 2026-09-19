@@ -6,7 +6,7 @@
 .DESCRIPTION
     Installs Chocolatey packages and Oh My Posh on Windows systems.
     Runs whenever the package list changes.
-    Version: 1.0.3 (Force Re-run)
+    Version: 1.0.4 (Force Re-run)
     1.0.2: operator installed the VS C++ Build Tools after the initial
     install had skipped Graft for lack of them - re-run so the graft block
     sees the toolchain and installs it (dotup alone would not re-fire:
@@ -17,6 +17,13 @@
     dotup had nothing left to fire (confirmed live). Non-admin runs now exit
     1 BEFORE doing anything: chezmoi does not record failed scripts, so the
     next elevated dotup re-fires the installer with admin steps intact.
+    1.0.4: Build Tools auto-install + JSONC. The elevation gate makes
+    admin guaranteed, so the graft block now installs the VC Build Tools
+    workload itself (one elevated dotup does the whole chain) instead of
+    printing manual winget guidance. Windows Terminal / VS Code
+    settings.json parsing moved to a JSONC-tolerant parser (comments and
+    trailing commas are legal in both files; strict JSON rejected them -
+    confirmed live on VS Code).
 #>
 
 $ErrorActionPreference = "Stop"
@@ -471,6 +478,51 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 # cosmetically a full-file diff the first time this runs.
 $desiredFont = "MesloLGS Nerd Font Mono"
 
+# ConvertFrom-JsonC: both Windows Terminal and VS Code settings.json are
+# JSONC (comments and trailing commas are legal there; strict JSON parsers
+# reject both - confirmed live: "Could not parse VS Code settings.json" on a
+# perfectly healthy file that simply had comments). Single-pass state
+# machine strips // and /* */ comments (never inside strings - URLs contain
+# //) and trailing commas (never inside strings), then defers to strict
+# ConvertFrom-Json for the actual parse so malformed JSON still fails loudly.
+# NOTE on write-back below: ConvertTo-Json re-emits strict JSON, which DROPS
+# the user's comments - the .bak backup exists for exactly this; restoring
+# comments is a documented one-time manual step if the user cares.
+function ConvertFrom-JsonC([string]$JsonCText) {
+    $sb = New-Object System.Text.StringBuilder
+    $i = 0; $n = $JsonCText.Length
+    $inString = $false
+    while ($i -lt $n) {
+        $c = $JsonCText[$i]
+        if ($inString) {
+            [void]$sb.Append($c)
+            if ($c -eq '\' -and ($i + 1) -lt $n) { [void]$sb.Append($JsonCText[$i + 1]); $i++ }
+            elseif ($c -eq '"') { $inString = $false }
+            $i++
+            continue
+        }
+        if ($c -eq '"') { $inString = $true; [void]$sb.Append($c); $i++; continue }
+        if ($c -eq '/' -and ($i + 1) -lt $n -and $JsonCText[$i + 1] -eq '/') {
+            while ($i -lt $n -and $JsonCText[$i] -ne "`n") { $i++ }
+            continue
+        }
+        if ($c -eq '/' -and ($i + 1) -lt $n -and $JsonCText[$i + 1] -eq '*') {
+            $i += 2
+            while ($i -lt ($n - 1) -and -not ($JsonCText[$i] -eq '*' -and $JsonCText[$i + 1] -eq '/')) { $i++ }
+            $i += 2
+            continue
+        }
+        [void]$sb.Append($c)
+        $i++
+    }
+    $clean = $sb.ToString()
+    # trailing commas before } or ] (outside strings is guaranteed here:
+    # comment stripping above never enters strings, so a comma still inside
+    # a string literal is part of the string and regex-safe)
+    $clean = [regex]::Replace($clean, ',(\s*[}\]])', '$1')
+    return ($clean | ConvertFrom-Json -ErrorAction Stop)
+}
+
 $wtSettings = @(
     "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json",
     "$env:LOCALAPPDATA\Microsoft\Windows Terminal\settings.json"
@@ -478,7 +530,7 @@ $wtSettings = @(
 
 if ($wtSettings) {
     try {
-        $wtJson = Get-Content $wtSettings -Raw | ConvertFrom-Json
+        $wtJson = ConvertFrom-JsonC (Get-Content $wtSettings -Raw)
         if (-not $wtJson.profiles) { $wtJson | Add-Member -MemberType NoteProperty -Name profiles -Value ([PSCustomObject]@{}) -Force }
         if (-not $wtJson.profiles.defaults) { $wtJson.profiles | Add-Member -MemberType NoteProperty -Name defaults -Value ([PSCustomObject]@{}) -Force }
         if (-not $wtJson.profiles.defaults.font) { $wtJson.profiles.defaults | Add-Member -MemberType NoteProperty -Name font -Value ([PSCustomObject]@{}) -Force }
@@ -489,14 +541,14 @@ if ($wtSettings) {
             Write-Host "  Set Windows Terminal default font to $desiredFont (backup: $wtSettings.bak)" -ForegroundColor Green
         }
     } catch {
-        Write-Host "  Could not parse Windows Terminal settings.json - leaving it untouched" -ForegroundColor Yellow
+        Write-Host "  Could not parse Windows Terminal settings.json even as JSONC - leaving it untouched ($_)" -ForegroundColor Yellow
     }
 }
 
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 if (Test-Path $vscodeSettings) {
     try {
-        $vsJson = Get-Content $vscodeSettings -Raw | ConvertFrom-Json
+        $vsJson = ConvertFrom-JsonC (Get-Content $vscodeSettings -Raw)
         $fontKey = "terminal.integrated.fontFamily"
         if ($vsJson.$fontKey -ne $desiredFont) {
             Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
@@ -505,7 +557,7 @@ if (Test-Path $vscodeSettings) {
             Write-Host "  Set VS Code integrated terminal font to $desiredFont (backup: $vscodeSettings.bak)" -ForegroundColor Green
         }
     } catch {
-        Write-Host "  Could not parse VS Code settings.json - leaving it untouched" -ForegroundColor Yellow
+        Write-Host "  Could not parse VS Code settings.json even as JSONC - leaving it untouched ($_)" -ForegroundColor Yellow
     }
 }
 {{- end }}
@@ -700,7 +752,31 @@ if (-not $graftWorks) {
             Write-Host "  Warning: Graft needs Python 3.8+ for native parser builds - skipping Graft" -ForegroundColor Red
             Write-Host "    Install Python manually: winget install Python.Python.3.13" -ForegroundColor Yellow
         } elseif (-not $vcToolsPath) {
-            Write-Host "  Warning: Graft needs the C++ Build Tools for native parser builds - skipping Graft" -ForegroundColor Red
+            # 1.0.4 policy flip: the elevation gate guarantees admin whenever
+            # this script runs, so instead of diagnosing-and-skipping (the
+            # old stance - the operator had to winget the Build Tools by
+            # hand, then a version bump was needed to re-fire graft), install
+            # the workload right here. One elevated dotup does the whole
+            # chain: Build Tools -> graft -> verify -> telemetry off. Large
+            # (multi-GB) and slow (~10-20 min); capped at 1800s and streamed,
+            # same never-silent contract as the choco loop. On failure the
+            # old manual guidance is printed and graft is skipped - degraded
+            # on ONE prerequisite, never silently.
+            Write-Host "  Graft needs the C++ Build Tools - installing via winget (one-time, multi-GB, ~10-20 min)..." -ForegroundColor Yellow
+            Invoke-WithTimeout -Description "VS Build Tools install" -Seconds 1800 -Action {
+                winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+            }
+            # Re-check vswhere now that the installer ran.
+            if (Test-Path $vswhere) {
+                try { $vcToolsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Out-String).Trim() } catch { $vcToolsPath = "" }
+            }
+        }
+        if (-not (Test-Path $pythonPath)) {
+            # unchanged: python missing stays a hard skip (small, fast, and
+            # the py-launcher fallback above already covers the usual shape)
+        } elseif (-not $vcToolsPath) {
+            Write-Host "  Warning: Build Tools still not detected after the winget attempt - skipping Graft" -ForegroundColor Red
             Write-Host "    Install the C++ Build Tools manually: winget install Microsoft.VisualStudio.2022.BuildTools --override `"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"" -ForegroundColor Yellow
         } else {
             Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
