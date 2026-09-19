@@ -80,7 +80,12 @@
     #   code --wait        VS Code (recommended - what you know)
     #   nvim               Neovim (fast, terminal-native)
     #   vim                Vim (always available)
-    autocrlf = input
+    # Line endings: false on every machine - .gitattributes is the single
+    # authority (repo ships a complete one). The previous `input` mostly
+    # coexisted, but `false` removes any conversion git would do before the
+    # attributes apply, so the attributes file alone decides what lands on
+    # disk. See .gitattributes at the repo root.
+    autocrlf = false
 {{- if or $isWsl $isDevcontainer $devDesktop (lookPath "code") }}
     # Requires VS Code in PATH (code command)
     editor = code --wait

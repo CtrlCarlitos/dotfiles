@@ -1,0 +1,46 @@
+# Editor behavior matching .gitattributes (the repo-level line-ending
+# authority). Generated to agree with it: LF everywhere except
+# Windows-native script types. Regenerate with
+# scripts/init-line-endings.sh (or the .ps1 twin).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = false
+
+[*.{sh,bash,zsh}]
+indent_style = space
+indent_size = 4
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_style = space
+indent_size = 2
+
+[*.go]
+indent_style = tab
+
+[*.lua]
+indent_style = space
+indent_size = 4
+
+# Windows-native scripts: CRLF here and in .gitattributes.
+[*.ps1]
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+
+[*.{bat,cmd}]
+end_of_line = crlf
+indent_style = space
+indent_size = 8
