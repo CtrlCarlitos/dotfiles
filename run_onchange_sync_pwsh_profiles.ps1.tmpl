@@ -1,0 +1,48 @@
+{{ if eq .chezmoi.os "windows" -}}
+# Sync chezmoi-managed PowerShell profiles into the Documents folder the
+# shell ACTUALLY loads. Under OneDrive known-folder redirection, pwsh's
+# $PROFILE resolves to "OneDrive - <tenant>\Documents\PowerShell\..." while
+# chezmoi writes to %USERPROFILE%\Documents (chezmoi cannot target the
+# tenant-named path portably). Confirmed live: dotup/dp landed in the
+# managed profile and a new terminal still didn't see them.
+#
+# Chezmoi's copy stays the source of truth; this mirrors it. Local edits to
+# the redirected copy are overwritten on the next profile change - same
+# contract as every other managed file.
+#
+# Hash: {{ include "Documents/PowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}{{ include "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}
+$ErrorActionPreference = 'Stop'
+
+# Cross-generation PSModulePath guard (same class as the other Windows
+# scripts - Copy-Item lives in Microsoft.PowerShell.Management, which 5.1
+# cannot autoload when it inherits pwsh 7's module path).
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    $env:PSModulePath = (($env:PSModulePath -split ';') |
+        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
+    Import-Module Microsoft.PowerShell.Management -ErrorAction SilentlyContinue
+}
+
+$managedRoot = Join-Path $env:USERPROFILE 'Documents'
+$loadedRoot = [Environment]::GetFolderPath('MyDocuments')
+
+if (-not $loadedRoot) {
+    Write-Host "  Documents folder unresolvable - skipping profile sync"
+} elseif ($managedRoot -eq $loadedRoot) {
+    Write-Host "  Documents not redirected - profiles already in place"
+} else {
+    foreach ($rel in @(
+        'PowerShell\Microsoft.PowerShell_profile.ps1',
+        'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
+    )) {
+        $src = Join-Path $managedRoot $rel
+        $dst = Join-Path $loadedRoot $rel
+        if (-not (Test-Path $src)) { continue }
+        $dstDir = Split-Path $dst
+        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+        if ((-not (Test-Path $dst)) -or ((Get-FileHash -LiteralPath $src).Hash -ne (Get-FileHash -LiteralPath $dst).Hash)) {
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+            Write-Host "  synced $rel -> $loadedRoot (redirected Documents)"
+        }
+    }
+}
+{{- end -}}
