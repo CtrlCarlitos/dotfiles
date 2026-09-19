@@ -1123,14 +1123,20 @@ install_apt() {
         #   extra_settings   - machine additions/changes, DEFAULTS tier
         #                      (upsert-if-absent; to change a baseline value:
         #                      exclude it AND add an extra)
-        python3 - "$settings" \
-            '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "exclude_settings" }}{{ .vscode_overrides.exclude_settings | toJson }}{{ else }}[]{{ end }}{{ else }}[]{{ end }}' \
-            '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}' \
-            <<'PYEOF' || warn "vscode: could not update settings.json - leaving it untouched"
+        # Override JSON embeds INSIDE the quoted heredoc (literal to bash):
+        # values may contain single quotes (terminal profile commands,
+        # quoted font names) which would terminate single-quoted argv.
+        # Triple-double-quote delimiters are collision-proof: in compact
+        # JSON a raw `"` is always structurally bounded (followed by , : } ]
+        # or preceded by , : [ {), so `"""` cannot occur - max run is 2
+        # (empty string).
+        python3 - "$settings" <<'PYEOF' || warn "vscode: could not update settings.json - leaving it untouched"
 import json, os, re, sys
 
-EXCLUDE = json.loads(sys.argv[2]) if sys.argv[2] else []
-EXTRA = json.loads(sys.argv[3]) if sys.argv[3] else {}
+EXCLUDE_JSON = """{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "exclude_settings" }}{{ .vscode_overrides.exclude_settings | toJson }}{{ else }}[]{{ end }}{{ else }}[]{{ end }}"""
+EXTRA_JSON = """{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}"""
+EXCLUDE = json.loads(EXCLUDE_JSON) if EXCLUDE_JSON else []
+EXTRA = json.loads(EXTRA_JSON) if EXTRA_JSON else {}
 
 FORCED = {
     "editor.fontFamily": "MesloLGS Nerd Font Mono",
