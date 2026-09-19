@@ -635,6 +635,11 @@ jobs:
         shell: powershell
         run: |
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-          chezmoi verify
+          # --exclude scripts: run_after_* scripts (dotfiles-doctor health
+          # check) are perpetually "due" by design - chezmoi lists always-run
+          # scripts as pending in diff/verify, so a repo carrying one can
+          # never pass a bare `chezmoi verify` (reproduced with a minimal
+          # fixture). File-state verification is what this step needs.
+          chezmoi verify --exclude scripts
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Windows installation verified!"
