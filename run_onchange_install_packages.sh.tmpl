@@ -1202,6 +1202,19 @@ PYEOF
     }
     if [ "$VSCODE_SETTINGS" = "true" ]; then
         command -v code &>/dev/null && configure_vscode_font
+        if command -v code &>/dev/null; then
+            info "Installing VS Code extensions (global, idempotent)..."
+            local ext
+            while IFS= read -r ext; do
+                [ -n "$ext" ] || continue
+                code --install-extension "$ext" >/dev/null 2>&1 \
+                    || warn "vscode: failed to install extension $ext - continuing"
+            done <<'VSEXT'
+{{- range .vscode.extensions }}
+{{ . }}
+{{- end }}
+VSEXT
+        fi
     else
         info "VS Code settings defaults disabled in config"
     fi

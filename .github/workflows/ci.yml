@@ -93,6 +93,9 @@ jobs:
       - name: Test migrate-to-choco contract
         run: bash tests/migrate_choco_contract.sh
 
+      - name: Test vscode extensions + ssh_hosts contract
+        run: bash tests/vscode_ssh_contract.sh
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
