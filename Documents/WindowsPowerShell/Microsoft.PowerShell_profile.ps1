@@ -84,12 +84,12 @@ function get { curl.exe -sS @args }
 function post { curl.exe -sS -X POST @args }
 function devprofiles { devprofile list }
 function agy { agy.exe --dangerously-skip-permissions @args }
-# htop parity via pstop (psmux/pstop, Chocolatey "pstop") - gated so the
-# aliases simply don't exist before the first install completes. `ps` is
-# deliberately left as pwsh's built-in Get-Process alias (procs stays
-# available under its own name).
+# Process viewers via pstop (psmux/pstop, Chocolatey "pstop"). The choco
+# package ships its own htop.exe shim on PATH, so htop needs NO alias here
+# (a profile function would only shadow the real binary). Only top is
+# wrapped - it has no shim. `ps` is deliberately left as pwsh's built-in
+# Get-Process alias (procs stays available under its own name).
 if (Get-Command pstop -ErrorAction SilentlyContinue) {
-    function htop { pstop @args }
     function top { pstop @args }
 }
 
