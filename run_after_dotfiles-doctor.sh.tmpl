@@ -1,0 +1,23 @@
+{{ if eq .chezmoi.os "linux" "darwin" -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Runs after EVERY chezmoi apply/update: the repo's own health check, no
+# --fix (repairs stay a deliberate, human-reviewed act - a mixed-encoding
+# config must never be auto-transcoded, and CI runs this unattended).
+# Exit 1 fails the apply so problems surface here, with guidance, instead
+# of silently drifting. Note the boundary: a config with invalid encoding
+# kills chezmoi before any script runs - that class stays covered by the
+# manual invocation documented in docs/windows.md.
+
+echo "▸ dotfiles health check (dotfiles-doctor)"
+if ! bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh"; then
+    echo "" >&2
+    echo "✗ dotfiles-doctor reported errors - apply stops here." >&2
+    echo "  Inspect the results above, then either:" >&2
+    echo "    bash \"\$(chezmoi source-path)/scripts/dotfiles-doctor.sh\" --fix   # auto-repair what is safe" >&2
+    echo "  or open ~/.config/chezmoi/chezmoi.toml in an editor (save as UTF-8)" >&2
+    echo "  and re-run: chezmoi apply" >&2
+    exit 1
+fi
+{{- end -}}

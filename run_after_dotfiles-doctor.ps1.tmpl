@@ -1,0 +1,22 @@
+{{ if eq .chezmoi.os "windows" -}}
+# Runs after EVERY chezmoi apply/update: the repo's own health check, no
+# -Fix (repairs stay a deliberate, human-reviewed act - a mixed-encoding
+# config must never be auto-transcoded, and CI runs this unattended).
+# Exit 1 fails the apply so problems surface here, with guidance, instead
+# of silently drifting. Note the boundary: a config with invalid encoding
+# kills chezmoi before any script runs - that class stays covered by the
+# manual invocation documented in docs/windows.md.
+
+Write-Host "dotfiles health check (dotfiles-doctor)" -ForegroundColor Cyan
+$doctor = Join-Path (chezmoi source-path) 'scripts\dotfiles-doctor.ps1'
+& pwsh -NoProfile -File $doctor
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "" 
+    Write-Host "dotfiles-doctor reported errors - apply stops here." -ForegroundColor Red
+    Write-Host "  Inspect the results above, then either:" 
+    Write-Host "    pwsh -File `"$doctor`" -Fix   # auto-repair what is safe" 
+    Write-Host "  or open $env:USERPROFILE\.config\chezmoi\chezmoi.toml in an editor (save as UTF-8)" 
+    Write-Host "  and re-run: chezmoi apply" 
+    exit 1
+}
+{{- end -}}

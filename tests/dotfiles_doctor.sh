@@ -101,4 +101,17 @@ env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
     fail "[5] unparseable config must fail"
 echo "  ok: unparseable config reported"
 
-printf 'PASS: dotfiles-doctor.sh (5 scenarios)\n'
+# [6] Contract: chezmoi runs the doctor after every apply, never with the
+# fix flag, and a failure stops the apply with guidance.
+run_after_sh="$repo_root/run_after_dotfiles-doctor.sh.tmpl"
+run_after_ps1="$repo_root/run_after_dotfiles-doctor.ps1.tmpl"
+for f in "$run_after_sh" "$run_after_ps1"; do
+    [ -f "$f" ] || fail "[6] $f missing (apply-time health check)"
+    grep -Fq 'dotfiles-doctor' "$f" || fail "[6] $f does not invoke the doctor"
+    ! grep -Eq -- '--fix|-Fix' <<<"$(grep -v 'no --fix\|no -Fix\|# ' "$f")" ||
+        fail "[6] $f invokes the fix flag - repairs must stay manual"
+    grep -Fq 'exit 1' "$f" || fail "[6] $f must stop the apply on doctor failure"
+done
+echo "  ok: run_after hook stops apply on doctor errors (no auto-fix)"
+
+printf 'PASS: dotfiles-doctor.sh (6 scenarios)\n'
