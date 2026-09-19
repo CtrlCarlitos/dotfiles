@@ -310,8 +310,8 @@ if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: guardrail gen-config opencode --merge failed - continuing" -ForegroundColor Red
     }
 }
-# Codex plane: gen-config codex exists since guardrail v0.20.0-dev (PR #29);
-# the PS1 path predated codex becoming a plane. ADR-0014 caveats carry over
+# Codex plane: gen-config codex exists since agent-guardrails PR #29; the
+# PS1 path predated codex becoming a plane. ADR-0014 caveats carry over
 # (hosted tools / write_stdin bypass pre-hooks; /hooks trust inside Codex is
 # the user's own gate). CODEX_HOME honored like the engine does.
 if ($guardrailReady -and (Get-Command codex -ErrorAction SilentlyContinue)) {

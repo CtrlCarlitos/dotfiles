@@ -1298,8 +1298,8 @@ if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
 }
 
 # Codex: same declarative floor as the planes above (gen-config codex since
-# guardrail v0.20.0-dev, agent-guardrails PR #29 - the PS1 path predated
-# codex becoming a plane). ADR-0014 caveats carry over unchanged: hosted
+# agent-guardrails PR #29 - the PS1 path predated codex becoming a plane).
+# ADR-0014 caveats carry over unchanged: hosted
 # tools and write_stdin bypass pre-hooks, and the /hooks trust step inside
 # Codex on first use is Codex's own security gate - deliberately NOT
 # automated here. CODEX_HOME honored: the engine checks both locations.
