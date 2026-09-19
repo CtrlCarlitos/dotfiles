@@ -612,11 +612,11 @@ install_agent_guardrails() {
     # agy has no SessionStart surface, so antigravity MCP-config drift has no
     # "someone ran it" moment - gate its coverage here instead (exit 1 fails
     # the run; bare call, set -e enforces it).
+    # `doctor --coverage antigravity` already prints the full doctor summary
+    # plus the coverage diff - a second plain `doctor` call doubled the output
+    # on every update. Enrollment guidance is guardrail's own UX now: the
+    # approval flow names its fix when no authenticator is enrolled.
     "$dest" doctor --coverage antigravity
-
-    "$dest" doctor || warn "guardrail: doctor reported a problem - continuing"
-    info "If no authenticator is enrolled, run: guardrail operator enroll"
-    info "It prints a localhost URL; open it and complete the passkey ceremony manually."
 }
 
 install_linux_desktop() {
