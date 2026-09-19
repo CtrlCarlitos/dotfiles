@@ -596,13 +596,18 @@ $vsExcludeSettings = @(
 {{-   end }}
 {{- end }}
 )
-$vsExtraSettingsJson = '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}'
+# Literal here-string transport (single quotes in values would terminate a
+# single-quoted string mid-line - same class the .sh twin guards against;
+# compact JSON has no newlines, so the '@ terminator can never collide).
+$vsExtraSettingsJson = @'
+{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}
+'@
 if ($vsExcludeSettings.Count -gt 0) {
     foreach ($k in $vsExcludeSettings) {
         $vsForced.Remove($k) ; $vsDefaults.Remove($k) ; $vsMerges.Remove($k)
     }
 }
-if ($vsExtraSettingsJson -and $vsExtraSettingsJson -ne '{}') {
+if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
     $vsExtra = $vsExtraSettingsJson | ConvertFrom-Json
     foreach ($p in $vsExtra.PSObject.Properties) {
         $vsDefaults[$p.Name] = $p.Value

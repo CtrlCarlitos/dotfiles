@@ -26,6 +26,31 @@ in the installers.
 | UPSERT | ~15 curated defaults | only written when absent | your value wins |
 | MERGE | files.exclude / search.exclude junk dirs | only missing sub-keys added | your entries stay |
 
+## Nested values in extra_settings
+
+Arrays and objects are fully supported — TOML inline tables/arrays become
+JSON and are stored verbatim:
+
+```toml
+[data.vscode_overrides.extra_settings]
+  "editor.rulers" = [80, 120]                       # array
+  "editor.codeActionsOnSave" = { "source.fixAll.eslint" = "explicit" }   # object
+  "[python]" = { "editor.tabSize" = 4 }              # language scope = just a key with brackets
+```
+
+One semantic to know: **upsert applies to the whole key**. An extra with an
+object value is written only when the *entire key is absent* — there is no
+deep-merge into an existing object. (Deep-merge exists only for the two
+MERGE-tier keys, `files.exclude`/`search.exclude`, and only for the baseline
+junk entries.) If you need to merge into an existing object setting, set it
+by hand in `settings.json` — upsert will never fight you.
+
+The override payloads embed as literal blocks inside the installers (a
+quoted heredoc on the Unix side, a literal here-string on the Windows
+side): values may contain single quotes (terminal profile commands, quoted
+font names) which would otherwise terminate single-quoted strings mid-line
+in both twins.
+
 ## Machine overrides (`[data.vscode_overrides]`)
 
 ```toml
