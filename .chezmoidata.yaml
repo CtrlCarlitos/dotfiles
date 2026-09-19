@@ -7,5 +7,43 @@
 #
 # Never resolve "latest": every value here is a reviewed exact release tag
 # (assets + SHA256SUMS verified before pinning). Bumping = edit this one line.
+# VS Code extensions installed globally by the installers (idempotent,
+# `code --install-extension`), gated by the vscode_settings config key.
+# Operator-curated 2026-09-21 from the surveyed project recommendations +
+# installed sets; gitlens and todo-tree are explicitly VETOED by the
+# operator - do not re-add (contract-enforced).
+vscode:
+  extensions:
+    # Tier 1 - editor core
+    - EditorConfig.EditorConfig
+    - streetsidesoftware.code-spell-checker
+    - mhutchie.git-graph
+    - donjayamanne.githistory
+    - christian-kohler.path-intellisense
+    - aaron-bond.better-comments
+    - vscode-icons-team.vscode-icons
+    # Tier 2 - remote/SSH + containers
+    - ms-vscode-remote.remote-ssh
+    - ms-vscode-remote.remote-ssh-edit
+    - ms-vscode.remote-explorer
+    - ms-vscode-remote.remote-containers
+    - ms-azuretools.vscode-containers
+    - ms-azuretools.vscode-docker
+    # Tier 3 - python core
+    - ms-python.python
+    - ms-python.vscode-pylance
+    - ms-python.debugpy
+    - charliermarsh.ruff
+    # Tier 4 - docs/data viewing
+    - bierner.markdown-mermaid
+    - yzhang.markdown-all-in-one
+    - tomoki1207.pdf
+    - rahulraghunathb.excel-lite
+    - mikestead.dotenv
+    - redhat.vscode-yaml
+  # Windows-only additions (the list above is cross-platform)
+  extensions_windows:
+    - ms-vscode-remote.remote-wsl
+
 guardrail:
   version: v0.21.5-dev

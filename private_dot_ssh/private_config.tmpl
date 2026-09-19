@@ -48,3 +48,59 @@ Host {{ $alias }}
 # No accounts configured yet.
 # Run 'chezmoi init' to set up your git identity.
 {{- end }}
+
+#===============================================================================
+# OPERATOR SSH HOSTS (data-driven: [[data.ssh_hosts]] in chezmoi.toml)
+#
+# Machine-local and NEVER git-tracked: host aliases live in
+# ~/.config/chezmoi/chezmoi.toml, this template renders them. Fields:
+#   name     (required)  Host alias
+#   hostname (required)  IP or DNS name
+#   user     (optional)  login user
+#   port     (optional)  SSH port (default 22)
+#   identity (optional)  key file name in ~/.ssh (e.g. "id_work"); must
+#                        exist - generate_identities normalizes its ACL
+#   proxy    (optional)  ProxyJump target alias (e.g. a bastion `name`)
+#   comment  (optional)  free text - rendered as the block's header comment
+#                        so `grep ~/.ssh/config` answers "what was this host?"
+#
+# Example (chezmoi.toml):
+#   [[data.ssh_hosts]]
+#     name     = "prod-jump"
+#     hostname = "10.0.0.5"
+#     user     = "carlitos"
+#     identity = "id_personal"
+#     comment  = "Bastion for the staging VPC - only reachable from office IP"
+#===============================================================================
+{{- if hasKey . "ssh_hosts" }}
+
+{{- range .ssh_hosts }}
+{{- $name := "" }}{{- $hostname := "" }}
+{{- if hasKey . "name" }}{{ $name = .name }}{{ end }}
+{{- if hasKey . "hostname" }}{{ $hostname = .hostname }}{{ end }}
+{{- if and $name $hostname }}
+
+{{- if hasKey . "comment" }}
+# {{ .comment }}
+{{- end }}
+Host {{ $name }}
+    HostName {{ $hostname }}
+{{- if hasKey . "user" }}
+    User {{ .user }}
+{{- end }}
+{{- if hasKey . "port" }}
+    Port {{ .port }}
+{{- end }}
+{{- if hasKey . "identity" }}
+    IdentityFile ~/.ssh/{{ .identity }}
+    IdentitiesOnly yes
+{{- end }}
+{{- if hasKey . "proxy" }}
+    ProxyJump {{ .proxy }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+# No [[data.ssh_hosts]] configured. Add hosts to ~/.config/chezmoi/chezmoi.toml
+# (see docs/secrets.md) and re-run `chezmoi apply`.
+{{- end }}
