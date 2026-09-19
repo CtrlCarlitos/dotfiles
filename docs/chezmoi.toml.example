@@ -146,3 +146,37 @@
 #
 # 5. Test:
 #    cd ~/projects && git config user.email
+
+# ==============================================================================
+# MACHINE-LOCAL FEATURES (round-tripped by chezmoi init; see the matching
+# commented examples the config template emits)
+# ==============================================================================
+
+# VS Code settings/extensions management (default true)
+# vscode_settings = false
+
+# SSH host aliases - rendered into the SSH client config on apply; the
+# comment field becomes the block header (your memory hook). VS Code
+# Remote-SSH picks them up natively. Keys live in ~/.ssh.
+# [[data.ssh_hosts]]
+#   name     = "prod-jump"              # required: Host alias
+#   hostname = "10.0.0.5"               # required: IP or DNS
+#   user     = "carlitos"               # optional: login user
+#   port     = 22                       # optional (default 22)
+#   identity = "id_personal"            # optional: key file in ~/.ssh
+#   proxy    = ""                       # optional: ProxyJump alias (bastion)
+#   comment  = "Bastion for staging"    # optional: rendered as block header
+
+# VS Code machine-local drift from the repo baseline (.chezmoidata.yaml).
+# Different key on purpose - chezmoi does not deep-merge same-named tables.
+#   exclude_settings strips any tier (incl. forced font keys);
+#   extra_settings join the upsert tier (change a value = exclude + add).
+# [data.vscode_overrides]
+#   extra_extensions    = ["hashicorp.terraform"]
+#   exclude_extensions  = ["ms-python.pylint"]
+#   exclude_settings    = ["terminal.integrated.fontFamily"]
+#   [data.vscode_overrides.extra_settings]
+#     "editor.fontSize"     = 15
+#     "files.autoSaveDelay" = 1000
+#     "editor.rulers"       = [80, 120]
+#     "[python]"            = { "editor.tabSize" = 4 }

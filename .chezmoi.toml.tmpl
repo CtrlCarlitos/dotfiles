@@ -166,6 +166,99 @@
 {{- end }}
 {{- end }}
 
+{{/* =====================================================================
+  Machine-local features - documented and ROUND-TRIPPED. `chezmoi init`
+  regenerates this whole file; any key this template doesn't re-emit is
+  destroyed (the same NOTE as accounts above). Each block below re-emits
+  what exists so re-init is lossless, with a commented example for the
+  features you haven't used yet.
+===================================================================== */}}
+
+{{/* vscode_settings: hasKey pattern (no prompt, no CI-seeding burden).
+     false = the installers skip VS Code settings defaults AND global
+     extension management entirely. Default true. */}}
+{{- if hasKey . "vscode_settings" }}
+vscode_settings = {{ .vscode_settings }}
+{{- else }}
+# vscode_settings = false   # opt out of VS Code settings/extensions management
+{{- end }}
+
+{{/* ssh_hosts: rendered into the SSH client config by
+     private_dot_ssh/private_config.tmpl; VS Code Remote-SSH reads them
+     natively. comment renders as the block header - your memory hook. */}}
+{{- if hasKey . "ssh_hosts" }}
+{{- range .ssh_hosts }}
+
+[[data.ssh_hosts]]
+  name = {{ .name | quote }}
+  hostname = {{ .hostname | quote }}
+{{- if hasKey . "user" }}
+  user = {{ .user | quote }}
+{{- end }}
+{{- if hasKey . "port" }}
+  port = {{ .port }}
+{{- end }}
+{{- if hasKey . "identity" }}
+  identity = {{ .identity | quote }}
+{{- end }}
+{{- if hasKey . "proxy" }}
+  proxy = {{ .proxy | quote }}
+{{- end }}
+{{- if hasKey . "comment" }}
+  comment = {{ .comment | quote }}
+{{- end }}
+{{- end }}
+{{- else }}
+# [[data.ssh_hosts]]
+#   name     = "prod-jump"              # required: Host alias
+#   hostname = "10.0.0.5"               # required: IP or DNS
+#   user     = "carlitos"               # optional: login user
+#   port     = 22                       # optional (default 22)
+#   identity = "id_personal"            # optional: key file in ~/.ssh
+#   proxy    = ""                       # optional: ProxyJump alias (bastion)
+#   comment  = "Bastion for staging"    # optional: rendered as block header
+{{- end }}
+
+{{/* vscode_overrides: machine-local drift from the repo-curated VS Code
+     baseline. Deliberately a DIFFERENT key from the .chezmoidata.yaml
+     vscode table (chezmoi does not deep-merge same-named tables - config
+     [data.X] is wholesale-shadowed; installers merge instead). See
+     docs/vscode.md for the full field reference. */}}
+{{- if hasKey . "vscode_overrides" }}
+[data.vscode_overrides]
+{{-   if hasKey .vscode_overrides "extra_extensions" }}
+  extra_extensions = [{{ range $i, $e := .vscode_overrides.extra_extensions }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
+{{-   end }}
+{{-   if hasKey .vscode_overrides "exclude_extensions" }}
+  exclude_extensions = [{{ range $i, $e := .vscode_overrides.exclude_extensions }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
+{{-   end }}
+{{-   if hasKey .vscode_overrides "exclude_settings" }}
+  exclude_settings = [{{ range $i, $e := .vscode_overrides.exclude_settings }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
+{{-   end }}
+{{-   if hasKey .vscode_overrides "extra_settings" }}
+  [data.vscode_overrides.extra_settings]
+{{-     range $k, $v := .vscode_overrides.extra_settings }}
+{{-       if kindIs "map" $v }}
+  {{ $k | quote }} = {{ $v | toJson }}
+{{-       else if kindIs "slice" $v }}
+  {{ $k | quote }} = {{ $v | toJson }}
+{{-       else if or (kindIs "bool" $v) (kindIs "int" $v) (kindIs "int64" $v) (kindIs "float64" $v) (kindIs "float32" $v) }}
+  {{ $k | quote }} = {{ $v }}
+{{-       else }}
+  {{ $k | quote }} = {{ $v | quote }}
+{{-       end }}
+{{-     end }}
+{{-   end }}
+{{- else }}
+# [data.vscode_overrides]
+#   extra_extensions    = ["hashicorp.terraform"]           # add to baseline
+#   exclude_extensions  = ["ms-python.pylint"]              # stop reinstalling here
+#   exclude_settings    = ["terminal.integrated.fontFamily"]  # stop forcing
+#   [data.vscode_overrides.extra_settings]
+#     "editor.fontSize"     = 15
+#     "files.autoSaveDelay" = 1000
+{{- end }}
+
 [add]
   secrets = "warning"
 
