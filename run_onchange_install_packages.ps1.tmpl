@@ -581,6 +581,34 @@ $vsDefaults = [ordered]@{
 $vsJunk = @('**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/node_modules/**', '**/*.pyc')
 $vsMerges = @{ 'files.exclude' = $vsJunk; 'search.exclude' = $vsJunk }
 
+# Machine-local settings drift, rendered from [data.vscode_overrides] (see
+# the extensions comment above for why not [data.vscode]):
+#   exclude_settings - JSON array; strips any tier (excluding a font key
+#                      stops its forced re-assert on this machine)
+#   extra_settings   - JSON object; joins the DEFAULTS tier (upsert-if-absent;
+#                      to change a baseline value: exclude it AND add an extra)
+$vsExcludeSettings = @(
+{{- if hasKey . "vscode_overrides" }}
+{{-   if hasKey .vscode_overrides "exclude_settings" }}
+{{-     range .vscode_overrides.exclude_settings }}
+    '{{ . }}'
+{{-     end }}
+{{-   end }}
+{{- end }}
+)
+$vsExtraSettingsJson = '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}'
+if ($vsExcludeSettings.Count -gt 0) {
+    foreach ($k in $vsExcludeSettings) {
+        $vsForced.Remove($k) ; $vsDefaults.Remove($k) ; $vsMerges.Remove($k)
+    }
+}
+if ($vsExtraSettingsJson -and $vsExtraSettingsJson -ne '{}') {
+    $vsExtra = $vsExtraSettingsJson | ConvertFrom-Json
+    foreach ($p in $vsExtra.PSObject.Properties) {
+        $vsDefaults[$p.Name] = $p.Value
+    }
+}
+
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 $vsApply = $true
 {{- if and (hasKey . "vscode_settings") (not .vscode_settings) }}
@@ -593,12 +621,25 @@ if (-not $vsApply) {
     # list rendered from .chezmoidata.yaml vscode.extensions (+ _windows).
     if (Get-Command code -ErrorAction SilentlyContinue) {
         Write-Host "  Installing VS Code extensions (global, idempotent)..." -ForegroundColor Yellow
+        # Machine-local drift lives in chezmoi.toml [data.vscode_overrides] -
+        # deliberately a DIFFERENT key from the .chezmoidata.yaml vscode table:
+        # chezmoi does not deep-merge same-named data tables (config [data.X]
+        # is wholesale-shadowed by chezmoidata X), so the merge happens here.
+        #   extra_extensions    - appended to the repo baseline
+        #   exclude_extensions  - filtered out: stop reinstalling on THIS
+        #                          machine only (repo-side veto contract still
+        #                          guards the curated list)
         $vsExts = @(
-{{- range .vscode.extensions }}
-            '{{ . }}'
+{{- $excluded := list }}
+{{- $extras := list }}
+{{- if hasKey . "vscode_overrides" }}
+{{-   if hasKey .vscode_overrides "exclude_extensions" }}{{ $excluded = .vscode_overrides.exclude_extensions }}{{ end }}
+{{-   if hasKey .vscode_overrides "extra_extensions" }}{{ $extras = .vscode_overrides.extra_extensions }}{{ end }}
 {{- end }}
-{{- range .vscode.extensions_windows }}
-            '{{ . }}'
+{{- range $e := concat $extras .vscode.extensions .vscode.extensions_windows }}
+{{-   if not (has $e $excluded) }}
+            '{{ $e }}'
+{{-   end }}
 {{- end }}
         )
         foreach ($ext in $vsExts) {

@@ -42,6 +42,17 @@ grep -Fq 'ProxyJump' "$ssh_tmpl" || fail "ssh template: no proxy field support"
 grep -Fqi 'ssh_hosts' "$docs" || fail "docs/secrets.md: ssh_hosts not documented"
 grep -Fqi 'never' "$docs" || fail "docs/secrets.md: git-never-sees-it caveat missing"
 
+# Machine-local drift: overrides live in [data.vscode_overrides] (NOT
+# [data.vscode] - chezmoi does not deep-merge same-named tables; the config
+# table would be wholesale-shadowed. Confirmed live.). Both installers must
+# read that key for extensions AND settings.
+for f in "$sh_installer" "$ps1_installer"; do
+    grep -Fq 'vscode_overrides' "$f" || fail "$f: no vscode_overrides merge"
+    grep -Fq 'exclude_settings' "$f" || fail "$f: no settings exclusion support"
+    grep -Fq 'extra_settings' "$f" || fail "$f: no extra-settings support"
+done
+grep -Fqi 'vscode_overrides' "$repo_root/docs/vscode.md" || fail "docs/vscode.md: overrides not documented"
+
 grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: vscode/ssh contract is not a PR CI check\n' >&2
     exit 1
