@@ -135,9 +135,12 @@
   #   name = "Work Name"
   #   email = "work@company.com"
   #   key = "id_work"
-  #   alias = "github-work"
+  #   signingKey = "id_work_sign"   # optional: commit signing; falls back to key
   #   dirs = ["projects/work"]
   #
+  # NOTE: only fields re-emitted below survive `chezmoi init` (the config file
+  # is regenerated from this template); anything else in the section is
+  # dropped. The gitconfig alias is derived (provider-username), not a field.
 {{- range $accounts }}
 
 [[data.accounts]]
@@ -146,6 +149,12 @@
   username = {{ if hasKey . "username" }}{{ .username | quote }}{{ else }}""{{ end }}
   provider = {{ if hasKey . "provider" }}{{ .provider | quote }}{{ else }}"github"{{ end }}
   key = {{ if hasKey . "key" }}{{ .key | quote }}{{ else }}""{{ end }}
+{{- if hasKey . "signingKey" }}
+  signingKey = {{ .signingKey | quote }}
+{{- end }}
+{{- if and (not (hasKey . "signingKey")) (hasKey . "signingkey") }}
+  signingkey = {{ .signingkey | quote }}
+{{- end }}
 {{- if hasKey . "organizations" }}
 {{-   if kindOf .organizations | eq "string" }}
   organizations = [{{ .organizations | quote }}]
