@@ -6,7 +6,12 @@
 .DESCRIPTION
     Installs Chocolatey packages and Oh My Posh on Windows systems.
     Runs whenever the package list changes.
-    Version: 1.0.1 (Force Re-run)
+    Version: 1.0.2 (Force Re-run)
+    1.0.2: operator installed the VS C++ Build Tools after the initial
+    install had skipped Graft for lack of them - re-run so the graft block
+    sees the toolchain and installs it (dotup alone would not re-fire:
+    run_onchange needs a content change, and prerequisite changes on the
+    machine are invisible to the hash).
 #>
 
 $ErrorActionPreference = "Stop"
