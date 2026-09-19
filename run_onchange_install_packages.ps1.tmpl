@@ -545,8 +545,22 @@ if ($wtSettings) {
     }
 }
 
+# User-level global settings (operator-confirmed semantics): CREATE the file
+# with just the font key when missing - these are the machine's defaults,
+# projects layer their own .vscode/settings.json on top. Existing values for
+# other keys are never clobbered; .bak only when modifying an existing file.
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
-if (Test-Path $vscodeSettings) {
+if (-not (Test-Path $vscodeSettings)) {
+    # File missing: create it with just the font key, but only when VS Code
+    # itself is installed (never fabricate %APPDATA%\Code for a product that
+    # isn't there).
+    if (Get-Command code -ErrorAction SilentlyContinue) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $vscodeSettings) | Out-Null
+        @{ "terminal.integrated.fontFamily" = $desiredFont } | ConvertTo-Json |
+            Set-Content -Path $vscodeSettings -Encoding utf8
+        Write-Host "  Created VS Code user settings with terminal font $desiredFont" -ForegroundColor Green
+    }
+} else {
     try {
         $vsJson = ConvertFrom-JsonC (Get-Content $vscodeSettings -Raw)
         # StrictMode-safe keyed access: the key itself contains dots, and
