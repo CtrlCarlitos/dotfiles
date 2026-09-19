@@ -73,25 +73,61 @@ function ga { git add $args }
 function gcam { git commit -am $args }
 function gb { git branch $args }
 
+# Cross-shell parity with dot_aliases.zsh - the portable subset (see the
+# comment on the dotup/dp block below for the source-of-truth rule).
+# Deliberately NOT ported: `ni` (collides with pwsh's built-in New-Item
+# alias), `ps`->procs and `top`->htop (would shadow Get-Process / need a
+# TUI Windows doesn't have), the rm/mv/cp -i safety wrappers (pwsh prompts
+# differently by design), and `vi` is added below rather than shadowing
+# anything. `cd -` works natively in pwsh 7 - no `-` alias needed.
+if (Get-Command eza -ErrorAction SilentlyContinue) {
+    function lt { eza --tree --icons --level 2 @args }
+    function lta { eza --tree --icons --level 2 -a @args }
+}
+if (Get-Command nvim -ErrorAction SilentlyContinue) {
+    function vi { nvim @args }
+}
+function c { Clear-Host }
+function h { Get-History @args }
+function py { python @args }
+function nr { npm run @args }
+function nrd { npm run dev }
+function nrb { npm run build }
+function serve { python -m http.server 8000 }
+function ff { Get-ChildItem -Recurse -File -Filter "$args" }
+function path { $env:Path -split ';' }
+function reload { . $PROFILE }
+function prof { nvim $PROFILE }
+function get { curl.exe -sS @args }
+function post { curl.exe -sS -X POST @args }
+function devprofiles { devprofile list }
+function agy { agy.exe --dangerously-skip-permissions @args }
+
 # Dotfiles parity with dot_aliases.zsh (the zsh file stays the source of
 # truth for Unix; only what maps cleanly to PowerShell lives here). Confirmed
 # live: dotup was zsh-only and a fresh Windows box had no way to update.
 function dotup { chezmoi update --apply @args }
 function dp { devprofile @args }
 
-# Navigation
+# Navigation - depth semantics match dot_aliases.zsh exactly (.. = 1 up,
+# ... = 2 up, .... = 3 up). The old twin had `...` defined twice; the second
+# (4-up) definition silently won, so `...` jumped four levels and 2-up was
+# unreachable. `cd -` needs no alias - pwsh 7 supports it natively.
+function ~ { Set-Location ~ }
 function .. { cd .. }
 function ... { cd ..\.. }
 function .... { cd ..\..\.. }
-function ... { cd ..\..\..\.. }
 
-# Docker
+# Docker (dc family is the pwsh-native set; docker-clean/stop-all are the
+# dot_aliases.zsh pair, mirrored here for full parity)
 function d { docker $args }
 function dc { docker compose $args }
 function dcu { docker compose up -d $args }
 function dcd { docker compose down $args }
 function dcl { docker compose logs -f $args }
 function dcp { docker compose ps $args }
+function docker-clean { docker system prune -af --volumes }
+function docker-stop-all { docker stop (docker ps -aq) 2>$null }
 
 #-------------------------------------------------------------------------------
 # Utilities
