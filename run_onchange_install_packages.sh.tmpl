@@ -1114,8 +1114,23 @@ install_apt() {
         #             project .vscode/settings.json still layers on top)
         #   MERGE   - object keys (files.exclude/search.exclude) gain only
         #             missing sub-keys
-        python3 - "$settings" <<'PYEOF' || warn "vscode: could not update settings.json - leaving it untouched"
+        # Machine-local drift: chezmoi.toml [data.vscode_overrides] (a
+        # different key from the chezmoidata vscode table - chezmoi does not
+        # deep-merge same-named tables; the merge happens here). Rendered to
+        # JSON and passed as argv:
+        #   exclude_settings - drop baseline keys on THIS machine (excluding
+        #                      a font key stops its forced re-assert)
+        #   extra_settings   - machine additions/changes, DEFAULTS tier
+        #                      (upsert-if-absent; to change a baseline value:
+        #                      exclude it AND add an extra)
+        python3 - "$settings" \
+            '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "exclude_settings" }}{{ .vscode_overrides.exclude_settings | toJson }}{{ else }}[]{{ end }}{{ else }}[]{{ end }}' \
+            '{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrides "extra_settings" }}{{ .vscode_overrides.extra_settings | toJson }}{{ else }}{}{{ end }}{{ else }}{}{{ end }}' \
+            <<'PYEOF' || warn "vscode: could not update settings.json - leaving it untouched"
 import json, os, re, sys
+
+EXCLUDE = json.loads(sys.argv[2]) if sys.argv[2] else []
+EXTRA = json.loads(sys.argv[3]) if sys.argv[3] else {}
 
 FORCED = {
     "editor.fontFamily": "MesloLGS Nerd Font Mono",
@@ -1142,6 +1157,14 @@ DEFAULTS = {
 JUNK = ["**/__pycache__/**", "**/.venv/**", "**/venv/**",
         "**/node_modules/**", "**/*.pyc"]
 MERGES = {"files.exclude": JUNK, "search.exclude": JUNK}
+
+# Machine-local overrides: exclusions strip any tier (FORCED included -
+# excluding a font key stops its forced re-assert); extras join DEFAULTS.
+for k in EXCLUDE:
+    FORCED.pop(k, None)
+    DEFAULTS.pop(k, None)
+    MERGES.pop(k, None)
+DEFAULTS.update(EXTRA)
 
 path = sys.argv[1]
 text = ""
@@ -1204,14 +1227,34 @@ PYEOF
         command -v code &>/dev/null && configure_vscode_font
         if command -v code &>/dev/null; then
             info "Installing VS Code extensions (global, idempotent)..."
+            # Machine-local drift, hasKey pattern (chezmoi.toml [vscode]):
+            #   extra_extensions    - appended to the repo baseline
+            #   exclude_extensions  - filtered out: they stop reinstalling on
+            #                          THIS machine only (the repo-side veto
+            #                          contract still guards the curated list)
+            # Final list computed in one place, then fed to the loop.
             local ext
             while IFS= read -r ext; do
                 [ -n "$ext" ] || continue
                 code --install-extension "$ext" >/dev/null 2>&1 \
                     || warn "vscode: failed to install extension $ext - continuing"
             done <<'VSEXT'
-{{- range .vscode.extensions }}
-{{ . }}
+{{/* Machine-local drift lives in chezmoi.toml [data.vscode_overrides] -
+      deliberately a DIFFERENT key from the .chezmoidata.yaml vscode table:
+      chezmoi does not deep-merge same-named data tables (config [data.X] is
+      wholesale-shadowed by chezmoidata X - confirmed live), so the merge
+      happens here instead. extra_extensions append to the repo baseline;
+      exclude_extensions stop reinstalling on THIS machine only. */}}
+{{- $excluded := list }}
+{{- $extras := list }}
+{{- if hasKey . "vscode_overrides" }}
+{{-   if hasKey .vscode_overrides "exclude_extensions" }}{{ $excluded = .vscode_overrides.exclude_extensions }}{{ end }}
+{{-   if hasKey .vscode_overrides "extra_extensions" }}{{ $extras = .vscode_overrides.extra_extensions }}{{ end }}
+{{- end }}
+{{- range $e := concat $extras .vscode.extensions }}
+{{-   if not (has $e $excluded) }}
+{{ $e }}
+{{-   end }}
 {{- end }}
 VSEXT
         fi
