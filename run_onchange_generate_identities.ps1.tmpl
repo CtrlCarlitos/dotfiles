@@ -129,21 +129,24 @@ if (-not (Test-Path $sshDirForSigners)) { New-Item -ItemType Directory -Path $ss
 # but its owner (not even SYSTEM/Administrators, per its docs).
 function Set-OwnerOnlyAcl {
     param([string]$Path)
+    # Inheritance flags are only legal on directories - FileSystemAccessRule
+    # throws ArgumentException ("No flags can be set") for file ACLs (caught
+    # by CI's Windows Installer Test before merge). Directories get the
+    # inheritable rule; files keep flags clear.
     if ((Get-Item $Path -Force).PSIsContainer) {
         $acl = New-Object System.Security.AccessControl.DirectorySecurity
+        # Inheritable ("this folder, subfolders and files") - confirmed live:
+        # a this-folder-only rule orphans the children. Set-Acl
+        # (SetSecurityInfo) propagates parent DACL changes: stripping the old
+        # inheritable ACEs left every child that relied on inheritance - the
+        # *.pub files, deliberately excluded from the per-file owner-only
+        # pass - with an EMPTY DACL, denying even the owner's Get-Content.
+        $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
     } else {
         $acl = New-Object System.Security.AccessControl.FileSecurity
+        $inherit = [System.Security.AccessControl.InheritanceFlags]::None
     }
     $acl.SetAccessRuleProtection($true, $false)
-    # Inheritable on directories ("this folder, subfolders and files") -
-    # confirmed live: a this-folder-only rule orphans the children. Set-Acl
-    # (SetSecurityInfo) propagates parent DACL changes: stripping the old
-    # inheritable ACEs left every child that relied on inheritance - the
-    # *.pub files, deliberately excluded from the per-file owner-only pass -
-    # with an EMPTY DACL, denying even the owner's Get-Content. Private keys
-    # stay strictly owner-only: their explicit per-file DACL below is
-    # protected (no inheritance), overriding this inherited rule.
-    $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
     $prop = [System.Security.AccessControl.PropagationFlags]::None
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", $inherit, $prop, "Allow")
     $acl.AddAccessRule($rule)
