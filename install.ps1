@@ -220,7 +220,19 @@ try {
     }
 
     if (Test-Path "$env:USERPROFILE/.local/share/chezmoi/.git") {
-        # Repo exists: Run init (to ensure config exists/generates) and then apply
+        # Repo exists: refresh it BEFORE applying. Confirmed live: a rerun
+        # after a failed install silently reused the pre-fix clone (no
+        # "Cloning into..." line), so freshly-merged template fixes never
+        # reached the machine and the identical failure replayed all 3
+        # retries. `chezmoi init --apply` alone does not pull. Fast-forward
+        # only - local commits/edits are respected; on failure (offline,
+        # diverged) warn and continue with the existing source.
+        Write-Info "Updating existing dotfiles clone..."
+        git -C "$env:USERPROFILE/.local/share/chezmoi" pull --ff-only 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Info "  clone update failed (offline? local changes?) - continuing with existing source"
+        }
+        # Run init (to ensure config exists/generates) and then apply
         Invoke-ChezmoiWithRetry { chezmoi init --apply }
     } else {
         # Check if running locally (e.g. cloned repo)
