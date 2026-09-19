@@ -5,17 +5,24 @@
 # Exit 1 fails the apply so problems surface here, with guidance, instead
 # of silently drifting.
 #
-# In-apply realities (same as the .sh twin, learned in CI run 35427915642):
-# `chezmoi source-path` inside a run_after script deadlocks on chezmoi's
-# persistent-state lock, so the source dir is rendered at TEMPLATE time via
-# .chezmoi.sourceDir; and sub-chezmoi calls hit the same lock (and would be
-# tautological mid-apply), so DOTFILES_DOCTOR_IN_APPLY=1 restricts the
-# doctor to file-level checks. A config with invalid encoding kills chezmoi
-# before any script runs - that class stays covered by the manual
-# invocation documented in docs/windows.md.
+# In-apply realities (same as the .sh twin, learned in CI runs
+# 35427915642 + 35428241917): `chezmoi source-path` deadlocks on the
+# apply's persistent-state lock, and rendering .chezmoi.sourceDir into the
+# script made its content environment-dependent (CI's post-install
+# sourceDir fix-up changed the script hash; chezmoi verify failed). The
+# source dir is therefore resolved at RUNTIME. DOTFILES_DOCTOR_IN_APPLY=1
+# restricts the doctor to file-level checks. Boundary: a config with
+# invalid encoding kills chezmoi before any script runs - that class stays
+# covered by the manual invocation in docs/windows.md.
+
+$src = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
+$doctor = Join-Path $src 'scripts\dotfiles-doctor.ps1'
 
 Write-Host "dotfiles health check (dotfiles-doctor, in-apply: file checks)" -ForegroundColor Cyan
-$doctor = '{{ .chezmoi.sourceDir }}\scripts\dotfiles-doctor.ps1'
+if (-not (Test-Path $doctor)) {
+    Write-Host "dotfiles-doctor not found at $doctor - skipping (partial checkout?)" -ForegroundColor Yellow
+    exit 0
+}
 $env:DOTFILES_DOCTOR_IN_APPLY = '1'
 & pwsh -NoProfile -File $doctor
 if ($LASTEXITCODE -ne 0) {

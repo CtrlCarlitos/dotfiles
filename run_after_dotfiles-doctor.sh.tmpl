@@ -8,28 +8,34 @@ set -euo pipefail
 # Exit 1 fails the apply so problems surface here, with guidance, instead
 # of silently drifting.
 #
-# Two in-apply realities (learned in CI, run 35427915642):
+# In-apply realities (learned in CI, runs 35427915642 + 35428241917):
 #   1. `chezmoi source-path` inside a run_after script deadlocks on
-#      chezmoi's own persistent-state lock ("timeout obtaining persistent
-#      state lock") - the apply itself holds it. The source dir is
-#      therefore rendered at TEMPLATE time via .chezmoi.sourceDir.
-#   2. Sub-chezmoi calls (data/execute-template) hit the same lock, and
-#      would be tautological anyway (chezmoi already parsed the config to
-#      get this far, and is running from the source dir). In-apply mode
-#      (DOTFILES_DOCTOR_IN_APPLY=1) runs the file-level checks only;
-#      config-parse/source-dir/chezmoi-version/guardrail-pin run when the
-#      doctor is invoked standalone.
-# Also note the boundary: a config with invalid encoding kills chezmoi
-# before any script runs - that class stays covered by the manual
-# invocation documented in docs/windows.md.
+#      chezmoi's persistent-state lock ("timeout obtaining persistent state
+#      lock") - the apply itself holds it. So the source dir is resolved at
+#      RUNTIME (not rendered from .chezmoi.sourceDir: that made this
+#      script's content environment-dependent, so CI's post-install
+#      sourceDir fix-up changed the script hash and chezmoi verify failed).
+#   2. Sub-chezmoi calls (data/execute-template) hit the same lock and are
+#      tautological mid-apply anyway. DOTFILES_DOCTOR_IN_APPLY=1 restricts
+#      the doctor to file-level checks; the rest run standalone.
+# Boundary: a config with invalid encoding kills chezmoi before any script
+# runs - that class stays covered by the manual invocation in
+# docs/windows.md.
+
+src="${CHEZMOI_SOURCE_DIR:-$HOME/.local/share/chezmoi}"
+doctor="$src/scripts/dotfiles-doctor.sh"
 
 echo "▸ dotfiles health check (dotfiles-doctor, in-apply: file checks)"
-if ! DOTFILES_DOCTOR_IN_APPLY=1 bash "{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh"; then
+if [ ! -f "$doctor" ]; then
+    echo "⚠ dotfiles-doctor not found at $doctor - skipping (partial checkout?)" >&2
+    exit 0
+fi
+if ! DOTFILES_DOCTOR_IN_APPLY=1 bash "$doctor"; then
     echo "" >&2
     echo "✗ dotfiles-doctor reported errors - apply stops here." >&2
     echo "  Inspect the results above, then either:" >&2
-    echo "    bash \"{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh\" --fix   # auto-repair what is safe" >&2
-    echo "    bash \"{{ .chezmoi.sourceDir }}/scripts/dotfiles-doctor.sh\"         # full standalone run (all checks)" >&2
+    echo "    bash \"$doctor\" --fix   # auto-repair what is safe" >&2
+    echo "    bash \"$doctor\"         # full standalone run (all checks)" >&2
     echo "  or open ~/.config/chezmoi/chezmoi.toml in an editor (save as UTF-8)" >&2
     echo "  and re-run: chezmoi apply" >&2
     exit 1
