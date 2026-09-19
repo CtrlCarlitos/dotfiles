@@ -32,6 +32,13 @@ set -euo pipefail
 FIX=false
 [ "${1:-}" = "--fix" ] && FIX=true
 
+# In-apply mode: invoked by run_after_dotfiles-doctor.sh during a chezmoi
+# apply, which HOLDS chezmoi's persistent-state lock - sub-chezmoi calls
+# (data/source-path/execute-template) deadlock on it, and those checks are
+# tautological mid-apply anyway (chezmoi already parsed the config and is
+# running from the source dir). File-level checks only in this mode.
+IN_APPLY="${DOTFILES_DOCTOR_IN_APPLY:-}"
+
 config_dir="${CHEZMOI_CONFIG_DIR:-$HOME/.config/chezmoi}"
 config="$config_dir/chezmoi.toml"
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -100,7 +107,9 @@ fi
 #-------------------------------------------------------------------------------
 # 2. Config parses
 #-------------------------------------------------------------------------------
-if [ -f "$config" ]; then
+if [ -n "$IN_APPLY" ]; then
+    result skip config-parse "in-apply mode - chezmoi already parsed the config to get this far"
+elif [ -f "$config" ]; then
     if chezmoi data >/dev/null 2>&1; then
         result ok config-parse "chezmoi loads the config"
     else
@@ -141,6 +150,9 @@ fi
 #-------------------------------------------------------------------------------
 # 4. Source directory present
 #-------------------------------------------------------------------------------
+if [ -n "$IN_APPLY" ]; then
+    result skip source-dir "in-apply mode - running from it right now"
+else
 src="$(chezmoi source-path 2>/dev/null || true)"
 if [ -n "$src" ] && [ -d "$src" ]; then
     if git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
@@ -153,10 +165,14 @@ if [ -n "$src" ] && [ -d "$src" ]; then
 else
     result warn source-dir "source dir missing - run the installer or: chezmoi init CtrlCarlitos/dotfiles"
 fi
+fi
 
 #-------------------------------------------------------------------------------
 # 5. Installed chezmoi vs the repo's .chezmoi-version pin
 #-------------------------------------------------------------------------------
+if [ -n "$IN_APPLY" ]; then
+    result skip chezmoi-version "in-apply mode - run standalone for version/pin drift checks"
+else
 pin_version="$(cat "$repo_root/.chezmoi-version" 2>/dev/null || true)"
 # "chezmoi version vX.Y.Z, commit ..." -> strip the trailing comma on $3.
 installed_version="$(chezmoi --version 2>/dev/null | awk '{print $3}' | tr -d ',' || true)"
@@ -169,10 +185,14 @@ if [ -n "$pin_version" ] && [ -n "$installed_version" ]; then
 else
     result skip chezmoi-version "cannot compare (installed: ${installed_version:-?}, pin: ${pin_version:-?})"
 fi
+fi
 
 #-------------------------------------------------------------------------------
 # 6. Installed guardrail binary vs .chezmoidata.yaml pin (opt-in package)
 #-------------------------------------------------------------------------------
+if [ -n "$IN_APPLY" ]; then
+    result skip guardrail-pin "in-apply mode - run standalone for version/pin drift checks"
+else
 guardrail_pin="$(chezmoi execute-template --source "$repo_root" '{{ .guardrail.version }}' 2>/dev/null || true)"
 if [ -z "$guardrail_pin" ]; then
     result skip guardrail-pin "source unreadable - run from a full checkout"
@@ -192,6 +212,7 @@ else
             result warn guardrail-pin "installed ${guardrail_have:-unknown} vs pin $guardrail_pin - run: chezmoi update"
         fi
     fi
+fi
 fi
 
 if [ "$errors" -gt 0 ]; then

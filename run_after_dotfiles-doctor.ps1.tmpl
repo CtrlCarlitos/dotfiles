@@ -1,0 +1,38 @@
+{{ if eq .chezmoi.os "windows" -}}
+# Runs after EVERY chezmoi apply/update: the repo's own health check, no
+# -Fix (repairs stay a deliberate, human-reviewed act - a mixed-encoding
+# config must never be auto-transcoded, and CI runs this unattended).
+# Exit 1 fails the apply so problems surface here, with guidance, instead
+# of silently drifting.
+#
+# In-apply realities (same as the .sh twin, learned in CI runs
+# 35427915642 + 35428241917): `chezmoi source-path` deadlocks on the
+# apply's persistent-state lock, and rendering .chezmoi.sourceDir into the
+# script made its content environment-dependent (CI's post-install
+# sourceDir fix-up changed the script hash; chezmoi verify failed). The
+# source dir is therefore resolved at RUNTIME. DOTFILES_DOCTOR_IN_APPLY=1
+# restricts the doctor to file-level checks. Boundary: a config with
+# invalid encoding kills chezmoi before any script runs - that class stays
+# covered by the manual invocation in docs/windows.md.
+
+$src = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
+$doctor = Join-Path $src 'scripts\dotfiles-doctor.ps1'
+
+Write-Host "dotfiles health check (dotfiles-doctor, in-apply: file checks)" -ForegroundColor Cyan
+if (-not (Test-Path $doctor)) {
+    Write-Host "dotfiles-doctor not found at $doctor - skipping (partial checkout?)" -ForegroundColor Yellow
+    exit 0
+}
+$env:DOTFILES_DOCTOR_IN_APPLY = '1'
+& pwsh -NoProfile -File $doctor
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "dotfiles-doctor reported errors - apply stops here." -ForegroundColor Red
+    Write-Host "  Inspect the results above, then either:"
+    Write-Host "    pwsh -File `"$doctor`" -Fix   # auto-repair what is safe"
+    Write-Host "    pwsh -File `"$doctor`"         # full standalone run (all checks)"
+    Write-Host "  or open $env:USERPROFILE\.config\chezmoi\chezmoi.toml in an editor (save as UTF-8)"
+    Write-Host "  and re-run: chezmoi apply"
+    exit 1
+}
+{{- end -}}
