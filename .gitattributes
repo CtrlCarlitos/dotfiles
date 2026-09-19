@@ -1,18 +1,49 @@
-# Force LF for POSIX shell scripts regardless of the checking-out OS's git
-# config - these run under bash/sh on Linux/macOS/WSL/CI runners, and CRLF
-# line terminators break them there (e.g. "Illegal option -", ": not found").
-# A Windows checkout with core.autocrlf unset/inconsistent can otherwise
-# leave these as CRLF on disk with no diff shown, since autocrlf=input only
-# converts on commit, not checkout - confirmed live: this exact drift broke
-# a local `act` run (act copies the working tree directly rather than doing
-# a fresh git clone, so it's exposed to local checkout drift real GitHub-
-# hosted runners never see, since they clone fresh from the LF-stored blob).
-*.sh text eol=lf
-*.sh.tmpl text eol=lf
+# Line-ending policy - the single repo-level authority (core.autocrlf is
+# false everywhere; this file decides). Pattern shared with agent-guardrails.
+#
+# History: CRLF drift broke a local `act` run once (act copies the working
+# tree rather than cloning fresh, so it sees checkout drift GitHub-hosted
+# runners never do) - see the *.sh comment below. The repo-wide eol=lf
+# default below closes the whole class: everything checks out LF except the
+# Windows-native script types that explicitly say otherwise.
 
-# PowerShell scripts are Windows-native and expected to have CRLF.
+# Everything text: normalize to LF in the repo AND on checkout.
+* text=auto eol=lf
+
+# POSIX shell scripts - CRLF terminators break them under bash/sh
+# ("Illegal option -", ": not found"). Explicit even though the default
+# above already covers them: the day someone narrows the default, these
+# must survive.
+*.sh  text eol=lf
+*.sh.tmpl text eol=lf
+*.zsh text eol=lf
+*.bash text eol=lf
+
+# Windows-native scripts - CRLF on checkout (LF stays in the repo).
+# PowerShell parses both endings (proven live: this repo's installers ran
+# as LF and CRLF interchangeably), CRLF is convention for Windows editors.
 *.ps1 text eol=crlf
 *.ps1.tmpl text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
-# Let git auto-detect everything else rather than forcing it.
-* text=auto
+# Binaries - never normalize, never diff-mangle.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.7z binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
