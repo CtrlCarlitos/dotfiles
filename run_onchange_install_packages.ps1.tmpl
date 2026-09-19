@@ -780,12 +780,23 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         # every Windows CI run's opencode wiring while the BOM-less Linux
         # side merged fine. Same WriteAllLines idiom as the mp-code-review
         # patcher below.
-        if (-not (Test-Path $ocConfig)) {
+        # Read as bytes + strip any BOM before parsing: this file is written
+        # by several tools in the same install (Serena's registration runs
+        # earlier and uses PowerShell's own writers), and a BOM'd or empty
+        # file made the old bare `Get-Content | ConvertFrom-Json` throw -
+        # the catch then skipped wiring superpowers entirely on fresh
+        # installs (confirmed live: "Could not parse existing opencode.json"
+        # on a fresh Windows box, plugin key never landed). Unparseable
+        # non-empty content still warns with the reason and leaves the file
+        # alone - never clobber a config we can't read.
+        $ocRaw = if (Test-Path $ocConfig) { [IO.File]::ReadAllBytes($ocConfig) } else { $null }
+        $ocText = if ($ocRaw) { [Text.UTF8Encoding]::new($false).GetString($ocRaw).TrimStart([char]0xFEFF) } else { '' }
+        if ([string]::IsNullOrWhiteSpace($ocText)) {
             $ocNew = @{ plugin = @($ocPluginSpec) } | ConvertTo-Json
             [System.IO.File]::WriteAllLines($ocConfig, $ocNew, (New-Object System.Text.UTF8Encoding($false)))
         } else {
             try {
-                $ocJson = Get-Content $ocConfig -Raw | ConvertFrom-Json
+                $ocJson = $ocText | ConvertFrom-Json -ErrorAction Stop
                 if (-not $ocJson.plugin) {
                     $ocJson | Add-Member -MemberType NoteProperty -Name plugin -Value @($ocPluginSpec) -Force
                 } elseif ($ocJson.plugin -notcontains $ocPluginSpec) {
@@ -794,7 +805,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
                 $ocMerged = $ocJson | ConvertTo-Json -Depth 10
                 [System.IO.File]::WriteAllLines($ocConfig, $ocMerged, (New-Object System.Text.UTF8Encoding($false)))
             } catch {
-                Write-Host "  Could not parse existing opencode.json - leaving it untouched" -ForegroundColor Yellow
+                Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
             }
         }
     }
@@ -852,7 +863,11 @@ function Set-ClaudeAttribution {
         if ($null -ne $temporary -and (Test-Path $temporary)) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
         }
-        Write-Host "  Warning: Could not parse Claude Code settings - leaving them untouched" -ForegroundColor Yellow
+        # Reason included: on a fresh install this fired with a bare message
+        # and no way to tell a BOM'd file from an Add-Member failure (e.g.
+        # attribution present but not an object). The file is left untouched
+        # either way - never clobber settings we can't read.
+        Write-Host "  Warning: Could not update Claude Code settings ($_) - leaving them untouched" -ForegroundColor Yellow
     }
 }
 
