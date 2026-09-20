@@ -33,6 +33,11 @@ grep -Fq 'extensions_windows:' "$data" || fail "data: no Windows-only list (remo
 for f in "$sh_installer" "$ps1_installer"; do
     grep -Fq -- '--install-extension' "$f" || fail "$f: no extension install step"
 done
+# Node occasionally writes non-fatal warnings to stderr. Windows PowerShell
+# turns those into terminating errors under the installer's global Stop
+# preference, so the native extension command must scope it to Continue.
+grep -Pzq 'try \{\r?\n                \$ErrorActionPreference = "Continue"\r?\n                & code --install-extension \$ext --force \*> \$null\r?\n            \} finally \{' "$ps1_installer" ||
+    fail "$ps1_installer: VS Code extension install must tolerate native stderr"
 
 # SSH: template renders [[data.ssh_hosts]] with the self-documenting comment.
 grep -Fq 'ssh_hosts' "$ssh_tmpl" || fail "ssh template: no ssh_hosts rendering"

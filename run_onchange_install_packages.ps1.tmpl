@@ -674,7 +674,15 @@ if (-not $vsApply) {
 {{- end }}
         )
         foreach ($ext in $vsExts) {
-            & code --install-extension $ext --force *> $null
+            # code.cmd launches Node, whose non-fatal stderr warnings would
+            # otherwise terminate this script under the global Stop policy.
+            $previousErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Continue"
+                & code --install-extension $ext --force *> $null
+            } finally {
+                $ErrorActionPreference = $previousErrorActionPreference
+            }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "    failed: $ext - continuing" -ForegroundColor Red
             }
