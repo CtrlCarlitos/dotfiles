@@ -18,6 +18,12 @@ forbid() {
     fi
 }
 
+forbid_regex() {
+    if grep -Eqi -- "$2" "$repo_root/$1"; then
+        fail "$1: must not match '$2'"
+    fi
+}
+
 require README.md "16-group taxonomy"
 require README.md "Platform installers (16-group gated)"
 require README.md "Config template (16 promptBoolOnce groups)"
@@ -68,9 +74,8 @@ require docs/backup-restore.md "Dotfiles backup passphrase"
 require docs/backup-restore.md "refuses to overwrite"
 require docs/backup-restore.md "chezmoi init"
 require docs/backup-restore.md "chezmoi apply"
-forbid docs/backup-restore.md "tar -czvf"
-forbid docs/backup-restore.md "Compress-Archive"
-forbid docs/backup-restore.md "tar -xzvf"
-forbid docs/backup-restore.md "Expand-Archive"
+forbid_regex docs/backup-restore.md '(^|[[:space:]`])(tar|zip|unzip|compress-archive|expand-archive)[[:space:]]'
+forbid_regex docs/backup-restore.md '(^|[^[:alnum:]])[^[:space:]`]+\.(tar|tar\.gz|tgz|zip)([^[:alnum:]]|$)'
+forbid_regex docs/backup-restore.md '(^|[[:space:]`])(cp|copy-item|scp|rsync|robocopy|xcopy)[[:space:]].*(\.ssh|\\\.ssh)'
 
 printf 'PASS: documentation package-group consistency\n'
