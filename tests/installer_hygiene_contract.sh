@@ -33,6 +33,22 @@ grep -Fq 'lib-bkp' "$ps1_installer" ||
 grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
     fail "$ps1_installer: no GoogleChrome handover advisory"
 
+# 4. Live-session gates on npm/uv upgrades (agent-guardrails guidance:
+#    recreating a package dir under a live agent host breaks in-flight
+#    resolution - the 2026-09-20 graft/lib-bkp class). Upgrades defer to a
+#    quiet dotup instead of racing sessions.
+grep -Fq 'Skipping Codex CLI upgrade' "$ps1_installer" ||
+    fail "$ps1_installer: codex upgrade must defer while a codex session is live"
+grep -Fq 'Skipping graft upgrade' "$ps1_installer" ||
+    fail "$ps1_installer: graft upgrade must defer while agent hosts are live"
+grep -Fq 'Skipping Serena upgrade' "$ps1_installer" ||
+    fail "$ps1_installer: serena upgrade must defer while a serena process is live"
+
+# 5. Defender exclusion scoping (agent-guardrails #146): exact installed
+#    binary FILE path only - never widened to a directory or process name.
+grep -Fq '#146' "$ps1_installer" ||
+    fail "$ps1_installer: Defender exclusion must document the file-path-only scoping rule (#146)"
+
 grep -Fq -- 'bash tests/installer_hygiene_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: installer hygiene contract is not a PR CI check\n' >&2
     exit 1

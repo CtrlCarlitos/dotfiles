@@ -939,10 +939,16 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         }
     } else {
         # Upgrade-if-present (presence gates froze versions - see codex note).
-        Write-Host "  Upgrading Serena via uv..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "uv tool upgrade serena-agent" -Seconds 300 -Action {
-            uv tool upgrade serena-agent
-            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        # Live-session gate (agent-guardrails guidance): uv recreates the tool
+        # env; a live serena MCP process resolves from it. Defer to quiet dotup.
+        if (Get-Process serena -ErrorAction SilentlyContinue) {
+            Write-Host "  Skipping Serena upgrade - a serena process is live; next quiet dotup upgrades it." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Upgrading Serena via uv..." -ForegroundColor Yellow
+            Invoke-WithTimeout -Description "uv tool upgrade serena-agent" -Seconds 300 -Action {
+                uv tool upgrade serena-agent
+                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+            }
         }
     }
     # uv tool shims land in User PATH (~\.local\bin) - rebuild again
@@ -1115,10 +1121,20 @@ if ($graftWorks) {
     # the tree-sitter native builds when a new version lands (a no-op-ish
     # registry check otherwise). The allowlist MUST travel with it - npm 12
     # blocks install scripts by default and a bare update bricks graft.
-    Write-Host "  Upgrading graft (npm)..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "Graft upgrade" -Seconds 300 -Action {
-        $graftUpgradeOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed (exit $LASTEXITCODE): $($graftUpgradeOutput.Trim())" }
+    # Live-session gate (agent-guardrails guidance): npm -g recreates the
+    # graft dir, and live agent hosts resolve graft from it on every hook
+    # event / CLI call (2026-09-20: hit live via graft resolution). Defer
+    # to a quiet dotup rather than racing sessions.
+    $__agentHosts = @(Get-Process opencode, claude, codex, agy -ErrorAction SilentlyContinue)
+    if ($__agentHosts.Count -gt 0) {
+        $__liveNames = (@($__agentHosts | ForEach-Object { $_.ProcessName }) | Select-Object -Unique) -join ', '
+        Write-Host "  Skipping graft upgrade - live agent session(s): $__liveNames. Recreating the graft dir would break in-flight resolution; next quiet dotup upgrades it." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Upgrading graft (npm)..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "Graft upgrade" -Seconds 300 -Action {
+            $graftUpgradeOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed (exit $LASTEXITCODE): $($graftUpgradeOutput.Trim())" }
+        }
     }
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
@@ -1342,8 +1358,15 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         # (confirmed live 2026-09-20: codex banner 0.154.0 -> 0.155.1 on a
         # machine that dotup'd daily). @latest re-resolves each run - an
         # idempotent seconds-long registry check when already current.
-        Write-Host "  Upgrading Codex CLI..." -ForegroundColor Yellow
-        Invoke-Quietly -Description "Failed to upgrade Codex CLI" -Action { npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+        # Live-session gate (agent-guardrails guidance): npm -g recreates the
+        # package dir; upgrading under a running codex denies file access and
+        # strands debris (lib-bkp class). Defer to a quiet dotup.
+        if (Get-Process codex -ErrorAction SilentlyContinue) {
+            Write-Host "  Skipping Codex CLI upgrade - a codex session is live; next quiet dotup upgrades it." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Upgrading Codex CLI..." -ForegroundColor Yellow
+            Invoke-Quietly -Description "Failed to upgrade Codex CLI" -Action { npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+        }
     }
 }
 
@@ -1696,6 +1719,11 @@ if (-not $guardrailReady) {
 # latency to hit the plugin's spawnSync timeout (agent-guardrails #132,
 # confirmed live 2026-09-20 - dozens of ETIMEDOUT fail-closes in one session).
 # Idempotent; non-admin degrades to the post-install note.
+# SCOPING RULE (agent-guardrails #146): the exclusion is the exact installed
+# binary FILE path ONLY. Never widen it - not the directory (would exclude
+# everything else dropped in ~/.local/bin), not a process name (would exclude
+# any file named guardrail.exe). A path exclusion survives guardrail's
+# in-place self-update overwrites, which is the seam #146 addresses.
 if ($guardrailExe -and (Test-Path $guardrailExe)) {
     try {
         $existingExclusion = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath -ErrorAction SilentlyContinue | Where-Object { $_ -eq $guardrailExe }
@@ -1711,6 +1739,10 @@ if ($guardrailExe -and (Test-Path $guardrailExe)) {
 }
 
 # Wire into Claude Code (no-op-safe if claude is absent or already wired).
+# ORDERING INVARIANT (agent-guardrails #145/#146 pairing): binary
+# install + version verification ALWAYS precede these gen-config calls, so
+# the deployed plugin is baked from the matching installed version - never
+# reorder gen-config ahead of the install/verify blocks above.
 # Always re-runs gen-config: its owned-entry merge is safe to repeat (same
 # contract as the sh installer). Invoke-WithTimeout, NOT Invoke-Quietly:
 # gen-config prints its SUCCESS message to stderr, and in-session under
