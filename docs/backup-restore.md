@@ -1,191 +1,89 @@
 # Chezmoi Backup & Restore Guide
 
-This guide covers backup, restore, and migration across **Windows**, **WSL**, **Linux**, and **macOS**.
+This guide covers the supported backup and recovery flow across **Windows**, **WSL**, **Linux**, and **macOS**.
 
 ---
 
-## Quick Reference
+## What Is Backed Up
 
-| File | Purpose | Location |
-|------|---------|----------|
-| `chezmoi.toml` | All config + Git identities | `~/.config/chezmoi/chezmoi.toml` |
-| SSH keys | Your identity keys | `~/.ssh/id_*` |
+`dotbackup` creates a portable, AES-256 encrypted 7-Zip archive with encrypted archive headers (`-mhe=on`). The archive path is:
+
+```text
+~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
+```
+
+The archive has a fixed allowlist:
+
+- `~/.config/chezmoi/chezmoi.toml`
+- Every regular file under `~/.ssh`, including non-standard private-key names, public keys, SSH config, known-host data, and signing data
+- A `manifest.json` describing the `dotfiles-backup-v1` archive format, creation time, and source platform
+
+Git configuration, VS Code state, application data, installed packages, caches, and installed tools are excluded. Chezmoi recreates managed configuration after recovery.
+
+Before continuing, install `7z` or `7zz` and ensure `chezmoi.toml` exists. The scripts prompt for the passphrase without echoing it and never put it on the command line. Store the passphrase in a password-manager secure note named `Dotfiles backup passphrase`; do not store it in ChezMoi configuration, shell history, or the archive.
 
 ---
 
-## 1. Backup (From Existing Machine)
+## Backup
 
 ### Linux / macOS / WSL
 
+Run the supported backup script from the machine being backed up:
+
 ```bash
-cat << 'EOF' > /tmp/backup-chezmoi.sh
-#!/bin/bash
-set -euo pipefail
-echo "Create backup tarball"
-mkdir -p /tmp/chezmoi-backup
-cp ~/.config/chezmoi/chezmoi.toml /tmp/chezmoi-backup/ 2>/dev/null || echo "No chezmoi.toml yet"
-cp ~/.ssh/id_* /tmp/chezmoi-backup/ 2>/dev/null || echo "No SSH keys yet"
-tar -czvf ~/chezmoi-backup.tar.gz -C /tmp chezmoi-backup
-rm -rf /tmp/chezmoi-backup
-echo "✓ Backup saved to: ~/chezmoi-backup.tar.gz"
-EOF
-chmod +x /tmp/backup-chezmoi.sh
-/tmp/backup-chezmoi.sh
-rm -f /tmp/backup-chezmoi.sh
+bash ~/.local/share/chezmoi/scripts/dotbackup.sh
+```
+
+The script writes the encrypted `.7z` archive to `~/.dot_backups/` and prints its exact path. It refuses to replace an archive if its timestamped destination already exists.
+
+### Windows (PowerShell)
+
+Run the supported backup script:
+
+```powershell
+powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotbackup.ps1"
+```
+
+It creates the same AES-256, header-encrypted `.7z` archive under `~/.dot_backups/` and refuses an existing destination archive.
+
+---
+
+## Transfer The Archive
+
+The scripts do not upload backups. After creating one, manually copy the encrypted `.7z` archive to independent storage or to the destination machine, for example by USB drive, cloud storage, or SCP/SFTP. Keep the archive and its password-manager passphrase separate.
+
+Because the archive is portable, a backup created on Windows, Linux, macOS, or WSL can be restored on another supported platform. Do not unpack or recreate the archive by hand.
+
+---
+
+## Restore
+
+Restore only onto a machine where any existing `~/.config/chezmoi/chezmoi.toml` and conflicting files under `~/.ssh` have been reviewed. `dotrestore` refuses to overwrite either an existing ChezMoi config or any existing SSH file. Resolve collisions manually, then rerun the script.
+
+### Linux / macOS / WSL
+
+Pass the transferred archive path to the restore script:
+
+```bash
+bash ~/.local/share/chezmoi/scripts/dotrestore.sh ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
 ```
 
 ### Windows (PowerShell)
 
+Pass the transferred archive path to the restore script:
+
 ```powershell
-@'
-Write-Host "Create backup folder"
-$backupDir = "$env:TEMP\chezmoi-backup"
-New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-
-Write-Host "Copy config and SSH keys"
-Copy-Item "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" $backupDir -ErrorAction SilentlyContinue
-Copy-Item "$env:USERPROFILE\.ssh\id_*" $backupDir -ErrorAction SilentlyContinue
-
-Write-Host "Create zip archive"
-Compress-Archive -Path $backupDir -DestinationPath "$env:USERPROFILE\chezmoi-backup.zip" -Force
-Remove-Item $backupDir -Recurse -Force
-Write-Host "✓ Backup saved to: $env:USERPROFILE\chezmoi-backup.zip"
-'@ | Set-Content -Encoding UTF8 -Path "$env:TEMP\\backup-chezmoi.ps1"
-& "$env:TEMP\\backup-chezmoi.ps1"
-Remove-Item "$env:TEMP\\backup-chezmoi.ps1" -Force
+powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotrestore.ps1" -Archive "C:\path\dotfiles-YYYYMMDD-HHMMSS.7z"
 ```
 
----
-
-## 2. Transferring Backups Between Platforms
-
-### WSL ↔ Windows
+The restore script prompts for the passphrase, validates the manifest, restores the allowlisted local data, and then directs you to run:
 
 ```bash
-# WSL → Windows
-cp ~/chezmoi-backup.tar.gz /mnt/c/Users/YourWindowsUsername/
-
-# Windows → WSL
-cp /mnt/c/Users/YourWindowsUsername/chezmoi-backup.tar.gz ~/
+chezmoi init
+chezmoi apply
 ```
 
-### If you have a Windows ZIP on Linux/macOS/WSL
-
-```bash
-# Unzip a Windows-created backup in POSIX
-unzip -o ~/chezmoi-backup.zip -d /tmp
-```
-
-### If you have a POSIX tar.gz on Windows
-
-```powershell
-# PowerShell (Windows 10/11 has bsdtar)
-tar -xzf "$env:USERPROFILE\chezmoi-backup.tar.gz" -C $env:TEMP
-```
-
-If `tar` is missing, install 7-Zip and run:
-```powershell
-7z x "$env:USERPROFILE\chezmoi-backup.tar.gz" -o"$env:TEMP"
-```
-
-### Cross-machine (any platform)
-
-Use your preferred method:
-- **USB drive**: Copy the backup file directly
-- **Cloud storage**: Upload to OneDrive, Google Drive, Dropbox
-- **SCP/SFTP**: `scp ~/chezmoi-backup.tar.gz user@newmachine:~/`
-
----
-
-## 3. Restore (On New Machine)
-
-> **Run BEFORE the installer** to skip interactive prompts.
-
-### Linux / macOS / WSL
-
-```bash
-cat << 'EOF' > /tmp/restore-chezmoi.sh
-#!/bin/bash
-set -euo pipefail
-echo "Extract backup"
-tar -xzvf ~/chezmoi-backup.tar.gz -C /tmp
-
-echo "Create directories"
-mkdir -p ~/.config/chezmoi ~/.ssh
-
-echo "Restore files"
-cp /tmp/chezmoi-backup/chezmoi.toml ~/.config/chezmoi/ 2>/dev/null || true
-cp /tmp/chezmoi-backup/id_* ~/.ssh/ 2>/dev/null || true
-
-echo "Fix SSH permissions"
-chmod 700 ~/.ssh
-chmod 600 ~/.ssh/id_* 2>/dev/null || true
-chmod 644 ~/.ssh/*.pub 2>/dev/null || true
-
-echo "Cleanup"
-rm -rf /tmp/chezmoi-backup ~/chezmoi-backup.tar.gz
-
-echo "✓ Config restored. Now run the installer."
-EOF
-chmod +x /tmp/restore-chezmoi.sh
-/tmp/restore-chezmoi.sh
-rm -f /tmp/restore-chezmoi.sh
-```
-
-### Windows (PowerShell)
-
-```powershell
-@'
-Write-Host "Extract backup"
-Expand-Archive -Path "$env:USERPROFILE\chezmoi-backup.zip" -DestinationPath "$env:TEMP" -Force
-
-Write-Host "Create directories"
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.ssh" | Out-Null
-
-Write-Host "Restore files"
-Copy-Item "$env:TEMP\chezmoi-backup\chezmoi.toml" "$env:USERPROFILE\.config\chezmoi\" -ErrorAction SilentlyContinue
-Copy-Item "$env:TEMP\chezmoi-backup\id_*" "$env:USERPROFILE\.ssh\" -ErrorAction SilentlyContinue
-
-Write-Host "Cleanup"
-Remove-Item "$env:TEMP\chezmoi-backup" -Recurse -Force
-Remove-Item "$env:USERPROFILE\chezmoi-backup.zip" -Force
-
-Write-Host "✓ Config restored. Now run the installer."
-'@ | Set-Content -Encoding UTF8 -Path "$env:TEMP\\restore-chezmoi.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\restore-chezmoi.ps1"
-Remove-Item "$env:TEMP\\restore-chezmoi.ps1" -Force
-```
-
----
-
-## 4. Run the Installer
-
-### Linux / macOS / WSL
-
-```bash
-export PAT="your_github_pat"
-sh -c "$(curl -H "Authorization: token $PAT" -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.sh)"
-```
-
-### Windows (PowerShell as Administrator)
-
-```powershell
-$PAT="your_github_pat"; iex "& {$(irm -Headers @{Authorization="token $PAT"} https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
-```
-
-The installer will detect your existing config and **skip interactive prompts**.
-
-Note: account `dirs` from `chezmoi.toml` are auto-created during `chezmoi apply`.
-
-> **Privilege requirements, and why the commands above look the way they do:**
-> the Windows command needs an elevated ("as Administrator") PowerShell -
-> Chocolatey requires it, and without it every package install fails with
-> exit code 1 (confirmed live). The Linux/macOS/WSL command deliberately has
-> **no** `sudo` in front of it - don't add one. `install.sh` elevates
-> internally only for the specific steps that need root; running the whole
-> thing as root breaks things it shouldn't (Claude Code's installer
-> explicitly refuses to run under sudo, for one).
+Run `chezmoi init` first, then `chezmoi apply`. This recreates managed configuration and applies the repository's SSH permission or ACL normalization.
 
 ---
 

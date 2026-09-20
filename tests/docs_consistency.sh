@@ -18,6 +18,12 @@ forbid() {
     fi
 }
 
+forbid_regex() {
+    if grep -Eqi -- "$2" "$repo_root/$1"; then
+        fail "$1: must not match '$2'"
+    fi
+}
+
 require README.md "16-group taxonomy"
 require README.md "Platform installers (16-group gated)"
 require README.md "Config template (16 promptBoolOnce groups)"
@@ -56,5 +62,20 @@ forbid docs/package-groups.md "Zero wiring by design"
 forbid docs/package-groups.md "no codex surface"
 require docs/menu-demo.md "opencode_cli"
 require docs/menu-demo.md "opencode_desktop"
+
+require docs/backup-restore.md "dotbackup.sh"
+require docs/backup-restore.md "dotrestore.sh"
+require docs/backup-restore.md "dotbackup.ps1"
+require docs/backup-restore.md "dotrestore.ps1"
+require docs/backup-restore.md "~/.dot_backups"
+require docs/backup-restore.md ".7z"
+require docs/backup-restore.md "-mhe=on"
+require docs/backup-restore.md "Dotfiles backup passphrase"
+require docs/backup-restore.md "refuses to overwrite"
+require docs/backup-restore.md "chezmoi init"
+require docs/backup-restore.md "chezmoi apply"
+forbid_regex docs/backup-restore.md '(^|[[:space:]`])(tar|zip|unzip|compress-archive|expand-archive)[[:space:]]'
+forbid_regex docs/backup-restore.md '(^|[^[:alnum:]])[^[:space:]`]+\.(tar|tar\.gz|tgz|zip)([^[:alnum:]]|$)'
+forbid_regex docs/backup-restore.md '(^|[[:space:]`])(cp|copy-item|scp|rsync|robocopy|xcopy)[[:space:]].*(\.ssh|\\\.ssh)'
 
 printf 'PASS: documentation package-group consistency\n'
