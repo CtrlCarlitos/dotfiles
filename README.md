@@ -63,7 +63,8 @@ open `/skills`, then enter `$teach <topic>`.
 Only OpenCode receives generated command adapters. Codex has no generated command files.
 
 Refresh curated skills explicitly after installation or whenever you want the
-latest catalog:
+latest catalog - `dot upgrade` runs the full sweep (packages + AI tools,
+session-gated); the underlying AI-tools section for a skills-only refresh:
 
 ```sh
 bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"

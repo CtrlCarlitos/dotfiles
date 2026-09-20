@@ -56,7 +56,7 @@ function gcam { git commit -am $args }
 function gb { git branch $args }
 
 # Cross-shell parity with dot_aliases.zsh - the portable subset (see the
-# comment on the dotup/dp block below for the source-of-truth rule).
+# comment on the dot/dp block below for the source-of-truth rule).
 # Deliberately NOT ported: `ni` (collides with pwsh's built-in New-Item
 # alias), `ps`->procs and `top`->htop (would shadow Get-Process / need a
 # TUI Windows doesn't have), the rm/mv/cp -i safety wrappers (pwsh prompts
@@ -93,10 +93,43 @@ if (Get-Command pstop -ErrorAction SilentlyContinue) {
     function top { pstop @args }
 }
 
-# Dotfiles parity with dot_aliases.zsh (the zsh file stays the source of
-# truth for Unix; only what maps cleanly to PowerShell lives here). Confirmed
-# live: dotup was zsh-only and a fresh Windows box had no way to update.
-function dotup { chezmoi update --apply @args }
+# Dotfiles command family (dot CLI). Source of truth:
+# docs/superpowers/specs/2026-09-20-dot-cli-design.md. `dot up` syncs
+# state and NEVER upgrades (chezmoi update owns the pull; init re-runs the
+# config template AFTER the pull - init does not fetch - and a final apply
+# fires only when init actually rewrote the config). `dot upgrade` is the
+# single upgrade owner (choco sweep + AI tools, live-session gated).
+function dot {
+    $sub = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
+    $rest = @($args | Select-Object -Skip 1)
+    $repoScripts = Join-Path $HOME '.local\share\chezmoi\scripts'
+    switch ($sub) {
+        'up' {
+            chezmoi update --apply
+            if ($LASTEXITCODE -ne 0) { return }
+            $cfg = Join-Path $HOME '.config\chezmoi\chezmoi.toml'
+            $before = if (Test-Path $cfg) { (Get-FileHash $cfg -ErrorAction SilentlyContinue).Hash } else { $null }
+            chezmoi init
+            if ($LASTEXITCODE -ne 0) { return }
+            $after = if (Test-Path $cfg) { (Get-FileHash $cfg -ErrorAction SilentlyContinue).Hash } else { $null }
+            if ($before -ne $after) { chezmoi apply }
+        }
+        'upgrade'   { & (Join-Path $repoScripts 'dotupgrade.ps1') @rest }
+        'backup'    { & (Join-Path $repoScripts 'dotbackup.ps1') @rest }
+        'restore'   { & (Join-Path $repoScripts 'dotrestore.ps1') @rest }
+        'doctor'    { & (Join-Path $repoScripts 'dotfiles-doctor.ps1') @rest }
+        default {
+            Write-Host "dot - dotfiles command family"
+            Write-Host "  dot up        sync state (pull + apply + config re-init; never upgrades)"
+            Write-Host "  dot upgrade   upgrade ALL tooling (choco + AI tools, session-gated)"
+            Write-Host "  dot backup    encrypted portable backup"
+            Write-Host "  dot restore   restore a backup"
+            Write-Host "  dot doctor    dotfiles health check"
+        }
+    }
+}
+
+# devprofile switcher (not part of the dot family - kept as-is).
 function dp { devprofile @args }
 
 # Navigation - depth semantics match dot_aliases.zsh exactly (.. = 1 up,

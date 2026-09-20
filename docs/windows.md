@@ -5,13 +5,13 @@ This guide covers Windows-specific configuration for a seamless development expe
 
 ## Overview
 
-### Run `dotup` as Administrator
+### Run `dot up` as Administrator
 
 The chezmoi installer hard-requires an elevated terminal: Chocolatey,
 OpenSSH capabilities, winget (VS Build Tools), and graft's native parser
-builds all need Administrator. A non-elevated `dotup` exits 1 **before
+builds all need Administrator. A non-elevated `dot up` exits 1 **before
 changing anything**, and chezmoi does not record failed scripts — the next
-elevated `dotup` re-runs the installer with every admin step intact.
+elevated `dot up` re-runs the installer with every admin step intact.
 (Never run it half-elevated by ignoring the warning: older versions
 "succeeded" degraded and silently burned the one-shot trigger for the
 elevated follow-up — that's why the gate exists.)
@@ -19,9 +19,9 @@ elevated follow-up — that's why the gate exists.)
 Sudo-style alternatives to opening a separate elevated terminal:
 
 - **Windows 11 built-in sudo** (24H2+): enable once in Settings → System →
-  For developers → "Enable sudo", then `sudo dotup` from a normal session.
+  For developers → "Enable sudo", then `sudo dot up` from a normal session.
 - **gsudo** (`choco install gsudo`): the community standard for older
-  builds; `gsudo dotup` behaves like Linux sudo, including credential
+  builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
 Your development happens inside WSL, but Windows provides:

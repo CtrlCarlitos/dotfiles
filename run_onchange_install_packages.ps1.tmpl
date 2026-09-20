@@ -50,7 +50,7 @@ $__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsId
 if (-not $__isAdmin) {
     Write-Host "This installer requires an elevated PowerShell (Administrator)." -ForegroundColor Red
     Write-Host "  Chocolatey, OpenSSH capabilities, winget, and graft's native builds all need it." -ForegroundColor Red
-    Write-Host "  Open a terminal as Administrator and re-run: dotup" -ForegroundColor Yellow
+    Write-Host "  Open a terminal as Administrator and re-run: dot up" -ForegroundColor Yellow
     Write-Host "  (Nothing was changed - the installer will re-run fully once elevated.)" -ForegroundColor Yellow
     exit 1
 }
@@ -937,20 +937,8 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             uv tool install -p 3.13 serena-agent
             if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
         }
-    } else {
-        # Upgrade-if-present (presence gates froze versions - see codex note).
-        # Live-session gate (agent-guardrails guidance): uv recreates the tool
-        # env; a live serena MCP process resolves from it. Defer to quiet dotup.
-        if (Get-Process serena -ErrorAction SilentlyContinue) {
-            Write-Host "  Skipping Serena upgrade - a serena process is live; next quiet dotup upgrades it." -ForegroundColor Yellow
-        } else {
-            Write-Host "  Upgrading Serena via uv..." -ForegroundColor Yellow
-            Invoke-WithTimeout -Description "uv tool upgrade serena-agent" -Seconds 300 -Action {
-                uv tool upgrade serena-agent
-                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
-            }
-        }
     }
+    # Upgrades: `dot upgrade` only (defer-aware there; see codex note).
     # uv tool shims land in User PATH (~\.local\bin) - rebuild again
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command serena -ErrorAction SilentlyContinue) {
@@ -1117,25 +1105,7 @@ if (-not $graftWorks) {
     }
 }
 if ($graftWorks) {
-    # Upgrade-if-working: re-running the install re-resolves latest and reruns
-    # the tree-sitter native builds when a new version lands (a no-op-ish
-    # registry check otherwise). The allowlist MUST travel with it - npm 12
-    # blocks install scripts by default and a bare update bricks graft.
-    # Live-session gate (agent-guardrails guidance): npm -g recreates the
-    # graft dir, and live agent hosts resolve graft from it on every hook
-    # event / CLI call (2026-09-20: hit live via graft resolution). Defer
-    # to a quiet dotup rather than racing sessions.
-    $__agentHosts = @(Get-Process opencode, claude, codex, agy -ErrorAction SilentlyContinue)
-    if ($__agentHosts.Count -gt 0) {
-        $__liveNames = (@($__agentHosts | ForEach-Object { $_.ProcessName }) | Select-Object -Unique) -join ', '
-        Write-Host "  Skipping graft upgrade - live agent session(s): $__liveNames. Recreating the graft dir would break in-flight resolution; next quiet dotup upgrades it." -ForegroundColor Yellow
-    } else {
-        Write-Host "  Upgrading graft (npm)..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "Graft upgrade" -Seconds 300 -Action {
-            $graftUpgradeOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed (exit $LASTEXITCODE): $($graftUpgradeOutput.Trim())" }
-        }
-    }
+    # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
 {{- end }}
@@ -1353,21 +1323,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
          Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
-    } else {
-        # Presence-only gates froze agent CLIs at first-install version forever
-        # (confirmed live 2026-09-20: codex banner 0.154.0 -> 0.155.1 on a
-        # machine that dotup'd daily). @latest re-resolves each run - an
-        # idempotent seconds-long registry check when already current.
-        # Live-session gate (agent-guardrails guidance): npm -g recreates the
-        # package dir; upgrading under a running codex denies file access and
-        # strands debris (lib-bkp class). Defer to a quiet dotup.
-        if (Get-Process codex -ErrorAction SilentlyContinue) {
-            Write-Host "  Skipping Codex CLI upgrade - a codex session is live; next quiet dotup upgrades it." -ForegroundColor Yellow
-        } else {
-            Write-Host "  Upgrading Codex CLI..." -ForegroundColor Yellow
-            Invoke-Quietly -Description "Failed to upgrade Codex CLI" -Action { npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
-        }
     }
+    # Upgrades are `dot upgrade`'s sole domain (dot CLI spec,
+    # 2026-09-20): presence-only here by design - install-if-missing.
 }
 
 # Superpowers for Codex CLI: deliberately NOT automated. Confirmed live

@@ -1,5 +1,10 @@
 Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 
+# Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
+# upgrade`) exports DOTUPGRADE_DEFER with the tools whose package dirs
+# cannot be recreated while live agent sessions resolve from them.
+function Test-Deferred([string]$Tool) { return (@($env:DOTUPGRADE_DEFER -split ',') -contains $Tool) }
+
 # 1. NPM Packages (Codex) + OpenCode via choco
 # OpenCode is NOT npm on Windows anymore: opencode-ai's npm package only
 # fetches its real platform binary in a postinstall script, and installs
@@ -8,18 +13,22 @@ Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 # the Windows route opencode's own README documents - see
 # run_onchange_install_packages.ps1.tmpl #3 for the full story.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
-    Write-Host "📦 Updating NPM packages..." -ForegroundColor Yellow
-    npm update -g @openai/codex
-    npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        uv tool upgrade serena-agent
+    if (Test-Deferred 'codex') {
+        Write-Host "  codex deferred - a codex session is live (dot upgrade reports it)." -ForegroundColor Yellow
+    } else {
+        Write-Host "📦 Updating NPM packages..." -ForegroundColor Yellow
+        npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
     }
 } else {
     Write-Host "⚠️  npm not found. Skipping npm packages." -ForegroundColor Red
 }
 if (Get-Command choco -ErrorAction SilentlyContinue) {
-    Write-Host "📦 Updating OpenCode (choco)..." -ForegroundColor Yellow
-    choco upgrade opencode -y --no-progress 2>$null
+    if (Test-Deferred 'opencode') {
+        Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
+    } else {
+        Write-Host "📦 Updating OpenCode (choco)..." -ForegroundColor Yellow
+        choco upgrade opencode -y --no-progress 2>$null
+    }
     # Remove any legacy npm-global opencode-ai shim (dead binary) so it can't
     # shadow choco's binary - the PS profile prepends %APPDATA%\npm to PATH.
     if (Get-Command npm -ErrorAction SilentlyContinue) {
@@ -405,23 +414,33 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     }
 }
 
-# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
+# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
+# Both are defer-aware: uv/graft recreate package dirs that live sessions
+# resolve from (2026-09-20 live incidents).
 if (Get-Command serena -ErrorAction SilentlyContinue) {
-    Write-Host "🧩 Updating Serena..." -ForegroundColor Yellow
-    try {
-        uv tool upgrade serena-agent 2>$null
-        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: serena upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
-    } catch {
-        Write-Host "  Warning: serena upgrade failed - continuing" -ForegroundColor Red
+    if (Test-Deferred 'serena') {
+        Write-Host "🧩 Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
+    } else {
+        Write-Host "🧩 Updating Serena..." -ForegroundColor Yellow
+        try {
+            uv tool upgrade serena-agent 2>$null
+            if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: serena upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+        } catch {
+            Write-Host "  Warning: serena upgrade failed - continuing" -ForegroundColor Red
+        }
     }
 }
 if (Get-Command graft -ErrorAction SilentlyContinue) {
-    Write-Host "🌱 Updating Graft..." -ForegroundColor Yellow
-    try {
-        graft upgrade 2>$null
-        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
-    } catch {
-        Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+    if (Test-Deferred 'graft') {
+        Write-Host "🌱 Graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)." -ForegroundColor Yellow
+    } else {
+        Write-Host "🌱 Updating Graft..." -ForegroundColor Yellow
+        try {
+            graft upgrade 2>$null
+            if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+        } catch {
+            Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+        }
     }
 }
 

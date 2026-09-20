@@ -33,16 +33,15 @@ grep -Fq 'lib-bkp' "$ps1_installer" ||
 grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
     fail "$ps1_installer: no GoogleChrome handover advisory"
 
-# 4. Live-session gates on npm/uv upgrades (agent-guardrails guidance:
-#    recreating a package dir under a live agent host breaks in-flight
-#    resolution - the 2026-09-20 graft/lib-bkp class). Upgrades defer to a
-#    quiet dotup instead of racing sessions.
-grep -Fq 'Skipping Codex CLI upgrade' "$ps1_installer" ||
-    fail "$ps1_installer: codex upgrade must defer while a codex session is live"
-grep -Fq 'Skipping graft upgrade' "$ps1_installer" ||
-    fail "$ps1_installer: graft upgrade must defer while agent hosts are live"
-grep -Fq 'Skipping Serena upgrade' "$ps1_installer" ||
-    fail "$ps1_installer: serena upgrade must defer while a serena process is live"
+# 4. The installer NEVER upgrades: upgrades moved to `dot upgrade`
+#    (tests/dot_cli_contract.sh pins the split). Assert the upgrade
+#    literals are ABSENT here.
+! grep -Fq '@openai/codex@latest' "$ps1_installer" ||
+    fail "$ps1_installer: must not upgrade codex (dot upgrade owns it)"
+! grep -Fq 'uv tool upgrade' "$ps1_installer" ||
+    fail "$ps1_installer: must not upgrade serena (dot upgrade owns it)"
+! grep -Fq 'Upgrading graft' "$ps1_installer" ||
+    fail "$ps1_installer: must not upgrade graft (dot upgrade owns it)"
 
 # 5. Defender exclusion scoping (agent-guardrails #146): exact installed
 #    binary FILE path only - never widened to a directory or process name.

@@ -3,13 +3,20 @@ set -e
 
 echo "🤖 Updating AI Coding Tools..."
 
+# Defer protocol: scripts/dotupgrade.sh (the ONLY entry point - `dot
+# upgrade`) exports DOTUPGRADE_DEFER with the tools whose package dirs
+# cannot be recreated while live agent sessions resolve from them.
+deferred() { case ",${DOTUPGRADE_DEFER:-}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
+
 # 1. NPM Packages (Codex)
 # Note: OpenCode is native on Linux/Mac, so it's not included here
 if command -v npm &>/dev/null; then
-    echo "📦 Updating NPM packages..."
-    sudo npm update -g @openai/codex
-    sudo npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft --loglevel=error --no-progress || echo "   Graft upgrade failed - continuing"
-    command -v uv &>/dev/null && uv tool upgrade serena-agent || echo "   Serena upgrade failed - continuing"
+    if deferred codex; then
+        echo "  codex deferred - a codex session is live (dot upgrade reports it)."
+    else
+        echo "📦 Updating NPM packages..."
+        sudo npm install -g @openai/codex@latest --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+    fi
 else
     echo "⚠️  npm not found. Skipping npm packages."
 fi
@@ -350,8 +357,12 @@ fi
 
 # 3. OpenCode (Native)
 if command -v opencode &>/dev/null; then
-    echo "💻 Updating OpenCode..."
-    curl -fsSL https://opencode.ai/install | bash
+    if deferred opencode; then
+        echo "  opencode deferred - an opencode session is live (upgrading it races the running binary)."
+    else
+        echo "💻 Updating OpenCode..."
+        curl -fsSL https://opencode.ai/install | bash
+    fi
     # A legacy npm-global opencode-ai shim (dead binary - postinstall never
     # ran) can shadow the native binary this installer just refreshed; remove
     # it if present. Harmless when npm or the package is absent.
@@ -383,8 +394,22 @@ if command -v npm &>/dev/null; then
     fi
 fi
 
-# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`)
-command -v serena &>/dev/null && { uv tool upgrade serena-agent 2>/dev/null || echo "  Warning: serena upgrade failed - continuing"; }
-command -v graft &>/dev/null && { graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"; }
+# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
+# Both are defer-aware: uv/graft recreate package dirs that live sessions
+# resolve from (2026-09-20 live incidents).
+if command -v serena &>/dev/null; then
+    if deferred serena; then
+        echo "  serena deferred - a serena process is live (dot upgrade reports it)."
+    else
+        uv tool upgrade serena-agent 2>/dev/null || echo "  Warning: serena upgrade failed - continuing"
+    fi
+fi
+if command -v graft &>/dev/null; then
+    if deferred graft; then
+        echo "  graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)."
+    else
+        graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+    fi
+fi
 
 echo "✅ AI Tools Update Complete!"

@@ -26,7 +26,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Claude Code** | Native (`curl \| sh`) | Native (`curl \| sh`) | Native (`irm \| iex`) | Native (`curl`) | ❌ | Re-run native installer |
 | **Antigravity CLI (agy)** | install script (`antigravity.google/cli/install.sh`) | `brew install --cask antigravity-cli` | `choco install antigravity-cli` | install script (`antigravity.google/cli/install.sh`) | ❌ | Re-run the install method for your platform - agy also self-updates on its own (verifies its own checksum each run). Replaces Gemini CLI in this repo: Google retired standalone Gemini Code Assist for individuals in favor of the Antigravity suite |
-| **Codex CLI** | `@openai/codex` | `@openai/codex` | `@openai/codex` | `@openai/codex` | ❌ | `npm update -g @openai/codex` |
+| **Codex CLI** | `@openai/codex` | `@openai/codex` | `@openai/codex` | `@openai/codex` | ❌ | `dot upgrade` (deferred while a codex session is live) |
 | **OpenCode** | Native (`curl \| bash`) | Native (`curl \| bash`) | `choco install opencode` | Native (`curl`) | ❌ | Re-run curl script, or `choco upgrade opencode` on Windows. NOT npm on Windows: opencode-ai's npm package ships a dead exe whenever its postinstall didn't run (confirmed live 2026-08-31 - "not a valid application for this OS platform") |
 | **Superpowers (Claude Code)** | `claude plugin install` | `claude plugin install` | `claude plugin install` | `claude plugin install` | ❌ | `claude plugin update superpowers -y` |
 | **Superpowers (OpenCode)** | `npm i --prefix ~/.config/opencode` | `npm i --prefix ~/.config/opencode` | `npm i --prefix %USERPROFILE%\.config\opencode` | `npm i --prefix ~/.config/opencode` | ❌ | Re-run the same `npm install` (no version pin, pulls latest commit) |
@@ -49,9 +49,10 @@ This document outlines the tools installed by the dotfiles configuration across 
 > Only OpenCode receives generated command adapters. Codex has no generated command files. Generated
 > command files are marker-owned, so refresh may
 > update them safely but preserves a user-owned command conflict with a warning.
-> Use `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
+> Use `dot upgrade` (the full sweep: packages + AI tools, live-session
+> gated) or `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
 > Linux/macOS/WSL or `& (Join-Path (chezmoi source-path)
-> 'scripts\update_ai_tools.ps1')` on Windows for explicit updates, then restart
+> 'scripts\update_ai_tools.ps1')` on Windows for AI-tools-only updates, then restart
 > OpenCode and start a new Claude Code, Antigravity CLI, or Codex CLI session
 > before using a refreshed skill. OpenCode and Codex discover the catalog-managed shared
 > `~/.agents/skills` directory; other existing content there is not deleted.
