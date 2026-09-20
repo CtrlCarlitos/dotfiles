@@ -214,6 +214,8 @@ New to zsh, tmux, or neovim? Start here:
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
 | [Menu Demo](docs/menu-demo.md) | What the selection menu looks like |
 | [Config Example](docs/chezmoi.toml.example) | Complete chezmoi.toml with all options |
+| [VS Code](docs/vscode.md) | Managed extensions, settings tiers, and per-machine overrides |
+| [Secrets & SSH Hosts](docs/secrets.md) | Machine-local config, SSH aliases, and safe handling |
 | [Windows Setup](docs/windows.md) | Windows-specific details, troubleshooting, devprofile |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
@@ -232,7 +234,10 @@ PowerShell isn't running elevated. Chocolatey requires Administrator rights. Clo
 <details>
 <summary><strong>"chezmoi.exe blocked by Application Control policy" (Windows)</strong></summary>
 
-This is Windows Smart App Control blocking the unsigned `chezmoi.exe`. Go to Windows Security → App & browser control → Smart App Control, and turn it off. On recent Windows 11 builds this is reversible. [Full diagnosis](docs/windows.md).
+Verify the binary/source and use an approved signed distribution or an
+organization-approved allow rule. Do not disable Smart App Control: it weakens
+endpoint protection. On managed devices, ask IT for an allow rule. [Windows
+details](docs/windows.md).
 </details>
 
 <details>

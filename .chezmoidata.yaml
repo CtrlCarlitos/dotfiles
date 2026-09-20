@@ -8,7 +8,7 @@
 # Never resolve "latest": every value here is a reviewed exact release tag
 # (assets + SHA256SUMS verified before pinning). Bumping = edit this one line.
 # VS Code extensions installed globally by the installers (idempotent,
-# `code --install-extension`), gated by the vscode_settings config key.
+# `code --install-extension`), gated by data.packages.vscode_settings.
 # Operator-curated 2026-09-21 from the surveyed project recommendations +
 # installed sets; gitlens and todo-tree are explicitly VETOED by the
 # operator - do not re-add (contract-enforced).

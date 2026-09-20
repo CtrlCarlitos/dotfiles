@@ -207,7 +207,9 @@ Note: account `dirs` from `chezmoi.toml` are auto-created during `chezmoi apply`
 This warning appears when the dotfiles have been updated but your local config is older.
 
 ```bash
-chezmoi init  # Regenerates config, preserves your [data] section
+# Back up ~/.config/chezmoi/chezmoi.toml first. `chezmoi init` preserves only
+# documented fields that .chezmoi.toml.tmpl explicitly re-emits.
+chezmoi init
 ```
 
 ---
@@ -223,11 +225,11 @@ chmod 600 ~/.ssh/id_*
 chmod 644 ~/.ssh/*.pub
 ```
 
-**Windows fix** (PowerShell as Admin):
-```powershell
-# Reset SSH key permissions
-icacls "$env:USERPROFILE\.ssh\id_*" /inheritance:r /grant:r "$env:USERNAME:R"
-```
+**Windows fix**:
+
+Run `chezmoi apply` so the repository's SSH ACL normalizer rebuilds owner-only
+key ACLs. Do not use a broad `icacls` grant: it cannot reliably remove existing
+explicit grants to other users/groups.
 
 ---
 
@@ -236,13 +238,11 @@ icacls "$env:USERPROFILE\.ssh\id_*" /inheritance:r /grant:r "$env:USERNAME:R"
 **Cause**: Private repo requires authentication during `chezmoi init`.
 
 **Solutions**:
-1. **Use SSH** (recommended): Ensure SSH keys are set up before running installer
-2. **Use PAT inline**: The installer uses PAT for downloading, but chezmoi clone may need it too
+1. **Use SSH** (recommended): ensure SSH keys are set up before cloning.
+2. **Use GitHub CLI or a credential manager** for HTTPS authentication.
 
-```bash
-# Clone with PAT embedded (temporary)
-git clone https://YOUR_PAT@github.com/CtrlCarlitos/dotfiles.git ~/.local/share/chezmoi
-```
+Do not embed a PAT in a clone URL: it can persist in shell history, process
+listings, Git remote configuration, and logs.
 
 ---
 

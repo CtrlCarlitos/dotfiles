@@ -77,6 +77,7 @@ $sectionRegex = '(?ms)^[ \t]*\[data\.packages\][ \t]*\r?\n(.*?)(?=^[ \t]*\[|\z)'
 $content = ''
 $hasSection = $false
 $trueKeys = @()
+$vscodeSettings = $null
 if (Test-Path -LiteralPath $configFile) {
     $content = [IO.File]::ReadAllText($configFile)
     $sectionMatch = [regex]::Match($content, $sectionRegex)
@@ -85,6 +86,9 @@ if (Test-Path -LiteralPath $configFile) {
         foreach ($line in ($sectionMatch.Groups[1].Value -split '\r?\n')) {
             if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*true\s*$') {
                 $trueKeys += $Matches[1]
+            }
+            if ($line -match '^\s*vscode_settings\s*=\s*(true|false)(?:\s*#.*)?\s*$') {
+                $vscodeSettings = $Matches[1]
             }
         }
     }
@@ -144,6 +148,7 @@ foreach ($group in $pkgGroups) {
     $value = if ($chosen -contains $group) { 'true' } else { 'false' }
     $lines += "  $group = $value"
 }
+if ($null -ne $vscodeSettings) { $lines += "  vscode_settings = $vscodeSettings" }
 $block = ($lines -join $nl) + $nl
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 

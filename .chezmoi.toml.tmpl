@@ -41,19 +41,23 @@
 {{- $interactive := and (not $isDevcontainer) (not (env "CI")) -}}
 
 [data]
-  # isDevcontainer/isWsl/isHost intentionally NOT stored here anymore - they used to
-  # be, which meant they were computed once at `chezmoi init` time and frozen into
-  # this file, going stale on every subsequent `chezmoi apply` (e.g. after copying
-  # this config to a different machine/environment type) until someone remembered to
-  # re-run `chezmoi init`. The two other templates that need these values
-  # (run_onchange_install_packages.sh.tmpl, dot_gitconfig.tmpl) compute them inline
-  # instead, so they're always live/correct on every apply, never stored, never stale.
+  # This is the template-data namespace: installers and dotfile templates read
+  # values under [data.*]. `chezmoi init` regenerates this entire file from this
+  # template, so preserve only fields the sections below explicitly re-emit.
+  #
+  # isDevcontainer/isWsl/isHost are intentionally NOT stored here. They used to
+  # be computed once at `chezmoi init` and then went stale after copying this
+  # config to another environment. Templates that need them compute them live
+  # on every `chezmoi apply` instead.
 
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
-  # All toggles are independent on all platforms (Linux, macOS, Windows).
-  # Clean break: the old six toggles became these 16 groups, no auto-migration
-  # - full rename map lives in docs/package-groups.md.
+  # All 16 toggles are independent on Linux, macOS, and Windows. `true` means
+  # desired state on the next apply; host-only desktop groups remain skipped in
+  # WSL and containers. The package-selection menu rewrites this whole table.
+  #
+  # These replace the old six install_* toggles with no auto-migration; the
+  # complete rename map, presets, and platform matrix live in docs/package-groups.md.
   # ==========================================================================
   [data.packages]
     # core - terminal fundamentals (git, zsh, tmux, node, python, fzf, gh)
@@ -93,13 +97,6 @@
     # antigravity_desktop - Antigravity 2.0 app (host only)
     antigravity_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.antigravity_desktop" "Install antigravity_desktop (Antigravity 2.0 app)?" false }}{{ else }}false{{ end }}
 
-    # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
-    # Host only: not prompted on WSL/containers, and enforced there too —
-    # the package-install template gates the actual install on the same
-    # $isHost check, not just this prompt, so hand-editing this to `true` on
-    # WSL/in a container still won't install desktop apps there.
-    dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
-
     # remote_access - private mesh access and approved app tunneling; no login/config.
     remote_access = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access" "Install remote_access (Tailscale, cloudflared; no login or tunnel setup)?" false }}{{ else }}false{{ end }}
 
@@ -111,6 +108,48 @@
     # binary + enable planes; false = never download, disable planes if a
     # binary exists (binary is never auto-removed).
     guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
+
+    # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
+    # Host only: not prompted on WSL/containers, and enforced there too —
+    # the package-install template gates the actual install on the same
+    # $isHost check, not just this prompt, so hand-editing this to `true` on
+    # WSL/in a container still won't install desktop apps there.
+    dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
+
+    # vscode_settings - settings defaults + global extension management.
+    # No prompt; default true. Set false to opt out wholesale on this machine.
+{{- if and (hasKey . "packages") (hasKey .packages "vscode_settings") }}
+    vscode_settings = {{ .packages.vscode_settings }}
+{{- else }}
+    # vscode_settings = false    # opt out of settings + extension management
+{{- end }}
+
+{{/* vscode_overrides: machine-local VS Code drift from the repo baseline.
+     Use this table for extensions/settings that vary per machine. Do NOT use
+     [data.vscode]: chezmoi replaces same-named data tables instead of merging
+     them, which would shadow the repo baseline. extra_settings supports
+     scalars, arrays, and nested TOML tables (including language scopes like
+     [python]); see docs/vscode.md for field semantics and examples. */}}
+{{- if hasKey . "vscode_overrides" }}
+# VS Code Machine-Local Overrides
+# These values complement the repository baseline for this machine only.
+# extra_extensions adds extensions; exclude_extensions prevents a baseline
+# extension from reinstalling. exclude_settings removes a managed key; use
+# extra_settings to upsert a replacement. Nested values are valid TOML and
+# `chezmoi init` writes them as nested tables.
+{{ replace "[vscode_overrides" "[data.vscode_overrides" (toToml (dict "vscode_overrides" .vscode_overrides)) }}
+{{- else }}
+  # [data.vscode_overrides]  (machine-local drift from the repo baseline;
+  # different key on purpose - chezmoi does not deep-merge same-named tables)
+  #   extra_extensions   = ["hashicorp.terraform"]              # add to baseline
+  #   exclude_extensions = ["ms-python.pylint"]                 # stop reinstalling here
+  #   exclude_settings   = ["terminal.integrated.fontFamily"]   # stop forcing a key
+  #   [data.vscode_overrides.extra_settings]  (upsert tier; change = exclude + add)
+  #     "editor.fontSize"     = 15
+  #     "files.autoSaveDelay" = 1000
+  #     "editor.rulers"       = [80, 120]
+  #     "[python]"            = { "editor.tabSize" = 4 }
+{{- end }}
 
 {{- if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
@@ -126,21 +165,23 @@
   organizations = []
   dirs = []
 {{- else }}
-  # Account configuration
-  # Each account generates: ~/.gitconfig-<alias> and includeIf rules
-  #
-  # To add more accounts, edit ~/.config/chezmoi/chezmoi.toml:
-  #
-  # [[data.accounts]]
-  #   name = "Work Name"
-  #   email = "work@company.com"
-  #   key = "id_work"
-  #   signingKey = "id_work_sign"   # optional: commit signing; falls back to key
-  #   dirs = ["projects/work"]
-  #
-  # NOTE: only fields re-emitted below survive `chezmoi init` (the config file
-  # is regenerated from this template); anything else in the section is
-  # dropped. The gitconfig alias is derived (provider-username), not a field.
+# Account Configuration
+# Each account generates a ~/.gitconfig-<provider>-<username> identity file
+# and includeIf rules for its dirs. The matching SSH key name is just the
+# filename in ~/.ssh (never a private key or passphrase).
+#
+# Add one [[data.accounts]] block per identity:
+#   name          = "Work Name"             # required: commit author name
+#   email         = "work@company.com"      # required: commit author email
+#   username      = "work-user"             # required: GitHub/GitLab account
+#   provider      = "github"                # github (default) or gitlab
+#   key           = "id_work"               # optional: ~/.ssh key filename
+#   signingKey    = "id_work_sign"          # optional: falls back to key
+#   organizations = ["company-org"]         # optional: URL rewrite scope
+#   dirs          = ["projects/work"]       # paths using this identity
+#
+# `chezmoi init` regenerates this file. Only fields explicitly re-emitted
+# below survive it; the gitconfig alias is derived, not a stored field.
 {{- range $accounts }}
 
 [[data.accounts]]
@@ -163,30 +204,39 @@
 {{-   end }}
 {{- end }}
   dirs = [{{ if hasKey . "dirs" }}{{ range $i, $dir := .dirs }}{{ if $i }}, {{ end }}{{ $dir | quote }}{{ end }}{{ end }}]
-{{- end }}
-{{- end }}
-
+{{- end -}}
+{{- end -}}
 {{/* =====================================================================
-  Machine-local features - documented and ROUND-TRIPPED. `chezmoi init`
-  regenerates this whole file; any key this template doesn't re-emit is
-  destroyed (the same NOTE as accounts above). Each block below re-emits
-  what exists so re-init is lossless, with a commented example for the
-  features you haven't used yet.
+  Machine-local SSH Hosts - documented and ROUND-TRIPPED. `chezmoi init`
+  regenerates this whole file, so any key this template does not re-emit is
+  destroyed. Each host below is re-emitted losslessly; an unused setup gets a
+  commented example. VS Code settings/overrides live above, after dev_desktop.
 ===================================================================== */}}
-
-{{/* vscode_settings: hasKey pattern (no prompt, no CI-seeding burden).
-     false = the installers skip VS Code settings defaults AND global
-     extension management entirely. Default true. */}}
-{{- if hasKey . "vscode_settings" }}
-vscode_settings = {{ .vscode_settings }}
-{{- else }}
-# vscode_settings = false   # opt out of VS Code settings/extensions management
-{{- end }}
 
 {{/* ssh_hosts: rendered into the SSH client config by
      private_dot_ssh/private_config.tmpl; VS Code Remote-SSH reads them
      natively. comment renders as the block header - your memory hook. */}}
-{{- if hasKey . "ssh_hosts" }}
+{{- if hasKey . "ssh_hosts" -}}
+# SSH Host Aliases
+# Each [[data.ssh_hosts]] block becomes an SSH Host entry and is picked up by
+# VS Code Remote-SSH. name and hostname are required; user, port, identity,
+# proxy (ProxyJump alias), and comment (the rendered block header) are optional.
+# identity is a filename in ~/.ssh; private keys and passphrases never belong here.
+#
+# Generated SSH config adds safe defaults after all aliases: host-key changes are
+# rejected, known-host entries are hashed, agent forwarding is disabled, and
+# dead sessions are detected. A future host-specific option is emitted before
+# those defaults and therefore wins (OpenSSH uses the first value it finds).
+#
+# Complete example (copy, uncomment, and customize):
+# [[data.ssh_hosts]]
+#   name     = "prod-jump"            # required  Host alias
+#   hostname = "10.0.0.5"             # required  IP or DNS name
+#   user     = "carlitos"             # optional  login user
+#   port     = 22                     # optional  default 22
+#   identity = "id_personal"          # optional  key filename in ~/.ssh
+#   proxy    = "bastion"              # optional  ProxyJump alias
+#   comment  = "Bastion for staging"  # optional  rendered block header
 {{- range .ssh_hosts }}
 
 [[data.ssh_hosts]]
@@ -209,54 +259,14 @@ vscode_settings = {{ .vscode_settings }}
 {{- end }}
 {{- end }}
 {{- else }}
-# [[data.ssh_hosts]]
-#   name     = "prod-jump"              # required: Host alias
-#   hostname = "10.0.0.5"               # required: IP or DNS
-#   user     = "carlitos"               # optional: login user
-#   port     = 22                       # optional (default 22)
-#   identity = "id_personal"            # optional: key file in ~/.ssh
-#   proxy    = ""                       # optional: ProxyJump alias (bastion)
-#   comment  = "Bastion for staging"    # optional: rendered as block header
-{{- end }}
-
-{{/* vscode_overrides: machine-local drift from the repo-curated VS Code
-     baseline. Deliberately a DIFFERENT key from the .chezmoidata.yaml
-     vscode table (chezmoi does not deep-merge same-named tables - config
-     [data.X] is wholesale-shadowed; installers merge instead). See
-     docs/vscode.md for the full field reference. */}}
-{{- if hasKey . "vscode_overrides" }}
-[data.vscode_overrides]
-{{-   if hasKey .vscode_overrides "extra_extensions" }}
-  extra_extensions = [{{ range $i, $e := .vscode_overrides.extra_extensions }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
-{{-   end }}
-{{-   if hasKey .vscode_overrides "exclude_extensions" }}
-  exclude_extensions = [{{ range $i, $e := .vscode_overrides.exclude_extensions }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
-{{-   end }}
-{{-   if hasKey .vscode_overrides "exclude_settings" }}
-  exclude_settings = [{{ range $i, $e := .vscode_overrides.exclude_settings }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
-{{-   end }}
-{{-   if hasKey .vscode_overrides "extra_settings" }}
-  [data.vscode_overrides.extra_settings]
-{{-     range $k, $v := .vscode_overrides.extra_settings }}
-{{-       if kindIs "map" $v }}
-  {{ $k | quote }} = {{ $v | toJson }}
-{{-       else if kindIs "slice" $v }}
-  {{ $k | quote }} = {{ $v | toJson }}
-{{-       else if or (kindIs "bool" $v) (kindIs "int" $v) (kindIs "int64" $v) (kindIs "float64" $v) (kindIs "float32" $v) }}
-  {{ $k | quote }} = {{ $v }}
-{{-       else }}
-  {{ $k | quote }} = {{ $v | quote }}
-{{-       end }}
-{{-     end }}
-{{-   end }}
-{{- else }}
-# [data.vscode_overrides]
-#   extra_extensions    = ["hashicorp.terraform"]           # add to baseline
-#   exclude_extensions  = ["ms-python.pylint"]              # stop reinstalling here
-#   exclude_settings    = ["terminal.integrated.fontFamily"]  # stop forcing
-#   [data.vscode_overrides.extra_settings]
-#     "editor.fontSize"     = 15
-#     "files.autoSaveDelay" = 1000
+# [[data.ssh_hosts]]  (one block per host; keys live in ~/.ssh)
+#   name     = "prod-jump"            # required  Host alias
+#   hostname = "10.0.0.5"             # required  IP or DNS name
+#   user     = "carlitos"             # optional  login user
+#   port     = 22                     # optional  default 22
+#   identity = "id_personal"          # optional  key file name in ~/.ssh
+#   proxy    = "bastion"              # optional  ProxyJump alias
+#   comment  = "Bastion for staging"  # optional  block header (memory hook)
 {{- end }}
 
 [add]

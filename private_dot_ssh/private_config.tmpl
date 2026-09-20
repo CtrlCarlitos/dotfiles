@@ -104,3 +104,14 @@ Host {{ $name }}
 # No [[data.ssh_hosts]] configured. Add hosts to ~/.config/chezmoi/chezmoi.toml
 # (see docs/secrets.md) and re-run `chezmoi apply`.
 {{- end }}
+
+# Security and connection defaults. This Host * block is intentionally last:
+# OpenSSH keeps the first value it finds, so a generated Host alias can opt out
+# with a host-specific directive before reaching these defaults.
+Host *
+    StrictHostKeyChecking accept-new
+    UpdateHostKeys yes
+    HashKnownHosts yes
+    ForwardAgent no
+    ServerAliveInterval 30
+    ServerAliveCountMax 3

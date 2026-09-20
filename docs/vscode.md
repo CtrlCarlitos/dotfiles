@@ -1,14 +1,19 @@
 # VS Code global settings & extensions
 
 Repo-curated machine baseline + per-machine drift, applied by the package
-installers on every `chezmoi apply` (gated by `vscode_settings` — set
-`vscode_settings = false` in chezmoi.toml to opt out wholesale).
+installers on every `chezmoi apply`. Opt out wholesale with:
+
+```toml
+[data.packages]
+vscode_settings = false
+```
 
 ## Where things live
 
 | What | Home |
 |---|---|
 | Extension baseline (24 curated) | `.chezmoidata.yaml` → `vscode.extensions` (+ `extensions_windows`) |
+| Whole-feature gate | `~/.config/chezmoi/chezmoi.toml` → `[data.packages]` → `vscode_settings` |
 | Settings baseline (forced/upsert/merge tiers) | embedded in both installer templates |
 | Machine overrides | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode_overrides]` |
 
@@ -22,14 +27,15 @@ in the installers.
 
 | Tier | Keys | On re-apply | Local drift |
 |---|---|---|---|
-| FORCED | editor/terminal font (MesloLGS NF) | re-asserted | exclude to stop |
+| FORCED | editor/terminal font (MesloLGS Nerd Font Mono) | re-asserted | exclude to stop |
 | UPSERT | ~15 curated defaults | only written when absent | your value wins |
 | MERGE | files.exclude / search.exclude junk dirs | only missing sub-keys added | your entries stay |
 
 ## Nested values in extra_settings
 
-Arrays and objects are fully supported — TOML inline tables/arrays become
-JSON and are stored verbatim:
+Arrays and objects are fully supported. They are serialized to JSON for the
+installers; `chezmoi init` may normalize TOML inline tables into nested tables
+while preserving their values:
 
 ```toml
 [data.vscode_overrides.extra_settings]
@@ -78,6 +84,8 @@ in both twins.
 - Settings file missing → created with the full effective set (only when VS
   Code itself is installed; never fabricate `%APPDATA%\Code`).
 - Existing file → `.bak` before any change; JSONC (comments/trailing commas)
-  parsed tolerantly by both twins; malformed files are never clobbered.
+  is parsed tolerantly and malformed files are never clobbered. A changed file
+  is rewritten as strict, alphabetized JSON with two-space indentation, so
+  comments remain only in the `.bak` copy.
 - Projects keep full authority: their `.vscode/settings.json` layers on top
   of these machine globals.
