@@ -29,7 +29,7 @@ left to you.
 | | Serena | Graft |
 | :--- | :--- | :--- |
 | Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) | `npm i -g @nanonets/graft` (with npm's `--allow-scripts` allowlist for its tree-sitter native builds) |
-| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex`, JSON merge into OpenCode's global `mcp` key, and `agy mcp add serena …` complete the remaining clients | None needed (it's a CLI); `graft mcp` exists if you want it as an MCP server |
+| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex`; JSON merge into OpenCode's global `mcp` key (graft joins it there too — opencode reads MCP only from that block); Antigravity gets both via the `dotfiles-mcp` plugin bundle (`~/.gemini/config/plugins/`), because agy defers plain global `mcp_config.json` servers until a manual `/mcp` while plugin-bundled servers start eagerly | Plugin bundle alongside serena's (same file); Claude and Codex get graft's MCP via graft's own global registration on first `graft init` |
 | Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional | `graft init` + `graft build` (see below) |
 | Telemetry | n/a | Disabled by the installer (`graft telemetry disable`) |
 | Upgrade | `uv tool upgrade serena-agent` (also run by `scripts/update_ai_tools.*`) | `graft upgrade` (also run by `scripts/update_ai_tools.*`) |

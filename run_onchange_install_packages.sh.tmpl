@@ -1369,12 +1369,18 @@ VSEXT
         fi
     fi
 
-    # opencode: global config mcp key (merge, never clobber the plugin key)
-    if command -v opencode &>/dev/null && command -v serena &>/dev/null; then
+    # opencode: global config mcp keys (merge, never clobber the plugin
+    # key). opencode loads MCP ONLY from this global block - graft needs an
+    # entry here too, or every fresh session starts with serena only
+    # (surveyed live 2026-09-20).
+    if command -v opencode &>/dev/null; then
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         mkdir -p "$(dirname "$OC_GLOBAL")"
-        if [ ! -f "$OC_GLOBAL" ] || ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null; then
-            info "Registering Serena MCP in opencode..."
+        OC_WANT=""
+        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
+        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
+        if [ -n "$OC_WANT" ]; then
+            info "Registering MCP in opencode ($OC_WANT)..."
             python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
 import json, os, sys
 p = sys.argv[1]
@@ -1387,18 +1393,40 @@ cfg.setdefault("mcp", {})["serena"] = {
     "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
     "enabled": True,
 }
+cfg.setdefault("mcp", {})["graft"] = {
+    "type": "local",
+    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
+    "enabled": True,
+}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
         fi
     fi
-    # agy: first-class MCP management (verified: agy mcp add/list)
-    if command -v agy &>/dev/null && command -v serena &>/dev/null; then
-        if ! agy mcp list 2>/dev/null | grep -q serena; then
-            info "Registering Serena MCP in agy..."
-            net_timeout 60 agy mcp add serena serena start-mcp-server --context ide-assistant \
-                || warn "agy MCP registration failed - continuing"
-        fi
+    # agy: MCP via plugin bundle, NOT the global mcp_config.json - agy
+    # defers global stdio servers until a manual /mcp (fast-startup design),
+    # while plugin-bundled servers start eagerly at session init (agy's own
+    # documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+    # rewriting the bundle is a refresh.
+    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
+    AGY_WANT=""
+    command -v serena &>/dev/null && AGY_WANT="serena"
+    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
+    if [ -n "$AGY_WANT" ]; then
+        info "Writing agy MCP plugin bundle ($AGY_WANT)..."
+        mkdir -p "$AGY_PLUGIN_DIR"
+        printf '{ "name": "dotfiles-mcp" }\n' > "$AGY_PLUGIN_DIR/plugin.json"
+        python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
+import json, sys
+want = set(filter(None, sys.argv[2].split(",")))
+servers = {}
+if "serena" in want:
+    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
+if "graft" in want:
+    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+with open(sys.argv[1], "w") as f:
+    json.dump({"mcpServers": servers}, f, indent=2)
+PYEOF
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
@@ -1777,12 +1805,18 @@ install_brew() {
         fi
     fi
 
-    # opencode: global config mcp key (merge, never clobber the plugin key)
-    if command -v opencode &>/dev/null && command -v serena &>/dev/null; then
+    # opencode: global config mcp keys (merge, never clobber the plugin
+    # key). opencode loads MCP ONLY from this global block - graft needs an
+    # entry here too, or every fresh session starts with serena only
+    # (surveyed live 2026-09-20).
+    if command -v opencode &>/dev/null; then
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         mkdir -p "$(dirname "$OC_GLOBAL")"
-        if [ ! -f "$OC_GLOBAL" ] || ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null; then
-            info "Registering Serena MCP in opencode..."
+        OC_WANT=""
+        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
+        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
+        if [ -n "$OC_WANT" ]; then
+            info "Registering MCP in opencode ($OC_WANT)..."
             python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
 import json, os, sys
 p = sys.argv[1]
@@ -1795,18 +1829,40 @@ cfg.setdefault("mcp", {})["serena"] = {
     "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
     "enabled": True,
 }
+cfg.setdefault("mcp", {})["graft"] = {
+    "type": "local",
+    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
+    "enabled": True,
+}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
         fi
     fi
-    # agy: first-class MCP management (verified: agy mcp add/list)
-    if command -v agy &>/dev/null && command -v serena &>/dev/null; then
-        if ! agy mcp list 2>/dev/null | grep -q serena; then
-            info "Registering Serena MCP in agy..."
-            net_timeout 60 agy mcp add serena serena start-mcp-server --context ide-assistant \
-                || warn "agy MCP registration failed - continuing"
-        fi
+    # agy: MCP via plugin bundle, NOT the global mcp_config.json - agy
+    # defers global stdio servers until a manual /mcp (fast-startup design),
+    # while plugin-bundled servers start eagerly at session init (agy's own
+    # documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+    # rewriting the bundle is a refresh.
+    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
+    AGY_WANT=""
+    command -v serena &>/dev/null && AGY_WANT="serena"
+    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
+    if [ -n "$AGY_WANT" ]; then
+        info "Writing agy MCP plugin bundle ($AGY_WANT)..."
+        mkdir -p "$AGY_PLUGIN_DIR"
+        printf '{ "name": "dotfiles-mcp" }\n' > "$AGY_PLUGIN_DIR/plugin.json"
+        python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
+import json, sys
+want = set(filter(None, sys.argv[2].split(",")))
+servers = {}
+if "serena" in want:
+    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
+if "graft" in want:
+    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+with open(sys.argv[1], "w") as f:
+    json.dump({"mcpServers": servers}, f, indent=2)
+PYEOF
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;

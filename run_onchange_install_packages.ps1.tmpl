@@ -956,27 +956,31 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     }
 }
 
-# opencode: global config mcp key (merge, never clobber the plugin key -
-#     the Superpowers-for-OpenCode wiring above owns it). Raw-content '"serena"'
-#     pre-check, same cheap idempotence guard as the sh side's grep, so an
-#     already-registered config is never re-serialized.
-if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
+# opencode: global config mcp keys (merge, never clobber the plugin key -
+#     the Superpowers-for-OpenCode wiring above owns it). Raw-content
+#     pre-checks per server ('"serena"' / '"graft"'), same cheap idempotence
+#     guard as the sh side's grep, so a registered config is never
+#     re-serialized. opencode loads MCP ONLY from this global mcp block
+#     (surveyed live 2026-09-20): without a graft entry here, every fresh
+#     opencode session starts with serena only.
+if (Get-Command opencode -ErrorAction SilentlyContinue) {
     $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
     # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
     # locked/unreadable opencode.json would otherwise terminate the script
     # here (WT settings read idiom); on read failure fall through to the
     # merge path, which re-reads inside its own try/catch.
-    $ocNeedsMerge = $true
+    $ocRawCfg = ""
     if (Test-Path $ocConfig) {
-        try { $ocNeedsMerge = -not ((Get-Content $ocConfig -Raw) -match '"serena"') } catch {
+        try { $ocRawCfg = Get-Content $ocConfig -Raw } catch {
             Write-Host "  Warning: opencode.json unreadable - attempting merge anyway" -ForegroundColor Yellow
         }
     }
-    if ($ocNeedsMerge) {
-        Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
-        try {
-            New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
-            $ocJson = if (Test-Path $ocConfig) { Get-Content $ocConfig -Raw | ConvertFrom-Json } else { New-Object PSObject }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
+        $ocJson = if ($ocRawCfg) { $ocRawCfg | ConvertFrom-Json } else { New-Object PSObject }
+        $ocDirty = $false
+        if ((Get-Command serena -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"serena"')) {
+            Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
             $serenaDef = @{ type = "local"; command = @("serena", "start-mcp-server", "--context", "ide-assistant"); enabled = $true }
             if (-not $ocJson.PSObject.Properties["mcp"]) {
                 $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ serena = $serenaDef }
@@ -984,26 +988,58 @@ if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command seren
                 # mcp already holds other servers - add serena beside them
                 $ocJson.mcp | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef -Force
             }
+            $ocDirty = $true
+        }
+        if ((Get-Command graft -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"graft"')) {
+            Write-Host "  Registering graft MCP in opencode..." -ForegroundColor Yellow
+            # Same npx form graft's own host-writer uses: OS-agnostic,
+            # registry-resolved, no global-binary coupling (npx resolves the
+            # graft index from cwd at spawn, so one global entry works per repo).
+            $graftDef = @{ type = "local"; command = @("npx", "-y", "@nanonets/graft", "mcp"); enabled = $true }
+            if (-not $ocJson.PSObject.Properties["mcp"]) {
+                $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ graft = $graftDef }
+            } else {
+                $ocJson.mcp | Add-Member -MemberType NoteProperty -Name graft -Value $graftDef -Force
+            }
+            $ocDirty = $true
+        }
+        if ($ocDirty) {
             # BOM-less UTF-8 write (PS 5.1's Set-Content -Encoding utf8 prepends
             # a BOM that Go JSON consumers reject - see block 5's note); the
             # round-trip preserves every existing key, plugin included.
             [System.IO.File]::WriteAllLines($ocConfig, ($ocJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
-        } catch {
-            Write-Host "  Warning: opencode Serena registration failed - $_" -ForegroundColor Red
         }
+    } catch {
+        Write-Host "  Warning: opencode MCP registration failed - $_" -ForegroundColor Red
     }
 }
 
-# agy: first-class MCP management (verified: agy mcp add/list).
-if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
-    # try/catch + 2>&1 capture, not a bare call: under EAP=Stop a native
-    # command's stderr is the terminating-error trap (same idiom as the
-    # guardrail version check below).
-    $agyMcp = ""
-    try { $agyMcp = (agy mcp list 2>&1 | Out-String) } catch { $agyMcp = "" }
-    if ($agyMcp -notmatch "serena") {
-        Write-Host "  Registering Serena MCP in agy..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "agy mcp add serena" -Seconds 60 -Action { agy mcp add serena serena start-mcp-server --context ide-assistant 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+# agy: MCP via plugin bundle, NOT the global mcp_config.json - agy defers
+#     global stdio servers until a manual /mcp (its fast-startup design),
+#     while plugin-bundled servers start eagerly at session init (agy's own
+#     documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+#     rewriting the bundle is a refresh. BOM-less writes per the opencode
+#     note above (agy's Go consumer has the same BOM class).
+$agyPluginsDir = "$env:USERPROFILE\.gemini\config\plugins\dotfiles-mcp"
+$agyWantServers = @()
+if (Get-Command serena -ErrorAction SilentlyContinue) { $agyWantServers += 'serena' }
+if (Get-Command graft -ErrorAction SilentlyContinue) { $agyWantServers += 'graft' }
+if ($agyWantServers.Count -gt 0) {
+    try {
+        New-Item -ItemType Directory -Force -Path $agyPluginsDir | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'plugin.json'), '{ "name": "dotfiles-mcp" }', (New-Object System.Text.UTF8Encoding($false)))
+        $agyServers = @{}
+        if ($agyWantServers -contains 'serena') {
+            $agyServers['serena'] = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+        }
+        if ($agyWantServers -contains 'graft') {
+            $agyServers['graft'] = @{ command = 'npx'; args = @('-y', '@nanonets/graft', 'mcp') }
+        }
+        $agyBundle = @{ mcpServers = $agyServers } | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'mcp_config.json'), $agyBundle, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  agy MCP plugin bundle written: $($agyWantServers -join ', ')" -ForegroundColor Green
+    } catch {
+        Write-Host "  Warning: agy MCP plugin bundle failed - $_" -ForegroundColor Red
     }
 }
 
