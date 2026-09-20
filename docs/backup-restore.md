@@ -41,7 +41,7 @@ The script writes the encrypted `.7z` archive to `~/.dot_backups/` and prints it
 Run the supported backup script:
 
 ```powershell
-pwsh -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotbackup.ps1"
+powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotbackup.ps1"
 ```
 
 It creates the same AES-256, header-encrypted `.7z` archive under `~/.dot_backups/` and refuses an existing destination archive.
@@ -73,7 +73,7 @@ bash ~/.local/share/chezmoi/scripts/dotrestore.sh ~/.dot_backups/dotfiles-YYYYMM
 Pass the transferred archive path to the restore script:
 
 ```powershell
-pwsh -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotrestore.ps1" -Archive "C:\path\dotfiles-YYYYMMDD-HHMMSS.7z"
+powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotrestore.ps1" -Archive "C:\path\dotfiles-YYYYMMDD-HHMMSS.7z"
 ```
 
 The restore script prompts for the passphrase, validates the manifest, restores the allowlisted local data, and then directs you to run:

@@ -10,7 +10,6 @@ seven_zip="$(command -v 7zz || command -v 7z || true)"
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
-"$seven_zip" t -p "$archive"
 "$seven_zip" x -p "-o$stage" "$archive"
 
 unexpected_root="$(find "$stage" -mindepth 1 -maxdepth 1 ! -name dotfiles-backup-v1 -print -quit)"
@@ -22,7 +21,32 @@ unexpected_root="$(find "$stage" -mindepth 1 -maxdepth 1 ! -name dotfiles-backup
 root="$stage/dotfiles-backup-v1"
 manifest="$root/manifest.json"
 config_source="$root/chezmoi/chezmoi.toml"
-[ -d "$root" ] && [ -f "$manifest" ] && [ -f "$config_source" ] || {
+ssh_source="$root/ssh"
+[ -d "$root" ] && [ ! -L "$root" ] || {
+    printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
+    exit 1
+}
+staged_symlink="$(find "$root" -type l -print -quit)"
+[ -z "$staged_symlink" ] || {
+    printf 'ERROR: archive contains a symlink: %s\n' "$staged_symlink" >&2
+    exit 1
+}
+manifest_entry=0
+chezmoi_entry=0
+ssh_entry=0
+for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    case "${entry##*/}" in
+        manifest.json) [ -f "$entry" ] && manifest_entry=1 ;;
+        chezmoi) [ -d "$entry" ] && chezmoi_entry=1 ;;
+        ssh) [ -d "$entry" ] && ssh_entry=1 ;;
+        *)
+            printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
+            exit 1
+            ;;
+    esac
+done
+[ "$manifest_entry" -eq 1 ] && [ "$chezmoi_entry" -eq 1 ] && [ "$ssh_entry" -eq 1 ] && [ -f "$config_source" ] || {
     printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
     exit 1
 }
@@ -59,19 +83,18 @@ reject_symlinked_parent() { # $1 = destination path
 
 config_destination="$HOME/.config/chezmoi/chezmoi.toml"
 reject_symlinked_parent "$config_destination"
-[ ! -e "$config_destination" ] || {
+[ ! -e "$config_destination" ] && [ ! -L "$config_destination" ] || {
     printf 'ERROR: refusing to overwrite existing ChezMoi config: %s\n' "$config_destination" >&2
     exit 1
 }
 
-ssh_source="$root/ssh"
 if [ -d "$ssh_source" ]; then
     reject_symlinked_parent "$HOME/.ssh/.dotrestore-parent-check"
     while IFS= read -r -d '' source; do
         relative="${source#"$ssh_source/"}"
         destination="$HOME/.ssh/$relative"
         reject_symlinked_parent "$destination"
-        [ ! -e "$destination" ] || {
+        [ ! -e "$destination" ] && [ ! -L "$destination" ] || {
             printf 'ERROR: refusing to overwrite existing SSH file: %s\n' "$destination" >&2
             exit 1
         }

@@ -45,10 +45,6 @@ case "$command" in
         mkdir -p "${archive}.contents"
         cp -R "$root" "${archive}.contents/"
         ;;
-    t)
-        archive="${!#}"
-        [ -f "$archive" ] && [ -d "${archive}.contents" ] || exit 66
-        ;;
     x)
         output=''
         for arg in "$@"; do
@@ -145,7 +141,28 @@ run_restore "$layout_home" "$layout_archive" >/dev/null 2>&1 && fail '[4] archiv
 [ ! -e "$layout_home/.config/chezmoi/chezmoi.toml" ] || fail '[4] invalid layout wrote config'
 printf '  ok: invalid archive layout rejected\n'
 
-# [5] Symlinked destination parents must not redirect restored files outside HOME.
+# [5] The v1 payload root must contain only its three required entries.
+payload_layout_archive="$tmp/payload-layout.7z"
+make_archive "$payload_layout_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
+printf 'unexpected\n' > "${payload_layout_archive}.contents/dotfiles-backup-v1/extra"
+payload_layout_home="$tmp/home-payload-layout"
+mkdir -p "$payload_layout_home"
+run_restore "$payload_layout_home" "$payload_layout_archive" >/dev/null 2>&1 && fail '[5] archive with an unexpected payload entry was restored'
+[ ! -e "$payload_layout_home/.config/chezmoi/chezmoi.toml" ] || fail '[5] invalid payload layout wrote config'
+printf '  ok: exact v1 payload layout required\n'
+
+# [6] Symlinks in the staged payload must be rejected before any files are read.
+payload_symlink_archive="$tmp/payload-symlink.7z"
+make_archive "$payload_symlink_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
+rm "${payload_symlink_archive}.contents/dotfiles-backup-v1/chezmoi/chezmoi.toml"
+ln -s /etc/passwd "${payload_symlink_archive}.contents/dotfiles-backup-v1/chezmoi/chezmoi.toml"
+payload_symlink_home="$tmp/home-payload-symlink"
+mkdir -p "$payload_symlink_home"
+run_restore "$payload_symlink_home" "$payload_symlink_archive" >/dev/null 2>&1 && fail '[6] archive with a payload symlink was restored'
+[ ! -e "$payload_symlink_home/.config/chezmoi/chezmoi.toml" ] || fail '[6] payload symlink wrote config'
+printf '  ok: staged payload symlinks rejected\n'
+
+# [7] Symlinked destination parents and final targets must not redirect restored files outside HOME.
 valid_archive="$tmp/valid.7z"
 make_archive "$valid_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
 config_parent_home="$tmp/home-config-parent"
@@ -169,8 +186,20 @@ empty_ssh_outside="$tmp/empty-ssh-outside"
 mkdir -p "$empty_ssh_home" "$empty_ssh_outside"
 ln -s "$empty_ssh_outside" "$empty_ssh_home/.ssh"
 run_restore "$empty_ssh_home" "$empty_ssh_archive" >/dev/null 2>&1 && fail '[5] empty SSH payload accepted a symlinked SSH parent'
-[ ! -e "$empty_ssh_home/.config/chezmoi/chezmoi.toml" ] || fail '[5] SSH parent rejection wrote config first'
-printf '  ok: symlinked destination parents rejected\n'
+[ ! -e "$empty_ssh_home/.config/chezmoi/chezmoi.toml" ] || fail '[7] SSH parent rejection wrote config first'
+config_target_home="$tmp/home-config-target"
+config_target_outside="$tmp/config-target-outside"
+mkdir -p "$config_target_home/.config/chezmoi" "$config_target_outside"
+ln -s "$config_target_outside/chezmoi.toml" "$config_target_home/.config/chezmoi/chezmoi.toml"
+run_restore "$config_target_home" "$valid_archive" >/dev/null 2>&1 && fail '[7] dangling config target symlink was accepted'
+[ ! -e "$config_target_outside/chezmoi.toml" ] || fail '[7] restore wrote through config target symlink'
+ssh_target_home="$tmp/home-ssh-target"
+ssh_target_outside="$tmp/ssh-target-outside"
+mkdir -p "$ssh_target_home/.ssh" "$ssh_target_outside"
+ln -s "$ssh_target_outside/custom_key" "$ssh_target_home/.ssh/custom_key"
+run_restore "$ssh_target_home" "$valid_archive" >/dev/null 2>&1 && fail '[7] dangling SSH target symlink was accepted'
+[ ! -e "$ssh_target_outside/custom_key" ] || fail '[7] restore wrote through SSH target symlink'
+printf '  ok: symlinked destination parents and targets rejected\n'
 
 # [6] The fixed-format parser accepts a valid v1 manifest without jq.
 no_jq_valid_home="$tmp/home-no-jq-valid"
@@ -222,4 +251,4 @@ run_restore "$restore_home" "$valid_archive" >/dev/null
 [ "$(stat -c '%a' "$restore_home/.ssh/custom_key.pub")" = 644 ] || fail '[5] public SSH mode incorrect'
 printf '  ok: valid payload restored with SSH modes\n'
 
-printf 'PASS: dotbackup_restore.sh (5 scenarios)\n'
+printf 'PASS: dotbackup_restore.sh\n'

@@ -56,10 +56,6 @@ $stage = Join-Path ([IO.Path]::GetTempPath()) ("dotrestore-" + [guid]::NewGuid()
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
 
-    & $sevenZip 't' '-p' $Archive
-    if ($LASTEXITCODE -ne 0) {
-        throw "7-Zip failed while testing archive (exit code $LASTEXITCODE)."
-    }
     & $sevenZip 'x' '-p' "-o$stage" $Archive
     if ($LASTEXITCODE -ne 0) {
         throw "7-Zip failed while extracting archive (exit code $LASTEXITCODE)."
@@ -78,9 +74,17 @@ try {
         throw "Archive contains a reparse point: $($stagedReparsePoint.FullName)"
     }
 
+    $payloadEntries = @(Get-ChildItem -LiteralPath $payloadRoot -Force)
+    $expectedPayloadEntries = 'manifest.json', 'chezmoi', 'ssh'
+    if ($payloadEntries.Count -ne 3 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
+        throw 'Archive does not contain the dotfiles-backup-v1 layout.'
+    }
+
     $manifest = Join-Path $payloadRoot 'manifest.json'
-    $configSource = Join-Path $payloadRoot 'chezmoi\chezmoi.toml'
-    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or -not (Test-Path -LiteralPath $configSource -PathType Leaf)) {
+    $chezmoiSource = Join-Path $payloadRoot 'chezmoi'
+    $configSource = Join-Path $chezmoiSource 'chezmoi.toml'
+    $sshSource = Join-Path $payloadRoot 'ssh'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or -not (Test-Path -LiteralPath $chezmoiSource -PathType Container) -or -not (Test-Path -LiteralPath $configSource -PathType Leaf) -or -not (Test-Path -LiteralPath $sshSource -PathType Container)) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
 
@@ -100,19 +104,12 @@ try {
         throw "Refusing to overwrite existing ChezMoi config: $configDestination"
     }
 
-    $sshSource = Join-Path $payloadRoot 'ssh'
     $sshDestinationRoot = Join-Path $env:USERPROFILE '.ssh'
-    $sshFiles = @()
-    if (Test-Path -LiteralPath $sshSource) {
-        if (-not (Test-Path -LiteralPath $sshSource -PathType Container)) {
-            throw 'Archive SSH payload is not a directory.'
-        }
-        $sshFiles = @(Get-ChildItem -LiteralPath $sshSource -File -Recurse -Force)
-    }
+    $sshFiles = @(Get-ChildItem -LiteralPath $sshSource -File -Recurse -Force)
 
     Test-DestinationParentsSafe -Destination (Join-Path $sshDestinationRoot '.dotrestore-parent-check') -Home $env:USERPROFILE
     foreach ($source in $sshFiles) {
-        $relative = [IO.Path]::GetRelativePath($sshSource, $source.FullName)
+        $relative = $source.FullName.Substring($sshSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
         $destination = Join-Path $sshDestinationRoot $relative
         Test-DestinationParentsSafe -Destination $destination -Home $env:USERPROFILE
         if (Test-Path -LiteralPath $destination) {
@@ -125,7 +122,7 @@ try {
     if ($sshFiles.Count -gt 0) {
         New-Item -ItemType Directory -Path $sshDestinationRoot -Force | Out-Null
         foreach ($source in $sshFiles) {
-            $relative = [IO.Path]::GetRelativePath($sshSource, $source.FullName)
+            $relative = $source.FullName.Substring($sshSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
             $destination = Join-Path $sshDestinationRoot $relative
             New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
             Copy-Item -LiteralPath $source.FullName -Destination $destination
