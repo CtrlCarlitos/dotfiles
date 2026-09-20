@@ -1358,6 +1358,7 @@ VSEXT
             net_timeout 600 uv tool install -p 3.13 serena-agent \
                 || warn "Serena install failed - skipping"
         fi
+        # Upgrades: `dot upgrade` only (defer-aware there).
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
@@ -1368,12 +1369,18 @@ VSEXT
         fi
     fi
 
-    # opencode: global config mcp key (merge, never clobber the plugin key)
-    if command -v opencode &>/dev/null && command -v serena &>/dev/null; then
+    # opencode: global config mcp keys (merge, never clobber the plugin
+    # key). opencode loads MCP ONLY from this global block - graft needs an
+    # entry here too, or every fresh session starts with serena only
+    # (surveyed live 2026-09-20).
+    if command -v opencode &>/dev/null; then
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         mkdir -p "$(dirname "$OC_GLOBAL")"
-        if [ ! -f "$OC_GLOBAL" ] || ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null; then
-            info "Registering Serena MCP in opencode..."
+        OC_WANT=""
+        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
+        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
+        if [ -n "$OC_WANT" ]; then
+            info "Registering MCP in opencode ($OC_WANT)..."
             python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
 import json, os, sys
 p = sys.argv[1]
@@ -1386,18 +1393,72 @@ cfg.setdefault("mcp", {})["serena"] = {
     "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
     "enabled": True,
 }
+cfg.setdefault("mcp", {})["graft"] = {
+    "type": "local",
+    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
+    "enabled": True,
+}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
         fi
     fi
-    # agy: first-class MCP management (verified: agy mcp add/list)
-    if command -v agy &>/dev/null && command -v serena &>/dev/null; then
-        if ! agy mcp list 2>/dev/null | grep -q serena; then
-            info "Registering Serena MCP in agy..."
-            net_timeout 60 agy mcp add serena serena start-mcp-server --context ide-assistant \
-                || warn "agy MCP registration failed - continuing"
-        fi
+    # agy: MCP via plugin bundle, NOT the global mcp_config.json - agy
+    # defers global stdio servers until a manual /mcp (fast-startup design),
+    # while plugin-bundled servers start eagerly at session init (agy's own
+    # documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+    # rewriting the bundle is a refresh.
+    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
+    AGY_WANT=""
+    command -v serena &>/dev/null && AGY_WANT="serena"
+    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
+    if [ -n "$AGY_WANT" ]; then
+        info "Writing agy MCP plugin bundle ($AGY_WANT)..."
+        mkdir -p "$AGY_PLUGIN_DIR"
+        printf '{ "name": "dotfiles-mcp" }\n' > "$AGY_PLUGIN_DIR/plugin.json"
+        python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
+import json, sys
+want = set(filter(None, sys.argv[2].split(",")))
+servers = {}
+if "serena" in want:
+    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
+if "graft" in want:
+    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+with open(sys.argv[1], "w") as f:
+    json.dump({"mcpServers": servers}, f, indent=2)
+PYEOF
+    fi
+    # One-time migration: retire serena/graft from the old global
+    # mcp_config.json - the plugin bundle is the only MCP source this repo
+    # owns (cross-source doubles otherwise; operator instruction
+    # 2026-09-20). Surgical: only OUR keys are removed; the file is deleted
+    # only when nothing else remains, so a user-added server survives.
+    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
+    if [ -f "$AGY_GLOBAL_MCP" ]; then
+        python3 - "$AGY_GLOBAL_MCP" <<'PYEOF' 2>/dev/null || warn "agy global mcp_config.json retirement failed - continuing"
+import json, os, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        cfg = json.load(f)
+except Exception:
+    sys.exit(0)
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    sys.exit(0)
+changed = False
+for k in ("serena", "graft"):
+    if k in servers:
+        del servers[k]
+        changed = True
+if not changed:
+    sys.exit(0)
+if servers:
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2)
+else:
+    os.remove(p)
+PYEOF
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
@@ -1417,6 +1478,7 @@ PYEOF
             net_timeout 300 $SUDO npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
+        # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
         command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
             || true
@@ -1582,6 +1644,7 @@ PYEOF
             npm_sudo=""
         fi
 
+        # Upgrades: `dot upgrade` only - install-if-missing here by design.
         command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
     else
         warn "npm not found - skipping Codex CLI"
@@ -1763,6 +1826,7 @@ install_brew() {
             net_timeout 600 uv tool install -p 3.13 serena-agent \
                 || warn "Serena install failed - skipping"
         fi
+        # Upgrades: `dot upgrade` only (defer-aware there).
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
@@ -1773,12 +1837,18 @@ install_brew() {
         fi
     fi
 
-    # opencode: global config mcp key (merge, never clobber the plugin key)
-    if command -v opencode &>/dev/null && command -v serena &>/dev/null; then
+    # opencode: global config mcp keys (merge, never clobber the plugin
+    # key). opencode loads MCP ONLY from this global block - graft needs an
+    # entry here too, or every fresh session starts with serena only
+    # (surveyed live 2026-09-20).
+    if command -v opencode &>/dev/null; then
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         mkdir -p "$(dirname "$OC_GLOBAL")"
-        if [ ! -f "$OC_GLOBAL" ] || ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null; then
-            info "Registering Serena MCP in opencode..."
+        OC_WANT=""
+        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
+        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
+        if [ -n "$OC_WANT" ]; then
+            info "Registering MCP in opencode ($OC_WANT)..."
             python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
 import json, os, sys
 p = sys.argv[1]
@@ -1791,18 +1861,72 @@ cfg.setdefault("mcp", {})["serena"] = {
     "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
     "enabled": True,
 }
+cfg.setdefault("mcp", {})["graft"] = {
+    "type": "local",
+    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
+    "enabled": True,
+}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
         fi
     fi
-    # agy: first-class MCP management (verified: agy mcp add/list)
-    if command -v agy &>/dev/null && command -v serena &>/dev/null; then
-        if ! agy mcp list 2>/dev/null | grep -q serena; then
-            info "Registering Serena MCP in agy..."
-            net_timeout 60 agy mcp add serena serena start-mcp-server --context ide-assistant \
-                || warn "agy MCP registration failed - continuing"
-        fi
+    # agy: MCP via plugin bundle, NOT the global mcp_config.json - agy
+    # defers global stdio servers until a manual /mcp (fast-startup design),
+    # while plugin-bundled servers start eagerly at session init (agy's own
+    # documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+    # rewriting the bundle is a refresh.
+    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
+    AGY_WANT=""
+    command -v serena &>/dev/null && AGY_WANT="serena"
+    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
+    if [ -n "$AGY_WANT" ]; then
+        info "Writing agy MCP plugin bundle ($AGY_WANT)..."
+        mkdir -p "$AGY_PLUGIN_DIR"
+        printf '{ "name": "dotfiles-mcp" }\n' > "$AGY_PLUGIN_DIR/plugin.json"
+        python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
+import json, sys
+want = set(filter(None, sys.argv[2].split(",")))
+servers = {}
+if "serena" in want:
+    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
+if "graft" in want:
+    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+with open(sys.argv[1], "w") as f:
+    json.dump({"mcpServers": servers}, f, indent=2)
+PYEOF
+    fi
+    # One-time migration: retire serena/graft from the old global
+    # mcp_config.json - the plugin bundle is the only MCP source this repo
+    # owns (cross-source doubles otherwise; operator instruction
+    # 2026-09-20). Surgical: only OUR keys are removed; the file is deleted
+    # only when nothing else remains, so a user-added server survives.
+    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
+    if [ -f "$AGY_GLOBAL_MCP" ]; then
+        python3 - "$AGY_GLOBAL_MCP" <<'PYEOF' 2>/dev/null || warn "agy global mcp_config.json retirement failed - continuing"
+import json, os, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        cfg = json.load(f)
+except Exception:
+    sys.exit(0)
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    sys.exit(0)
+changed = False
+for k in ("serena", "graft"):
+    if k in servers:
+        del servers[k]
+        changed = True
+if not changed:
+    sys.exit(0)
+if servers:
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2)
+else:
+    os.remove(p)
+PYEOF
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
@@ -1821,6 +1945,7 @@ PYEOF
             net_timeout 300 npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
+        # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
         command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
             || true
@@ -1910,6 +2035,7 @@ PYEOF
     # install lives here).
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
+        # Upgrades: `dot upgrade` only - install-if-missing here by design.
         command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
     else
         warn "npm not found - skipping Codex CLI"

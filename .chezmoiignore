@@ -16,6 +16,11 @@ install.ps1
 # Claude Code project settings (source-repo tooling, not a dotfile to deploy)
 .claude/**
 
+# Graft host wiring (generated per machine by `graft init` - see .gitignore;
+# nothing reads these at $HOME, they only ever mattered as repo-local files)
+.mcp.json
+opencode.json
+
 # Devcontainer helper scripts (not for home directory)
 devcontainer/**
 

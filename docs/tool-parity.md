@@ -26,7 +26,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Claude Code** | Native (`curl \| sh`) | Native (`curl \| sh`) | Native (`irm \| iex`) | Native (`curl`) | ❌ | Re-run native installer |
 | **Antigravity CLI (agy)** | install script (`antigravity.google/cli/install.sh`) | `brew install --cask antigravity-cli` | `choco install antigravity-cli` | install script (`antigravity.google/cli/install.sh`) | ❌ | Re-run the install method for your platform - agy also self-updates on its own (verifies its own checksum each run). Replaces Gemini CLI in this repo: Google retired standalone Gemini Code Assist for individuals in favor of the Antigravity suite |
-| **Codex CLI** | `@openai/codex` | `@openai/codex` | `@openai/codex` | `@openai/codex` | ❌ | `npm update -g @openai/codex` |
+| **Codex CLI** | `@openai/codex` | `@openai/codex` | `@openai/codex` | `@openai/codex` | ❌ | `dot upgrade` (deferred while a codex session is live) |
 | **OpenCode** | Native (`curl \| bash`) | Native (`curl \| bash`) | `choco install opencode` | Native (`curl`) | ❌ | Re-run curl script, or `choco upgrade opencode` on Windows. NOT npm on Windows: opencode-ai's npm package ships a dead exe whenever its postinstall didn't run (confirmed live 2026-08-31 - "not a valid application for this OS platform") |
 | **Superpowers (Claude Code)** | `claude plugin install` | `claude plugin install` | `claude plugin install` | `claude plugin install` | ❌ | `claude plugin update superpowers -y` |
 | **Superpowers (OpenCode)** | `npm i --prefix ~/.config/opencode` | `npm i --prefix ~/.config/opencode` | `npm i --prefix %USERPROFILE%\.config\opencode` | `npm i --prefix ~/.config/opencode` | ❌ | Re-run the same `npm install` (no version pin, pulls latest commit) |
@@ -35,7 +35,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Superpowers (Codex CLI)** | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | Manual (`/plugins` in-app) | ❌ | Not automated - confirmed via an isolated Docker test that the only scriptable option (`codex-plugin`, a third-party npm helper) expects a `plugins/<name>/` marketplace layout obra/superpowers doesn't use (root-level `.codex-plugin/plugin.json` instead), so it fails outright regardless of flags |
 | **Playwright Chromium** | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | `npx playwright install chromium` | ❌ | `npx playwright install chromium` |
 | **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
-| **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Claude checks `claude mcp get serena` before `serena setup claude-code`; Codex uses `serena setup codex`, OpenCode merges its global `mcp` key, and Antigravity uses `agy mcp add`. See docs/agent-context-tools.md |
+| **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Claude checks `claude mcp get serena` before `serena setup claude-code`; Codex uses `serena setup codex`; OpenCode merges its global `mcp` key (graft too); Antigravity gets both via the dotfiles-mcp plugin bundle (eager start). See docs/agent-context-tools.md |
 | **Graft** | `npm i -g @nanonets/graft` (with `--allow-scripts` allowlist for its tree-sitter native builds) | same | same | same | ❌ | `graft upgrade`. Per-repo activation is separate and manual: `graft init` (or e.g. `graft init --agents claude agents`) + `graft build` writes the gitignored local `graft/` graph. Telemetry disabled by the installer. See docs/agent-context-tools.md |
 | guardrail | opt-in flag: pinned curl+SHA256SUMS bootstrap → `~/.local/bin`, then `guardrail update <pin>` + `guardrail plane enable\|disable --all` (desired state from `packages.guardrail`) | same | pinned `.exe` → `%USERPROFILE%\.local\bin` (checksum + Unblock-File) + `gen-config --merge` per plane (no plane/update on Windows this release) | same as Linux | not installed (no `claude` there) | bump `guardrail.version` in `.chezmoidata.yaml` (single source of truth - templates render it, updaters read it at runtime), re-`chezmoi update` (Unix self-updates via `guardrail update`) |
 
@@ -49,9 +49,10 @@ This document outlines the tools installed by the dotfiles configuration across 
 > Only OpenCode receives generated command adapters. Codex has no generated command files. Generated
 > command files are marker-owned, so refresh may
 > update them safely but preserves a user-owned command conflict with a warning.
-> Use `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
+> Use `dot upgrade` (the full sweep: packages + AI tools, live-session
+> gated) or `bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"` on
 > Linux/macOS/WSL or `& (Join-Path (chezmoi source-path)
-> 'scripts\update_ai_tools.ps1')` on Windows for explicit updates, then restart
+> 'scripts\update_ai_tools.ps1')` on Windows for AI-tools-only updates, then restart
 > OpenCode and start a new Claude Code, Antigravity CLI, or Codex CLI session
 > before using a refreshed skill. OpenCode and Codex discover the catalog-managed shared
 > `~/.agents/skills` directory; other existing content there is not deleted.

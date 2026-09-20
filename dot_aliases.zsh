@@ -159,6 +159,37 @@ alias dp='devprofile'
 alias agy='agy --dangerously-skip-permissions'
 
 #-------------------------------------------------------------------------------
-# Management
+# Management - the dot command family (spec:
+# docs/superpowers/specs/2026-09-20-dot-cli-design.md)
 #-------------------------------------------------------------------------------
-alias dotup='chezmoi update --apply'
+# `dot up` NEVER upgrades: chezmoi update owns the pull; init re-runs the
+# config template AFTER the pull (init does not fetch); a final apply
+# fires only when init actually rewrote the config. `dot upgrade` is the
+# single upgrade owner (apt/brew sweep + AI tools, live-session gated,
+# no-op inside devcontainers - image rebuilds own those).
+dot() {
+    local sub="${1:-}" cfg before after
+    local repo_scripts="$HOME/.local/share/chezmoi/scripts"
+    case "$sub" in
+        up)
+            chezmoi update --apply || return
+            cfg="$HOME/.config/chezmoi/chezmoi.toml"
+            before=""; [ -f "$cfg" ] && before="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
+            chezmoi init || return
+            after=""; [ -f "$cfg" ] && after="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
+            [ "$before" != "$after" ] && chezmoi apply
+            ;;
+        upgrade)  shift; bash "$repo_scripts/dotupgrade.sh" "$@" ;;
+        backup)   shift; bash "$repo_scripts/dotbackup.sh" "$@" ;;
+        restore)  shift; bash "$repo_scripts/dotrestore.sh" "$@" ;;
+        doctor)   shift; bash "$repo_scripts/dotfiles-doctor.sh" "$@" ;;
+        *)
+            echo "dot - dotfiles command family"
+            echo "  dot up        sync state (pull + apply + config re-init; never upgrades)"
+            echo "  dot upgrade   upgrade ALL tooling (apt/brew + AI tools, session-gated)"
+            echo "  dot backup    encrypted portable backup"
+            echo "  dot restore   restore a backup"
+            echo "  dot doctor    dotfiles health check"
+            ;;
+    esac
+}

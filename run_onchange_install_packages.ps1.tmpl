@@ -24,6 +24,18 @@
     settings.json parsing moved to a JSONC-tolerant parser (comments and
     trailing commas are legal in both files; strict JSON rejected them -
     confirmed live on VS Code).
+    1.0.5: batched choco inventory + hard timeout kills. A per-package
+    choco-list probe wedged pre-resolution for 77 minutes
+    (2026-09-20, confirmed live, ~1 core, uncapped) and froze the whole
+    elevated run; Stop-Job could not kill it either (native children
+    survive as orphans holding choco's global mutex). The probe loop is now
+    ONE timeout-capped `choco list --limit-output` (with a nupkg-presence
+    degraded fallback), and Invoke-WithTimeout hard-kills the job's
+    process tree on expiry. Contract: tests/choco_probe_contract.sh.
+    1.0.6: registry fuzzy-skip anchored to prefix. Substring matching let
+    package `tree` match "WizTree v4.32" - unrelated software - so tree
+    was silently never installed (2026-09-20, confirmed via choco
+    upgrade all listing). Same contract test as 1.0.5.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -38,8 +50,22 @@ $__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsId
 if (-not $__isAdmin) {
     Write-Host "This installer requires an elevated PowerShell (Administrator)." -ForegroundColor Red
     Write-Host "  Chocolatey, OpenSSH capabilities, winget, and graft's native builds all need it." -ForegroundColor Red
-    Write-Host "  Open a terminal as Administrator and re-run: dotup" -ForegroundColor Yellow
+    Write-Host "  Open a terminal as Administrator and re-run: dot up" -ForegroundColor Yellow
     Write-Host "  (Nothing was changed - the installer will re-run fully once elevated.)" -ForegroundColor Yellow
+    exit 1
+}
+
+# Single-flight guard: 2026-09-20 live incident - two concurrent dotups
+# (22:57 + 23:12) multiplied every choco/npm lock into a night-long outage
+# (double probe storms, global-mutex blocks, orphaned upgrades). A second
+# instance exits 1 BEFORE any work; chezmoi records nothing for a failed
+# script, so the next dotup re-fires fully - the same contract as the
+# elevation gate above. Global\ = machine-wide, across elevation levels.
+# Process exit releases the mutex on every path, including hard kills.
+$__dotupMutex = New-Object System.Threading.Mutex($false, 'Global\dotfiles-install')
+if (-not $__dotupMutex.WaitOne(0)) {
+    Write-Host "Another dotfiles installer instance is running - exiting without changes." -ForegroundColor Red
+    Write-Host "  (Nothing was recorded; the next dotup re-runs fully.)" -ForegroundColor Yellow
     exit 1
 }
 
@@ -53,6 +79,9 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
         Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
     Import-Module Microsoft.PowerShell.Security, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
 }
+# Set by the guardrail section when the Defender exclusion cannot be added
+# (non-admin / missing Defender); read by the post-install notes at the end.
+$defenderExclusionFailed = $false
 
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
@@ -66,26 +95,51 @@ function Invoke-WithTimeout {
     param(
         [Parameter(Mandatory)][string]$Description,
         [Parameter(Mandatory)][int]$Seconds,
-        [Parameter(Mandatory)][scriptblock]$Action
+        [Parameter(Mandatory)][scriptblock]$Action,
+        # Collect job output and RETURN it instead of streaming to the host -
+        # for callers that use the result (the batched choco inventory below),
+        # not just the side effect. Streaming callers see zero behavior change.
+        [switch]$NoStream
     )
+    $jobStarted = Get-Date
     $job = Start-Job -ScriptBlock $Action
-    $deadline = (Get-Date).AddSeconds($Seconds)
+    $deadline = $jobStarted.AddSeconds($Seconds)
+    $collected = @()
     while ($job.State -eq 'Running' -and (Get-Date) -lt $deadline) {
-        Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+        $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
+        if (-not $NoStream) { $out | ForEach-Object { Write-Host "    $_" } }
+        $collected += $out
         Start-Sleep -Milliseconds 500
     }
+    $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
+    if (-not $NoStream) { $out | ForEach-Object { Write-Host "    $_" } }
+    $collected += $out
     if ($job.State -eq 'Running') {
+        # Stop-Job cannot terminate a native child mid-call. 2026-09-20,
+        # confirmed live: a wedged choco probe outlived its 600s cap by 70+
+        # minutes as an orphan burning ~1 core, holding Chocolatey's global
+        # mutex and freezing every choco step of a concurrent run. Kill the
+        # job's process TREE hard - taskkill /T reaches the native
+        # grandchildren Stop-Job can't - then reap the job object. Matched by
+        # parent PID + spawn window: this script only ever has one live job
+        # (every call site is sequential), so the newest qualifying child IS
+        # the job shell. try/catch, not bare 2>$null: taskkill's stderr would
+        # otherwise hit the PS 5.1 native-stderr terminating-error trap (see
+        # Invoke-Quietly below). Never throws - same contract as the rest.
+        try {
+            Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+                Where-Object { $_.ParentProcessId -eq $PID -and $_.CreationDate -ge $jobStarted.AddSeconds(-2) } |
+                ForEach-Object { & taskkill /PID $_.ProcessId /T /F | Out-Null }
+        } catch { }
         Stop-Job $job -ErrorAction SilentlyContinue
-        Write-Host "  Warning: $Description - timed out after ${Seconds}s, continuing" -ForegroundColor Red
-    } else {
-        Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
-        if ($job.State -eq 'Failed') {
-            Write-Host "  Warning: $Description - failed" -ForegroundColor Red
-            $reason = $job.ChildJobs[0].JobStateInfo.Reason
-            if ($reason) { Write-Host "    $reason" -ForegroundColor Red }
-        }
+        Write-Host "  Warning: $Description - timed out after ${Seconds}s (process tree killed), continuing" -ForegroundColor Red
+    } elseif ($job.State -eq 'Failed') {
+        Write-Host "  Warning: $Description - failed" -ForegroundColor Red
+        $reason = $job.ChildJobs[0].JobStateInfo.Reason
+        if ($reason) { Write-Host "    $reason" -ForegroundColor Red }
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
+    if ($NoStream) { return $collected }
 }
 
 {{/* 16-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
@@ -366,6 +420,48 @@ $packages += @("opencode-desktop")
 
 {{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
+# ONE batched local inventory instead of one `choco list --exact <pkg>` per
+# package: each probe spawned a fresh .NET choco process (~1.5s x ~40
+# packages per re-fire), and a single probe wedging pre-resolution on
+# 2026-09-20 froze an entire elevated dotup for 77 minutes - probes were the
+# ONE uncapped choco call in this script (only installs had Invoke-WithTimeout).
+# Bare `choco list` (no name filter) resolves purely against the local lib
+# (`Resolving resource ListResource for source C:\ProgramData\chocolatey\lib`
+# in chocolatey.log) and `--limit-output` emits clean `id|version` lines.
+# Semantics match the old per-package probe exactly, including choco's
+# broken/pending-package exclusion (NotBroken filter) - that matters: a
+# nupkg on disk is NOT proof choco considers the package installed
+# (confirmed live: wiztree's nupkg survived an interrupted install while
+# choco list correctly reported it gone).
+$chocoListOutput = Invoke-WithTimeout -Description "batched choco list (local inventory)" -Seconds 120 -NoStream -Action {
+    choco list --limit-output
+    if ($LASTEXITCODE -ne 0) { throw "choco list exited with $LASTEXITCODE" }
+}
+$chocoInstalled = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$chocoInventoryUsable = $false
+if ($chocoListOutput) {
+    foreach ($line in $chocoListOutput) {
+        $id = ($line -split '\|')[0]
+        if ($id) { [void]$chocoInstalled.Add($id.Trim()) }
+    }
+    $chocoInventoryUsable = $true
+} else {
+    # Degraded path (list timed out/failed - e.g. another choco instance
+    # holds the global mutex): fall back to nupkg presence per package.
+    # Imperfect by design and cheaper than wedging: broken/pending packages
+    # keep their nupkg (wiztree, live) - those apps still get caught by the
+    # registry fuzzy-skip below, same as today's choco-listed misses.
+    Write-Host "  Warning: batched choco list unavailable - falling back to nupkg presence checks (less precise)" -ForegroundColor Yellow
+    $chocoLibDir = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { 'C:\ProgramData\chocolatey\lib' }
+}
+# If choco still manages GoogleChrome, every `choco upgrade all` keeps
+# failing on checksum lag (see the direct-MSI Chrome block for why we
+# install it that way instead) while Chrome self-updates via Google Update.
+# Advise the one-time handover; never uninstall software from here.
+if ($chocoInventoryUsable -and $chocoInstalled.Contains('GoogleChrome')) {
+    Write-Host "  Note: choco still manages GoogleChrome - its upgrades will keep failing on checksum lag." -ForegroundColor Yellow
+    Write-Host "    One-time handover: choco uninstall GoogleChrome -y  (Chrome itself stays; the installer's direct-MSI block owns it)" -ForegroundColor Yellow
+}
 # `choco list --exact` only recognizes what Chocolatey itself installed - it's
 # blind to the same software installed any other way (direct installer,
 # winget, MSIX, ...). Best-effort, not exhaustive: cache the Windows uninstall registry once (not
@@ -384,11 +480,25 @@ $uninstallEntries = @(
 )
 foreach ($pkg in $packages) {
     try {
-        # Chocolatey CLI 2.x removed --local-only; `choco list` is local-only by default now.
-        $installed = choco list --exact $pkg 2>$null | Select-String "^$pkg\s"
+        # Chocolatey CLI 2.x removed --local-only; bare `choco list` (no name
+        # filter) is the local inventory. The per-package probe this replaced
+        # spawned one .NET choco process per package and was the ONE uncapped
+        # choco call - 2026-09-20 one wedged for 77 min, freezing the run.
+        # Inventory + fallback live above the loop; semantics documented there.
+        $installed = if ($chocoInventoryUsable) {
+            $chocoInstalled.Contains($pkg)
+        } else {
+            Test-Path (Join-Path $chocoLibDir "$pkg\$pkg.nupkg")
+        }
         if (-not $installed) {
             $normalizedPkg = ($pkg -replace '[^a-zA-Z0-9]', '').ToLowerInvariant()
-            $existing = $uninstallEntries | Where-Object { $normalizedPkg.Length -ge 3 -and $_.Normalized -like "*$normalizedPkg*" } | Select-Object -First 1
+            # PREFIX-anchored match, never bare substring: "tree" matching
+            # inside "WizTree v4.32" silently skipped installing tree
+            # entirely (2026-09-20, confirmed live - the two are unrelated
+            # software). Prefix keeps every legitimate catch: version and
+            # suffix noise trails the name ("WizTree v4.32", "qBittorrent
+            # 5.x"), it never precedes it.
+            $existing = $uninstallEntries | Where-Object { $normalizedPkg.Length -ge 3 -and $_.Normalized -like "$normalizedPkg*" } | Select-Object -First 1
             if ($existing) {
                 Write-Host "  Skipping $pkg - '$($existing.Display)' is already installed (not via Chocolatey)" -ForegroundColor Yellow
                 if (-not (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue)) { $skippedNotChoco = @() }
@@ -828,6 +938,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
         }
     }
+    # Upgrades: `dot upgrade` only (defer-aware there; see codex note).
     # uv tool shims land in User PATH (~\.local\bin) - rebuild again
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command serena -ErrorAction SilentlyContinue) {
@@ -845,27 +956,31 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     }
 }
 
-# opencode: global config mcp key (merge, never clobber the plugin key -
-#     the Superpowers-for-OpenCode wiring above owns it). Raw-content '"serena"'
-#     pre-check, same cheap idempotence guard as the sh side's grep, so an
-#     already-registered config is never re-serialized.
-if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
+# opencode: global config mcp keys (merge, never clobber the plugin key -
+#     the Superpowers-for-OpenCode wiring above owns it). Raw-content
+#     pre-checks per server ('"serena"' / '"graft"'), same cheap idempotence
+#     guard as the sh side's grep, so a registered config is never
+#     re-serialized. opencode loads MCP ONLY from this global mcp block
+#     (surveyed live 2026-09-20): without a graft entry here, every fresh
+#     opencode session starts with serena only.
+if (Get-Command opencode -ErrorAction SilentlyContinue) {
     $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
     # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
     # locked/unreadable opencode.json would otherwise terminate the script
     # here (WT settings read idiom); on read failure fall through to the
     # merge path, which re-reads inside its own try/catch.
-    $ocNeedsMerge = $true
+    $ocRawCfg = ""
     if (Test-Path $ocConfig) {
-        try { $ocNeedsMerge = -not ((Get-Content $ocConfig -Raw) -match '"serena"') } catch {
+        try { $ocRawCfg = Get-Content $ocConfig -Raw } catch {
             Write-Host "  Warning: opencode.json unreadable - attempting merge anyway" -ForegroundColor Yellow
         }
     }
-    if ($ocNeedsMerge) {
-        Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
-        try {
-            New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
-            $ocJson = if (Test-Path $ocConfig) { Get-Content $ocConfig -Raw | ConvertFrom-Json } else { New-Object PSObject }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
+        $ocJson = if ($ocRawCfg) { $ocRawCfg | ConvertFrom-Json } else { New-Object PSObject }
+        $ocDirty = $false
+        if ((Get-Command serena -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"serena"')) {
+            Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
             $serenaDef = @{ type = "local"; command = @("serena", "start-mcp-server", "--context", "ide-assistant"); enabled = $true }
             if (-not $ocJson.PSObject.Properties["mcp"]) {
                 $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ serena = $serenaDef }
@@ -873,26 +988,91 @@ if ((Get-Command opencode -ErrorAction SilentlyContinue) -and (Get-Command seren
                 # mcp already holds other servers - add serena beside them
                 $ocJson.mcp | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef -Force
             }
+            $ocDirty = $true
+        }
+        if ((Get-Command graft -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"graft"')) {
+            Write-Host "  Registering graft MCP in opencode..." -ForegroundColor Yellow
+            # Same npx form graft's own host-writer uses: OS-agnostic,
+            # registry-resolved, no global-binary coupling (npx resolves the
+            # graft index from cwd at spawn, so one global entry works per repo).
+            $graftDef = @{ type = "local"; command = @("npx", "-y", "@nanonets/graft", "mcp"); enabled = $true }
+            if (-not $ocJson.PSObject.Properties["mcp"]) {
+                $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ graft = $graftDef }
+            } else {
+                $ocJson.mcp | Add-Member -MemberType NoteProperty -Name graft -Value $graftDef -Force
+            }
+            $ocDirty = $true
+        }
+        if ($ocDirty) {
             # BOM-less UTF-8 write (PS 5.1's Set-Content -Encoding utf8 prepends
             # a BOM that Go JSON consumers reject - see block 5's note); the
             # round-trip preserves every existing key, plugin included.
             [System.IO.File]::WriteAllLines($ocConfig, ($ocJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
-        } catch {
-            Write-Host "  Warning: opencode Serena registration failed - $_" -ForegroundColor Red
         }
+    } catch {
+        Write-Host "  Warning: opencode MCP registration failed - $_" -ForegroundColor Red
     }
 }
 
-# agy: first-class MCP management (verified: agy mcp add/list).
-if ((Get-Command agy -ErrorAction SilentlyContinue) -and (Get-Command serena -ErrorAction SilentlyContinue)) {
-    # try/catch + 2>&1 capture, not a bare call: under EAP=Stop a native
-    # command's stderr is the terminating-error trap (same idiom as the
-    # guardrail version check below).
-    $agyMcp = ""
-    try { $agyMcp = (agy mcp list 2>&1 | Out-String) } catch { $agyMcp = "" }
-    if ($agyMcp -notmatch "serena") {
-        Write-Host "  Registering Serena MCP in agy..." -ForegroundColor Yellow
-        Invoke-WithTimeout -Description "agy mcp add serena" -Seconds 60 -Action { agy mcp add serena serena start-mcp-server --context ide-assistant 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+# agy: MCP via plugin bundle, NOT the global mcp_config.json - agy defers
+#     global stdio servers until a manual /mcp (its fast-startup design),
+#     while plugin-bundled servers start eagerly at session init (agy's own
+#     documented auto-wire path; surveyed live 2026-09-20). Idempotent:
+#     rewriting the bundle is a refresh. BOM-less writes per the opencode
+#     note above (agy's Go consumer has the same BOM class).
+$agyPluginsDir = "$env:USERPROFILE\.gemini\config\plugins\dotfiles-mcp"
+$agyWantServers = @()
+if (Get-Command serena -ErrorAction SilentlyContinue) { $agyWantServers += 'serena' }
+if (Get-Command graft -ErrorAction SilentlyContinue) { $agyWantServers += 'graft' }
+if ($agyWantServers.Count -gt 0) {
+    try {
+        New-Item -ItemType Directory -Force -Path $agyPluginsDir | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'plugin.json'), '{ "name": "dotfiles-mcp" }', (New-Object System.Text.UTF8Encoding($false)))
+        $agyServers = @{}
+        if ($agyWantServers -contains 'serena') {
+            $agyServers['serena'] = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+        }
+        if ($agyWantServers -contains 'graft') {
+            $agyServers['graft'] = @{ command = 'npx'; args = @('-y', '@nanonets/graft', 'mcp') }
+        }
+        $agyBundle = @{ mcpServers = $agyServers } | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'mcp_config.json'), $agyBundle, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  agy MCP plugin bundle written: $($agyWantServers -join ', ')" -ForegroundColor Green
+    } catch {
+        Write-Host "  Warning: agy MCP plugin bundle failed - $_" -ForegroundColor Red
+    }
+}
+
+# One-time migration: retire serena/graft from the old global
+# mcp_config.json - the plugin bundle is the only MCP source this repo owns
+# (cross-source doubles otherwise; operator instruction 2026-09-20).
+# Surgical: only OUR keys are removed; the file is deleted only when
+# nothing else remains, so a user-added server survives.
+$agyGlobalMcp = "$env:USERPROFILE\.gemini\config\mcp_config.json"
+if (Test-Path $agyGlobalMcp) {
+    try {
+        $gJson = Get-Content $agyGlobalMcp -Raw | ConvertFrom-Json
+        $msProp = $gJson.PSObject.Properties['mcpServers']
+        $gChanged = $false
+        if ($msProp -and $msProp.Value) {
+            foreach ($k in @('serena', 'graft')) {
+                if ($msProp.Value.PSObject.Properties[$k]) {
+                    $msProp.Value.PSObject.Properties.Remove($k)
+                    $gChanged = $true
+                }
+            }
+        }
+        if ($gChanged) {
+            if (@($msProp.Value.PSObject.Properties).Count -eq 0) {
+                Remove-Item $agyGlobalMcp -Force
+                Write-Host "  Removed old agy global mcp_config.json (empty after retiring serena/graft)" -ForegroundColor Green
+            } else {
+                [System.IO.File]::WriteAllText($agyGlobalMcp, ($gJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+                Write-Host "  Retired serena/graft from agy global mcp_config.json (other servers kept)" -ForegroundColor Green
+            }
+        }
+    } catch {
+        Write-Host "  Warning: agy global mcp_config.json retirement failed - $_" -ForegroundColor Red
     }
 }
 
@@ -994,11 +1174,22 @@ if (-not $graftWorks) {
     }
 }
 if ($graftWorks) {
+    # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
 {{- end }}
 
 {{- if $opencode_cli }}
+# choco abandons lib-bkp\opencode whenever an upgrade ran while an opencode
+# session held the binary open (access denied x3 retries, then left behind -
+# confirmed live twice on 2026-09-20). Harmless but confuses later upgrades;
+# clear it whenever no opencode process is alive.
+if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'lib-bkp\opencode'))) {
+    if (-not (Get-Process opencode -ErrorAction SilentlyContinue)) {
+        Remove-Item (Join-Path $env:ChocolateyInstall 'lib-bkp\opencode') -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  Cleared choco lib-bkp\opencode leftover" -ForegroundColor Green
+    }
+}
 # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
 # split out of agent_toolkit per the spec's placement rule). choco install +
 # superpowers-for-OpenCode wiring; guardrail's opencode plane stays
@@ -1202,6 +1393,8 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
          Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
     }
+    # Upgrades are `dot upgrade`'s sole domain (dot CLI spec,
+    # 2026-09-20): presence-only here by design - install-if-missing.
 }
 
 # Superpowers for Codex CLI: deliberately NOT automated. Confirmed live
@@ -1548,7 +1741,35 @@ if (-not $guardrailReady) {
     Write-Host "  guardrail version verified: guardrail $guardrailVersion" -ForegroundColor Green
 }
 
+# Exclude guardrail.exe from Defender real-time scanning: the opencode plugin
+# spawns it for EVERY tool call, and Defender's per-spawn scan adds enough
+# latency to hit the plugin's spawnSync timeout (agent-guardrails #132,
+# confirmed live 2026-09-20 - dozens of ETIMEDOUT fail-closes in one session).
+# Idempotent; non-admin degrades to the post-install note.
+# SCOPING RULE (agent-guardrails #146): the exclusion is the exact installed
+# binary FILE path ONLY. Never widen it - not the directory (would exclude
+# everything else dropped in ~/.local/bin), not a process name (would exclude
+# any file named guardrail.exe). A path exclusion survives guardrail's
+# in-place self-update overwrites, which is the seam #146 addresses.
+if ($guardrailExe -and (Test-Path $guardrailExe)) {
+    try {
+        $existingExclusion = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath -ErrorAction SilentlyContinue | Where-Object { $_ -eq $guardrailExe }
+        if (-not $existingExclusion) {
+            Add-MpPreference -ExclusionPath $guardrailExe
+            Write-Host "  Defender exclusion added for guardrail.exe (prevents per-spawn scan latency)" -ForegroundColor Green
+        }
+    } catch {
+        $defenderExclusionFailed = $true
+        Write-Host "  Warning: could not add Defender exclusion for guardrail.exe (requires admin)" -ForegroundColor Red
+        Write-Host "    Add-MpPreference -ExclusionPath `"$guardrailExe`"" -ForegroundColor Yellow
+    }
+}
+
 # Wire into Claude Code (no-op-safe if claude is absent or already wired).
+# ORDERING INVARIANT (agent-guardrails #145/#146 pairing): binary
+# install + version verification ALWAYS precede these gen-config calls, so
+# the deployed plugin is baked from the matching installed version - never
+# reorder gen-config ahead of the install/verify blocks above.
 # Always re-runs gen-config: its owned-entry merge is safe to repeat (same
 # contract as the sh installer). Invoke-WithTimeout, NOT Invoke-Quietly:
 # gen-config prints its SUCCESS message to stderr, and in-session under
@@ -1834,4 +2055,8 @@ Write-Host "  Login and any cloudflared service activation are manual. See docs/
 {{- if $remote_access_server }}
 Write-Host "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md." -ForegroundColor Yellow
 {{- end }}
+if ($defenderExclusionFailed) {
+    Write-Host "[Post-Install] Add the Defender exclusion for guardrail.exe to prevent tool-call timeouts" -ForegroundColor Yellow
+    Write-Host "  Add-MpPreference -ExclusionPath `"$env:USERPROFILE\.local\bin\guardrail.exe`"" -ForegroundColor Cyan
+}
 {{ end -}}
