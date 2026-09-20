@@ -57,6 +57,9 @@ jobs:
       - name: Test choco probe resilience contract
         run: bash tests/choco_probe_contract.sh
 
+      - name: Test installer hygiene contract
+        run: bash tests/installer_hygiene_contract.sh
+
       - name: Test agent tool upgrade contract
         run: bash tests/agent_tool_upgrade_contract.sh
 
@@ -164,7 +167,7 @@ jobs:
             key = ""
             organizations = []
             dirs = []
-          
+
           [data.packages]
             core = false
             modern_cli = false
@@ -224,7 +227,7 @@ jobs:
             key = ""
             organizations = ["ci-org"]
             dirs = ["scripts"]
-          
+
           [data.packages]
             core = false
             modern_cli = false
@@ -356,7 +359,7 @@ jobs:
             key = "id_personal"
             organizations = ["myuser"]
             dirs = ["projects/personal", ".dotfiles"]
-          
+
           [[data.accounts]]
             name = "Work Account"
             email = "work@company.com"
@@ -365,7 +368,7 @@ jobs:
             key = "id_work"
             organizations = ["mycompany"]
             dirs = ["projects/work"]
-          
+
           [data.packages]
             core = false
             modern_cli = false
@@ -428,7 +431,7 @@ jobs:
             key = "id_alice"
             organizations = ["alice"]
             dirs = ["projects/alice", ".dotfiles"]
-          
+
           [[data.accounts]]
             name = "Bob Work"
             email = "bob@work.com"
@@ -437,7 +440,7 @@ jobs:
             key = "id_bob"
             organizations = ["bobcorp"]
             dirs = ["projects/bobcorp"]
-          
+
           [data.packages]
             core = false
             modern_cli = false
@@ -463,40 +466,40 @@ jobs:
       - name: Test .gitconfig has correct includeIf rules
         run: |
           echo "=== Testing .gitconfig includeIf rules ==="
-          
+
           # Check includeIf for alice's directories
           grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "✓ includeIf for alice/projects" || exit 1
           grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "✓ includeIf for .dotfiles" || exit 1
-          
+
           # Check includeIf for bob's directories
           grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "✓ includeIf for bobcorp" || exit 1
-          
+
           echo "=== includeIf rules correct ==="
 
       - name: Test .gitconfig has correct URL shortcuts
         run: |
           echo "=== Testing .gitconfig URL shortcuts ==="
-          
+
           # Check URL rewriting for alice
           grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "✓ URL shortcut for alice" || exit 1
           grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "✓ insteadOf for alice" || exit 1
-          
+
           # Check URL rewriting for bob
           grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bobcorp" || exit 1
           grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "✓ insteadOf for bobcorp" || exit 1
-          
+
           echo "=== URL shortcuts correct ==="
 
       - name: Test SSH config has correct host entries
         run: |
           echo "=== Testing SSH config ==="
-          
+
           grep -q 'Host github-alice' ~/.ssh/config && echo "✓ Host github-alice exists" || exit 1
           grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "✓ IdentityFile for alice" || exit 1
-          
+
           grep -q 'Host github-bob' ~/.ssh/config && echo "✓ Host github-bob exists" || exit 1
           grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "✓ IdentityFile for bob" || exit 1
-          
+
           echo "=== SSH config correct ==="
 
       - name: Test identity generation script exists
@@ -567,7 +570,7 @@ jobs:
         run: |
           # Use the installer script to bootstrap everything
           sh install.sh
-          
+
           # Add local bin to path for subsequent steps
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
@@ -596,19 +599,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      
+
       - name: Create minimal config (disable desktop apps)
         run: |
           New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
           @"
           sourceDir = '$env:GITHUB_WORKSPACE'
-          
+
           [data]
-          
+
           [[data.accounts]]
             name = "CI Windows"
             email = "ci@windows.local"
-          
+
           [data.packages]
             core = false
             modern_cli = false
@@ -654,7 +657,7 @@ jobs:
             exit 1
           }
           exit 0
-          
+
       - name: Verify installation
         shell: powershell
         run: |

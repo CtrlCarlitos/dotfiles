@@ -55,6 +55,20 @@ if (-not $__isAdmin) {
     exit 1
 }
 
+# Single-flight guard: 2026-09-20 live incident - two concurrent dotups
+# (22:57 + 23:12) multiplied every choco/npm lock into a night-long outage
+# (double probe storms, global-mutex blocks, orphaned upgrades). A second
+# instance exits 1 BEFORE any work; chezmoi records nothing for a failed
+# script, so the next dotup re-fires fully - the same contract as the
+# elevation gate above. Global\ = machine-wide, across elevation levels.
+# Process exit releases the mutex on every path, including hard kills.
+$__dotupMutex = New-Object System.Threading.Mutex($false, 'Global\dotfiles-install')
+if (-not $__dotupMutex.WaitOne(0)) {
+    Write-Host "Another dotfiles installer instance is running - exiting without changes." -ForegroundColor Red
+    Write-Host "  (Nothing was recorded; the next dotup re-runs fully.)" -ForegroundColor Yellow
+    exit 1
+}
+
 # Cross-generation PSModulePath guard (see run_onchange_generate_identities.
 # ps1.tmpl for the full story): this script's Get-FileHash/Unblock-File live
 # in Microsoft.PowerShell.Utility, the same broken-autoload class as
@@ -439,6 +453,14 @@ if ($chocoListOutput) {
     # registry fuzzy-skip below, same as today's choco-listed misses.
     Write-Host "  Warning: batched choco list unavailable - falling back to nupkg presence checks (less precise)" -ForegroundColor Yellow
     $chocoLibDir = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { 'C:\ProgramData\chocolatey\lib' }
+}
+# If choco still manages GoogleChrome, every `choco upgrade all` keeps
+# failing on checksum lag (see the direct-MSI Chrome block for why we
+# install it that way instead) while Chrome self-updates via Google Update.
+# Advise the one-time handover; never uninstall software from here.
+if ($chocoInventoryUsable -and $chocoInstalled.Contains('GoogleChrome')) {
+    Write-Host "  Note: choco still manages GoogleChrome - its upgrades will keep failing on checksum lag." -ForegroundColor Yellow
+    Write-Host "    One-time handover: choco uninstall GoogleChrome -y  (Chrome itself stays; the installer's direct-MSI block owns it)" -ForegroundColor Yellow
 }
 # `choco list --exact` only recognizes what Chocolatey itself installed - it's
 # blind to the same software installed any other way (direct installer,
@@ -1103,6 +1125,16 @@ if ($graftWorks) {
 {{- end }}
 
 {{- if $opencode_cli }}
+# choco abandons lib-bkp\opencode whenever an upgrade ran while an opencode
+# session held the binary open (access denied x3 retries, then left behind -
+# confirmed live twice on 2026-09-20). Harmless but confuses later upgrades;
+# clear it whenever no opencode process is alive.
+if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'lib-bkp\opencode'))) {
+    if (-not (Get-Process opencode -ErrorAction SilentlyContinue)) {
+        Remove-Item (Join-Path $env:ChocolateyInstall 'lib-bkp\opencode') -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  Cleared choco lib-bkp\opencode leftover" -ForegroundColor Green
+    }
+}
 # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
 # split out of agent_toolkit per the spec's placement rule). choco install +
 # superpowers-for-OpenCode wiring; guardrail's opencode plane stays
