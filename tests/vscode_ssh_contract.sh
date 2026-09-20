@@ -89,15 +89,20 @@ grep -Fq $'{{- if $fonts }}\nif ($wtSettings)' "$ps1_installer" ||
 grep -Fq $'}\n{{- end }}\n\n# User-level global settings' "$ps1_installer" ||
     fail "$ps1_installer: fonts gate must end before VS Code management"
 
-# First-run devcontainers have no [data.packages] table. Initializing there must
-# render the config template and its devcontainer identity without prompting.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" CI=true DEVCONTAINER=true \
-    chezmoi init --source="$repo_root" >/dev/null ||
-    fail "config template: first-run devcontainer initialization failed"
-grep -Fq 'email = "devcontainer@local"' "$tmp/config/chezmoi/chezmoi.toml" ||
-    fail "config template: first-run devcontainer identity missing"
+# First-run devcontainers have no [data.packages] table. The guard must check
+# for that table before reading its VS Code gate. The end-to-end devcontainer
+# CI job also initializes this template on every pull request.
+grep -Fq 'if and (hasKey . "packages") (hasKey .packages "vscode_settings")' "$config_tmpl" ||
+    fail "config template: vscode_settings must guard a missing packages table"
+if command -v chezmoi >/dev/null; then
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" CI=true DEVCONTAINER=true \
+        chezmoi init --source="$repo_root" >/dev/null ||
+        fail "config template: first-run devcontainer initialization failed"
+    grep -Fq 'email = "devcontainer@local"' "$tmp/config/chezmoi/chezmoi.toml" ||
+        fail "config template: first-run devcontainer identity missing"
+fi
 
 grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: vscode/ssh contract is not a PR CI check\n' >&2
