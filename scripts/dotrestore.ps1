@@ -100,7 +100,11 @@ try {
 
     $configDestination = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
     Test-DestinationParentsSafe -Destination $configDestination -Home $env:USERPROFILE
-    if (Test-Path -LiteralPath $configDestination) {
+    $configDestinationItem = Get-Item -LiteralPath $configDestination -Force -ErrorAction SilentlyContinue
+    if ($null -ne $configDestinationItem) {
+        if ($configDestinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing reparse-point destination: $configDestination"
+        }
         throw "Refusing to overwrite existing ChezMoi config: $configDestination"
     }
 
@@ -112,7 +116,11 @@ try {
         $relative = $source.FullName.Substring($sshSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
         $destination = Join-Path $sshDestinationRoot $relative
         Test-DestinationParentsSafe -Destination $destination -Home $env:USERPROFILE
-        if (Test-Path -LiteralPath $destination) {
+        $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+        if ($null -ne $destinationItem) {
+            if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing reparse-point destination: $destination"
+            }
             throw "Refusing to overwrite existing SSH file: $destination"
         }
     }

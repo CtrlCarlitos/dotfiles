@@ -40,8 +40,9 @@ fi
 require "$restore" 'chezmoi.toml'
 require "$restore" '$relative'
 require "$restore" '$source.FullName.Substring($sshSource.Length)'
-require "$restore" 'Test-Path -LiteralPath $configDestination'
-require "$restore" 'Test-Path -LiteralPath $destination'
+require "$restore" 'Get-Item -LiteralPath $configDestination -Force -ErrorAction SilentlyContinue'
+require "$restore" 'Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue'
+require "$restore" 'Refusing reparse-point destination:'
 require "$restore" 'ReparsePoint'
 require "$restore" '$payloadEntries.Count -ne 3'
 require "$restore" "'manifest.json', 'chezmoi', 'ssh'"
