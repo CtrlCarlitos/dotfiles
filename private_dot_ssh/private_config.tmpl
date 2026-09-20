@@ -83,6 +83,7 @@ Host {{ $alias }}
 {{- if hasKey . "comment" }}
 # {{ .comment }}
 {{- end }}
+
 Host {{ $name }}
     HostName {{ $hostname }}
 {{- if hasKey . "user" }}

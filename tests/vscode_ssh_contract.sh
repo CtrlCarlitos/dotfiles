@@ -39,6 +39,17 @@ grep -Fq 'ssh_hosts' "$ssh_tmpl" || fail "ssh template: no ssh_hosts rendering"
 grep -Fq 'comment' "$ssh_tmpl" || fail "ssh template: no comment field support"
 grep -Fq 'ProxyJump' "$ssh_tmpl" || fail "ssh template: no proxy field support"
 
+# Two generated aliases must remain visibly separate in the rendered config.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+: >"$tmp/chezmoi.toml"
+rendered=$(chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
+    --override-data '{"chezmoi":{"os":"linux"},"accounts":[],"ssh_hosts":[{"name":"first","hostname":"first.example"},{"name":"second","hostname":"second.example"}]}' \
+    <"$ssh_tmpl")
+expected=$'Host first\n    HostName first.example\n\nHost second\n    HostName second.example'
+[[ "$rendered" == *"$expected"* ]] ||
+    fail "ssh template: generated aliases need one blank separator"
+
 # Secrets pattern documented.
 grep -Fqi 'ssh_hosts' "$docs" || fail "docs/secrets.md: ssh_hosts not documented"
 grep -Fqi 'never' "$docs" || fail "docs/secrets.md: git-never-sees-it caveat missing"
