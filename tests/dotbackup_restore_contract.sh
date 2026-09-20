@@ -17,6 +17,8 @@ require "$backup" '-mhe=on'
 require "$backup" "'-p'"
 require "$backup" 'manifest.json'
 require "$backup" 'dotfiles-backup-v1'
+require "$backup" '$configItem.Attributes -band [IO.FileAttributes]::ReparsePoint'
+require "$restore" '[CmdletBinding()]'
 require "$restore" "'-p'"
 require "$restore" 'manifest.json'
 require "$restore" 'dotfiles-backup-v1'

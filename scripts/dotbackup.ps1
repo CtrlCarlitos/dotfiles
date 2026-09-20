@@ -17,6 +17,10 @@ $config = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
 if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
     throw "Missing ChezMoi config: $config"
 }
+$configItem = Get-Item -LiteralPath $config -Force
+if ($configItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw "Refusing reparse-point ChezMoi config: $config"
+}
 
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("dotbackup-" + [guid]::NewGuid())
 try {
