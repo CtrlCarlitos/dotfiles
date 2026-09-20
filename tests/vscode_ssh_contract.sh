@@ -39,16 +39,23 @@ grep -Fq 'ssh_hosts' "$ssh_tmpl" || fail "ssh template: no ssh_hosts rendering"
 grep -Fq 'comment' "$ssh_tmpl" || fail "ssh template: no comment field support"
 grep -Fq 'ProxyJump' "$ssh_tmpl" || fail "ssh template: no proxy field support"
 
-# Two generated aliases must remain visibly separate in the rendered config.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-: >"$tmp/chezmoi.toml"
-rendered=$(chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
-    --override-data '{"chezmoi":{"os":"linux"},"accounts":[],"ssh_hosts":[{"name":"first","hostname":"first.example"},{"name":"second","hostname":"second.example"}]}' \
-    <"$ssh_tmpl")
-expected=$'Host first\n    HostName first.example\n\nHost second\n    HostName second.example'
-[[ "$rendered" == *"$expected"* ]] ||
-    fail "ssh template: generated aliases need one blank separator"
+# The source template keeps a separator before each valid generated alias.
+grep -Fq $'{{- if and $name $hostname }}\n\n{{- if hasKey . "comment" }}' "$ssh_tmpl" ||
+    fail "ssh template: generated aliases need a source separator"
+
+# Rendered output is checked where ChezMoi is available. The lint job does not
+# install it, but the platform and devcontainer jobs exercise the template.
+if command -v chezmoi >/dev/null; then
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    : >"$tmp/chezmoi.toml"
+    rendered=$(chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux"},"accounts":[],"ssh_hosts":[{"name":"first","hostname":"first.example"},{"name":"second","hostname":"second.example"}]}' \
+        <"$ssh_tmpl")
+    expected=$'Host first\n    HostName first.example\n\nHost second\n    HostName second.example'
+    [[ "$rendered" == *"$expected"* ]] ||
+        fail "ssh template: generated aliases need one blank separator"
+fi
 
 # Secrets pattern documented.
 grep -Fqi 'ssh_hosts' "$docs" || fail "docs/secrets.md: ssh_hosts not documented"
