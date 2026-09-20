@@ -38,11 +38,6 @@ fi
 {{- $remote_access := false -}}
 {{- $remote_access_server := false -}}
 {{- $vscodeSettings := "true" -}}
-{{- if hasKey . "vscode_settings" -}}
-  {{- if not .vscode_settings -}}
-    {{- $vscodeSettings = "false" -}}
-  {{- end -}}
-{{- end -}}
 {{- $guardrail := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
@@ -58,6 +53,7 @@ fi
   {{- if hasKey .packages "antigravity_cli" }}{{- $antigravity_cli = .packages.antigravity_cli }}{{- end -}}
   {{- if hasKey .packages "antigravity_desktop" }}{{- $antigravity_desktop = .packages.antigravity_desktop }}{{- end -}}
   {{- if hasKey .packages "dev_desktop" }}{{- $dev_desktop = .packages.dev_desktop }}{{- end -}}
+  {{- if hasKey .packages "vscode_settings" }}{{- if not .packages.vscode_settings }}{{- $vscodeSettings = "false" }}{{- end }}{{- end -}}
   {{- if hasKey .packages "remote_access" }}{{- $remote_access = .packages.remote_access }}{{- end -}}
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
@@ -1088,10 +1084,13 @@ install_apt() {
 {{- if $fonts }}
     # Fonts - MesloLGS NF is great for Starship too
     install_fonts
+{{- else }}
+    info "Fonts disabled in config"
+{{- end }}
 
     # VS Code global defaults (terminal + editor) - gated by the
-    # `vscode_settings` config key (hasKey pattern: default true, set
-    # `vscode_settings = false` in chezmoi.toml to opt out; no prompt, so no
+    # `packages.vscode_settings` config key (hasKey pattern: default true, set
+    # `[data.packages] vscode_settings = false` in chezmoi.toml to opt out; no prompt, so no
     # CI-seeding burden - see check_workflow_config_keys for that outage
     # class). Semantics identical to the .ps1 twin: FORCED font keys,
     # UPSERT-if-absent defaults, MERGE-only sub-keys for excludes.
@@ -1270,9 +1269,6 @@ VSEXT
     else
         info "VS Code settings defaults disabled in config"
     fi
-{{- else }}
-    info "Fonts disabled in config"
-{{- end }}
 
 {{- if $agent_toolkit }}
     # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,

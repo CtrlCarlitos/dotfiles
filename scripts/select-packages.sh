@@ -60,6 +60,19 @@ existing_true_keys() {
         insec && $0 ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*true[[:space:]]*$/ {
             print $1
         }
+    ' "$CONFIG_FILE" | while IFS= read -r key; do
+        case " ${PKG_GROUPS[*]} " in *" $key "*) printf '%s\n' "$key" ;; esac
+    done
+}
+
+# vscode_settings is an installer gate, not one of the 16 menu groups. Preserve
+# an explicit user value when the menu rewrites its otherwise-owned table.
+existing_vscode_settings() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    awk '
+        /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
+        insec && /^[[:space:]]*\[/ { insec = 0 }
+        insec && $0 ~ /^[[:space:]]*vscode_settings[[:space:]]*=[[:space:]]*(true|false)([[:space:]]*#.*)?[[:space:]]*$/ { print $0; exit }
     ' "$CONFIG_FILE"
 }
 
@@ -144,6 +157,11 @@ for group in "${PKG_GROUPS[@]}"; do
         ;;
     esac
 done
+
+vscode_settings_line="$(existing_vscode_settings)"
+if [ -n "$vscode_settings_line" ]; then
+    section+=$'\n  '"${vscode_settings_line#${vscode_settings_line%%[![:space:]]*}}"
+fi
 
 if [ ! -f "$CONFIG_FILE" ]; then
     mkdir -p "$(dirname "$CONFIG_FILE")"

@@ -1,10 +1,10 @@
 # Secrets and machine-local data
 
-The pattern: **sensitive values live in `~/.config/chezmoi/chezmoi.toml` —
-machine-local, never git-tracked — and chezmoi templates render them.** Git
-carries the templates; each machine carries its own values. The same
-mechanism already drives git identities (`[[data.accounts]]`); everything
-below follows it.
+The pattern: **machine-specific values live in `~/.config/chezmoi/chezmoi.toml`
+and chezmoi templates render them.** That file is normally untracked; never
+put its real values in the repository. Protect it like other local metadata
+and include it only in encrypted backups. Documented examples/templates are
+intentionally tracked; real host names, aliases, and credentials are not.
 
 ## What belongs where
 
@@ -32,7 +32,8 @@ list automatically.
   user     = "carlitos"               # optional: login user
   port     = 22                       # optional
   identity = "id_personal"            # optional: key name in ~/.ssh
-  proxy    = ""                       # optional: ProxyJump alias (bastion)
+  # Omit proxy unless this host needs a configured bastion alias.
+  proxy    = "bastion"                # optional: ProxyJump alias
   comment  = "Bastion for staging - office IP only"   # optional: free text
 ```
 

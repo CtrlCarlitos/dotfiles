@@ -463,7 +463,6 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 }
 {{- end }}
 
-{{- if $fonts }}
 # Wire the Nerd Font into the places that actually render it. Installing the
 # font isn't enough - confirmed live that a real machine had it fully
 # installed (nerd-fonts-meslo via choco) but neither Windows Terminal nor VS
@@ -553,6 +552,7 @@ $wtSettings = @(
     "$env:LOCALAPPDATA\Microsoft\Windows Terminal\settings.json"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
+{{- if $fonts }}
 if ($wtSettings) {
     try {
         $wtJson = ConvertFrom-JsonC (Get-Content $wtSettings -Raw)
@@ -569,6 +569,7 @@ if ($wtSettings) {
         Write-Host "  Could not parse Windows Terminal settings.json even as JSONC - leaving it untouched ($_)" -ForegroundColor Yellow
     }
 }
+{{- end }}
 
 # User-level global settings (operator-confirmed semantics): CREATE the file
 # when missing (only when VS Code itself is installed), else merge. Curated
@@ -578,8 +579,8 @@ if ($wtSettings) {
 #   FORCED - font keys (consistency mandate: MesloLGS NF everywhere)
 #   UPSERT - other keys only when ABSENT (user values win; projects layer on top)
 #   MERGE  - object keys (files.exclude/search.exclude) gain only missing sub-keys
-# Gated by the vscode_settings config key (hasKey pattern: default true, set
-# `vscode_settings = false` in chezmoi.toml to opt out - no prompt, so no
+# Gated by packages.vscode_settings (hasKey pattern: default true, set
+# `[data.packages] vscode_settings = false` in chezmoi.toml to opt out - no prompt, so no
 # CI-seeding burden, see check_workflow_config_keys for that outage class).
 $vsForced = @{
     'editor.fontFamily' = $desiredFont
@@ -641,7 +642,7 @@ if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
 
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 $vsApply = $true
-{{- if and (hasKey . "vscode_settings") (not .vscode_settings) }}
+{{- if and (hasKey .packages "vscode_settings") (not .packages.vscode_settings) }}
 $vsApply = $false
 {{- end }}
 if (-not $vsApply) {
@@ -742,7 +743,6 @@ if (-not $vsApply) {
         Write-Host "  Could not parse VS Code settings.json even as JSONC - leaving it untouched ($_)" -ForegroundColor Yellow
     }
 }
-{{- end }}
 
 
 

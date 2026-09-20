@@ -121,16 +121,15 @@ Use this GUID in your Windows Terminal `settings.json` to configure the profile 
 
 ## VS Code Configuration
 
-### Extensions to Install
+### Managed Extensions and Settings
 
-- [ ] Remote - WSL
-- [ ] Remote - Containers (for devcontainers)
-- [ ] GitLens
-- [ ] TODO: Add your preferred extensions
+`chezmoi apply` installs the repository-curated VS Code baseline globally,
+including Remote - WSL, Remote - Containers, and Remote - SSH. Do not add
+GitLens to the managed list; it is explicitly excluded from this setup.
 
-### Settings Sync
-
-If using Settings Sync, document any Windows-specific overrides needed.
+For machine-specific additions or exclusions, use `[data.vscode_overrides]` in
+`~/.config/chezmoi/chezmoi.toml`. See [VS Code](vscode.md) for the supported
+fields and settings behavior.
 
 ## PowerShell Profile
 

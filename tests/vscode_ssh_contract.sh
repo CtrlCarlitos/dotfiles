@@ -14,6 +14,7 @@ data="$repo_root/.chezmoidata.yaml"
 sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 ssh_tmpl="$repo_root/private_dot_ssh/private_config.tmpl"
+config_tmpl="$repo_root/.chezmoi.toml.tmpl"
 docs="$repo_root/docs/secrets.md"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -52,6 +53,41 @@ for f in "$sh_installer" "$ps1_installer"; do
     grep -Fq 'extra_settings' "$f" || fail "$f: no extra-settings support"
 done
 grep -Fqi 'vscode_overrides' "$repo_root/docs/vscode.md" || fail "docs/vscode.md: overrides not documented"
+
+# Config-template order is semantic in TOML and mirrors the operator-facing
+# flow: dev_desktop, its VS Code gate, overrides, accounts, then SSH hosts.
+dev_desktop_line=$(grep -n 'dev_desktop = ' "$config_tmpl" | head -n1 | cut -d: -f1)
+settings_line=$(grep -n 'vscode_settings = ' "$config_tmpl" | head -n1 | cut -d: -f1)
+overrides_line=$(grep -n '{{/\* vscode_overrides:' "$config_tmpl" | cut -d: -f1)
+accounts_line=$(grep -n '^\[\[data\.accounts\]\]$' "$config_tmpl" | head -n1 | cut -d: -f1)
+ssh_hosts_line=$(grep -n '{{/\* ssh_hosts:' "$config_tmpl" | cut -d: -f1)
+(( dev_desktop_line < settings_line && settings_line < overrides_line && overrides_line < accounts_line && accounts_line < ssh_hosts_line )) || fail "config template: machine-local blocks are out of order"
+for package_key in remote_access remote_access_server guardrail; do
+    package_line=$(grep -n "    $package_key = " "$config_tmpl" | head -n1 | cut -d: -f1)
+    (( package_line < overrides_line )) || fail "config template: $package_key must stay in [data.packages]"
+done
+
+# JSON object syntax is not TOML inline-table syntax (`:` vs `=`). Map values
+# in extra_settings therefore require a TOML serializer, not toJson.
+! grep -Fq '{{ $v | toJson }}' "$config_tmpl" || fail "config template: extra_settings maps emit invalid TOML JSON"
+grep -Fq 'replace "[vscode_overrides" "[data.vscode_overrides"' "$config_tmpl" || fail "config template: override serializer must not redefine [data]"
+
+# Generated config documents active machine-local blocks, not only empty ones.
+grep -Fq 'VS Code Machine-Local Overrides' "$config_tmpl" || fail "config template: active VS Code overrides lack documentation"
+grep -Fq 'SSH Host Aliases' "$config_tmpl" || fail "config template: active SSH hosts lack documentation"
+
+# The gate belongs to [data.packages], alongside dev_desktop, in both installers.
+for f in "$sh_installer" "$ps1_installer"; do
+    grep -Fq 'hasKey .packages "vscode_settings"' "$f" || fail "$f: vscode_settings must be read from packages"
+done
+
+# Settings/extensions are independent of font installation. On Windows, the
+# fonts gate therefore applies only to the Windows Terminal mutation, before
+# the shared VS Code management block.
+grep -Fq $'{{- if $fonts }}\nif ($wtSettings)' "$ps1_installer" ||
+    fail "$ps1_installer: fonts gate must start at Windows Terminal settings"
+grep -Fq $'}\n{{- end }}\n\n# User-level global settings' "$ps1_installer" ||
+    fail "$ps1_installer: fonts gate must end before VS Code management"
 
 grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: vscode/ssh contract is not a PR CI check\n' >&2

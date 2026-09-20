@@ -181,15 +181,23 @@ grep -q -- '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,opencode
 assert_file_equals "$H3/.config/chezmoi/chezmoi.toml" "$(expected_section "${PKG_GROUPS[@]}")" "preset run: all true"
 ok "full preset omits remote_access_server; full selection persisted"
 
+# --- installer gate: preserve an explicit value with a TOML comment ---------
+echo "[6] re-run preserves the VS Code gate"
+printf '%s\n' "$(expected_section core)" "  vscode_settings = false # unmanaged on this machine" >"$H3/.config/chezmoi/chezmoi.toml"
+run_menu "fonts" custom "$H3" || fail "VS Code gate run: script exited non-zero"
+grep -Eq '^[[:space:]]*vscode_settings[[:space:]]*=[[:space:]]*false([[:space:]]|$)' "$H3/.config/chezmoi/chezmoi.toml" ||
+    fail "VS Code gate run: explicit false value was lost"
+ok "explicit VS Code gate remains disabled"
+
 # --- gum cancel: config untouched ------------------------------------------
-echo "[6] canceled menu leaves the config untouched"
+echo "[7] canceled menu leaves the config untouched"
 before="$(cat "$H2/.config/chezmoi/chezmoi.toml")"
 run_menu "__FAIL__" custom "$H2" || fail "cancel run: script exited non-zero"
 assert_file_equals "$H2/.config/chezmoi/chezmoi.toml" "$before" "cancel run: config changed"
 ok "gum cancel = exit 0, no write"
 
 # --- CI safety: no TTY, or no gum on PATH ----------------------------------
-echo "[7] no TTY -> skipping menu"
+echo "[8] no TTY -> skipping menu"
 H4="$TMP/home4"
 mkdir -p "$H4"
 out="$(run_no_tty "$H4")" || fail "no-tty run: script exited non-zero"
@@ -198,7 +206,7 @@ case "$out" in *"skipping menu"*) ;; *) fail "no-tty run: missing skipping messa
 [ ! -s "$GUM_LOG" ] || fail "no-tty run: gum was invoked anyway"
 ok "no TTY: exit 0 + skipping message, no write, no gum call"
 
-echo "[8] no gum on PATH -> skipping menu"
+echo "[9] no gum on PATH -> skipping menu"
 out="$(timeout 30 script -qec "HOME='$H4' PATH='$EMPTYBIN' bash '$script_under_test'" /dev/null 2>/dev/null | tr -d '\r')" ||
     fail "no-gum run: script exited non-zero"
 case "$out" in *"skipping menu"*) ;; *) fail "no-gum run: missing skipping message: $out" ;; esac

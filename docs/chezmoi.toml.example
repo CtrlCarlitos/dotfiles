@@ -1,7 +1,11 @@
 # Example Chezmoi Configuration
 # ==============================================================================
-# This single file contains all chezmoi settings: environment, packages, and
-# git identities. Copy to ~/.config/chezmoi/chezmoi.toml and customize.
+# This single file contains the machine-local data consumed by the dotfiles:
+# package preferences, VS Code drift, Git identities, and SSH host aliases.
+# Copy it to ~/.config/chezmoi/chezmoi.toml and customize the examples below.
+#
+# IMPORTANT: [data.*] is template data. `chezmoi apply` consumes it; `chezmoi
+# init` can regenerate it from .chezmoi.toml.tmpl, so use the documented keys.
 #
 # SETUP:
 #   cp docs/chezmoi.toml.example ~/.config/chezmoi/chezmoi.toml
@@ -17,10 +21,11 @@
 # ==============================================================================
 # Toggle what gets installed. Runs via `chezmoi apply`.
 #
-# The 14 package groups — one vocabulary shared by the menu
+# The 16 package groups share one vocabulary across the menu
 # (scripts/select-packages.*), these keys, and CI seeds. Full table, menu
 # flow, presets, and the rename map from the old install_* toggles:
-# docs/package-groups.md.
+# docs/package-groups.md. `true` requests desired state on the next apply;
+# host-only desktop groups remain skipped in WSL and containers.
 #
 # NOTE: the menu OWNS this section — re-running scripts/select-packages.sh
 # (or .ps1) rewrites it wholesale. Hand-edits here survive `chezmoi apply`
@@ -76,18 +81,39 @@
     #                       three OSs (mac/Linux use pinned hub-channel URLs).
     antigravity_desktop = false
 
-    # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,
-    #               ScreenRec, Termius, Handy... Host only: auto-skipped on
-    #               WSL/containers even if true.
-    dev_desktop = false
-
     # guardrail — Agent guardrails: guardrail binary + per-CLI planes.
     #             Modifies ~/.claude/settings.json etc. - deliberately a
     #             separate opt-in from the agent groups.
     #             See docs/guardrail-install.md.
     guardrail = true
+    # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,
+    #               ScreenRec, Termius, Handy... Host only: auto-skipped on
+    #               WSL/containers even if true.
+    dev_desktop = false
+
+    # vscode_settings — Settings defaults + global extension management.
+    #                   Default true; set false to opt out wholesale.
+    # vscode_settings = false
+
     # Defaults above = the "standard" preset (docs/package-groups.md).
 
+# ==============================================================================
+# VS CODE MACHINE-LOCAL OVERRIDES
+# ==============================================================================
+# Use this table for values that vary on this machine. It intentionally does
+# not reuse [data.vscode]: chezmoi does not deep-merge same-named tables.
+# exclude_settings strips any tier (including forced font keys); extra_settings
+# joins the upsert tier (change a value = exclude + add). Nested objects and
+# arrays are valid TOML; `chezmoi init` normalizes objects into nested tables.
+# [data.vscode_overrides]
+#   extra_extensions   = ["hashicorp.terraform"]
+#   exclude_extensions = ["ms-python.pylint"]
+#   exclude_settings   = ["terminal.integrated.fontFamily"]
+#   [data.vscode_overrides.extra_settings]
+#     "editor.fontSize"     = 15
+#     "files.autoSaveDelay" = 1000
+#     "editor.rulers"       = [80, 120]
+#     "[python]"            = { "editor.tabSize" = 4 }
 
 # ==============================================================================
 # GIT IDENTITIES
@@ -96,6 +122,10 @@
 #   - ~/.gitconfig-{provider}-{username}  (identity file)
 #   - SSH host alias in ~/.ssh/config
 #   - URL rewrites for organizations
+#
+# name, email, username, provider, and dirs define identity/routing. `key` and
+# `signingKey` are filenames in ~/.ssh, never key material. Repeat this array
+# table for every identity; only fields shown below survive `chezmoi init`.
 
 [[data.accounts]]
   name = "Your Name"
@@ -129,6 +159,16 @@
 #   organizations = []
 #   dirs = ["projects/opensource"]
 
+# SSH host aliases - rendered into the SSH client config on apply; VS Code
+# Remote-SSH picks them up natively. One block per host; keys live in ~/.ssh.
+# [[data.ssh_hosts]]
+#   name     = "prod-jump"            # required  Host alias
+#   hostname = "10.0.0.5"             # required  IP or DNS name
+#   user     = "carlitos"             # optional  login user
+#   port     = 22                     # optional  default 22
+#   identity = "id_personal"          # optional  key file name in ~/.ssh
+#   proxy    = "bastion"              # optional  ProxyJump alias
+#   comment  = "Bastion for staging"  # optional  block header (memory hook)
 
 # ==============================================================================
 # QUICK SETUP
@@ -146,37 +186,3 @@
 #
 # 5. Test:
 #    cd ~/projects && git config user.email
-
-# ==============================================================================
-# MACHINE-LOCAL FEATURES (round-tripped by chezmoi init; see the matching
-# commented examples the config template emits)
-# ==============================================================================
-
-# VS Code settings/extensions management (default true)
-# vscode_settings = false
-
-# SSH host aliases - rendered into the SSH client config on apply; the
-# comment field becomes the block header (your memory hook). VS Code
-# Remote-SSH picks them up natively. Keys live in ~/.ssh.
-# [[data.ssh_hosts]]
-#   name     = "prod-jump"              # required: Host alias
-#   hostname = "10.0.0.5"               # required: IP or DNS
-#   user     = "carlitos"               # optional: login user
-#   port     = 22                       # optional (default 22)
-#   identity = "id_personal"            # optional: key file in ~/.ssh
-#   proxy    = ""                       # optional: ProxyJump alias (bastion)
-#   comment  = "Bastion for staging"    # optional: rendered as block header
-
-# VS Code machine-local drift from the repo baseline (.chezmoidata.yaml).
-# Different key on purpose - chezmoi does not deep-merge same-named tables.
-#   exclude_settings strips any tier (incl. forced font keys);
-#   extra_settings join the upsert tier (change a value = exclude + add).
-# [data.vscode_overrides]
-#   extra_extensions    = ["hashicorp.terraform"]
-#   exclude_extensions  = ["ms-python.pylint"]
-#   exclude_settings    = ["terminal.integrated.fontFamily"]
-#   [data.vscode_overrides.extra_settings]
-#     "editor.fontSize"     = 15
-#     "files.autoSaveDelay" = 1000
-#     "editor.rulers"       = [80, 120]
-#     "[python]"            = { "editor.tabSize" = 4 }
