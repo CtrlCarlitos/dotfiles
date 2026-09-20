@@ -1357,6 +1357,10 @@ VSEXT
             info "Installing Serena via uv..."
             net_timeout 600 uv tool install -p 3.13 serena-agent \
                 || warn "Serena install failed - skipping"
+        else
+            info "Upgrading Serena via uv..."
+            net_timeout 300 uv tool upgrade serena-agent \
+                || warn "Serena upgrade failed - continuing"
         fi
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
@@ -1416,6 +1420,10 @@ PYEOF
             info "Installing Graft (npm -g)..."
             net_timeout 300 $SUDO npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
                 || warn "Graft install failed - skipping"
+        else
+            info "Upgrading graft (npm)..."
+            net_timeout 300 $SUDO npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
+                || warn "Graft upgrade failed - continuing"
         fi
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
         command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
@@ -1582,7 +1590,12 @@ PYEOF
             npm_sudo=""
         fi
 
-        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        if command -v codex &>/dev/null; then
+            info "Upgrading Codex CLI..."
+            $npm_sudo "$NPM_BIN" install -g @openai/codex@latest || warn "Codex CLI upgrade failed - continuing"
+        else
+            $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        fi
     else
         warn "npm not found - skipping Codex CLI"
     fi
@@ -1762,6 +1775,10 @@ install_brew() {
             info "Installing Serena via uv..."
             net_timeout 600 uv tool install -p 3.13 serena-agent \
                 || warn "Serena install failed - skipping"
+        else
+            info "Upgrading Serena via uv..."
+            net_timeout 300 uv tool upgrade serena-agent \
+                || warn "Serena upgrade failed - continuing"
         fi
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
@@ -1820,6 +1837,11 @@ PYEOF
             info "Installing Graft (npm -g)..."
             net_timeout 300 npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
                 || warn "Graft install failed - skipping"
+        else
+            # Upgrade-if-present: re-resolves latest; allowlist MUST travel with it.
+            info "Upgrading graft (npm)..."
+            net_timeout 300 npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
+                || warn "Graft upgrade failed - continuing"
         fi
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
         command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
@@ -1910,7 +1932,12 @@ PYEOF
     # install lives here).
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
-        command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        if command -v codex &>/dev/null; then
+            info "Upgrading Codex CLI..."
+            npm install -g @openai/codex@latest || warn "Codex CLI upgrade failed - continuing"
+        else
+            npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        fi
     else
         warn "npm not found - skipping Codex CLI"
     fi

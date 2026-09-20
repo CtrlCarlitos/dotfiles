@@ -54,6 +54,12 @@ jobs:
       - name: Test Windows Graft installation contract
         run: bash tests/graft_windows_install_contract.sh
 
+      - name: Test choco probe resilience contract
+        run: bash tests/choco_probe_contract.sh
+
+      - name: Test agent tool upgrade contract
+        run: bash tests/agent_tool_upgrade_contract.sh
+
       - name: Test devcontainer documentation contract
         run: bash tests/devcontainer_docs_contract.sh
 

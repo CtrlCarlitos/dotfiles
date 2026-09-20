@@ -24,6 +24,18 @@
     settings.json parsing moved to a JSONC-tolerant parser (comments and
     trailing commas are legal in both files; strict JSON rejected them -
     confirmed live on VS Code).
+    1.0.5: batched choco inventory + hard timeout kills. A per-package
+    `choco list --exact` probe wedged pre-resolution for 77 minutes
+    (2026-09-20, confirmed live, ~1 core, uncapped) and froze the whole
+    elevated run; Stop-Job could not kill it either (native children
+    survive as orphans holding choco's global mutex). The probe loop is now
+    ONE timeout-capped `choco list --limit-output` (with a nupkg-presence
+    degraded fallback), and Invoke-WithTimeout hard-kills the job's
+    process tree on expiry. Contract: tests/choco_probe_contract.sh.
+    1.0.6: registry fuzzy-skip anchored to prefix. Substring matching let
+    package `tree` match "WizTree v4.32" - unrelated software - so tree
+    was silently never installed (2026-09-20, confirmed via choco
+    upgrade all listing). Same contract test as 1.0.5.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +65,9 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
         Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
     Import-Module Microsoft.PowerShell.Security, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
 }
+# Set by the guardrail section when the Defender exclusion cannot be added
+# (non-admin / missing Defender); read by the post-install notes at the end.
+$defenderExclusionFailed = $false
 
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
@@ -66,26 +81,51 @@ function Invoke-WithTimeout {
     param(
         [Parameter(Mandatory)][string]$Description,
         [Parameter(Mandatory)][int]$Seconds,
-        [Parameter(Mandatory)][scriptblock]$Action
+        [Parameter(Mandatory)][scriptblock]$Action,
+        # Collect job output and RETURN it instead of streaming to the host -
+        # for callers that use the result (the batched choco inventory below),
+        # not just the side effect. Streaming callers see zero behavior change.
+        [switch]$NoStream
     )
+    $jobStarted = Get-Date
     $job = Start-Job -ScriptBlock $Action
-    $deadline = (Get-Date).AddSeconds($Seconds)
+    $deadline = $jobStarted.AddSeconds($Seconds)
+    $collected = @()
     while ($job.State -eq 'Running' -and (Get-Date) -lt $deadline) {
-        Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+        $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
+        if (-not $NoStream) { $out | ForEach-Object { Write-Host "    $_" } }
+        $collected += $out
         Start-Sleep -Milliseconds 500
     }
+    $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
+    if (-not $NoStream) { $out | ForEach-Object { Write-Host "    $_" } }
+    $collected += $out
     if ($job.State -eq 'Running') {
+        # Stop-Job cannot terminate a native child mid-call. 2026-09-20,
+        # confirmed live: a wedged choco probe outlived its 600s cap by 70+
+        # minutes as an orphan burning ~1 core, holding Chocolatey's global
+        # mutex and freezing every choco step of a concurrent run. Kill the
+        # job's process TREE hard - taskkill /T reaches the native
+        # grandchildren Stop-Job can't - then reap the job object. Matched by
+        # parent PID + spawn window: this script only ever has one live job
+        # (every call site is sequential), so the newest qualifying child IS
+        # the job shell. try/catch, not bare 2>$null: taskkill's stderr would
+        # otherwise hit the PS 5.1 native-stderr terminating-error trap (see
+        # Invoke-Quietly below). Never throws - same contract as the rest.
+        try {
+            Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+                Where-Object { $_.ParentProcessId -eq $PID -and $_.CreationDate -ge $jobStarted.AddSeconds(-2) } |
+                ForEach-Object { & taskkill /PID $_.ProcessId /T /F | Out-Null }
+        } catch { }
         Stop-Job $job -ErrorAction SilentlyContinue
-        Write-Host "  Warning: $Description - timed out after ${Seconds}s, continuing" -ForegroundColor Red
-    } else {
-        Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
-        if ($job.State -eq 'Failed') {
-            Write-Host "  Warning: $Description - failed" -ForegroundColor Red
-            $reason = $job.ChildJobs[0].JobStateInfo.Reason
-            if ($reason) { Write-Host "    $reason" -ForegroundColor Red }
-        }
+        Write-Host "  Warning: $Description - timed out after ${Seconds}s (process tree killed), continuing" -ForegroundColor Red
+    } elseif ($job.State -eq 'Failed') {
+        Write-Host "  Warning: $Description - failed" -ForegroundColor Red
+        $reason = $job.ChildJobs[0].JobStateInfo.Reason
+        if ($reason) { Write-Host "    $reason" -ForegroundColor Red }
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
+    if ($NoStream) { return $collected }
 }
 
 {{/* 16-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
@@ -366,6 +406,40 @@ $packages += @("opencode-desktop")
 
 {{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
+# ONE batched local inventory instead of one `choco list --exact <pkg>` per
+# package: each probe spawned a fresh .NET choco process (~1.5s x ~40
+# packages per re-fire), and a single probe wedging pre-resolution on
+# 2026-09-20 froze an entire elevated dotup for 77 minutes - probes were the
+# ONE uncapped choco call in this script (only installs had Invoke-WithTimeout).
+# Bare `choco list` (no name filter) resolves purely against the local lib
+# (`Resolving resource ListResource for source C:\ProgramData\chocolatey\lib`
+# in chocolatey.log) and `--limit-output` emits clean `id|version` lines.
+# Semantics match the old per-package probe exactly, including choco's
+# broken/pending-package exclusion (NotBroken filter) - that matters: a
+# nupkg on disk is NOT proof choco considers the package installed
+# (confirmed live: wiztree's nupkg survived an interrupted install while
+# choco list correctly reported it gone).
+$chocoListOutput = Invoke-WithTimeout -Description "batched choco list (local inventory)" -Seconds 120 -NoStream -Action {
+    choco list --limit-output
+    if ($LASTEXITCODE -ne 0) { throw "choco list exited with $LASTEXITCODE" }
+}
+$chocoInstalled = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$chocoInventoryUsable = $false
+if ($chocoListOutput) {
+    foreach ($line in $chocoListOutput) {
+        $id = ($line -split '\|')[0]
+        if ($id) { [void]$chocoInstalled.Add($id.Trim()) }
+    }
+    $chocoInventoryUsable = $true
+} else {
+    # Degraded path (list timed out/failed - e.g. another choco instance
+    # holds the global mutex): fall back to nupkg presence per package.
+    # Imperfect by design and cheaper than wedging: broken/pending packages
+    # keep their nupkg (wiztree, live) - those apps still get caught by the
+    # registry fuzzy-skip below, same as today's choco-listed misses.
+    Write-Host "  Warning: batched choco list unavailable - falling back to nupkg presence checks (less precise)" -ForegroundColor Yellow
+    $chocoLibDir = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { 'C:\ProgramData\chocolatey\lib' }
+}
 # `choco list --exact` only recognizes what Chocolatey itself installed - it's
 # blind to the same software installed any other way (direct installer,
 # winget, MSIX, ...). Best-effort, not exhaustive: cache the Windows uninstall registry once (not
@@ -384,11 +458,25 @@ $uninstallEntries = @(
 )
 foreach ($pkg in $packages) {
     try {
-        # Chocolatey CLI 2.x removed --local-only; `choco list` is local-only by default now.
-        $installed = choco list --exact $pkg 2>$null | Select-String "^$pkg\s"
+        # Chocolatey CLI 2.x removed --local-only; bare `choco list` (no name
+        # filter) is the local inventory. The per-package probe this replaced
+        # spawned one .NET choco process per package and was the ONE uncapped
+        # choco call - 2026-09-20 one wedged for 77 min, freezing the run.
+        # Inventory + fallback live above the loop; semantics documented there.
+        $installed = if ($chocoInventoryUsable) {
+            $chocoInstalled.Contains($pkg)
+        } else {
+            Test-Path (Join-Path $chocoLibDir "$pkg\$pkg.nupkg")
+        }
         if (-not $installed) {
             $normalizedPkg = ($pkg -replace '[^a-zA-Z0-9]', '').ToLowerInvariant()
-            $existing = $uninstallEntries | Where-Object { $normalizedPkg.Length -ge 3 -and $_.Normalized -like "*$normalizedPkg*" } | Select-Object -First 1
+            # PREFIX-anchored match, never bare substring: "tree" matching
+            # inside "WizTree v4.32" silently skipped installing tree
+            # entirely (2026-09-20, confirmed live - the two are unrelated
+            # software). Prefix keeps every legitimate catch: version and
+            # suffix noise trails the name ("WizTree v4.32", "qBittorrent
+            # 5.x"), it never precedes it.
+            $existing = $uninstallEntries | Where-Object { $normalizedPkg.Length -ge 3 -and $_.Normalized -like "$normalizedPkg*" } | Select-Object -First 1
             if ($existing) {
                 Write-Host "  Skipping $pkg - '$($existing.Display)' is already installed (not via Chocolatey)" -ForegroundColor Yellow
                 if (-not (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue)) { $skippedNotChoco = @() }
@@ -827,6 +915,13 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             uv tool install -p 3.13 serena-agent
             if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
         }
+    } else {
+        # Upgrade-if-present (presence gates froze versions - see codex note).
+        Write-Host "  Upgrading Serena via uv..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "uv tool upgrade serena-agent" -Seconds 300 -Action {
+            uv tool upgrade serena-agent
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        }
     }
     # uv tool shims land in User PATH (~\.local\bin) - rebuild again
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -994,6 +1089,15 @@ if (-not $graftWorks) {
     }
 }
 if ($graftWorks) {
+    # Upgrade-if-working: re-running the install re-resolves latest and reruns
+    # the tree-sitter native builds when a new version lands (a no-op-ish
+    # registry check otherwise). The allowlist MUST travel with it - npm 12
+    # blocks install scripts by default and a bare update bricks graft.
+    Write-Host "  Upgrading graft (npm)..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "Graft upgrade" -Seconds 300 -Action {
+        $graftUpgradeOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed (exit $LASTEXITCODE): $($graftUpgradeOutput.Trim())" }
+    }
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
 {{- end }}
@@ -1201,6 +1305,13 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
          Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+    } else {
+        # Presence-only gates froze agent CLIs at first-install version forever
+        # (confirmed live 2026-09-20: codex banner 0.154.0 -> 0.155.1 on a
+        # machine that dotup'd daily). @latest re-resolves each run - an
+        # idempotent seconds-long registry check when already current.
+        Write-Host "  Upgrading Codex CLI..." -ForegroundColor Yellow
+        Invoke-Quietly -Description "Failed to upgrade Codex CLI" -Action { npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
     }
 }
 
@@ -1548,6 +1659,25 @@ if (-not $guardrailReady) {
     Write-Host "  guardrail version verified: guardrail $guardrailVersion" -ForegroundColor Green
 }
 
+# Exclude guardrail.exe from Defender real-time scanning: the opencode plugin
+# spawns it for EVERY tool call, and Defender's per-spawn scan adds enough
+# latency to hit the plugin's spawnSync timeout (agent-guardrails #132,
+# confirmed live 2026-09-20 - dozens of ETIMEDOUT fail-closes in one session).
+# Idempotent; non-admin degrades to the post-install note.
+if ($guardrailExe -and (Test-Path $guardrailExe)) {
+    try {
+        $existingExclusion = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath -ErrorAction SilentlyContinue | Where-Object { $_ -eq $guardrailExe }
+        if (-not $existingExclusion) {
+            Add-MpPreference -ExclusionPath $guardrailExe
+            Write-Host "  Defender exclusion added for guardrail.exe (prevents per-spawn scan latency)" -ForegroundColor Green
+        }
+    } catch {
+        $defenderExclusionFailed = $true
+        Write-Host "  Warning: could not add Defender exclusion for guardrail.exe (requires admin)" -ForegroundColor Red
+        Write-Host "    Add-MpPreference -ExclusionPath `"$guardrailExe`"" -ForegroundColor Yellow
+    }
+}
+
 # Wire into Claude Code (no-op-safe if claude is absent or already wired).
 # Always re-runs gen-config: its owned-entry merge is safe to repeat (same
 # contract as the sh installer). Invoke-WithTimeout, NOT Invoke-Quietly:
@@ -1834,4 +1964,8 @@ Write-Host "  Login and any cloudflared service activation are manual. See docs/
 {{- if $remote_access_server }}
 Write-Host "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md." -ForegroundColor Yellow
 {{- end }}
+if ($defenderExclusionFailed) {
+    Write-Host "[Post-Install] Add the Defender exclusion for guardrail.exe to prevent tool-call timeouts" -ForegroundColor Yellow
+    Write-Host "  Add-MpPreference -ExclusionPath `"$env:USERPROFILE\.local\bin\guardrail.exe`"" -ForegroundColor Cyan
+}
 {{ end -}}

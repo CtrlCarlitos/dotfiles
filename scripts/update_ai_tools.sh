@@ -8,6 +8,8 @@ echo "🤖 Updating AI Coding Tools..."
 if command -v npm &>/dev/null; then
     echo "📦 Updating NPM packages..."
     sudo npm update -g @openai/codex
+    sudo npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft --loglevel=error --no-progress || echo "   Graft upgrade failed - continuing"
+    command -v uv &>/dev/null && uv tool upgrade serena-agent || echo "   Serena upgrade failed - continuing"
 else
     echo "⚠️  npm not found. Skipping npm packages."
 fi

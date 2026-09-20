@@ -10,6 +10,10 @@ Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "📦 Updating NPM packages..." -ForegroundColor Yellow
     npm update -g @openai/codex
+    npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        uv tool upgrade serena-agent
+    }
 } else {
     Write-Host "⚠️  npm not found. Skipping npm packages." -ForegroundColor Red
 }
