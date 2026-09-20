@@ -1428,6 +1428,38 @@ with open(sys.argv[1], "w") as f:
     json.dump({"mcpServers": servers}, f, indent=2)
 PYEOF
     fi
+    # One-time migration: retire serena/graft from the old global
+    # mcp_config.json - the plugin bundle is the only MCP source this repo
+    # owns (cross-source doubles otherwise; operator instruction
+    # 2026-09-20). Surgical: only OUR keys are removed; the file is deleted
+    # only when nothing else remains, so a user-added server survives.
+    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
+    if [ -f "$AGY_GLOBAL_MCP" ]; then
+        python3 - "$AGY_GLOBAL_MCP" <<'PYEOF' 2>/dev/null || warn "agy global mcp_config.json retirement failed - continuing"
+import json, os, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        cfg = json.load(f)
+except Exception:
+    sys.exit(0)
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    sys.exit(0)
+changed = False
+for k in ("serena", "graft"):
+    if k in servers:
+        del servers[k]
+        changed = True
+if not changed:
+    sys.exit(0)
+if servers:
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2)
+else:
+    os.remove(p)
+PYEOF
+    fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
     # per-repo activation is `graft init` (documented in
@@ -1862,6 +1894,38 @@ if "graft" in want:
     servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
 with open(sys.argv[1], "w") as f:
     json.dump({"mcpServers": servers}, f, indent=2)
+PYEOF
+    fi
+    # One-time migration: retire serena/graft from the old global
+    # mcp_config.json - the plugin bundle is the only MCP source this repo
+    # owns (cross-source doubles otherwise; operator instruction
+    # 2026-09-20). Surgical: only OUR keys are removed; the file is deleted
+    # only when nothing else remains, so a user-added server survives.
+    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
+    if [ -f "$AGY_GLOBAL_MCP" ]; then
+        python3 - "$AGY_GLOBAL_MCP" <<'PYEOF' 2>/dev/null || warn "agy global mcp_config.json retirement failed - continuing"
+import json, os, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        cfg = json.load(f)
+except Exception:
+    sys.exit(0)
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    sys.exit(0)
+changed = False
+for k in ("serena", "graft"):
+    if k in servers:
+        del servers[k]
+        changed = True
+if not changed:
+    sys.exit(0)
+if servers:
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2)
+else:
+    os.remove(p)
 PYEOF
     fi
 

@@ -1043,6 +1043,39 @@ if ($agyWantServers.Count -gt 0) {
     }
 }
 
+# One-time migration: retire serena/graft from the old global
+# mcp_config.json - the plugin bundle is the only MCP source this repo owns
+# (cross-source doubles otherwise; operator instruction 2026-09-20).
+# Surgical: only OUR keys are removed; the file is deleted only when
+# nothing else remains, so a user-added server survives.
+$agyGlobalMcp = "$env:USERPROFILE\.gemini\config\mcp_config.json"
+if (Test-Path $agyGlobalMcp) {
+    try {
+        $gJson = Get-Content $agyGlobalMcp -Raw | ConvertFrom-Json
+        $msProp = $gJson.PSObject.Properties['mcpServers']
+        $gChanged = $false
+        if ($msProp -and $msProp.Value) {
+            foreach ($k in @('serena', 'graft')) {
+                if ($msProp.Value.PSObject.Properties[$k]) {
+                    $msProp.Value.PSObject.Properties.Remove($k)
+                    $gChanged = $true
+                }
+            }
+        }
+        if ($gChanged) {
+            if (@($msProp.Value.PSObject.Properties).Count -eq 0) {
+                Remove-Item $agyGlobalMcp -Force
+                Write-Host "  Removed old agy global mcp_config.json (empty after retiring serena/graft)" -ForegroundColor Green
+            } else {
+                [System.IO.File]::WriteAllText($agyGlobalMcp, ($gJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+                Write-Host "  Retired serena/graft from agy global mcp_config.json (other servers kept)" -ForegroundColor Green
+            }
+        }
+    } catch {
+        Write-Host "  Warning: agy global mcp_config.json retirement failed - $_" -ForegroundColor Red
+    }
+}
+
 # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
 #     per-repo activation is `graft init` (documented in
 #     docs/agent-context-tools.md). Telemetry off per repo decision.

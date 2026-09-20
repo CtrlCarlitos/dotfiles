@@ -40,6 +40,17 @@ for f in "$ps1_installer" "$sh_installer"; do
     grep -Fq '"-y"' "$f" || fail "$f: bundle missing graft npx -y form"
 done
 
+# 4. One-time migration: our keys retire from the old global
+#    mcp_config.json - the bundle is the only MCP source this repo owns
+#    (cross-source doubles otherwise). Surgical: only serena/graft removed;
+#    the file is deleted only when nothing else remains.
+grep -Fq 'Remove-Item $agyGlobalMcp' "$ps1_installer" ||
+    fail "$ps1_installer: no agy global mcp_config.json retirement"
+grep -Fq 'AGY_GLOBAL_MCP' "$sh_installer" ||
+    fail "$sh_installer: no agy global mcp_config.json retirement"
+grep -Fq 'os.remove(p)' "$sh_installer" ||
+    fail "$sh_installer: retirement must delete the file only when empty"
+
 grep -Fq -- 'bash tests/mcp_autowire_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: MCP autowire contract is not a PR CI check\n' >&2
     exit 1
