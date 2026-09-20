@@ -32,12 +32,33 @@ if command -v jq >/dev/null 2>&1; then
         printf 'ERROR: invalid backup manifest\n' >&2
         exit 1
     }
-elif ! grep -Eq '"format_version"[[:space:]]*:[[:space:]]*"dotfiles-backup-v1"' "$manifest"; then
-    printf 'ERROR: invalid backup manifest\n' >&2
-    exit 1
+else
+    manifest_text="$(<"$manifest")"
+    manifest_pattern='^[[:space:]]*\{[[:space:]]*"format_version"[[:space:]]*:[[:space:]]*"dotfiles-backup-v1"[[:space:]]*,[[:space:]]*"created_at"[[:space:]]*:[[:space:]]*"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"[[:space:]]*,[[:space:]]*"source_platform"[[:space:]]*:[[:space:]]*"[A-Za-z0-9._-]+"[[:space:]]*\}[[:space:]]*$'
+    [[ "$manifest_text" =~ $manifest_pattern ]] || {
+        printf 'ERROR: invalid backup manifest\n' >&2
+        exit 1
+    }
 fi
 
+reject_symlinked_parent() { # $1 = destination path
+    local parent
+    parent="$(dirname "$1")"
+    while [ "$parent" != "$HOME" ]; do
+        [ "$parent" != / ] || {
+            printf 'ERROR: destination is outside HOME: %s\n' "$1" >&2
+            exit 1
+        }
+        [ ! -L "$parent" ] || {
+            printf 'ERROR: refusing symlinked destination parent: %s\n' "$parent" >&2
+            exit 1
+        }
+        parent="$(dirname "$parent")"
+    done
+}
+
 config_destination="$HOME/.config/chezmoi/chezmoi.toml"
+reject_symlinked_parent "$config_destination"
 [ ! -e "$config_destination" ] || {
     printf 'ERROR: refusing to overwrite existing ChezMoi config: %s\n' "$config_destination" >&2
     exit 1
@@ -45,9 +66,11 @@ config_destination="$HOME/.config/chezmoi/chezmoi.toml"
 
 ssh_source="$root/ssh"
 if [ -d "$ssh_source" ]; then
+    reject_symlinked_parent "$HOME/.ssh/.dotrestore-parent-check"
     while IFS= read -r -d '' source; do
         relative="${source#"$ssh_source/"}"
         destination="$HOME/.ssh/$relative"
+        reject_symlinked_parent "$destination"
         [ ! -e "$destination" ] || {
             printf 'ERROR: refusing to overwrite existing SSH file: %s\n' "$destination" >&2
             exit 1

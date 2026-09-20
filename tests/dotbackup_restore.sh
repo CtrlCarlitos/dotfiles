@@ -18,7 +18,7 @@ bin="$tmp/bin"
 mkdir -p "$bin"
 
 cat > "$bin/7z" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 printf '%s\n' "$*" >> "$FAKE_7Z_LOG"
@@ -63,12 +63,23 @@ esac
 EOF
 chmod +x "$bin/7z"
 
+no_jq_bin="$tmp/no-jq-bin"
+mkdir -p "$no_jq_bin"
+for tool in chmod cp dirname find grep mkdir mktemp rm; do
+    ln -s "$(command -v "$tool")" "$no_jq_bin/$tool"
+done
+ln -s "$bin/7z" "$no_jq_bin/7z"
+
 run_backup() { # $1 = home
     HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$backup"
 }
 
 run_restore() { # $1 = home, $2 = archive
     HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "$2"
+}
+
+run_restore_without_jq() { # $1 = home, $2 = archive
+    HOME="$1" PATH="$no_jq_bin" FAKE_7Z_LOG="$tmp/7z.log" /bin/bash "$restore" "$2"
 }
 
 make_source_home() { # $1 = home
@@ -134,7 +145,56 @@ run_restore "$layout_home" "$layout_archive" >/dev/null 2>&1 && fail '[4] archiv
 [ ! -e "$layout_home/.config/chezmoi/chezmoi.toml" ] || fail '[4] invalid layout wrote config'
 printf '  ok: invalid archive layout rejected\n'
 
-# [5] Existing destination files must never be overwritten.
+# [5] Symlinked destination parents must not redirect restored files outside HOME.
+valid_archive="$tmp/valid.7z"
+make_archive "$valid_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
+config_parent_home="$tmp/home-config-parent"
+config_outside="$tmp/config-outside"
+mkdir -p "$config_parent_home/.config" "$config_outside"
+ln -s "$config_outside" "$config_parent_home/.config/chezmoi"
+run_restore "$config_parent_home" "$valid_archive" >/dev/null 2>&1 && fail '[5] symlinked config parent was accepted'
+[ ! -e "$config_outside/chezmoi.toml" ] || fail '[5] restore wrote through config parent symlink'
+ssh_parent_home="$tmp/home-ssh-parent"
+ssh_outside="$tmp/ssh-outside"
+mkdir -p "$ssh_parent_home" "$ssh_outside"
+ln -s "$ssh_outside" "$ssh_parent_home/.ssh"
+run_restore "$ssh_parent_home" "$valid_archive" >/dev/null 2>&1 && fail '[5] symlinked SSH parent was accepted'
+[ ! -e "$ssh_outside/custom_key" ] || fail '[5] restore wrote through SSH parent symlink'
+empty_ssh_archive="$tmp/empty-ssh.7z"
+make_archive "$empty_ssh_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
+rm "${empty_ssh_archive}.contents/dotfiles-backup-v1/ssh/custom_key" \
+    "${empty_ssh_archive}.contents/dotfiles-backup-v1/ssh/custom_key.pub"
+empty_ssh_home="$tmp/home-empty-ssh-parent"
+empty_ssh_outside="$tmp/empty-ssh-outside"
+mkdir -p "$empty_ssh_home" "$empty_ssh_outside"
+ln -s "$empty_ssh_outside" "$empty_ssh_home/.ssh"
+run_restore "$empty_ssh_home" "$empty_ssh_archive" >/dev/null 2>&1 && fail '[5] empty SSH payload accepted a symlinked SSH parent'
+[ ! -e "$empty_ssh_home/.config/chezmoi/chezmoi.toml" ] || fail '[5] SSH parent rejection wrote config first'
+printf '  ok: symlinked destination parents rejected\n'
+
+# [6] The fixed-format parser accepts a valid v1 manifest without jq.
+no_jq_valid_home="$tmp/home-no-jq-valid"
+mkdir -p "$no_jq_valid_home"
+run_restore_without_jq "$no_jq_valid_home" "$valid_archive" >/dev/null
+[ "$(<"$no_jq_valid_home/.config/chezmoi/chezmoi.toml")" = 'restored config' ] || fail '[6] valid manifest was not restored without jq'
+printf '  ok: valid fixed-format manifest restored without jq\n'
+
+# [7] The no-jq parser must reject malformed JSON and conflicting duplicates.
+malformed_archive="$tmp/malformed.7z"
+make_archive "$malformed_archive" '{"format_version":"dotfiles-backup-v1"'
+malformed_home="$tmp/home-malformed"
+mkdir -p "$malformed_home"
+run_restore_without_jq "$malformed_home" "$malformed_archive" >/dev/null 2>&1 && fail '[6] malformed manifest was restored without jq'
+[ ! -e "$malformed_home/.config/chezmoi/chezmoi.toml" ] || fail '[6] malformed manifest wrote config'
+duplicate_archive="$tmp/duplicate.7z"
+make_archive "$duplicate_archive" '{"format_version":"dotfiles-backup-v1","format_version":"wrong-format"}'
+duplicate_home="$tmp/home-duplicate"
+mkdir -p "$duplicate_home"
+run_restore_without_jq "$duplicate_home" "$duplicate_archive" >/dev/null 2>&1 && fail '[6] duplicate format_version manifest was restored without jq'
+[ ! -e "$duplicate_home/.config/chezmoi/chezmoi.toml" ] || fail '[6] duplicate manifest wrote config'
+printf '  ok: strict no-jq manifest validation\n'
+
+# [7] Existing destination files must never be overwritten.
 valid_archive="$tmp/valid.7z"
 make_archive "$valid_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Linux"}'
 config_collision_home="$tmp/home-config-collision"
