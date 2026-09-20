@@ -25,7 +25,7 @@
     trailing commas are legal in both files; strict JSON rejected them -
     confirmed live on VS Code).
     1.0.5: batched choco inventory + hard timeout kills. A per-package
-    `choco list --exact` probe wedged pre-resolution for 77 minutes
+    choco-list probe wedged pre-resolution for 77 minutes
     (2026-09-20, confirmed live, ~1 core, uncapped) and froze the whole
     elevated run; Stop-Job could not kill it either (native children
     survive as orphans holding choco's global mutex). The probe loop is now
