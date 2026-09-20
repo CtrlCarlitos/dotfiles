@@ -57,6 +57,18 @@ docs/superpowers/
 /.graft/
 /graft/
 
+# Graft: host wiring is GENERATED per machine by `graft init` (shims bake the
+# running machine's dist path by design; .mcp.json/opencode.json get the npx
+# entry graft itself writes). Verified against @nanonets/graft 0.18.0 source
+# (dist/claude/init.js runInit writes all of these each run; its own comments
+# design for gitignore-ability with a ~/.claude global fallback). Tracking
+# them ships one machine's baked paths and reverts on every regeneration.
+.claude/helpers/graft-hooks.cjs
+.claude/helpers/graft-statusline.cjs
+.claude/skills/graft/
+/.mcp.json
+/opencode.json
+
 # Serena: share the project definition; retain machine-local state locally.
 /.serena/cache/
 /.serena/memories/
