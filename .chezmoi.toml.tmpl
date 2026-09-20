@@ -118,7 +118,7 @@
 
     # vscode_settings - settings defaults + global extension management.
     # No prompt; default true. Set false to opt out wholesale on this machine.
-{{- if hasKey .packages "vscode_settings" }}
+{{- if and (hasKey . "packages") (hasKey .packages "vscode_settings") }}
     vscode_settings = {{ .packages.vscode_settings }}
 {{- else }}
     # vscode_settings = false    # opt out of settings + extension management
