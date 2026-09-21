@@ -48,6 +48,17 @@ grep -Fq 'Get-Process opencode, claude, codex, agy, serena' "$up_ps1" ||
 grep -Fq 'pgrep -x' "$up_sh" || fail "$up_sh: no live-session scan (pgrep)"
 grep -Fq 'brew upgrade' "$up_sh" || fail "$up_sh: no macOS sweep"
 grep -Fq 'apt-get upgrade' "$up_sh" || fail "$up_sh: no apt sweep"
+
+# Full sweep premise: on Windows, winget-managed apps (Build Tools, ChatGPT
+# Work/Codex msstore, Win-CodexBar) upgrade alongside choco - `winget
+# upgrade --all`, same premise as `choco upgrade all`. Linux/mac: brew and
+# apt ARE full sweeps of their universe, but the installers also place
+# direct-download artifacts (GitHub .debs/dmg/tarball) that no manager
+# owns - the run must NAME them so the operator sees the residual gap.
+grep -Fq 'winget upgrade --all' "$up_ps1" ||
+    fail "$up_ps1: no winget sweep (Build Tools / ChatGPT Work / Win-CodexBar)"
+grep -Fq 'outside package managers' "$up_sh" ||
+    fail "$up_sh: no outside-package-managers report (direct-download artifacts)"
 grep -Fq 'DEVCONTAINER' "$up_sh" || fail "$up_sh: no devcontainer guard"
 grep -Fq 'DOTUPGRADE_DEFER' "$up_ps1" || fail "$up_ps1: no defer-list export"
 grep -Fq 'DOTUPGRADE_DEFER' "$up_sh" || fail "$up_sh: no defer-list export"
