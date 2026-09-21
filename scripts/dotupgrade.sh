@@ -52,6 +52,21 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/update_ai_tools.sh"
 
+# --- Known outside-package-managers artifacts: no manager owns these, so
+# the sweep above cannot upgrade them (Linux: direct .debs with no repo -
+# Chrome, Docker Desktop, Termius, Handy, OpenCode Desktop, git-delta, dust,
+# procs, neovim/lazygit tarballs - plus the Antigravity 2.0 tar.gz; macOS:
+# ScreenRec and Antigravity 2.0 .dmgs). Most self-update or are refreshable
+# by re-running the installer; named here so the gap stays visible.
+case "$(uname -s)" in
+    Linux)
+        echo "  Note: outside package managers (no auto-upgrade): Chrome, Docker Desktop, Termius, Handy, OpenCode Desktop, git-delta, dust, procs, Antigravity 2.0 - re-run the installer or upgrade manually if any lags."
+        ;;
+    Darwin)
+        echo "  Note: outside package managers (no auto-upgrade): ScreenRec, Antigravity 2.0 - re-run the installer or upgrade manually if any lags."
+        ;;
+esac
+
 # --- Deferred report: what to re-run when quiet. ---
 if [ -n "$DEFER" ]; then
     echo ""

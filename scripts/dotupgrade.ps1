@@ -43,6 +43,22 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  choco not found - skipping system packages." -ForegroundColor Yellow
 }
 
+# --- 1a. winget-managed apps (Build Tools, ChatGPT Work/Codex msstore,
+# Win-CodexBar): same full-sweep premise as choco - upgrade everything
+# winget knows, not just what this repo installed. --include-unknown: apps
+# with undetermined installed versions are skipped without it.
+if (Get-Command winget -ErrorAction SilentlyContinue) {
+    Write-Host "  Upgrading winget packages (winget upgrade --all)..." -ForegroundColor Yellow
+    try {
+        & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: winget upgrade exited $LASTEXITCODE (store apps can require interactive agreement) - continuing" -ForegroundColor Red }
+    } catch {
+        Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red
+    }
+} else {
+    Write-Host "  winget not found - skipping winget packages." -ForegroundColor Yellow
+}
+
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 & (Join-Path $PSScriptRoot 'update_ai_tools.ps1')
 
