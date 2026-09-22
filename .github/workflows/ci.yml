@@ -8,6 +8,12 @@ on:
   workflow_dispatch:
 
 
+# Explicit rather than inherited: the repo default is read-only today, but a
+# settings change (or a fork with a permissive default) should not silently
+# hand these jobs a write token. Nothing here needs more than a checkout.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Validate
