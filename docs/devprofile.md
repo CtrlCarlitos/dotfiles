@@ -35,7 +35,7 @@ identity, creating a new account:
 | `devprofile init <name> <email> --passphrase` | New account with fresh keys |
 | `devprofile verify --install-hook` | Sanity check + pre-commit safety net |
 
-Linux/macOS/WSL alias: `dp`. PowerShell has no alias yet.
+Short alias everywhere (zsh and PowerShell): `dp`.
 
 ## Example outputs
 

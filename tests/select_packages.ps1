@@ -18,6 +18,16 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ScriptUnderTest = Join-Path $RepoRoot 'scripts/select-packages.ps1'
 
+# Windows has no pty to fake a console with, so the interactive scenarios only
+# work when this harness itself runs from a real console. Under a captured or
+# piped shell every one of them takes the script's no-TTY path and fails, which
+# is noise, not a regression - skip instead. CI runs this test on Linux, where
+# the python pty helper below provides a console.
+if (($IsWindows -or $env:OS -eq 'Windows_NT') -and [Console]::IsInputRedirected) {
+    Write-Host 'SKIP: select_packages.ps1 needs a console stdin on Windows (CI runs it on Linux)'
+    exit 0
+}
+
 $script:PassCount = 0
 $script:Failed = @()
 function Ok([string]$name) {
@@ -70,7 +80,11 @@ if errorlevel 1 (
 )
 '@ | Set-Content -Path (Join-Path $Bin 'gum.cmd') -Encoding Ascii
 } else {
-    @'
+    # The test file is CRLF (.gitattributes: *.ps1 eol=crlf), so this here-string
+    # inherits CRLF. Written verbatim, the shebang keeps a trailing CR and Linux
+    # fails with: /usr/bin/env: 'bash\r': No such file or directory - gum then
+    # never runs and every interactive assertion fails (confirmed live).
+    $gumSh = @'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${FAKE_GUM_LOG:?}"
 if [[ "$*" == *--no-limit* ]]; then
@@ -79,7 +93,8 @@ if [[ "$*" == *--no-limit* ]]; then
 else
     printf '%s\n' "${FAKE_PRESET:-custom}"
 fi
-'@ | Set-Content -Path (Join-Path $Bin 'gum')
+'@
+    [IO.File]::WriteAllText((Join-Path $Bin 'gum'), ($gumSh -replace "`r`n", "`n"))
     chmod +x (Join-Path $Bin 'gum')
 }
 

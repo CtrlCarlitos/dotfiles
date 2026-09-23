@@ -110,7 +110,11 @@ fi
 if [ -n "$IN_APPLY" ]; then
     result skip config-parse "in-apply mode - chezmoi already parsed the config to get this far"
 elif [ -f "$config" ]; then
-    if chezmoi data >/dev/null 2>&1; then
+    # --config pins chezmoi to the file every other check inspects. Bare
+    # `chezmoi data` resolves its own config through XDG_CONFIG_HOME, so where
+    # that is set (GitHub runners, some desktops) this check silently validated
+    # a DIFFERENT file - reporting "loads the config" while $config was broken.
+    if chezmoi --config "$config" data >/dev/null 2>&1; then
         result ok config-parse "chezmoi loads the config"
     else
         result error config-parse "chezmoi cannot parse the config (encoding above? run: chezmoi execute-template '{{ .chezmoi.sourceDir }}' to see raw errors)"

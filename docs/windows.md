@@ -24,145 +24,96 @@ Sudo-style alternatives to opening a separate elevated terminal:
   builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
-Your development happens inside WSL, but Windows provides:
-- **Windows Terminal** - Modern terminal emulator
-- **VS Code** - Editor with Remote-WSL extension
-- **Git** - For any Windows-native repos (rare)
+Windows provides the host side of the setup:
 
-## Windows Terminal Configuration
+- **Windows Terminal**, configured by chezmoi. Details are in [Terminal Experience](terminal.md).
+- **VS Code**, with Remote - WSL / SSH / Containers.
+- **PowerShell 7** with a managed profile, for Windows-native work.
+- **Git for Windows**, for Windows-side repos (including this one).
 
-### Install Windows Terminal
+## Windows Terminal
 
-```powershell
-# From Microsoft Store or:
-winget install Microsoft.WindowsTerminal
-```
+Install it from the Microsoft Store or with `winget install Microsoft.WindowsTerminal`.
+Chezmoi then merges its settings into Terminal's `settings.json`: the Catppuccin look,
+the Nerd Font, tab colors per environment, one profile per SSH host, pane and agent
+keys, and highlight-to-copy. The **[Terminal Experience](terminal.md)** guide covers
+all of it, plus the VS Code terminal, OpenCode, and SSH hosts.
 
-### Recommended Settings
+### Font
 
-TODO: Document your preferred settings
-
-Key settings to configure:
-- [ ] Default profile → Ubuntu/WSL
-- [ ] Font → A Nerd Font (for Starship icons)
-- [ ] Terminal → Windows Terminal (recommended)
-- [ ] Color scheme
-- [ ] Key bindings
-- [ ] Starting directory
-
-### Font Installation
-
-For Starship to display correctly, install a Nerd Font:
-
-1. If `install_fonts = true`, this repo already installs it for you via the
-   `nerd-fonts-meslo` Chocolatey package - no manual download needed. Confirm
-   it's actually there first: `Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter "*Meslo*"`.
-   Otherwise, download from [nerdfonts.com](https://www.nerdfonts.com/)
-   - Recommended: **MesloLGS Nerd Font** (Excellent choice)
-   - Alternative: **JetBrainsMono Nerd Font**
-
-2. Install by right-clicking the `.ttf` files → Install
-
-3. **Set the font in Windows Terminal settings - this step does not happen
-   automatically**, even when the repo installed the font files for you.
-   Installing the font and *selecting* it in your terminal profile are two
-   separate steps; skipping the second one is the most common reason icons
-   still look broken after a full install.
-
-### Example settings.json Snippet
-
-> **Face name:** the Chocolatey `nerd-fonts-meslo` package (Nerd Fonts v3
-> naming) registers `MesloLGS Nerd Font`, `MesloLGS Nerd Font Mono`, and
-> `MesloLGS Nerd Font Propo` - there is no family literally named `MesloLGS NF`
-> despite that being the font's common nickname (confirmed by listing installed
-> font families on a real machine). Use the **`Mono`** variant for terminals -
-> it fixes icon glyphs to a single cell width so prompt output stays aligned;
-> the plain/`Propo` variants are meant for proportional text in GUI editors.
-
-```json
-{
-    "profiles": {
-        "defaults": {
-            "font": {
-                "face": "MesloLGS Nerd Font Mono",
-                "size": 11
-            }
-        },
-        "list": [
-            {
-                "guid": "{YOUR-WSL-GUID}",
-                "name": "Ubuntu",
-                "source": "Windows.Terminal.Wsl",
-                "startingDirectory": "//wsl$/Ubuntu/home/<username>"
-            }
-        ]
-    }
-}
-```
-
-### Finding Your WSL GUID
-
-To find the GUID for your WSL distributions, run this in PowerShell:
+The `fonts` package group installs **MesloLGS Nerd Font** (Chocolatey
+`nerd-fonts-meslo`), and the Terminal and VS Code settings select it. There's no
+manual step. To confirm the font is installed:
 
 ```powershell
-Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss |
-% {
-  $p = Get-ItemProperty $_.PsPath
-  "$($p.DistributionName) => $($_.PSChildName)"
-}
+Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter "*Meslo*"
 ```
 
-Example output:
-```
-Ubuntu-24.04 => {12345678-1234-1234-1234-123456789abc}
-```
-
-Use this GUID in your Windows Terminal `settings.json` to configure the profile manually.
+> **Face name:** the package (Nerd Fonts v3 naming) registers `MesloLGS Nerd Font`,
+> `MesloLGS Nerd Font Mono`, and `MesloLGS Nerd Font Propo`. There is no family
+> literally named `MesloLGS NF`, despite that being the font's common nickname. Use the
+> **`Mono`** variant in terminals: it keeps icon glyphs one cell wide, so prompt output
+> stays aligned. The plain and `Propo` variants are for proportional text in GUI editors.
 
 ## VS Code Configuration
 
 ### Managed Extensions and Settings
 
-`chezmoi apply` installs the repository-curated VS Code baseline globally,
+The installer installs the repository-curated VS Code baseline globally,
 including Remote - WSL, Remote - Containers, and Remote - SSH. Do not add
 GitLens to the managed list; it is explicitly excluded from this setup.
 
 For machine-specific additions or exclusions, use `[data.vscode_overrides]` in
 `~/.config/chezmoi/chezmoi.toml`. See [VS Code](vscode.md) for the supported
-fields and settings behavior.
+fields and settings behavior, and [Terminal Experience](terminal.md) for the
+integrated terminal.
 
 ## PowerShell Profile
 
-TODO: If you use PowerShell for anything, add configuration here.
+Chezmoi manages both profiles:
 
-Location: `$PROFILE` (usually `~\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`)
+- PowerShell 7: `Documents/PowerShell/Microsoft.PowerShell_profile.ps1`
+- Windows PowerShell 5.1: `Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1`
 
-```powershell
-# Example: Quick access to WSL
-function wsl { wsl.exe -d Ubuntu }
+With OneDrive folder redirection, `$PROFILE` lives under
+`OneDrive - <tenant>\Documents`, a path chezmoi can't target portably.
+`run_onchange_sync_pwsh_profiles` copies the managed profiles there whenever they
+change. Edit them in the repo, not in OneDrive; local edits there are overwritten.
 
-# Example: SSH agent forwarding
-# TODO: Document if needed
-```
+What the PowerShell 7 profile sets up:
+
+| Area | What |
+|---|---|
+| Prompt and navigation | starship, zoxide; `..` / `...` / `....`, `~` |
+| Modern tools | `ls`→eza (`ll`, `la`, `lt`, `lta`), `cat`→bat, `vim`/`vi`/`v`→nvim |
+| Git | OMZ-style `gst`, `gd`, `gl`, `gp`, `gco`, `ga`, `gcam`, `gb` |
+| Parity with `dot_aliases.zsh` | `c`, `h`, `py`, `nr`/`nrd`/`nrb`, `serve`, `ff`, `path`, `reload`, `prof`, `get`/`post`, docker `d`/`dc*` |
+| Dotfiles | `dotup` (chezmoi update + apply), `devprofile` / `dp` |
+| Windows Terminal | reports the current folder (OSC 9;9), so splits open where you are (the 5.1 profile does too) |
+| SSH agent | tops up the Windows ssh-agent with your declared keys (only adds, never removes) |
+
+`dot_aliases.zsh` stays the source of truth for aliases; the profile ports the
+subset that maps cleanly to PowerShell. The profile's comments explain each
+deliberate omission.
 
 ## Git for Windows
 
-Generally not needed since Git runs in WSL, but if required:
+The `core` group installs Git for Windows (Chocolatey `git.install`), and chezmoi
+writes `~/.gitconfig`. See **[Git](git.md)** for the defaults, line endings, and
+aliases. Windows-specific points:
 
-```powershell
-winget install Git.Git
-```
-
-Configure to use WSL's SSH:
-```
-TODO: Document SSH agent sharing if needed
-```
+- `core.autocrlf = false` overrides Git for Windows' system-level `true`;
+  `.gitattributes` decides line endings.
+- `core.longpaths = true`, because deep trees (`node_modules`) exceed the 260-character path limit.
+- Git uses its bundled `ssh`, which reads key files directly. That's fine for keys
+  without a passphrase. The bundled `ssh` can't reach the Windows ssh-agent service,
+  so passphrase-protected keys would prompt on every push.
 
 ## devprofile (PowerShell)
 
 `devprofile` manages which Git identity (name/email/signing key) is active, based on your chezmoi accounts.
 
-**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit safety net, or creating a new account. See the [README's Git Identity section](../README.md#git-identity-devprofile) for annotated example output of each command.
+**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit safety net, or creating a new account. See [devprofile](devprofile.md#example-outputs) for annotated example output of each command.
 
 ```powershell
 devprofile                                      # Show the identity active in the current repo
@@ -173,7 +124,7 @@ devprofile verify -InstallHook
 ```
 
 Notes:
-- No `dp` alias is defined for PowerShell yet (unlike the `dp` alias in zsh) - use `devprofile` in full.
+- `dp` is a short alias for `devprofile`, same as in zsh.
 - `devprofile verify -InstallHook` preserves any existing hook as `pre-commit.user`.
 - Passphrases are optional. You can force prompts with `$env:DEVPROFILE_PASSPHRASE=1`.
 - Auth vs signing keys: `key` is for auth; `signingKey` is optional for signing. If omitted, `key` is used for both.
@@ -209,18 +160,20 @@ ssh-keygen -p -f "$env:USERPROFILE\.ssh\id_yourkey"
 
 ## Clipboard Integration
 
-Clipboard sharing between Windows and WSL is automatic in modern WSL.
+- **In the terminals:** highlighting copies and right-click pastes, the same in
+  Windows Terminal and the VS Code terminal. See [Terminal Experience](terminal.md#clipboard).
+- **From the WSL shell:** `dot_aliases.zsh` maps `pbcopy` / `pbpaste` to `clip.exe`
+  and PowerShell's `Get-Clipboard` (to `xclip` on a Linux desktop), so the macOS
+  habits work:
 
-From WSL:
-```bash
-# Copy
-echo "hello" | clip.exe
+  ```bash
+  echo "hello" | pbcopy
+  pbpaste
+  ```
 
-# Paste
-powershell.exe -command "Get-Clipboard"
-```
-
-The aliases in this dotfiles repo handle this automatically.
+- **tmux in WSL:** `y` in copy mode pipes to `clip.exe`.
+- **Over SSH:** tmux and Neovim use OSC 52 instead, see
+  [Terminal Experience](terminal.md#remote-ssh-hosts).
 
 ## File System Access
 
@@ -242,63 +195,63 @@ WSL2 has its own network adapter. To access services:
 
 ## Troubleshooting
 
-### Slow WSL Startup
+### SSH agent
 
-TODO: Document common fixes
+Windows and WSL each run their own agent. Nothing is shared between them, by design:
 
-### SSH Agent Not Working
+- **Windows:** `ssh-agent` is a service. `run_onchange_generate_identities`
+  sets it to Automatic and starts it (the first time needs an elevated shell), and
+  the PowerShell profile adds your declared keys at startup. To check: `ssh-add -l`.
+  The service serves Windows OpenSSH (`ssh.exe`), not the `ssh` that Git for Windows
+  bundles; see [Git for Windows](#git-for-windows).
+- **WSL:** the Oh My Zsh `ssh-agent` plugin starts a per-login agent and loads the
+  keys the identities script lists (`zstyle :omz:plugins:ssh-agent identities`).
 
-TODO: Document SSH agent setup for Windows ↔ WSL
+If a key is missing from `ssh-add -l`, re-open the shell. If it's still missing,
+check that the key file exists in `~/.ssh` and is listed in your chezmoi accounts.
 
 ### Fonts Not Displaying
 
-- **Check elevation first** - if PowerShell wasn't running as Administrator
-  when `chezmoi apply` ran, `choco install nerd-fonts-meslo` failed outright
-  (confirmed live: every Chocolatey package fails with exit code 1 without
-  elevation) and the font was never installed at all, not just misconfigured.
-  See "Package installs silently failing" below before checking anything else.
-- Confirm the font is actually installed (`install_fonts = true` doesn't
-  guarantee it ran, or that it's this profile's active font):
-  `Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter "*Meslo*"`
-- Set the font in the Windows Terminal profile - installing it is not the same
-  as selecting it, and nothing does the second step for you (see the face-name
-  note above; `MesloLGS NF` alone won't match anything installed)
-- Also check VS Code's `terminal.integrated.fontFamily` if icons look wrong
-  specifically in its integrated terminal, and legacy console apps (Git Bash,
-  Git CMD, PowerShell shortcuts opened outside Windows Terminal) separately -
-  they read `HKCU:\Console\<app>` `FaceName`, not the Windows Terminal config
-- Restart Windows Terminal (or VS Code) after changing the font
+- **Check elevation first.** If the installer never ran elevated, Chocolatey never
+  installed `nerd-fonts-meslo`. See the elevation note at the top.
+- **Confirm the font is installed** (see [Font](#font)). The `fonts` group being
+  `true` doesn't prove the install ran.
+- **Windows Terminal and VS Code** select the font themselves (see
+  [Terminal Experience](terminal.md)). Icons broken only in a WSL tab mean the
+  Terminal template hasn't been applied yet. WSL's own generated profile forces
+  `Ubuntu Mono`, and the template overrides it.
+- **Legacy console windows** (Git Bash, Git CMD, PowerShell shortcuts opened outside
+  Windows Terminal) read `HKCU:\Console\<app>` `FaceName`, not any of this.
+  Set those by hand.
+- Restart Windows Terminal (or VS Code) after a font change.
 
-### Package installs silently failing
+### Package installs failing
 
-Chocolatey requires an **elevated PowerShell** ("Run as Administrator") -
-without it, every `choco install` fails with exit code 1, one per package,
-with no single loud error to point at the real cause (confirmed live this
-session: an entire non-elevated run failed every package the same way, and
-it wasn't obvious from the output alone that elevation was the problem).
-
-- **Symptom:** `chezmoi apply` finishes without an overall failure, but
-  packages/fonts/tools you expected are missing afterward.
-- **Fix:** close the window, reopen PowerShell via **Run as Administrator**,
-  and re-run `chezmoi apply`.
+Chocolatey requires an **elevated PowerShell**. Without it, every `choco install`
+fails with exit code 1, one per package, with no single loud error pointing at the
+real cause. The installer now checks elevation first and exits before changing
+anything (see [Run `dot up` as Administrator](#run-dot-up-as-administrator)). So if
+packages are missing, the most likely cause is that the elevated run never
+happened. Re-run `dot up` from an elevated shell.
 
 ### chezmoi itself won't run at all ("Application Control policy has blocked this file")
 
-Different failure mode from the two above - this one is `chezmoi.exe`
-itself refusing to launch, not a package install failing partway through.
-It's Windows Smart App Control blocking the unsigned binary, confirmed live
-via the Windows Event Log - see the matching entry in the repo README's
-Troubleshooting section for the full diagnosis and fix.
+Different failure mode from the one above: here `chezmoi.exe` itself refuses to
+launch, rather than a package failing partway through. It's Windows Smart App Control
+blocking the unsigned binary, confirmed live via the Windows Event Log. See the
+matching entry in the repo README's Troubleshooting section for the full diagnosis
+and fix.
 
 ---
 
-## Checklist
+## Checklist (new Windows machine)
 
-Complete these items from Windows:
-
-- [ ] Install Windows Terminal
-- [ ] Install Nerd Font
-- [ ] Configure Windows Terminal settings
-- [ ] Install VS Code extensions
-- [ ] Test clipboard integration
-- [ ] Document any custom PowerShell profile
+- [ ] Run the installer from an **elevated** PowerShell (see the README).
+- [ ] Open Windows Terminal: Catppuccin colors, Nerd Font icons in the prompt, and
+      an orange WSL tab.
+- [ ] VS Code: its terminal shows the same colors, and extensions are installed.
+- [ ] `ssh-add -l` in PowerShell lists your keys.
+- [ ] `git config user.email` inside a repo under an account's `dirs` shows that
+      account (see [devprofile](devprofile.md)).
+- [ ] Add your SSH hosts to `[[data.ssh_hosts]]` and apply; an `SSH: <name>` tab
+      appears for each (see [Terminal Experience](terminal.md#remote-ssh-hosts)).

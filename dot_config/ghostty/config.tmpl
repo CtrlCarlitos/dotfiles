@@ -1,0 +1,81 @@
+{{- /*
+  Ghostty (macOS + Linux desktop): the twin of the Windows Terminal template
+  (AppData/.../modify_settings.json), so every machine looks and behaves the
+  same. See docs/terminal.md. Excluded on Windows and in WSL (.chezmoiignore).
+
+  Owned outright, not a modify-template: Ghostty never rewrites its config.
+  Unused unless Ghostty is installed (dev_desktop group); nothing here makes it
+  the default terminal - that's the user's choice in the OS.
+  Needs Ghostty 1.3+ (chained keybinds for the agent splits).
+*/ -}}
+# Managed by chezmoi (dot_config/ghostty/config.tmpl) - edit the template, not
+# this file. `ghostty +show-config` shows the effective config.
+
+# --- Look: Catppuccin Mocha + the Nerd Font, like every other terminal -------
+theme = Catppuccin Mocha
+font-family = MesloLGS Nerd Font Mono
+{{- if eq .chezmoi.os "darwin" }}
+# macOS points are smaller on screen than Windows/Linux points at 96 dpi;
+# 14 here matches 12 in Windows Terminal.
+font-size = 14
+{{- else }}
+font-size = 12
+{{- end }}
+background-opacity = 0.92
+background-blur = true
+cursor-style = bar
+window-padding-x = 8
+window-padding-y = 6
+{{- if eq .chezmoi.os "darwin" }}
+window-save-state = always
+{{- end }}
+
+# --- Clipboard: highlight copies, right-click pastes (as in Windows Terminal
+# and the VS Code terminal). Shift+right-click pastes in OpenCode, which
+# captures the mouse (Shift hands it back to Ghostty).
+copy-on-select = clipboard
+right-click-action = paste
+
+# --- SSH: ssh-terminfo installs Ghostty's terminfo on the host the first time,
+# ssh-env falls back to xterm-256color where it can't; either way backspace,
+# colors, and tmux behave on remote hosts.
+shell-integration = detect
+shell-integration-features = ssh-terminfo,ssh-env
+window-inherit-working-directory = true
+
+# --- Panes (same keys as Windows Terminal) ------------------------------------
+keybind = alt+shift+equal=new_split:right
+keybind = alt+shift+minus=new_split:down
+keybind = alt+shift+d=new_split:auto
+keybind = alt+left=goto_split:left
+keybind = alt+right=goto_split:right
+keybind = alt+up=goto_split:up
+keybind = alt+down=goto_split:down
+keybind = alt+shift+z=toggle_split_zoom
+keybind = ctrl+shift+w=close_surface
+keybind = ctrl+shift+p=toggle_command_palette
+
+# --- Agent keys: type the command + Enter (Shift: in a new split, same folder)
+keybind = ctrl+alt+c=text:claude\r
+keybind = ctrl+alt+x=text:codex\r
+keybind = ctrl+alt+o=text:opencode\r
+keybind = ctrl+alt+a=text:agy\r
+keybind = ctrl+alt+shift+c=new_split:right
+keybind = chain=text:claude\r
+keybind = ctrl+alt+shift+x=new_split:right
+keybind = chain=text:codex\r
+keybind = ctrl+alt+shift+o=new_split:right
+keybind = chain=text:opencode\r
+keybind = ctrl+alt+shift+a=new_split:right
+keybind = chain=text:agy\r
+
+# --- Drop-down (quick) terminal, from any app ---------------------------------
+{{- if eq .chezmoi.os "darwin" }}
+# Ctrl+Option+` (Cmd+` is macOS's window cycling; Ctrl+` is VS Code's
+# terminal toggle). Needs Accessibility permission for Ghostty.
+keybind = global:ctrl+alt+grave_accent=toggle_quick_terminal
+{{- else }}
+# Super+` - the Win+` of Windows Terminal. Needs a Wayland compositor with
+# wlr-layer-shell (KDE, Hyprland, Sway; not GNOME) and an XDG desktop portal.
+keybind = global:super+grave_accent=toggle_quick_terminal
+{{- end }}

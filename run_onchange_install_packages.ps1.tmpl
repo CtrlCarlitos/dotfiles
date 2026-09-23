@@ -282,7 +282,11 @@ function Install-Node {
 # deliberately: psmux recommends PS 7+, and this list installs it first.
 $packages += @(
     "git.install", "curl", "wget", "jq", "fzf", "neovim", "ripgrep", "gh",
-    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg"
+    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg",
+    # npiperelay: bridges the Windows ssh-agent named pipe into WSL, so a WSL
+    # distro (and any devcontainer launched from it) uses the Windows agent and
+    # holds no private keys of its own. See docs/ssh-agents.md.
+    "npiperelay"
 )
 
 # Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups
@@ -712,10 +716,50 @@ $vsDefaults = [ordered]@{
     'workbench.startupEditor' = 'none'
     'terminal.integrated.scrollback' = 30000
     'terminal.integrated.shellIntegration.enabled' = $true
+    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
+    'terminal.integrated.fontSize' = 16
+    # Shift+Enter (newline) for claude/codex/opencode: Windows CLIs sit
+    # behind ConPTY, which only forwards the Shift modifier when the
+    # terminal speaks win32-input-mode - Windows Terminal always does, VS
+    # Code only with this (experimental, default off). The kitty protocol
+    # (on by default) can't help: ConPTY drops it. Windows-only key; the
+    # .sh twin omits it.
+    'terminal.integrated.enableWin32InputMode' = $true
+    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
+    # instead of toggling the sidebar / panel while the terminal has focus.
+    'terminal.integrated.commandsToSkipShell' = @('-workbench.action.toggleSidebarVisibility', '-workbench.action.togglePanel')
+    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
+    # right-click always pastes.
+    'terminal.integrated.copyOnSelection' = $true
+    'terminal.integrated.rightClickBehavior' = 'paste'
     'cSpell.language' = 'en,es'
 }
 $vsJunk = @('**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/node_modules/**', '**/*.pyc')
-$vsMerges = @{ 'files.exclude' = $vsJunk; 'search.exclude' = $vsJunk }
+$vsJunkMap = [ordered]@{}
+foreach ($s in $vsJunk) { $vsJunkMap[$s] = $true }
+# Catppuccin Mocha for the integrated terminal only (same palette as the
+# Windows Terminal scheme) - editor theme untouched. Sub-key upsert: any
+# color you set yourself wins.
+$vsTerminalColors = [ordered]@{
+    'terminal.background' = '#1E1E2E'; 'terminal.foreground' = '#CDD6F4'
+    'terminalCursor.foreground' = '#F5E0DC'; 'terminal.selectionBackground' = '#585B70'
+    'terminal.ansiBlack' = '#45475A'; 'terminal.ansiRed' = '#F38BA8'
+    'terminal.ansiGreen' = '#A6E3A1'; 'terminal.ansiYellow' = '#F9E2AF'
+    'terminal.ansiBlue' = '#89B4FA'; 'terminal.ansiMagenta' = '#F5C2E7'
+    'terminal.ansiCyan' = '#94E2D5'; 'terminal.ansiWhite' = '#BAC2DE'
+    'terminal.ansiBrightBlack' = '#585B70'; 'terminal.ansiBrightRed' = '#F38BA8'
+    'terminal.ansiBrightGreen' = '#A6E3A1'; 'terminal.ansiBrightYellow' = '#F9E2AF'
+    'terminal.ansiBrightBlue' = '#89B4FA'; 'terminal.ansiBrightMagenta' = '#F5C2E7'
+    'terminal.ansiBrightCyan' = '#94E2D5'; 'terminal.ansiBrightWhite' = '#A6ADC8'
+}
+# MERGES: object key -> sub-keys (with values) added only when absent.
+$vsMerges = @{ 'files.exclude' = $vsJunkMap; 'search.exclude' = $vsJunkMap; 'workbench.colorCustomizations' = $vsTerminalColors }
+# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
+# at a hand-kept config (OneDrive Documents\_ssh\config), so its hosts never
+# reached ssh.exe, Windows Terminal's SSH profiles, or chezmoi. With it unset,
+# Remote-SSH reads ~/.ssh/config - rendered from [[data.ssh_hosts]] - like
+# everything else. exclude_settings can keep it on a machine that needs it.
+$vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')
 
 # Machine-local settings drift, rendered from [data.vscode_overrides] (see
 # the extensions comment above for why not [data.vscode]):
@@ -740,7 +784,7 @@ $vsExtraSettingsJson = @'
 '@
 if ($vsExcludeSettings.Count -gt 0) {
     foreach ($k in $vsExcludeSettings) {
-        $vsForced.Remove($k) ; $vsDefaults.Remove($k) ; $vsMerges.Remove($k)
+        $vsForced.Remove($k) ; $vsDefaults.Remove($k) ; $vsMerges.Remove($k) ; [void]$vsUnset.Remove($k)
     }
 }
 if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
@@ -809,12 +853,7 @@ if (-not $vsApply) {
         $new = [ordered]@{}
         foreach ($k in $vsForced.Keys) { $new[$k] = $vsForced[$k] }
         foreach ($k in $vsDefaults.Keys) { $new[$k] = $vsDefaults[$k] }
-        $new['files.exclude'] = [ordered]@{}
-        $new['search.exclude'] = [ordered]@{}
-        foreach ($s in $vsJunk) {
-            $new['files.exclude'][$s] = $true
-            $new['search.exclude'][$s] = $true
-        }
+        foreach ($k in $vsMerges.Keys) { $new[$k] = [PSCustomObject]$vsMerges[$k] }
         (ConvertTo-SortedJson ([PSCustomObject]$new)) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
         Write-Host "  Created VS Code user settings with global defaults" -ForegroundColor Green
     }
@@ -843,11 +882,17 @@ if (-not $vsApply) {
                 $vsJson | Add-Member -MemberType NoteProperty -Name $k -Value ([pscustomobject]@{}) -Force
                 $objProp = $vsJson.PSObject.Properties[$k]
             }
-            foreach ($s in $vsMerges[$k]) {
+            foreach ($s in $vsMerges[$k].Keys) {
                 if ($null -eq $objProp.Value.PSObject.Properties[$s]) {
-                    $objProp.Value | Add-Member -MemberType NoteProperty -Name $s -Value $true
+                    $objProp.Value | Add-Member -MemberType NoteProperty -Name $s -Value $vsMerges[$k][$s]
                     $vsChanged++
                 }
+            }
+        }
+        foreach ($k in $vsUnset) {
+            if ($null -ne $vsJson.PSObject.Properties[$k]) {
+                $vsJson.PSObject.Properties.Remove($k)
+                $vsChanged++
             }
         }
         if ($vsChanged -gt 0) {

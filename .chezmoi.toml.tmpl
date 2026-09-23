@@ -237,6 +237,8 @@
 #   identity = "id_personal"          # optional  key filename in ~/.ssh
 #   proxy    = "bastion"              # optional  ProxyJump alias
 #   comment  = "Bastion for staging"  # optional  rendered block header
+#   os       = "linux"                # optional  mac|linux: Windows Terminal tab color
+#   tmux     = true                   # optional  Terminal tab attaches to tmux session "main" (or a name)
 {{- range .ssh_hosts }}
 
 [[data.ssh_hosts]]
@@ -257,6 +259,12 @@
 {{- if hasKey . "comment" }}
   comment = {{ .comment | quote }}
 {{- end }}
+{{- if hasKey . "os" }}
+  os = {{ .os | quote }}
+{{- end }}
+{{- if hasKey . "tmux" }}
+  tmux = {{ if kindIs "string" .tmux }}{{ .tmux | quote }}{{ else }}{{ .tmux }}{{ end }}
+{{- end }}
 {{- end }}
 {{- else }}
 # [[data.ssh_hosts]]  (one block per host; keys live in ~/.ssh)
@@ -267,6 +275,8 @@
 #   identity = "id_personal"          # optional  key file name in ~/.ssh
 #   proxy    = "bastion"              # optional  ProxyJump alias
 #   comment  = "Bastion for staging"  # optional  block header (memory hook)
+#   os       = "linux"                # optional  mac|linux: Windows Terminal tab color
+#   tmux     = true                   # optional  Terminal tab attaches to tmux session "main" (or a name)
 {{- end }}
 
 [add]

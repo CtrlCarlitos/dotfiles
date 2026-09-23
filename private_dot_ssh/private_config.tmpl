@@ -63,6 +63,10 @@ Host {{ $alias }}
 #   proxy    (optional)  ProxyJump target alias (e.g. a bastion `name`)
 #   comment  (optional)  free text - rendered as the block's header comment
 #                        so `grep ~/.ssh/config` answers "what was this host?"
+#   os       (optional)  "mac" | "linux" - not an SSH option; picks the tab
+#                        color/icon of the host's Windows Terminal profile
+#   tmux     (optional)  true | "<session>" - not an SSH option; that Terminal
+#                        profile re-attaches to a remote tmux session
 #
 # Example (chezmoi.toml):
 #   [[data.ssh_hosts]]

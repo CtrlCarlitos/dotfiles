@@ -137,14 +137,6 @@ net_timeout() {
 #-------------------------------------------------------------------------------
 # Detect OS and Package Manager
 #-------------------------------------------------------------------------------
-detect_os() {
-    case "$(uname -s)" in
-        Darwin) echo "macos" ;;
-        Linux)  echo "linux" ;;
-        *)      echo "unknown" ;;
-    esac
-}
-
 detect_package_manager() {
     if command -v apt &>/dev/null; then echo "apt"
     elif command -v pacman &>/dev/null; then echo "pacman"
@@ -752,6 +744,20 @@ install_linux_desktop() {
         $SUDO apt install -y "$pkg" || warn "Skipping '$pkg' (not installable on this release)."
     done
 
+    # Ghostty (the Mac/Linux twin of Windows Terminal; config in
+    # dot_config/ghostty/config.tmpl). Distro package manager only - no snap,
+    # no third-party repo: Ubuntu 26.04+ ships it in universe (1.3.0, which the
+    # config's chained keybinds need); older releases (24.04) don't have it,
+    # so skip with a pointer instead. Installing it does not make it the
+    # default terminal; that stays the user's choice.
+    if ! command -v ghostty &>/dev/null; then
+        if apt-cache show ghostty &>/dev/null; then
+            $SUDO apt install -y ghostty || warn "Ghostty apt install failed - continuing"
+        else
+            warn "Ghostty: not in this release's apt repositories (Ubuntu 26.04+ has it) - see https://ghostty.org/docs/install/binary. The config is already in ~/.config/ghostty."
+        fi
+    fi
+
     # Termius (SSH/SFTP client - replaces FileZilla everywhere as of this
     # commit; FileZilla itself is fine on Linux/Windows, but its Homebrew
     # cask was pulled entirely on macOS, adware concerns - standardizing on
@@ -825,7 +831,7 @@ install_apt() {
 
 {{- if $core }}
     info "Installing core packages..."
-    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd
+    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd socat ssh-agent-filter
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
@@ -1157,11 +1163,47 @@ DEFAULTS = {
     "workbench.startupEditor": "none",
     "terminal.integrated.scrollback": 30000,
     "terminal.integrated.shellIntegration.enabled": True,
+    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
+    "terminal.integrated.fontSize": 16,
+    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
+    # instead of toggling the sidebar / panel while the terminal has focus.
+    # (enableWin32InputMode is the .ps1 twin's Windows-only Shift+Enter fix;
+    # here the default-on kitty keyboard protocol already carries Shift+Enter.)
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.toggleSidebarVisibility",
+        "-workbench.action.togglePanel",
+    ],
+    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
+    # right-click always pastes.
+    "terminal.integrated.copyOnSelection": True,
+    "terminal.integrated.rightClickBehavior": "paste",
     "cSpell.language": "en,es",
 }
 JUNK = ["**/__pycache__/**", "**/.venv/**", "**/venv/**",
         "**/node_modules/**", "**/*.pyc"]
-MERGES = {"files.exclude": JUNK, "search.exclude": JUNK}
+# Catppuccin Mocha for the integrated terminal only (same palette as the
+# Windows Terminal scheme) - editor theme untouched; any color you set wins.
+TERMINAL_COLORS = {
+    "terminal.background": "#1E1E2E", "terminal.foreground": "#CDD6F4",
+    "terminalCursor.foreground": "#F5E0DC", "terminal.selectionBackground": "#585B70",
+    "terminal.ansiBlack": "#45475A", "terminal.ansiRed": "#F38BA8",
+    "terminal.ansiGreen": "#A6E3A1", "terminal.ansiYellow": "#F9E2AF",
+    "terminal.ansiBlue": "#89B4FA", "terminal.ansiMagenta": "#F5C2E7",
+    "terminal.ansiCyan": "#94E2D5", "terminal.ansiWhite": "#BAC2DE",
+    "terminal.ansiBrightBlack": "#585B70", "terminal.ansiBrightRed": "#F38BA8",
+    "terminal.ansiBrightGreen": "#A6E3A1", "terminal.ansiBrightYellow": "#F9E2AF",
+    "terminal.ansiBrightBlue": "#89B4FA", "terminal.ansiBrightMagenta": "#F5C2E7",
+    "terminal.ansiBrightCyan": "#94E2D5", "terminal.ansiBrightWhite": "#A6ADC8",
+}
+# MERGES: object key -> sub-keys (with values) added only when absent.
+MERGES = {"files.exclude": {s: True for s in JUNK},
+          "search.exclude": {s: True for s in JUNK},
+          "workbench.colorCustomizations": TERMINAL_COLORS}
+# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
+# at a hand-kept config outside ~/.ssh, so its hosts never reached ssh or
+# chezmoi. Unset, Remote-SSH reads ~/.ssh/config - rendered from
+# [[data.ssh_hosts]]. exclude_settings can keep it on a machine that needs it.
+UNSET = ["remote.SSH.configFile"]
 
 # Machine-local overrides: exclusions strip any tier (FORCED included -
 # excluding a font key stops its forced re-assert); extras join DEFAULTS.
@@ -1169,6 +1211,8 @@ for k in EXCLUDE:
     FORCED.pop(k, None)
     DEFAULTS.pop(k, None)
     MERGES.pop(k, None)
+    if k in UNSET:
+        UNSET.remove(k)
 DEFAULTS.update(EXTRA)
 
 path = sys.argv[1]
@@ -1211,9 +1255,12 @@ for k, v in DEFAULTS.items():
         data[k] = v; changed.append(k)
 for k, subs in MERGES.items():
     cur = data.setdefault(k, {})
-    for s in subs:
+    for s, v in subs.items():
         if s not in cur:
-            cur[s] = True; changed.append(k + "." + s)
+            cur[s] = v; changed.append(k + "." + s)
+for k in UNSET:
+    if k in data:
+        del data[k]; changed.append(k + " (unset)")
 
 if not changed:
     print("  VS Code settings already at defaults (%s)" % path)
@@ -2118,7 +2165,7 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
+    for cask in google-chrome visual-studio-code ghostty obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
 

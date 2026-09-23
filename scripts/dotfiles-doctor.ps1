@@ -101,7 +101,9 @@ if (-not (Test-Path -LiteralPath $config)) {
 if ($InApply) {
     Result 'skip' 'config-parse' 'in-apply mode - chezmoi already parsed the config to get this far'
 } elseif (Test-Path -LiteralPath $config) {
-    & chezmoi data *> $null
+    # --config pins chezmoi to the file every other check inspects (see the
+    # .sh twin): bare `chezmoi data` resolves its own config independently.
+    & chezmoi --config $config data *> $null
     if ($LASTEXITCODE -eq 0) {
         Result 'ok' 'config-parse' 'chezmoi loads the config'
     } else {

@@ -155,33 +155,131 @@ deliberately configured. Binding it to `0.0.0.0` requires
 the runtime environment or your platform's secret mechanism, not image build
 configuration or feature options.
 
-### 6. Persist agent authentication and configuration
+### 6. Persist authentication once: identity volumes + a forwarded agent
 
-Feature installation is cached in the image, but agent authentication and
-configuration live in the remote user's home directory. Use named volumes when
-they should survive a rebuild: `~/.claude`, `~/.codex`, and
-`~/.config/opencode`. This example assumes the standard `vscode`
-remote user from the base image; change the target paths if your `remoteUser`
-differs.
+**Separate identity from project.** Tokens and SSH keys are per *user*, not per
+project, so they belong in named volumes and an agent socket shared by every
+container. Do that and you log in **once, ever**: restarts, rebuilds and brand-new
+projects all inherit it. Only deleting the volume loses it.
+
+Keep the volume names identical across projects — that is what makes a new
+project start already authenticated.
+
+The first five mounts are the agent CLIs' credentials and config. The last is the
+SSH **agent socket** — never `~/.ssh`, never a key file.
 
 ```json
 {
   "remoteUser": "vscode",
   "mounts": [
-    "source=devcontainer-claude,target=/home/vscode/.claude,type=volume",
-    "source=devcontainer-codex,target=/home/vscode/.codex,type=volume",
-    "source=devcontainer-opencode-config,target=/home/vscode/.config/opencode,type=volume"
-  ]
+    "source=agents-claude,target=/home/vscode/.claude,type=volume",
+    "source=agents-codex,target=/home/vscode/.codex,type=volume",
+    "source=agents-opencode-config,target=/home/vscode/.config/opencode,type=volume",
+    "source=agents-gemini,target=/home/vscode/.gemini,type=volume",
+    "source=agents-gh,target=/home/vscode/.config/gh,type=volume",
+    "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind"
+  ],
+  "remoteEnv": { "SSH_AUTH_SOCK": "/ssh-agent" }
 }
 ```
 
-`~/.local/share/opencode` is an optional user-managed data path. Mount it only
-when you intentionally need its contents to survive rebuilds.
+Where each CLI actually keeps its credentials (verified, not assumed):
 
-Claude also stores user settings in `~/.claude.json`. Docker named volumes are
-directories, so do not mount one at that file path. If that file must persist,
-create a host file outside the repository and bind mount it explicitly, for
-example `source=/absolute/host/path/claude.json,target=/home/vscode/.claude.json,type=bind`.
+| CLI | File | Volume above |
+|---|---|---|
+| Claude Code | `~/.claude/.credentials.json` | `agents-claude` |
+| Codex | `~/.codex/auth.json` | `agents-codex` |
+| OpenCode | `~/.local/share/opencode/auth.json` | none by default — see below |
+| agy | under `~/.gemini` | `agents-gemini` |
+| gh | `~/.config/gh/hosts.yml` | `agents-gh` |
+
+**OpenCode is the exception, and it is a real trade-off.** `~/.config/opencode`
+holds config and commands; its auth lives in `~/.local/share/opencode/auth.json`,
+an optional user-managed data path that also contains `opencode.db`, snapshots and
+per-project state. So:
+
+- **Default (above):** config persists, auth does not. You re-run OpenCode's login
+  after a rebuild.
+- **Want persistent OpenCode auth?** Mount the data path too, and prefer a
+  *per-project* volume name so sessions and snapshots don't bleed between projects:
+  `"source=myproject-opencode-data,target=/home/vscode/.local/share/opencode,type=volume"`.
+- **Headless?** Provide the provider API key through the environment instead and
+  skip the mount entirely.
+
+Claude also keeps user settings in `~/.claude.json`. Docker named volumes are
+directories, so that single file cannot be one; use an explicit bind mount if it
+must persist, for example
+`source=/absolute/host/path/claude.json,target=/home/vscode/.claude.json,type=bind`.
+
+`gh` uses the OS keyring on your host, so there is nothing on the host to share.
+Inside a container there is no keyring, so `gh auth login` writes
+`~/.config/gh/hosts.yml`, which the volume persists.
+
+**Do not bind-mount host credential files.** A bind mount gives everything in the
+container write access to the tokens that own your GitHub, Anthropic and OpenAI
+sessions — and agents often run there with permission prompts disabled. A named
+volume is a separate copy you authorize once, inside the trust boundary you meant
+to create. For headless or CI runs, inject an API key from a secret store instead.
+
+### SSH without VS Code (terminal-first)
+
+VS Code forwards the agent for you. The `devcontainer` CLI and plain `docker run`
+do not, so a terminal-first workflow wires it explicitly — that is what the
+`SSH_AUTH_SOCK` mount above does.
+
+- **Launch from WSL, not PowerShell.** WSL's agent is a Unix socket Docker can
+  bind. The Windows OpenSSH agent is a named pipe, which a Linux container cannot
+  mount without an `npiperelay` + `socat` bridge — which is exactly what
+  `ssh-agent-relay` sets up; see **[SSH Agents](ssh-agents.md)**. Mount the
+  per-account **filtered** socket (`ssh-agent-relay use <alias>`), not the raw one,
+  so the container cannot authenticate as another account.
+- Your zsh already starts an agent and loads the declared keys, so the socket
+  exists at login.
+- **Key material never enters the container.** While attached, though, anything
+  inside can *use* the keys the agent holds.
+
+**One agent per GitHub account.** Forwarding exposes the whole agent, so a single
+agent holding three accounts' keys lets a customer's container authenticate as
+your personal account. Start one agent per account, each with one key, and let
+each project tree select its own socket — the same per-directory idea the
+`[[data.accounts]]` `dirs` list already uses for git identity:
+
+```sh
+# ~/.zshrc (or a login script): one socket per account
+ssh-agent -a "$XDG_RUNTIME_DIR/ssh-agent.personal.sock" >/dev/null 2>&1
+
+# projects/work/.envrc (direnv): this tree uses the work agent
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.work.sock"
+```
+
+`${localEnv:SSH_AUTH_SOCK}` in `devcontainer.json` then resolves to whichever
+agent is active in the directory you launch from.
+
+**Signing in a container**, without mounting a key: derive the public key from
+the forwarded agent at start, and sign through the agent.
+
+```sh
+ssh-add -L | head -1 > ~/.ssh/signing.pub
+git config --global user.signingkey ~/.ssh/signing.pub
+git config --global commit.gpgsign true
+```
+
+Chezmoi leaves signing off in containers by default (`commit.gpgsign` and the
+`-i <key> -o IdentitiesOnly=yes` pin are host-only), because a container has no
+key files: `IdentitiesOnly` with a missing identity refuses the agent's keys, and
+ssh signing needs a public key file present.
+
+### Where the code lives, and where the agents run
+
+You do not SSH into the container.
+
+- **Code:** in the WSL filesystem, bind-mounted to `/workspaces/<repo>`. Edits are
+  visible from both sides; keep it out of `/mnt/c` for speed.
+- **Toolchain:** in the image, via features. That is the point — the Windows host
+  needs Docker, WSL, chezmoi and your agent, and no language runtimes.
+- **Agents:** run `claude`, `codex`, `opencode` or `agy` **inside** the container
+  (`devcontainer exec` or `docker exec`), where the toolchain and the project are.
+  They inherit the volumes above, so they are already logged in.
 
 ### What happens on container start
 
@@ -191,21 +289,6 @@ The dotfiles `install.sh` detects the devcontainer environment (`DEVCONTAINER=tr
 3. Runs `chezmoi init --apply` — applies your shell config, git identities, aliases, and profiles
 
 No packages are installed. Only configuration is applied. This runs on every container start (fast — it's file copies, not package downloads).
-
-## SSH Keys in Devcontainers
-
-Your SSH keys from the host are automatically forwarded if you:
-1. Have SSH agent running on host
-2. Have keys loaded: `ssh-add ~/.ssh/id_*`
-
-VS Code forwards the agent automatically.
-
-### Verify SSH Works
-
-```bash
-ssh-add -l              # Should list your keys
-ssh -T git@github.com   # Should authenticate
-```
 
 ## Troubleshooting
 

@@ -5,13 +5,21 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 guide="$repo_root/docs/devcontainer.md"
 ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-python3 - "$guide" <<'PY'
+# Resolve a real Python: on Windows `python3` on PATH is usually the Microsoft
+# Store stub, which prints an ad and exits non-zero, so probe before using it.
+PY_BIN=""
+for c in python3 python "py -3"; do
+    if $c -c "" >/dev/null 2>&1; then PY_BIN="$c"; break; fi
+done
+[ -n "$PY_BIN" ] || { printf 'SKIP: no working Python interpreter (tried python3, python, py -3)\n'; exit 0; }
+
+$PY_BIN - "$guide" <<'PY'
 import json
 import re
 import sys
 from pathlib import Path
 
-guide = Path(sys.argv[1]).read_text()
+guide = Path(sys.argv[1]).read_text(encoding="utf-8")  # Windows defaults to cp1252
 flat_guide = re.sub(r"\s+", " ", guide)
 
 def section(start, end):

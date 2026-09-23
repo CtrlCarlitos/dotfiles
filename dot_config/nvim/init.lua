@@ -53,6 +53,30 @@ opt.splitbelow = true
 opt.wrap = false
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"  -- Use system clipboard
+
+-- Over SSH there is no system clipboard tool: yank through OSC 52 instead,
+-- which the local terminal (Windows Terminal, iTerm2, ...) puts on ITS
+-- clipboard; inside tmux, set-clipboard forwards it. Paste reads Nvim's own
+-- register - most terminals refuse OSC 52 reads, and a read would hang.
+-- Local sessions keep the normal providers (clip.exe, pbcopy, xclip).
+-- Self-contained rather than vim.ui.clipboard.osc52: that needs Nvim 0.10,
+-- and Ubuntu's packaged Nvim (the usual SSH host) is 0.9.
+if vim.env.SSH_TTY then
+  local function copy(lines)
+    local text = table.concat(lines, "\n")
+    local b64 = vim.base64 and vim.base64.encode(text)
+      or vim.fn.system("base64 | tr -d '\\n'", text)       -- Nvim 0.9
+    vim.fn.chansend(vim.v.stderr, "\027]52;c;" .. b64 .. "\007")
+  end
+  local function paste()
+    return { vim.fn.split(vim.fn.getreg(""), "\n"), vim.fn.getregtype("") }
+  end
+  vim.g.clipboard = {
+    name = "OSC 52",
+    copy = { ["+"] = copy, ["*"] = copy },
+    paste = { ["+"] = paste, ["*"] = paste },
+  }
+end
 opt.undofile = true            -- Persistent undo
 
 -- Performance

@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Curated-skill wiring contract across the four agent CLIs.
+#
+# This file was structurally broken from the commit that introduced it until
+# 2026-09-22, in a way nothing could see:
+#   - Two functions (verify_unix_skill_lifecycle, verify_windows_command_generation)
+#     ended right after a heredoc; their closing lines had been displaced further
+#     down the file (one left a stray `:` placeholder). Everything between was
+#     therefore NESTED inside them, so the windows-scope functions only existed
+#     if the unix scope had already run. `bash -n` is happy with this.
+#   - The CI lint job had no chezmoi, so every rendering assertion early-returned
+#     "PASS/SKIP: ... requires chezmoi". Green, validating only the greps.
+# Both are fixed (ci.yml now installs the pinned chezmoi). When touching this
+# file, verify the functions actually exist at runtime, not just on screen:
+#   head -n <line before the main section> "$0" > /tmp/probe.sh
+#   bash -c 'source /tmp/probe.sh; declare -F | grep -c verify_'   # expect 8
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 catalog="$repo_root/scripts/curated-agent-skills.txt"
 unix_files=(
@@ -19,6 +35,17 @@ required_skills=(
 )
 failed=false
 scope="${AGENT_SKILL_WIRING_SCOPE:-all}"
+# On Windows (Git Bash) only the windows scope can hold: the unix half asserts
+# POSIX file modes and runs the .sh twins. CI runs both scopes on Linux; an
+# explicit AGENT_SKILL_WIRING_SCOPE still wins.
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32)
+        if [[ -z "${AGENT_SKILL_WIRING_SCOPE:-}" ]]; then
+            scope=windows
+            printf 'NOTE: Windows host - running the windows scope (unix scope needs a Unix host)\n'
+        fi
+        ;;
+esac
 
 if [[ "$scope" != "all" && "$scope" != "unix" && "$scope" != "windows" ]]; then
     printf 'FAIL: AGENT_SKILL_WIRING_SCOPE must be all, unix, or windows\n' >&2
@@ -93,6 +120,9 @@ verify_unix_supported_target_counts() {
     config="$tmp/chezmoi.toml"
     rendered="$tmp/installer.sh"
     : > "$config"
+    # The scratch source needs the repo's data (guardrail.version, vscode, ...):
+    # without it the installer template fails on `.guardrail.version`.
+    cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
         < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
@@ -153,6 +183,7 @@ verify_unix_skill_lifecycle() {
         "$tmp/home/.gemini/antigravity-cli/skills/handoff"
     config="$tmp/chezmoi.toml"
     : > "$config"
+    cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
     rendered="$tmp/installer.sh"
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
@@ -192,6 +223,20 @@ mv() {
 }
 
 EOF
+        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
+        printf '%s\n' 'install_agent_skills'
+    } > "$harness"
+
+    output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
+    if ! grep -Fqx -- 'Curated skills: Antigravity installed=0 skipped=0 failed=1' <<< "$output"; then
+        fail 'Unix lifecycle must report a failed Antigravity promotion'
+    fi
+    target="$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
+    if [[ ! -f "$target" || "$(<"$target")" != stale ]]; then
+        fail 'Unix lifecycle must restore the stale Antigravity target after promotion failure'
+    fi
+}
+
 verify_unix_claude_attribution() {
     local tmp config rendered harness settings warnings mode
     if ! command -v chezmoi >/dev/null 2>&1; then
@@ -287,7 +332,7 @@ verify_windows_claude_attribution() {
     fi
 
     local fixture config rendered render_dir
-    fixture="$(mktemp)"
+    fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"  # pwsh -File needs .ps1
     render_dir="$(mktemp -d)"
     config="$render_dir/chezmoi.toml"
     rendered="$render_dir/installer.ps1"
@@ -300,9 +345,13 @@ $ErrorActionPreference = 'Stop'
 $source = Get-Content -Raw -LiteralPath $args[0]
 $match = [regex]::Match($source, '(?ms)^function Set-ClaudeAttribution \{.*?^\}')
 if (-not $match.Success) { throw 'Claude attribution merger not found' }
-$usesWindowsReplace = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
-if ($usesWindowsReplace -and $match.Value -notmatch '\[System\.IO\.File\]::Replace\(\$temporary, \$settings, \$null\)') { throw 'Windows Claude attribution must atomically replace existing settings' }
-if (-not $usesWindowsReplace -and $match.Value -notmatch '\[System\.IO\.File\]::Move\(\$temporary, \$settings, \$true\)') { throw 'non-Windows Claude attribution must safely replace existing settings' }
+# The writer is a direct BOM-less WriteAllText on every platform. The previous
+# temp-file + File.Replace/Move dance threw "The path is not of a legal form" on
+# real Windows/.NET Framework (see the comment on the function itself), so it
+# must not come back. These assertions used to require that dance and therefore
+# failed wherever pwsh actually exists - they were checking a removed design.
+if ($match.Value -notmatch '\[System\.IO\.File\]::WriteAllText\(\$settings, \$merged, \(New-Object System\.Text\.UTF8Encoding\(\$false\)\)\)') { throw 'Claude attribution must write settings with a BOM-less WriteAllText' }
+if ($match.Value -match '\[System\.IO\.File\]::(Replace|Move)\(') { throw 'Claude attribution must not reintroduce the temp-file Replace/Move dance' }
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-attribution-' + [guid]::NewGuid().ToString('N'))
 try {
     foreach ($fixture in 'new', 'empty', 'zero-byte', 'nested', 'malformed') {
@@ -342,20 +391,6 @@ POWERSHELL
     rm -rf "$render_dir"
     rm -f "$fixture"
 }
-:
-        awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
-        printf '%s\n' 'install_agent_skills'
-    } > "$harness"
-
-    output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
-    if ! grep -Fqx -- 'Curated skills: Antigravity installed=0 skipped=0 failed=1' <<< "$output"; then
-        fail 'Unix lifecycle must report a failed Antigravity promotion'
-    fi
-    target="$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
-    if [[ ! -f "$target" || "$(<"$target")" != stale ]]; then
-        fail 'Unix lifecycle must restore the stale Antigravity target after promotion failure'
-    fi
-}
 
 verify_windows_command_generation() {
     if ! command -v pwsh >/dev/null 2>&1; then
@@ -368,7 +403,7 @@ verify_windows_command_generation() {
     fi
 
     local fixture
-    fixture="$(mktemp)"
+    fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"  # pwsh -File needs .ps1
     cat > "$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
 trap { Write-Error $_; exit 1 }
@@ -456,6 +491,19 @@ try {
     Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
+    local config rendered
+    local render_dir
+    render_dir="$(mktemp -d)"
+    config="$render_dir/chezmoi.toml"
+    rendered="$render_dir/installer.ps1"
+    : > "$config"
+    chezmoi execute-template --config "$config" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
+    pwsh -NoProfile -File "$fixture" "$rendered" "$repo_root/scripts/update_ai_tools.ps1"
+    rm -rf "$render_dir"
+    rm -f "$fixture"
+}
 
 verify_windows_summary_fallbacks() {
     if ! command -v pwsh >/dev/null 2>&1; then
@@ -468,10 +516,11 @@ verify_windows_summary_fallbacks() {
     fi
 
     local fixture render_dir config rendered
-    fixture="$(mktemp)"
+    fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"  # pwsh -File needs .ps1
     render_dir="$(mktemp -d)"
     config="$render_dir/chezmoi.toml"
     rendered="$render_dir/installer.ps1"
+    cp "$repo_root/.chezmoidata.yaml" "$render_dir/"   # sourceDir stays the scratch dir (catalog-unavailable mode) but data must resolve
     : > "$config"
     chezmoi execute-template --config "$config" --source "$render_dir" \
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
@@ -534,19 +583,6 @@ try {
 }
 POWERSHELL
     pwsh -NoProfile -File "$fixture" "$repo_root/scripts/update_ai_tools.ps1" "$rendered"
-    rm -rf "$render_dir"
-    rm -f "$fixture"
-}
-    local config rendered
-    local render_dir
-    render_dir="$(mktemp -d)"
-    config="$render_dir/chezmoi.toml"
-    rendered="$render_dir/installer.ps1"
-    : > "$config"
-    chezmoi execute-template --config "$config" --source "$repo_root" \
-        --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
-        < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
-    pwsh -NoProfile -File "$fixture" "$rendered" "$repo_root/scripts/update_ai_tools.ps1"
     rm -rf "$render_dir"
     rm -f "$fixture"
 }

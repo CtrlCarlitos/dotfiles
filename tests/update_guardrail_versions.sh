@@ -57,7 +57,11 @@ done
 # 6. Behavioral sanity when chezmoi is available: the template really renders
 #    the data pin into the script (skipped where chezmoi is absent).
 if command -v chezmoi >/dev/null 2>&1; then
-    rendered="$(chezmoi execute-template < "$sh_installer")"
+    # Force the Unix branch: rendering the .sh installer on Windows would drop
+    # the whole Linux/macOS section (and with it GUARDRAIL_VERSION).
+    rendered="$(chezmoi execute-template --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}}}' \
+        < "$sh_installer")"
     grep -Fq -- "GUARDRAIL_VERSION=\"$pin\"" <<<"$rendered" ||
         fail "rendered installer does not carry GUARDRAIL_VERSION=\"$pin\""
 fi

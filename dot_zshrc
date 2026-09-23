@@ -171,3 +171,34 @@ fi
 if command -v direnv &>/dev/null; then
     eval "$(direnv hook zsh)"
 fi
+
+# Windows Terminal cwd reporting (OSC 9;9), WSL only: lets duplicate panes/
+# tabs (Alt+Shift+D, the Ctrl+Alt+Shift+<agent> splits) open in THIS
+# directory. WT_SESSION reaches WSL via WSLENV; over SSH it is unset, so a
+# remote shell never reports a path Windows can't open. chpwd (not precmd):
+# wslpath forks, so pay it on directory change, not on every prompt.
+if [[ -n "$WT_SESSION" ]] && command -v wslpath &>/dev/null; then
+    # \033\134 = ESC + backslash (string terminator), octal to keep shellcheck quiet
+    _wt_report_cwd() { printf '\033]9;9;%s\033\134' "$(wslpath -w "$PWD")"; }
+    autoload -Uz add-zsh-hook
+    add-zsh-hook chpwd _wt_report_cwd
+    _wt_report_cwd
+fi
+
+# SSH agent: on WSL the keys live in the WINDOWS agent (service, DPAPI-backed,
+# survives reboots) and this distro holds none. ssh-agent-relay bridges that
+# agent in and hands each account its own filtered socket, so forwarding one
+# into a devcontainer cannot authenticate as another account. Backgrounded and
+# idempotent: a live socket is reused, so this never delays a prompt, and a
+# missing relay never blocks the shell. `ssh-agent-relay status` to inspect,
+# `eval "$(ssh-agent-relay use <alias>)"` (or direnv) to switch account.
+if [[ -o interactive ]] && command -v ssh-agent-relay &>/dev/null; then
+    (ssh-agent-relay start >/dev/null 2>&1 &) 2>/dev/null
+    _ssh_relay_default="${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay/default.sock"
+    if [[ -r "$_ssh_relay_default" ]]; then
+        _ssh_relay_sock="$(<"$_ssh_relay_default")"
+        [[ -S "$_ssh_relay_sock" ]] && export SSH_AUTH_SOCK="$_ssh_relay_sock"
+        unset _ssh_relay_sock
+    fi
+    unset _ssh_relay_default
+fi

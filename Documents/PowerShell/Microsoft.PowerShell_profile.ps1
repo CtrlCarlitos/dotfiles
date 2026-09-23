@@ -9,6 +9,19 @@ if (Get-Command starship -ErrorAction SilentlyContinue) {
     Invoke-Expression (&starship init powershell)
 }
 
+# Windows Terminal cwd reporting (OSC 9;9): lets "duplicate" panes/tabs -
+# Alt+Shift+D and the Ctrl+Alt+Shift+<agent> splits - open in THIS directory
+# instead of the profile's start dir. Starship calls this hook before every
+# prompt; in-process, no fork. Only inside Terminal (VS Code's own shell
+# integration already tracks cwd).
+if ($env:WT_SESSION) {
+    function Invoke-Starship-PreCommand {
+        if ($PWD.Provider.Name -eq 'FileSystem') {
+            $host.UI.Write("$([char]27)]9;9;`"$($PWD.ProviderPath)`"$([char]27)\")
+        }
+    }
+}
+
 # Zoxide
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (&zoxide init powershell | Out-String)
@@ -207,6 +220,18 @@ try {
             $__fpSrc = if (Test-Path "$__kp.pub") { "$__kp.pub" } else { $__kp }
             $__fp = ((& ssh-keygen -lf $__fpSrc 2>$null) -split '\s+')[1]
             if ($__fp -and ($__loaded -match [regex]::Escape($__fp))) { continue }
+            # Never block a new shell: `ssh-add` on a passphrase-protected key
+            # prompts on the console, which would hang EVERY terminal at startup
+            # for anyone who uses passphrases. `ssh-keygen -y -P ""` succeeds only
+            # on a key with no passphrase, so it is a safe pre-flight test.
+            # Passphrase keys are added once, by hand - the Windows agent is a
+            # service and persists them across reboots (DPAPI, in the registry),
+            # so that is a one-time cost, not a per-login one.
+            & ssh-keygen -y -P '""' -f $__kp *> $null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  ssh-agent: $__k needs a passphrase - run: ssh-add `"$__kp`"" -ForegroundColor DarkYellow
+                continue
+            }
             & ssh-add $__kp 2>&1 | Out-Null
         }
     }

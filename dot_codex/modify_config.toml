@@ -1,0 +1,118 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Codex CLI settings (~/.codex/config.toml, every OS).
+
+  MERGE, not own - and more carefully than the other two modify-templates in
+  this repo. Codex rewrites this file constantly and with machine-specific
+  content: per-project `trust_level` entries keyed by absolute path, SHA-256
+  `trusted_hash` values for every hook in hooks.json, `[notice.*]` model
+  migrations, `[tui.model_availability_nux]` counters. Owning it would wipe
+  that on every apply and re-prompt for trust in every repo.
+
+  Why this one is text-surgical instead of parse-and-reserialise (which is what
+  modify_settings.json and modify_tui.json do with JSON): a TOML round-trip
+  would drop Codex's comments and re-quote its literal table headers - keys like
+  [projects.'C:\Users\carlitos\...'] carry backslashes and single quotes whose
+  re-quoting we'd have to get exactly right, with a broken config.toml as the
+  failure mode. Instead every byte Codex wrote is passed through untouched and
+  exactly one key is forced.
+
+  The forced key: tui.keymap.editor.insert_newline.
+
+  Codex is the only one of the four agent CLIs with a user-configurable keymap
+  (tui.keymap.{global,chat,composer,editor,pager,list,agents,approval,vim_*}),
+  and its default newline bindings are shift-enter and ctrl-j only. Claude Code,
+  OpenCode and agy all accept Ctrl+Enter; Codex silently did nothing, which is
+  the one inconsistency left in docs/terminal.md's "New line vs submit" table.
+  Alt+Enter is included for the same reason - Windows Terminal leaves it unbound
+  here (full screen is F11), so it reaches the CLI.
+
+  Key names are lowercase and hyphenated: ctrl-a, shift-enter, page-down. An
+  invalid one is not ignored - Codex refuses to start with "data did not match
+  any variant of untagged enum KeybindingsSpec in `tui.keymap.editor...`", so
+  this list was validated against codex-cli 0.155.1 before being written here.
+
+  Caveat that no config can fix: Ctrl+Enter and Enter are the same byte (0x0D)
+  in legacy terminal encoding. The binding only has an effect where the terminal
+  reports the modifier - win32-input-mode locally, the kitty keyboard protocol
+  over SSH. Ctrl+J is still the habit that works everywhere; see docs/terminal.md.
+
+  To force another Codex key, add it to $forced below as "<dotted path>" ->
+  "<TOML value>". Anything not listed is left to you and to Codex.
+*/ -}}
+
+{{- $forced := dict
+      "tui.keymap.editor.insert_newline" `["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]`
+-}}
+
+{{- $raw := .chezmoi.stdin | trimPrefix "\ufeff" -}}
+{{- $eol := "\n" -}}
+{{- if contains "\r\n" $raw }}{{ $eol = "\r\n" }}{{ end -}}
+{{- $lines := splitList "\n" (replace "\r\n" "\n" $raw) -}}
+
+{{- /* header: current [table] we are inside. done: paths already emitted.
+       skip: we are swallowing the continuation lines of a replaced multi-line
+       array value (a key we replace may legitimately span lines). */ -}}
+{{- $st := dict "header" "" "done" (dict) "skip" false "out" (list) -}}
+
+{{- range $lines -}}
+{{-   $line := . -}}
+{{-   $t := trim $line -}}
+{{-   if $st.skip -}}
+{{-     if contains "]" $t }}{{ $_ := set $st "skip" false }}{{ end -}}
+{{-   else if and (hasPrefix "[" $t) (hasSuffix "]" $t) -}}
+{{-     $h := trim (trimSuffix "]" (trimPrefix "[" $t)) -}}
+{{-     $_ := set $st "header" $h -}}
+{{-     $_ := set $st "out" (append $st.out $line) -}}
+{{- /* entering a table that owns a forced key: emit it right after the
+           header, before any value Codex or the user put there */ -}}
+{{-     range $path, $value := $forced -}}
+{{-       $key := $path | trimPrefix (printf "%s." $h) -}}
+{{-       if and (ne $key $path) (not (contains "." $key)) (not (hasKey $st.done $path)) -}}
+{{-         $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-         $_ := set $st.done $path true -}}
+{{-       end -}}
+{{-     end -}}
+{{-   else if and (contains "=" $t) (not (hasPrefix "#" $t)) -}}
+{{-     $key := trim (first (splitList "=" $t)) -}}
+{{-     $path := $key -}}
+{{-     if ne $st.header "" }}{{ $path = printf "%s.%s" $st.header $key }}{{ end -}}
+{{-     if hasKey $forced $path -}}
+{{- /* an existing setting for a forced key: drop it (and any continuation
+             lines of a multi-line array), then emit ours unless already done */ -}}
+{{-       $rest := trim (last (splitList "=" $t)) -}}
+{{-       if and (hasPrefix "[" $rest) (not (contains "]" $rest)) }}{{ $_ := set $st "skip" true }}{{ end -}}
+{{-       if not (hasKey $st.done $path) -}}
+{{-         $_ := set $st "out" (append $st.out (printf "%s = %s" $key (get $forced $path))) -}}
+{{-         $_ := set $st.done $path true -}}
+{{-       end -}}
+{{-     else -}}
+{{-       $_ := set $st "out" (append $st.out $line) -}}
+{{-     end -}}
+{{-   else -}}
+{{-     $_ := set $st "out" (append $st.out $line) -}}
+{{-   end -}}
+{{- end -}}
+
+{{- /* nothing in the file claimed a forced key: append its table at the end */ -}}
+{{- range $path, $value := $forced -}}
+{{-   if not (hasKey $st.done $path) -}}
+{{-     $parts := splitList "." $path -}}
+{{-     $key := last $parts -}}
+{{-     $table := join "." (initial $parts) -}}
+{{-     $_ := set $st "out" (append $st.out "") -}}
+{{-     $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_config.toml). Edits here are overwritten.") -}}
+{{-     $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
+{{-     $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-     $_ := set $st.done $path true -}}
+{{-   end -}}
+{{- end -}}
+
+{{- /* join on LF, tidy, then restore the file's own line ending. Collapsing
+       runs of blank lines keeps the appended table from drifting a line further
+       down each time, on a config that already ended in a newline. */ -}}
+{{- $body := join "\n" $st.out -}}
+{{- $body = regexReplaceAll `\n{3,}` $body "\n\n" -}}
+{{- $body = regexReplaceAll `(?s)^\s+|\s+$` $body "" -}}
+{{- if eq $eol "\r\n" }}{{ $body = replace "\n" "\r\n" $body }}{{ end -}}
+{{- $body }}{{ $eol }}

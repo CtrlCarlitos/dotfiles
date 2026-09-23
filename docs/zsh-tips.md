@@ -125,7 +125,7 @@ manually at all - it's already selected automatically by which folder a
 repo lives in. When you do (a repo outside any mapped folder, or just to
 double-check), use `devprofile` (aliased to `dp` here; no equivalent alias
 exists in PowerShell yet, see [windows.md](windows.md)) - full annotated
-example output is in the [README's Git Identity section](../README.md#git-identity-devprofile):
+example output is in [devprofile](devprofile.md#example-outputs):
 ```bash
 dp             # Show current repo's git identity (bare devprofile)
 dp list        # List all configured identities

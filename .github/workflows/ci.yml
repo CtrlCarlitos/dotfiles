@@ -21,8 +21,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # zsh: without it, the zshrc contract's `zsh -n` syntax check silently
+      # took its SKIP branch here (this runner image has no zsh - the other two
+      # jobs install it explicitly), leaving only greps and shellcheck.
+      - name: Install shellcheck and zsh
+        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh
+
+      # Without chezmoi on PATH, every contract test that renders a template
+      # early-returns ("PASS/SKIP: ... requires chezmoi") - this job was green
+      # while skipping the rendering assertions entirely (confirmed live: the
+      # skill-wiring contract skipped 3 blocks and validated only greps).
+      # Pinned to .chezmoi-version, like the other jobs.
+      - name: Install chezmoi
+        run: |
+          CHEZMOI_VERSION=$(cat .chezmoi-version)
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Lint shell scripts
         run: |
@@ -87,6 +101,18 @@ jobs:
       - name: Test zsh startup contract
         run: bash tests/zshrc_startup_contract.sh
 
+      - name: Test Windows Terminal settings contract
+        run: bash tests/windows_terminal_contract.sh
+
+      - name: Test Codex keymap merge contract
+        run: bash tests/codex_keymap_contract.sh
+
+      - name: Test home scope contract
+        run: bash tests/home_scope_contract.sh
+
+      - name: Test ssh-agent-relay contract
+        run: bash tests/ssh_agent_relay_contract.sh
+
       - name: Test stable guardrail release updates
         run: bash tests/update_guardrail_versions.sh
 
@@ -98,6 +124,34 @@ jobs:
 
       - name: Test dotfiles doctor (pwsh twin)
         run: pwsh -NoProfile -File tests/dotfiles_doctor.ps1
+
+      # These six existed but were never wired into CI, so they had never run
+      # (confirmed live: `git log -S<name> -- .github/workflows/ci.yml` empty for
+      # each). They pass; the gap was the wiring, not the tests.
+      - name: Test documentation consistency
+        run: bash tests/docs_consistency.sh
+
+      - name: Test remote access docs
+        run: bash tests/remote_access_docs.sh
+
+      - name: Test ChatGPT desktop identity contract
+        run: bash tests/chatgpt_desktop_identity_contract.sh
+
+      - name: Test CodexBar install contract
+        run: bash tests/codexbar_install_contract.sh
+
+      - name: Test backup/restore contract
+        run: bash tests/dotbackup_restore_contract.sh
+
+      - name: Test backup/restore round trip
+        run: bash tests/dotbackup_restore.sh
+
+      # Seventh never-wired test. Its Unix twin (tests/select_packages.sh) was
+      # already here; this one had never run, and it was broken: the fake gum
+      # stub inherited the file's CRLF, so its shebang carried a trailing CR and
+      # Linux could not exec it.
+      - name: Test select-packages.ps1 (pwsh twin)
+        run: pwsh -NoProfile -File tests/select_packages.ps1
 
       - name: Test PSModulePath guard contract
         run: bash tests/ps_modulepath_contract.sh

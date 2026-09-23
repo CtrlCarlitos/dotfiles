@@ -143,7 +143,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **chatgpt_desktop** | ChatGPT Desktop app | ❌ | ✅ | ✅ | ❌ | ❌ |
 | **antigravity_cli** | Antigravity CLI (agy) + Superpowers + skills | ✅ | ✅ | ✅ | ✅ | `antigravity-cli` |
 | **antigravity_desktop** | Antigravity 2.0 app | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **dev_desktop** | Chrome, VS Code, Docker Desktop, CodexBar, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **dev_desktop** | Chrome, VS Code, Ghostty (Mac/Linux), Docker Desktop, CodexBar, ScreenRec... | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **remote_access** | Tailscale and cloudflared tools only; no sign-in or tunnel setup. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | cloudflared only | ❌ |
 | **remote_access_server** | OpenSSH-server prerequisites only; server setup is deliberately manual. See [remote access](docs/remote-access.md). | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **guardrail** | Agent guardrails (hook enforcement) | ✅ | ✅ | ✅ | ✅ | `guardrail` |
@@ -204,6 +204,7 @@ New to zsh, tmux, or neovim? Start here:
 - **[Tmux Guide](docs/tmux.md)** — sessions, panes, and the plugin setup this repo ships
 - **[Neovim Cheat Sheet](docs/nvim.md)** — the keybindings and plugins configured for you
 - **[Zsh Tips & Tricks](docs/zsh-tips.md)** — aliases, plugins, and workflow shortcuts
+- **[Terminal Experience](docs/terminal.md)** — one look and one set of keys across Windows Terminal, the VS Code terminal, WSL, and SSH hosts
 
 ## 📖 Reference
 
@@ -212,12 +213,15 @@ New to zsh, tmux, or neovim? Start here:
 | [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
+| [Git](docs/git.md) | Line endings, gitconfig defaults, delta, and aliases |
+| [Terminal Experience](docs/terminal.md) | Windows Terminal, VS Code terminal, OpenCode theme, agent keys, clipboard, SSH hosts |
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
 | [Menu Demo](docs/menu-demo.md) | What the selection menu looks like |
 | [Config Example](docs/chezmoi.toml.example) | Complete chezmoi.toml with all options |
 | [VS Code](docs/vscode.md) | Managed extensions, settings tiers, and per-machine overrides |
 | [Secrets & SSH Hosts](docs/secrets.md) | Machine-local config, SSH aliases, and safe handling |
-| [Windows Setup](docs/windows.md) | Windows-specific details, troubleshooting, devprofile |
+| [SSH Agents](docs/ssh-agents.md) | One key vault, one filtered agent per account; WSL relay; devcontainer forwarding |
+| [Windows Setup](docs/windows.md) | Windows specifics: elevation, PowerShell profile, Git for Windows, SSH agent, troubleshooting |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
 | [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
@@ -283,10 +287,19 @@ run_onchange_install_packages.*     # Platform installers (16-group gated)
 run_onchange_generate_identities.*  # Git identity + SSH key generation
 dot_zshrc / dot_gitconfig.tmpl      # Shell and git configuration
 dot_config/nvim/                    # Neovim (Lazy.nvim)
+dot_config/opencode/modify_tui.json # OpenCode theme (merged into tui.json)
+dot_config/ghostty/                 # Ghostty (Mac/Linux twin of Windows Terminal)
+AppData/                            # Windows only: Terminal + VS Code keybindings (modify_ merges)
+Library/, dot_config/Code/          # macOS / Linux desktop: VS Code keybindings (same template)
+.chezmoitemplates/                  # Shared template bodies (VS Code keybindings)
+Documents/                          # Windows only: PowerShell profiles
 private_dot_ssh/                    # SSH config (templated, mode 600)
 .chezmoi.toml.tmpl                  # Config template (16 promptBoolOnce groups)
 tests/                              # CI test suite (menu, config keys, skills args)
 docs/                               # You are here
+
+scripts/ and tests/ stay in the repo - they are never copied into $HOME.
+The `dot` family runs them from the source path.
 ```
 </details>
 

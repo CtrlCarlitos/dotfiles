@@ -1,0 +1,37 @@
+{{- /*
+  VS Code keybindings, shared by the three per-OS modify_keybindings.json
+  files (Windows AppData/Roaming, macOS Library/Application Support, Linux
+  .config - each `{{ template "vscode-keybindings.json" . }}`s this). The
+  .chezmoiignore guards apply them only where VS Code's User dir exists.
+
+  Same agent chords as Windows Terminal (modify_settings.json there), scoped to
+  a focused integrated terminal:
+    Ctrl+Alt+C/X/O/A        type claude / codex / opencode / agy + Enter here
+    Ctrl+Alt+Shift+C/X/O/A  split the terminal (same cwd), run it there
+
+  MERGE, not own: VS Code rewrites keybindings.json from its Keyboard Shortcuts
+  UI. Ours replace any entry bound to the same key; everything else is kept.
+  VS Code writes JSONC (a // header comment, sometimes trailing commas), so
+  full-line // comments and trailing commas are stripped before fromJson
+  (comments are not preserved - VS Code does not need them).
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "﻿" -}}
+{{- $raw = regexReplaceAll "(?m)^\\s*//.*$" $raw "" -}}
+{{- $raw = regexReplaceAll ",(\\s*[}\\]])" $raw "${1}" | trim -}}
+{{- $cur := list -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+
+{{- $mine := list -}}
+{{- range $a := list (list "c" "claude") (list "x" "codex") (list "o" "opencode") (list "a" "agy") }}
+{{-   $send := dict "command" "workbench.action.terminal.sendSequence" "args" (dict "text" (printf "%s\r" (index $a 1))) }}
+{{-   $mine = append $mine (dict "key" (printf "ctrl+alt+%s" (index $a 0)) "command" $send.command "args" $send.args "when" "terminalFocus") }}
+{{-   $mine = append $mine (dict "key" (printf "ctrl+alt+shift+%s" (index $a 0)) "command" "runCommands" "args" (dict "commands" (list "workbench.action.terminal.split" $send)) "when" "terminalFocus") }}
+{{- end -}}
+
+{{- $out := list -}}
+{{- range $e := $cur }}
+{{-   $clash := false }}
+{{-   range $m := $mine }}{{ if eq (lower (toString (get $e "key"))) $m.key }}{{ $clash = true }}{{ end }}{{ end }}
+{{-   if not $clash }}{{ $out = append $out $e }}{{ end }}
+{{- end -}}
+{{- toPrettyJson (concat $out $mine) }}

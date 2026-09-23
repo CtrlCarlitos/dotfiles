@@ -1,0 +1,278 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Windows Terminal settings (Windows only - excluded elsewhere by .chezmoiignore).
+
+  MERGE, not own: Terminal rewrites settings.json itself (on every Settings UI
+  save, and whenever it detects a new VS / WSL / PowerShell install, with
+  per-machine GUIDs). Owning the whole file made every `dot up` hit chezmoi's
+  "changed since chezmoi last wrote it" prompt, which was confirmed live seconds
+  after the first apply. This template reads the current file from
+  .chezmoi.stdin and forces only the keys below, the same FORCED/merge idea
+  as the VS Code settings step in run_onchange_install_packages.ps1.tmpl.
+
+    globals / profiles.defaults  FORCED keys; every other key is left alone
+    styled profiles              keys merged ONLY IF that profile exists here
+                                 (never creates Ubuntu 20.04 on a box without it).
+                                 Matched by guid, or by source for WSL: every
+                                 distro (24.04 here, 26.04 on another box, any
+                                 future one) gets the same look, no GUIDs to track
+    "SSH: <name>" profiles       OWNED: rebuilt from [[data.ssh_hosts]] each
+                                 apply, so a removed host loses its tab too
+    schemes/themes (by name), actions (by id), keybindings (by id OR keys)
+                                 ours replace same-named entries, rest kept
+
+  Look: Catppuccin Mocha + MesloLGS Nerd Font Mono. Tab color per environment:
+    blue = PowerShell 7   orange = WSL   green = SSH -> Mac   red = SSH -> Linux
+  The WSL profile re-pins font + scheme on purpose: WSL's generated fragment
+  forces "Ubuntu Mono" + the purple Ubuntu scheme, breaking starship glyphs.
+
+  Agent keys: Ctrl+Alt+C/X/O/A type claude/codex/opencode/agy + Enter into
+  the FOCUSED pane (sendInput), so one chord works in pwsh, WSL zsh, and an
+  SSH session alike (the CLI just has to exist there). Add Shift to open it in
+  a new split instead; the split starts in the same directory because both
+  shells report it (OSC 9;9 - see the pwsh profile and dot_zshrc).
+
+  Windows: the workflow is several long-lived WINDOWS, each with its own tabs and
+  panes, parked on specific monitors.
+    firstWindowPreference persistedWindowLayout  restores that on launch -
+      state.json keeps one entry per window with its tabs AND its position.
+    windowingBehavior useNew  every launch is a NEW window. "useExisting" (the
+      earlier value here) dropped each launch into the most recent window as a
+      tab, which makes a second window impossible to open by hand; `wt -w 0`
+      (or -w <name>) still targets an existing window deliberately.
+    centerOnLaunch false  centering fights a restored window's saved position.
+
+  tabWidthMode - the enum is exactly "equal" | "titleLength" | "compact"; there is
+  no marquee/scrolling tab text in Terminal, long titles just ellipsize.
+    titleLength  sizes each tab to its title. The agent CLIs rewrite titles
+                 ("[ ! ] Action Required | ... | repo"), so the row sprawled.
+    equal        current: every tab keeps a slice, truncated from the END - the CLIs put
+                 status FIRST, so "[ ! ]" survives on an inactive tab.
+    compact      inactive tabs shrink to their icon. Tidiest, but the
+                 per-tab alert is invisible, so attention has to come from the
+                 bell instead (bellStyle below flashes window + taskbar).
+  Switching is one word here.
+
+  Clipboard (same in the VS Code terminal, see the installers): highlighting
+  copies (copyOnSelect) and right-click pastes, in every pane. OpenCode keeps
+  mouse capture (wheel scrolling), so there Shift+right-click pastes - Shift
+  hands the mouse back to Terminal.
+
+  Alt+Enter is unbound ("id": null) so it reaches the agent CLIs as a newline
+  (OpenCode, agy); full screen stays on F11.
+
+  tmux = true (or a session name) on an ssh_hosts entry makes its profile run
+  `ssh -t <host> "tmux new-session -A -s main"`: every tab re-attaches to the
+  same remote session, so an agent keeps running across disconnects.
+
+  SSH GUIDs derive from the host name (sha256), so they are stable across
+  applies and machines. Output is strict JSON; a hand-added // comment in
+  settings.json makes fromJson fail the apply loudly (Terminal never writes
+  comments itself).
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "﻿" | trim -}}
+{{- $cur := dict -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+
+{{- $want := `{
+  "globals": {
+    "$help": "https://aka.ms/terminal-documentation",
+    "$schema": "https://aka.ms/terminal-profiles-schema",
+    "theme": "Catppuccin Mocha",
+    "firstWindowPreference": "persistedWindowLayout",
+    "windowingBehavior": "useNew",
+    "centerOnLaunch": false,
+    "initialCols": 140,
+    "initialRows": 38,
+    "copyOnSelect": true,
+    "trimPaste": true,
+    "tabWidthMode": "equal",
+    "tabSwitcherMode": "inOrder",
+    "useAcrylicInTabRow": true
+  },
+  "defaults": {
+    "colorScheme": "Catppuccin Mocha",
+    "font": { "face": "MesloLGS Nerd Font Mono", "size": 12 },
+    "opacity": 92,
+    "useAcrylic": true,
+    "padding": "8, 6",
+    "cursorShape": "bar",
+    "intenseTextStyle": "bright",
+    "historySize": 20000,
+    "bellStyle": ["window", "taskbar"],
+    "closeOnExit": "graceful"
+  },
+  "styled": [
+    { "source": "Microsoft.WSL", "tabColor": "#FAB387",
+      "colorScheme": "Catppuccin Mocha", "cursorShape": "bar",
+      "font": { "face": "MesloLGS Nerd Font Mono", "size": 12 } },
+    { "source": "Windows.Terminal.Wsl", "tabColor": "#FAB387",
+      "colorScheme": "Catppuccin Mocha", "cursorShape": "bar",
+      "font": { "face": "MesloLGS Nerd Font Mono", "size": 12 } },
+    { "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "tabColor": "#89B4FA" },
+    { "guid": "{e229d38a-dcc3-495b-af2c-6c254b71fef9}", "tabColor": "#F9E2AF",
+      "colorScheme": "Catppuccin Mocha", "cursorShape": "bar",
+      "font": { "face": "MesloLGS Nerd Font Mono", "size": 12 } },
+    { "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}", "tabColor": "#74C7EC" },
+    { "guid": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}", "tabColor": "#7F849C" }
+  ],
+  "schemes": [
+    {
+      "name": "Catppuccin Mocha",
+      "background": "#1E1E2E", "foreground": "#CDD6F4",
+      "cursorColor": "#F5E0DC", "selectionBackground": "#585B70",
+      "black": "#45475A", "red": "#F38BA8", "green": "#A6E3A1", "yellow": "#F9E2AF",
+      "blue": "#89B4FA", "purple": "#F5C2E7", "cyan": "#94E2D5", "white": "#BAC2DE",
+      "brightBlack": "#585B70", "brightRed": "#F38BA8", "brightGreen": "#A6E3A1",
+      "brightYellow": "#F9E2AF", "brightBlue": "#89B4FA", "brightPurple": "#F5C2E7",
+      "brightCyan": "#94E2D5", "brightWhite": "#A6ADC8"
+    }
+  ],
+  "themes": [
+    {
+      "name": "Catppuccin Mocha",
+      "window": { "applicationTheme": "dark", "useMica": false },
+      "tab": { "background": "#1E1E2EFF", "unfocusedBackground": "#181825FF", "showCloseButton": "hover" },
+      "tabRow": { "background": "#181825FF", "unfocusedBackground": "#11111BFF" }
+    }
+  ],
+  "actions": [
+    { "command": { "action": "quakeMode" }, "id": "User.quakeMode" },
+    { "command": "toggleFullscreen", "id": "User.toggleFullscreen" },
+    { "command": { "action": "splitPane", "split": "right", "splitMode": "duplicate" }, "id": "User.splitRight" },
+    { "command": { "action": "splitPane", "split": "down", "splitMode": "duplicate" }, "id": "User.splitDown" },
+    { "command": "togglePaneZoom", "id": "User.togglePaneZoom" },
+    { "command": "closePane", "id": "User.closePane" },
+    { "command": { "action": "moveFocus", "direction": "left" }, "id": "User.focusLeft" },
+    { "command": { "action": "moveFocus", "direction": "right" }, "id": "User.focusRight" },
+    { "command": { "action": "moveFocus", "direction": "up" }, "id": "User.focusUp" },
+    { "command": { "action": "moveFocus", "direction": "down" }, "id": "User.focusDown" },
+    { "command": { "action": "commandPalette" }, "id": "User.commandPalette" },
+    { "command": "openTabRenamer", "id": "User.renameTab" },
+    { "name": "Agent: Claude Code (here)", "id": "User.agentClaude",
+      "command": { "action": "sendInput", "input": "claude\r" } },
+    { "name": "Agent: Codex (here)", "id": "User.agentCodex",
+      "command": { "action": "sendInput", "input": "codex\r" } },
+    { "name": "Agent: OpenCode (here)", "id": "User.agentOpencode",
+      "command": { "action": "sendInput", "input": "opencode\r" } },
+    { "name": "Agent: Antigravity (here)", "id": "User.agentAgy",
+      "command": { "action": "sendInput", "input": "agy\r" } },
+    { "name": "Agent: Claude Code (split right)", "id": "User.agentClaudeSplit",
+      "command": { "action": "multipleActions", "actions": [
+        { "action": "splitPane", "split": "right", "splitMode": "duplicate" },
+        { "action": "sendInput", "input": "claude\r" } ] } },
+    { "name": "Agent: Codex (split right)", "id": "User.agentCodexSplit",
+      "command": { "action": "multipleActions", "actions": [
+        { "action": "splitPane", "split": "right", "splitMode": "duplicate" },
+        { "action": "sendInput", "input": "codex\r" } ] } },
+    { "name": "Agent: OpenCode (split right)", "id": "User.agentOpencodeSplit",
+      "command": { "action": "multipleActions", "actions": [
+        { "action": "splitPane", "split": "right", "splitMode": "duplicate" },
+        { "action": "sendInput", "input": "opencode\r" } ] } },
+    { "name": "Agent: Antigravity (split right)", "id": "User.agentAgySplit",
+      "command": { "action": "multipleActions", "actions": [
+        { "action": "splitPane", "split": "right", "splitMode": "duplicate" },
+        { "action": "sendInput", "input": "agy\r" } ] } }
+  ],
+  "keybindings": [
+    { "id": "Terminal.CopyToClipboard", "keys": "ctrl+c" },
+    { "id": "Terminal.PasteFromClipboard", "keys": "ctrl+v" },
+    { "id": "Terminal.DuplicatePaneAuto", "keys": "alt+shift+d" },
+    { "id": "User.quakeMode", "keys": "win+sc(41)" },
+    { "id": "User.toggleFullscreen", "keys": "f11" },
+    { "id": null, "keys": "alt+enter" },
+    { "id": "User.splitRight", "keys": "alt+shift+plus" },
+    { "id": "User.splitDown", "keys": "alt+shift+minus" },
+    { "id": "User.togglePaneZoom", "keys": "alt+shift+z" },
+    { "id": "User.closePane", "keys": "ctrl+shift+w" },
+    { "id": "User.focusLeft", "keys": "alt+left" },
+    { "id": "User.focusRight", "keys": "alt+right" },
+    { "id": "User.focusUp", "keys": "alt+up" },
+    { "id": "User.focusDown", "keys": "alt+down" },
+    { "id": "User.commandPalette", "keys": "ctrl+shift+p" },
+    { "id": "User.renameTab", "keys": "ctrl+shift+r" },
+    { "id": "User.agentClaude", "keys": "ctrl+alt+c" },
+    { "id": "User.agentCodex", "keys": "ctrl+alt+x" },
+    { "id": "User.agentOpencode", "keys": "ctrl+alt+o" },
+    { "id": "User.agentAgy", "keys": "ctrl+alt+a" },
+    { "id": "User.agentClaudeSplit", "keys": "ctrl+alt+shift+c" },
+    { "id": "User.agentCodexSplit", "keys": "ctrl+alt+shift+x" },
+    { "id": "User.agentOpencodeSplit", "keys": "ctrl+alt+shift+o" },
+    { "id": "User.agentAgySplit", "keys": "ctrl+alt+shift+a" }
+  ]
+}` | fromJson -}}
+
+{{- /* SSH profiles, one per [[data.ssh_hosts]] with name + hostname */ -}}
+{{- $ssh := list -}}
+{{- if hasKey . "ssh_hosts" }}{{ range .ssh_hosts }}
+{{-   if and (hasKey . "name") (hasKey . "hostname") }}
+{{-     $h := sha256sum (printf "wt-ssh:%s" .name) }}
+{{-     $p := dict "guid" (printf "{%s-%s-%s-%s-%s}" (substr 0 8 $h) (substr 8 12 $h) (substr 12 16 $h) (substr 16 20 $h) (substr 20 32 $h)) "name" (printf "SSH: %s" .name) "commandline" (printf "ssh.exe %s" .name) "startingDirectory" "%USERPROFILE%" "hidden" false "tabColor" "#CBA6F7" }}
+{{-     if hasKey . "tmux" }}{{ if .tmux }}
+{{-       $session := "main" }}{{ if kindIs "string" .tmux }}{{ $session = .tmux }}{{ end }}
+{{-       $_ := set $p "commandline" (printf "ssh.exe -t %s \"tmux new-session -A -s %s\"" .name $session) }}
+{{-     end }}{{ end }}
+{{-     $os := "" }}{{ if hasKey . "os" }}{{ $os = .os }}{{ end }}
+{{-     if eq $os "mac" }}{{ $_ := set $p "tabColor" "#A6E3A1" }}{{ $_ := set $p "icon" "🍎" }}
+{{-     else if eq $os "linux" }}{{ $_ := set $p "tabColor" "#F38BA8" }}{{ $_ := set $p "icon" "🐧" }}{{ end }}
+{{-     $ssh = append $ssh $p }}
+{{-   end }}
+{{- end }}{{ end -}}
+
+{{- /* globals */ -}}
+{{- range $k, $v := $want.globals }}{{ $_ := set $cur $k $v }}{{ end -}}
+
+{{- /* profiles: defaults, styled-if-present, owned SSH */ -}}
+{{- if not (kindIs "map" (get $cur "profiles")) }}{{ $_ := set $cur "profiles" dict }}{{ end -}}
+{{- $profiles := get $cur "profiles" -}}
+{{- if not (kindIs "map" (get $profiles "defaults")) }}{{ $_ := set $profiles "defaults" dict }}{{ end -}}
+{{- $defaults := get $profiles "defaults" -}}
+{{- range $k, $v := $want.defaults }}{{ $_ := set $defaults $k $v }}{{ end -}}
+{{- $list := list -}}
+{{- if kindIs "slice" (get $profiles "list") }}{{ $list = get $profiles "list" }}{{ end -}}
+{{- $kept := list -}}
+{{- range $ep := $list }}
+{{-   $name := toString (get $ep "name") }}
+{{-   if not (and (hasPrefix "SSH: " $name) (hasPrefix "ssh.exe " (toString (get $ep "commandline")))) }}
+{{-     range $sp := $want.styled }}
+{{-       $byGuid := and (hasKey $sp "guid") (eq (lower (toString (get $ep "guid"))) (lower (toString (get $sp "guid")))) }}
+{{-       $bySource := and (hasKey $sp "source") (eq (toString (get $ep "source")) (toString (get $sp "source"))) }}
+{{-       if or $byGuid $bySource }}
+{{-         range $k, $v := $sp }}{{ $_ := set $ep $k $v }}{{ end }}
+{{-       end }}
+{{-     end }}
+{{-     $kept = append $kept $ep }}
+{{-   end }}
+{{- end -}}
+{{- $_ := set $profiles "list" (concat $kept $ssh) -}}
+
+{{- /* schemes + themes by name */ -}}
+{{- range $section := list "schemes" "themes" }}
+{{-   $mine := get $want $section }}
+{{-   $out := list }}
+{{-   if kindIs "slice" (get $cur $section) }}{{ range $e := get $cur $section }}
+{{-     $clash := false }}{{ range $m := $mine }}{{ if eq (toString (get $e "name")) $m.name }}{{ $clash = true }}{{ end }}{{ end }}
+{{-     if not $clash }}{{ $out = append $out $e }}{{ end }}
+{{-   end }}{{ end }}
+{{-   $_ := set $cur $section (concat $out $mine) }}
+{{- end -}}
+
+{{- /* actions by id; keybindings by id OR keys (one chord, one owner) */ -}}
+{{- $out := list -}}
+{{- if kindIs "slice" (get $cur "actions") }}{{ range $e := get $cur "actions" }}
+{{-   $clash := false }}{{ range $m := $want.actions }}{{ if eq (toString (get $e "id")) $m.id }}{{ $clash = true }}{{ end }}{{ end }}
+{{-   if not $clash }}{{ $out = append $out $e }}{{ end }}
+{{- end }}{{ end -}}
+{{- $_ := set $cur "actions" (concat $out $want.actions) -}}
+{{- $out = list -}}
+{{- if kindIs "slice" (get $cur "keybindings") }}{{ range $e := get $cur "keybindings" }}
+{{-   $clash := false }}{{ range $m := $want.keybindings }}
+{{- /* id match only for real ids: an unbind entry has "id": null */ -}}
+{{-     $mid := "" }}{{ if $m.id }}{{ $mid = $m.id }}{{ end }}
+{{-     if or (and $mid (eq (toString (get $e "id")) $mid)) (eq (lower (toString (get $e "keys"))) $m.keys) }}{{ $clash = true }}{{ end }}
+{{-   end }}
+{{-   if not $clash }}{{ $out = append $out $e }}{{ end }}
+{{- end }}{{ end -}}
+{{- $_ := set $cur "keybindings" (concat $out $want.keybindings) -}}
+
+{{- toPrettyJson $cur }}
