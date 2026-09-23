@@ -716,6 +716,22 @@ $vsDefaults = [ordered]@{
     'workbench.startupEditor' = 'none'
     'terminal.integrated.scrollback' = 30000
     'terminal.integrated.shellIntegration.enabled' = $true
+    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
+    'terminal.integrated.fontSize' = 16
+    # Shift+Enter (newline) for claude/codex/opencode: Windows CLIs sit
+    # behind ConPTY, which only forwards the Shift modifier when the
+    # terminal speaks win32-input-mode - Windows Terminal always does, VS
+    # Code only with this (experimental, default off). The kitty protocol
+    # (on by default) can't help: ConPTY drops it. Windows-only key; the
+    # .sh twin omits it.
+    'terminal.integrated.enableWin32InputMode' = $true
+    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
+    # instead of toggling the sidebar / panel while the terminal has focus.
+    'terminal.integrated.commandsToSkipShell' = @('-workbench.action.toggleSidebarVisibility', '-workbench.action.togglePanel')
+    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
+    # right-click always pastes.
+    'terminal.integrated.copyOnSelection' = $true
+    'terminal.integrated.rightClickBehavior' = 'paste'
     'cSpell.language' = 'en,es'
 }
 $vsJunk = @('**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/node_modules/**', '**/*.pyc')
@@ -744,22 +760,6 @@ $vsMerges = @{ 'files.exclude' = $vsJunkMap; 'search.exclude' = $vsJunkMap; 'wor
 # Remote-SSH reads ~/.ssh/config - rendered from [[data.ssh_hosts]] - like
 # everything else. exclude_settings can keep it on a machine that needs it.
 $vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')
-    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
-    'terminal.integrated.fontSize' = 16
-    # Shift+Enter (newline) for claude/codex/opencode: Windows CLIs sit
-    # behind ConPTY, which only forwards the Shift modifier when the
-    # terminal speaks win32-input-mode - Windows Terminal always does, VS
-    # Code only with this (experimental, default off). The kitty protocol
-    # (on by default) can't help: ConPTY drops it. Windows-only key; the
-    # .sh twin omits it.
-    'terminal.integrated.enableWin32InputMode' = $true
-    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
-    # instead of toggling the sidebar / panel while the terminal has focus.
-    'terminal.integrated.commandsToSkipShell' = @('-workbench.action.toggleSidebarVisibility', '-workbench.action.togglePanel')
-    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
-    # right-click always pastes.
-    'terminal.integrated.copyOnSelection' = $true
-    'terminal.integrated.rightClickBehavior' = 'paste'
 
 # Machine-local settings drift, rendered from [data.vscode_overrides] (see
 # the extensions comment above for why not [data.vscode]):
@@ -889,16 +889,16 @@ if (-not $vsApply) {
                 }
             }
         }
-        if ($vsChanged -gt 0) {
-            Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
-            (ConvertTo-SortedJson $vsJson) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
-            Write-Host "  VS Code settings: $vsChanged change(s) (backup: $vscodeSettings.bak)" -ForegroundColor Green
         foreach ($k in $vsUnset) {
             if ($null -ne $vsJson.PSObject.Properties[$k]) {
                 $vsJson.PSObject.Properties.Remove($k)
                 $vsChanged++
             }
         }
+        if ($vsChanged -gt 0) {
+            Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
+            (ConvertTo-SortedJson $vsJson) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
+            Write-Host "  VS Code settings: $vsChanged change(s) (backup: $vscodeSettings.bak)" -ForegroundColor Green
         } else {
             Write-Host "  VS Code settings already at defaults" -ForegroundColor Green
         }
