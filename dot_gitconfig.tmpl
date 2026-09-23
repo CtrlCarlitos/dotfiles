@@ -55,7 +55,7 @@
 {{- end }}
     # Prevent git from guessing identity - forces explicit configuration
     useConfigOnly = true
-{{- if and $simpleName $simpleKey }}
+{{- if and $simpleName $simpleKey (not $isDevcontainer) }}
 
 [commit]
     gpgsign = true
@@ -95,11 +95,24 @@
 {{- if $modernCli }}
     pager = delta
 {{- end }}
-{{- if $simpleKey }}
+{{- if and $simpleKey (not $isDevcontainer) }}
     sshCommand = "ssh -i ~/.ssh/{{ $simpleKey }} -o IdentitiesOnly=yes"
 {{- else }}
+    # Devcontainers (and keyless configs) use plain ssh: a container has no key
+    # FILES - keys arrive through the forwarded agent socket - and
+    # `-i <path> -o IdentitiesOnly=yes` would pin a nonexistent identity and
+    # refuse the agent's. ~/.ssh/config still supplies the host aliases the
+    # [url] rewrites below resolve through. See docs/devcontainer.md.
     sshCommand = "ssh"
 {{- end }}
+{{- if eq .chezmoi.os "windows" }}
+    # Deep trees (node_modules) exceed Windows' 260-char MAX_PATH otherwise.
+    longpaths = true
+{{- end }}
+
+[apply]
+    # Was `core.whitespace = fix`, which git silently ignores (core.whitespace
+    # only takes problem names). Fixing whitespace on apply is this key.
     whitespace = fix
 
 [color]
@@ -111,19 +124,43 @@
 [push]
     autoSetupRemote = true
     default = current
+    followTags = true
 
 [fetch]
     prune = true
 
 [rebase]
     autoStash = true
+    updateRefs = true
 
 [merge]
-    conflictstyle = diff3
+    # zdiff3: diff3's base section, minus lines both sides already agree on.
+    # Delta (the pager) renders conflicted files in `git diff` as separate
+    # ours/theirs diffs against that base - the two work together.
+    conflictstyle = zdiff3
+
+[rerere]
+    # Remember conflict resolutions; replay them on the next identical conflict.
+    enabled = true
+
+[branch]
+    sort = -committerdate
+
+[tag]
+    sort = version:refname
+
+[help]
+    autocorrect = prompt
 
 [diff]
     algorithm = histogram
     colorMoved = default
+{{- if $modernCli }}
+
+[interactive]
+    # Delta-colored hunks in `git add -p` / `git checkout -p`.
+    diffFilter = delta --color-only
+{{- end }}
 
 {{- if .accounts }}
 #-------------------------------------------------------------------------------
@@ -167,7 +204,8 @@
     line-numbers = true
     navigate = true
     side-by-side = false
-    syntax-theme = Dracula
+    # Same palette as the terminals (Windows Terminal, VS Code, opencode).
+    syntax-theme = Catppuccin Mocha
 
 #-------------------------------------------------------------------------------
 # Aliases
@@ -202,13 +240,13 @@
     ap = add --patch
 
     # Reset
-    unstage = reset HEAD --
+    unstage = restore --staged --
     undo = reset --soft HEAD~1
 
     # Stash
     sl = stash list
     sp = stash pop
-    ss = stash save
+    ss = stash push
 
     # Remote
     pu = push
@@ -220,7 +258,8 @@
     ra = remote add
 
     # Cleanup
-    cleanup = !git branch --merged | grep -v '\\*\\|main\\|master' | xargs -n 1 git branch -d
+    # Exact-name match: the old `grep -v 'main'` also spared e.g. feat/domain-*.
+    cleanup = !git branch --merged | grep -vE '^[*+]|^ *(main|master)$' | xargs -n 1 git branch -d
 
     # Identity check
     whoami = !echo "$(git config user.name) <$(git config user.email)>"
