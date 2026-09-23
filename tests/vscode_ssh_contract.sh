@@ -132,4 +132,12 @@ grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci
     exit 1
 }
 
+# Remote-SSH reads ~/.ssh/config (rendered from ssh_hosts) on every machine:
+# both twins UNSET remote.SSH.configFile, which used to point at a hand-kept
+# OneDrive config that ssh.exe, Windows Terminal and chezmoi never saw.
+grep -Fq "\$vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')" "$ps1_installer" ||
+    fail "$ps1_installer: remote.SSH.configFile must be in the UNSET tier"
+grep -Fq 'UNSET = ["remote.SSH.configFile"]' "$sh_installer" ||
+    fail "$sh_installer: remote.SSH.configFile must be in the UNSET tier"
+
 printf 'PASS: VS Code extensions + ssh_hosts contracts\n'

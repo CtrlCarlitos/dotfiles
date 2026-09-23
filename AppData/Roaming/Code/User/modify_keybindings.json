@@ -1,0 +1,4 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Shared body: .chezmoitemplates/vscode-keybindings.json. includeTemplate, not
+     template: a modify-template cannot resolve {{ template }} at apply time. */ -}}
+{{- includeTemplate "vscode-keybindings.json" . -}}
