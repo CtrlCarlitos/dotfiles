@@ -197,6 +197,15 @@ try {
             $__fpSrc = if (Test-Path "$__kp.pub") { "$__kp.pub" } else { $__kp }
             $__fp = ((& ssh-keygen -lf $__fpSrc 2>$null) -split '\s+')[1]
             if ($__fp -and ($__loaded -match [regex]::Escape($__fp))) { continue }
+            # Never block a new shell - twin of the PowerShell 7 profile's guard:
+            # ssh-add on a passphrase-protected key prompts on the console and
+            # would hang every terminal at startup. `ssh-keygen -y -P ""` exits
+            # non-zero on such a key without prompting (verified: 0 vs 255).
+            & ssh-keygen -y -P '""' -f $__kp *> $null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  ssh-agent: $__k needs a passphrase - run: ssh-add `"$__kp`"" -ForegroundColor DarkYellow
+                continue
+            }
             & ssh-add $__kp 2>&1 | Out-Null
         }
     }

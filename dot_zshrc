@@ -184,3 +184,21 @@ if [[ -n "$WT_SESSION" ]] && command -v wslpath &>/dev/null; then
     add-zsh-hook chpwd _wt_report_cwd
     _wt_report_cwd
 fi
+
+# SSH agent: on WSL the keys live in the WINDOWS agent (service, DPAPI-backed,
+# survives reboots) and this distro holds none. ssh-agent-relay bridges that
+# agent in and hands each account its own filtered socket, so forwarding one
+# into a devcontainer cannot authenticate as another account. Backgrounded and
+# idempotent: a live socket is reused, so this never delays a prompt, and a
+# missing relay never blocks the shell. `ssh-agent-relay status` to inspect,
+# `eval "$(ssh-agent-relay use <alias>)"` (or direnv) to switch account.
+if [[ -o interactive ]] && command -v ssh-agent-relay &>/dev/null; then
+    (ssh-agent-relay start >/dev/null 2>&1 &) 2>/dev/null
+    _ssh_relay_default="${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay/default.sock"
+    if [[ -r "$_ssh_relay_default" ]]; then
+        _ssh_relay_sock="$(<"$_ssh_relay_default")"
+        [[ -S "$_ssh_relay_sock" ]] && export SSH_AUTH_SOCK="$_ssh_relay_sock"
+        unset _ssh_relay_sock
+    fi
+    unset _ssh_relay_default
+fi

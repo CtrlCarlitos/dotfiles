@@ -282,7 +282,11 @@ function Install-Node {
 # deliberately: psmux recommends PS 7+, and this list installs it first.
 $packages += @(
     "git.install", "curl", "wget", "jq", "fzf", "neovim", "ripgrep", "gh",
-    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg"
+    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg",
+    # npiperelay: bridges the Windows ssh-agent named pipe into WSL, so a WSL
+    # distro (and any devcontainer launched from it) uses the Windows agent and
+    # holds no private keys of its own. See docs/ssh-agents.md.
+    "npiperelay"
 )
 
 # Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups

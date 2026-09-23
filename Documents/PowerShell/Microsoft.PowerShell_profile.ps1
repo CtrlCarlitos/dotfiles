@@ -220,6 +220,18 @@ try {
             $__fpSrc = if (Test-Path "$__kp.pub") { "$__kp.pub" } else { $__kp }
             $__fp = ((& ssh-keygen -lf $__fpSrc 2>$null) -split '\s+')[1]
             if ($__fp -and ($__loaded -match [regex]::Escape($__fp))) { continue }
+            # Never block a new shell: `ssh-add` on a passphrase-protected key
+            # prompts on the console, which would hang EVERY terminal at startup
+            # for anyone who uses passphrases. `ssh-keygen -y -P ""` succeeds only
+            # on a key with no passphrase, so it is a safe pre-flight test.
+            # Passphrase keys are added once, by hand - the Windows agent is a
+            # service and persists them across reboots (DPAPI, in the registry),
+            # so that is a one-time cost, not a per-login one.
+            & ssh-keygen -y -P '""' -f $__kp *> $null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  ssh-agent: $__k needs a passphrase - run: ssh-add `"$__kp`"" -ForegroundColor DarkYellow
+                continue
+            }
             & ssh-add $__kp 2>&1 | Out-Null
         }
     }

@@ -839,7 +839,7 @@ install_apt() {
 
 {{- if $core }}
     info "Installing core packages..."
-    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd
+    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd socat ssh-agent-filter
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
