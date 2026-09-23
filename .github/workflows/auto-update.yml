@@ -15,6 +15,18 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # A GitHub App installation token instead of a PAT. Three things a PAT
+      # cannot give at once: commits the API signs (main requires signatures;
+      # sign-commits with a PAT yields "unsigned", see Auto Update Versions #4),
+      # PRs that still trigger ci.yml (GITHUB_TOKEN-made PRs do not), and a
+      # credential scoped to this repo that expires in an hour.
+      - name: Mint updater token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.UPDATER_APP_ID }}
+          private-key: ${{ secrets.UPDATER_APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -27,13 +39,13 @@ jobs:
         id: cpr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
-          # A PAT, not the default GITHUB_TOKEN: PRs authored via GITHUB_TOKEN don't
+          # Not the default GITHUB_TOKEN: PRs authored via GITHUB_TOKEN don't
           # trigger other workflows (ci.yml's pull_request trigger), so every prior
           # auto-update PR merged with zero CI validation ever having run on it.
-          token: ${{ secrets.DOTFILES_UPDATER_PAT }}
+          token: ${{ steps.app.outputs.token }}
           # main requires signed commits. Commit through the GitHub API so the
-          # commit is signed by GitHub; a local git commit from the runner is
-          # unsigned and the merge is refused (Auto Update Versions #3).
+          # commit is signed by GitHub. Only GITHUB_TOKEN and App tokens get
+          # signed this way; a PAT does not (Auto Update Versions #3 and #4).
           sign-commits: true
           commit-message: "chore: auto-update software versions"
           branch: "chore/auto-update-versions"
@@ -58,10 +70,10 @@ jobs:
         # update PR rotted unmerged forever.
         if: steps.cpr.outputs.pull-request-operation == 'created' || steps.cpr.outputs.pull-request-operation == 'updated'
         env:
-          # The PAT, not GITHUB_TOKEN, for the same reason as PR creation
+          # The App token, not GITHUB_TOKEN, for the same reason as PR creation
           # above: a merge performed by GITHUB_TOKEN does not trigger push
           # workflows, so the bump would land on main with no CI run at all.
-          GH_TOKEN: ${{ secrets.DOTFILES_UPDATER_PAT }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           PR_NUMBER="${{ steps.cpr.outputs.pull-request-number }}"
           echo "Waiting for checks on PR #$PR_NUMBER..."
