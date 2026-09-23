@@ -1,0 +1,23 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  OpenCode TUI settings (~/.config/opencode/tui.json, every OS). Since 1.x
+  OpenCode keeps theme/keybinds here, not in opencode.json (it migrates them
+  out itself).
+
+  theme = "catppuccin": its dark variant IS Catppuccin Mocha (base #1e1e2e -
+  checked against the 1.18 bundle), the palette Windows Terminal and the VS Code
+  terminal use. Why not "system": it asks the terminal for its palette and
+  silently falls back to OpenCode's own theme when there's no answer, which
+  was the mismatch we saw. The fixed theme looks the same in every terminal.
+
+  MERGE, not own: only $schema + theme are forced; your keybinds/tui keys stay.
+  Full-line // comments and trailing commas are stripped before parsing.
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "﻿" -}}
+{{- $raw = regexReplaceAll "(?m)^\\s*//.*$" $raw "" -}}
+{{- $raw = regexReplaceAll ",(\\s*[}\\]])" $raw "${1}" | trim -}}
+{{- $cur := dict -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+{{- $_ := set $cur "$schema" "https://opencode.ai/tui.json" -}}
+{{- $_ := set $cur "theme" "catppuccin" -}}
+{{- toPrettyJson $cur }}
