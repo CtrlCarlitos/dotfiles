@@ -81,6 +81,16 @@ grep -Fq 'DOTUPGRADE_DEFER' "$ai_sh" || fail "$ai_sh: no defer hooks"
 ! grep -Fq 'Upgrading graft' "$sh_installer" ||
     fail "$sh_installer: must not upgrade graft (dot upgrade owns it)"
 
+# The dot family runs these scripts from the SOURCE repo, so neither scripts/
+# nor tests/ is deployed to $HOME. Home copies were unreferenced and went stale.
+ignore="$repo_root/.chezmoiignore"
+grep -Fq 'scripts/**' "$ignore" || fail "$ignore: scripts/** must not be deployed to \$HOME"
+grep -Fq 'tests/**' "$ignore" || fail "$ignore: tests/** must not be deployed to \$HOME"
+for f in "$ps1_profile" "$ps1_profile5"; do
+    grep -Fq '.local\share\chezmoi\scripts' "$f" || fail "$f: dot must run scripts from the source repo"
+done
+grep -Fq '.local/share/chezmoi/scripts' "$zsh_aliases" || fail "$zsh_aliases: dot must run scripts from the source repo"
+
 grep -Fq -- 'bash tests/dot_cli_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: dot CLI contract is not a PR CI check\n' >&2
     exit 1
