@@ -29,16 +29,6 @@ _net() {
 
 # 0. Helper Functions
 
-detect_os() {
-    if [ -f /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        echo "$ID"
-    else
-        echo "unknown"
-    fi
-}
-
 install_package() {
     PACKAGE=$1
     
