@@ -51,6 +51,18 @@
 *   **Treesitter**: Better syntax highlighting.
 *   **Which-Key**: Pop-up helper that shows you available keys if you wait a second after pressing `Space`.
 
+## 📋 Clipboard
+`y` (yank) and `p` (paste) use the system clipboard (`clipboard = unnamedplus`), so
+what you yank in Neovim pastes anywhere, and the other way round.
+
+*   **Locally:** Neovim finds the OS tool itself: `clip.exe` in WSL, `pbcopy` on macOS,
+    `xclip` / `wl-copy` on a Linux desktop.
+*   **Over SSH:** a server has no clipboard tool, so `init.lua` sends yanks to your
+    *local* terminal as OSC 52 when `$SSH_TTY` is set, and they land on your laptop's
+    clipboard. Paste there with right-click or your terminal's paste key; `p` inside
+    Neovim pastes what Neovim itself yanked. Works on Neovim 0.9+. See
+    [Terminal Experience](terminal.md#remote-ssh-hosts).
+
 ## 💡 Tips for Learning
 1.  **Don't use arrow keys**: Force yourself to use `h j k l`. It's faster once you get used to it.
 2.  **Use `Space`**: Wait a second after pressing `Space` to see the *Which-Key* menu with all available options.

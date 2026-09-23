@@ -135,10 +135,15 @@ alias path='echo -e ${PATH//:/\\n}'
 alias get='curl -sS'
 alias post='curl -sS -X POST'
 
-# Copy/Paste (Linux/WSL)
-if command -v xclip &> /dev/null; then
+# Copy/Paste (Linux/WSL) - macOS has real pbcopy/pbpaste; never shadow them.
+if [[ "$OSTYPE" == darwin* ]]; then
+  :
+elif command -v xclip &> /dev/null; then
   alias pbcopy='xclip -selection clipboard'
   alias pbpaste='xclip -selection clipboard -o'
+elif [[ -n "$WAYLAND_DISPLAY" ]] && command -v wl-copy &> /dev/null; then
+  alias pbcopy='wl-copy'
+  alias pbpaste='wl-paste --no-newline'
 elif command -v clip.exe &> /dev/null; then
   # WSL
   alias pbcopy='clip.exe'

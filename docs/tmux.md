@@ -57,6 +57,16 @@ To scroll up or copy text:
 4.  Press `y` to copy text to your system clipboard.
 5.  Press `q` to quit copy mode.
 
+Dragging with the mouse copies too. Where the copy lands:
+
+- **WSL:** `clip.exe`, the Windows clipboard.
+- **macOS:** `pbcopy`.
+- **Linux desktop:** `wl-copy` on Wayland, `xclip` on X (only when a display is present).
+- **Everywhere, including over SSH:** `set -s set-clipboard on` also sends each copy to
+  your *local* terminal as OSC 52, so a copy in tmux on a remote server reaches your
+  laptop's clipboard. Windows Terminal, iTerm2, Ghostty, WezTerm and kitty accept it.
+  See [Terminal Experience](terminal.md#remote-ssh-hosts).
+
 ## 🔌 Plugins
 We use **TPM (Tmux Plugin Manager)**.
 *   `Ctrl+a` then `I` (capital i) → **I**nstall new plugins listed in `tmux.conf`.
