@@ -179,7 +179,14 @@ start_filter() { # $1 = alias
 
 # Which account a shell gets when it does not choose one. Override with
 # SSH_AGENT_RELAY_DEFAULT=<alias>; otherwise the first configured account.
-DEFAULT_ALIAS="${SSH_AGENT_RELAY_DEFAULT:-{{ if .accounts }}{{ $first := first .accounts }}{{ if hasKey $first "provider" }}{{ $first.provider }}{{ else }}github{{ end }}-{{ $first.username }}{{ end }}}"
+{{- $default := "" }}
+{{- range .accounts }}
+{{- if and (not $default) (hasKey . "username") }}
+{{- $provider := "github" }}{{ if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
+{{- $default = printf "%s-%s" $provider .username }}
+{{- end }}
+{{- end }}
+DEFAULT_ALIAS="${SSH_AGENT_RELAY_DEFAULT:-{{ $default }}}"
 
 cmd_start() {
     local alias rc=0
