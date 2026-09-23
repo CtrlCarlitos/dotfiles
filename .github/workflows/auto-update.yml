@@ -31,6 +31,10 @@ jobs:
           # trigger other workflows (ci.yml's pull_request trigger), so every prior
           # auto-update PR merged with zero CI validation ever having run on it.
           token: ${{ secrets.DOTFILES_UPDATER_PAT }}
+          # main requires signed commits. Commit through the GitHub API so the
+          # commit is signed by GitHub; a local git commit from the runner is
+          # unsigned and the merge is refused (Auto Update Versions #3).
+          sign-commits: true
           commit-message: "chore: auto-update software versions"
           branch: "chore/auto-update-versions"
           delete-branch: true
