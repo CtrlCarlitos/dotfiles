@@ -22,7 +22,8 @@ the wrong place.
 Rendered into `~/.ssh/config` by `private_dot_ssh/private_config.tmpl` on
 every apply — VS Code Remote-SSH (installed by the global extension set)
 reads `~/.ssh/config` natively, so aliases appear in the Remote-SSH host
-list automatically.
+list automatically. On Windows each host also becomes a Windows Terminal
+profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-terminal)).
 
 ```toml
 # ~/.config/chezmoi/chezmoi.toml
@@ -35,6 +36,8 @@ list automatically.
   # Omit proxy unless this host needs a configured bastion alias.
   proxy    = "bastion"                # optional: ProxyJump alias
   comment  = "Bastion for staging - office IP only"   # optional: free text
+  os       = "linux"                  # optional: "mac" | "linux" (Terminal tab color)
+  tmux     = true                     # optional: Terminal tab re-attaches to tmux "main" (or a session name)
 ```
 
 The `comment` field renders as the block's header comment in
@@ -45,6 +48,12 @@ the operator's memory hook. Fields are all optional except `name` and
 
 Add hosts, run `chezmoi apply`, done. Remove the entry and apply to retire
 the alias.
+
+`~/.ssh/config` is the only SSH config. The installers unset VS Code's
+`remote.SSH.configFile` on every run, so Remote-SSH, `ssh`, and the Windows
+Terminal `SSH: <name>` profiles all read the same file. Hosts from a hand-kept
+config (the old OneDrive `Documents\_ssh\config`) go into `[[data.ssh_hosts]]`
+by hand.
 
 ## Why not `encrypted_`?
 

@@ -169,6 +169,8 @@
 #   identity = "id_personal"          # optional  key file name in ~/.ssh
 #   proxy    = "bastion"              # optional  ProxyJump alias
 #   comment  = "Bastion for staging"  # optional  block header (memory hook)
+#   os       = "linux"                # optional  mac|linux: Windows Terminal tab color/icon
+#   tmux     = true                   # optional  Terminal tab re-attaches to tmux "main" (or a name)
 
 # ==============================================================================
 # QUICK SETUP

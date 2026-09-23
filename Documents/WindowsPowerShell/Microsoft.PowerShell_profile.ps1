@@ -6,6 +6,16 @@ if (Get-Command starship -ErrorAction SilentlyContinue) {
     Invoke-Expression (&starship init powershell)
 }
 
+# Windows Terminal cwd reporting (OSC 9;9) - twin of the PowerShell 7
+# profile's block: duplicate panes/tabs and the agent splits open here.
+if ($env:WT_SESSION) {
+    function Invoke-Starship-PreCommand {
+        if ($PWD.Provider.Name -eq 'FileSystem') {
+            $host.UI.Write("$([char]27)]9;9;`"$($PWD.ProviderPath)`"$([char]27)\")
+        }
+    }
+}
+
 # Zoxide
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (&zoxide init powershell | Out-String)

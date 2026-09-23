@@ -9,6 +9,19 @@ if (Get-Command starship -ErrorAction SilentlyContinue) {
     Invoke-Expression (&starship init powershell)
 }
 
+# Windows Terminal cwd reporting (OSC 9;9): lets "duplicate" panes/tabs -
+# Alt+Shift+D and the Ctrl+Alt+Shift+<agent> splits - open in THIS directory
+# instead of the profile's start dir. Starship calls this hook before every
+# prompt; in-process, no fork. Only inside Terminal (VS Code's own shell
+# integration already tracks cwd).
+if ($env:WT_SESSION) {
+    function Invoke-Starship-PreCommand {
+        if ($PWD.Provider.Name -eq 'FileSystem') {
+            $host.UI.Write("$([char]27)]9;9;`"$($PWD.ProviderPath)`"$([char]27)\")
+        }
+    }
+}
+
 # Zoxide
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (&zoxide init powershell | Out-String)
