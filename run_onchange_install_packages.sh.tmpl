@@ -744,6 +744,20 @@ install_linux_desktop() {
 
     # Utilities
     # geany: cross-platform replacement for Notepad++ (Windows-only, no real
+    # Ghostty (the Mac/Linux twin of Windows Terminal; config in
+    # dot_config/ghostty/config.tmpl). Distro package manager only - no snap,
+    # no third-party repo: Ubuntu 26.04+ ships it in universe (1.3.0, which the
+    # config's chained keybinds need); older releases (24.04) don't have it,
+    # so skip with a pointer instead. Installing it does not make it the
+    # default terminal; that stays the user's choice.
+    if ! command -v ghostty &>/dev/null; then
+        if apt-cache show ghostty &>/dev/null; then
+            $SUDO apt install -y ghostty || warn "Ghostty apt install failed - continuing"
+        else
+            warn "Ghostty: not in this release's apt repositories (Ubuntu 26.04+ has it) - see https://ghostty.org/docs/install/binary. The config is already in ~/.config/ghostty."
+        fi
+    fi
+
     # Mac/Linux port) - fills the same "lightweight quick-edit GUI editor"
     # role. In Ubuntu's default apt repos, no extra setup needed.
     # Installed individually so one package that's unavailable on this release
@@ -2159,7 +2173,7 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    for cask in google-chrome visual-studio-code obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
+    for cask in google-chrome visual-studio-code ghostty obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
 
