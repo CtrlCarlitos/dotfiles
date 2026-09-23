@@ -108,6 +108,21 @@ env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 &&
     fail "[5] unparseable config must fail"
 echo "  ok: unparseable config reported"
 
+# [5b] Regression: the parse check must inspect the SAME file as every other
+# check. chezmoi resolves its own config through XDG_CONFIG_HOME, so where that
+# points elsewhere (GitHub runners set it; so do many desktops) a bare
+# `chezmoi data` validated a different, usually absent, config and reported
+# "chezmoi loads the config" while $config was broken. Caught only once this
+# test was wired into CI - it had never run anywhere. XDG_CONFIG_HOME is pinned
+# here rather than inherited, so the divergence is exercised on every machine.
+H="$TMP/home-xdg"; valid_config "$H"
+printf 'this is not toml [[[
+' >> "$H/.config/chezmoi/chezmoi.toml"
+mkdir -p "$TMP/xdg-elsewhere"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" XDG_CONFIG_HOME="$TMP/xdg-elsewhere" bash "$doctor" >/dev/null 2>&1 &&
+    fail "[5b] parse check followed XDG_CONFIG_HOME instead of the config under test"
+echo "  ok: parse check pinned to the config under test"
+
 # [6a] In-apply mode: sub-chezmoi checks are skipped (chezmoi holds its
 # persistent-state lock during apply - a nested chezmoi call deadlocks).
 H="$TMP/home-inapply"; valid_config "$H"
@@ -130,4 +145,4 @@ for f in "$run_after_sh" "$run_after_ps1"; do
 done
 echo "  ok: run_after hook stops apply on doctor errors (no auto-fix)"
 
-printf 'PASS: dotfiles-doctor.sh (7 scenarios)\n'
+printf 'PASS: dotfiles-doctor.sh (8 scenarios)\n'
