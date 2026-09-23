@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
+# Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
+# on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32) echo "SKIP: dotfiles_doctor.sh is Unix-only (the .ps1 twin covers Windows)"; exit 0 ;;
+esac
+
 # Behavioral tests for scripts/dotfiles-doctor.sh — the dotfiles-level
 # complement to `chezmoi doctor`, covering failure classes this repo has
 # actually hit live:

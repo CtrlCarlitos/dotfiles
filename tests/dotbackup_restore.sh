@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
+# Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
+# on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32) echo "SKIP: dotbackup_restore.sh is Unix-only (needs POSIX symlinks)"; exit 0 ;;
+esac
+
 # Behavioral coverage for the Unix portable backup commands. The fake 7-Zip
 # records its interface and preserves a staged archive payload as a directory.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
+# Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
+# on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32) echo "SKIP: select_packages.sh is Unix-only"; exit 0 ;;
+esac
+
 # Tests for scripts/select-packages.sh — the gum package-group menu.
 #
 # The script's contract (docs/research/package-groups-spec.md §4):
@@ -49,13 +56,6 @@ expected_section() { # $@ = keys that are true
             printf '  %s = false\n' "$g"
         fi
     done
-}
-
-list_has() { # $1 = item, rest = list
-    local want="$1" item
-    shift
-    for item in "$@"; do [ "$item" = "$want" ] && return 0; done
-    return 1
 }
 
 TMP="$(mktemp -d)"
