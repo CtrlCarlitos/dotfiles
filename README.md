@@ -90,6 +90,7 @@ other user-managed content there.
 </details>
 
 <details>
+<a id="wsl-docker-desktop-integration"></a>
 <summary><strong>WSL: enable Docker Desktop integration first</strong></summary>
 
 Open Docker Desktop → Settings → Resources → WSL Integration, toggle ON for your distro, then run the installer. The installer checks this first and asks before proceeding without it.
@@ -254,7 +255,7 @@ The log shows `Error: do not run this installer with sudo`. Re-run without `sudo
 <details>
 <summary><strong>Docker not found on WSL</strong></summary>
 
-Enable Docker Desktop's WSL Integration for your distro: Docker Desktop → Settings → Resources → WSL Integration → toggle ON. Then restart your terminal. Full steps in [the WSL section above](#wsL-enable-docker-desktop-integration-first).
+Enable Docker Desktop's WSL Integration for your distro: Docker Desktop → Settings → Resources → WSL Integration → toggle ON. Then restart your terminal. Full steps in [the WSL section above](#wsl-docker-desktop-integration).
 </details>
 
 <details>
