@@ -245,38 +245,31 @@ fi
 # plugin's manifest format, confirmed via an isolated test, not just an
 # interactive-prompt issue). Update it via Codex's own `/plugins` UI.
 
+# guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
 #     ~/.config/chezmoi/chezmoi.toml [data.packages] guardrail (default false,
-#     same semantics as the installer template).
-#       true  = curl+SHA256SUMS bootstrap when no binary exists, then
-#               `guardrail update <pin>` (verified self-update), then
-#               `guardrail plane enable --all`.
-#       false = nothing on a fresh machine; if a binary exists from a previous
-#               opt-in, `guardrail plane disable --all` (binary stays installed).
-#     Lifecycle output streams through untouched - plane commands print a
-#     WebAuthn approval URL and block until the operator responds, and any
-#     non-zero (denied/expired/timeout) fails this script under set -e. The
-#     config-merge wiring this replaces is guardrail-owned now. Windows keeps
-#     the curl+merge path in the .ps1 twin (plane commands exit 2 there and
-#     self-update can't rename a running exe).
+#     same semantics as the installer template). Installation itself lives in
+#     agent-guardrails (its install.sh, ADR-0029 there) - binary download,
+#     checksum, self-update of an older binary, and `guardrail setup` (plane
+#     wiring, coverage). This script only fetches the pinned release's
+#     install.sh + SHA256SUMS, verifies the installer against SHA256SUMS, and
+#     runs it from the downloaded file (never piped):
+#       true  = install.sh --version <pin> --state enabled
+#       false = install.sh --version <pin> --state disabled, only when a
+#               binary is already installed (never a download just to
+#               disable; nothing is removed).
+#     `guardrail setup` prints a WebAuthn approval URL and blocks until the
+#     operator responds, so the installer's output streams through
+#     untouched. Unlike the auto-run installer template (which fails the
+#     whole reconciliation on a bad install), a non-zero installer exit here
+#     is a WARNING, not fatal - this script keeps going to the remaining
+#     tools below, matching how every other step in this file degrades.
 #     Pin: single source of truth is .chezmoidata.yaml guardrail.version
 #     (the installer templates render the same key) - read at runtime via
 #     `chezmoi execute-template`, which this script can rely on because it is
 #     itself invoked through `chezmoi source-path`.
 GUARDRAIL_VERSION="$(chezmoi execute-template '{{ .guardrail.version }}' 2>/dev/null || true)"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
-# Oldest release whose binary ships `guardrail update`; older binaries exit 2
-# ("unknown subcommand") on update, so they take the curl bootstrap instead.
-GUARDRAIL_UPDATE_FLOOR="v0.19.2-dev"
-# vMAJOR.MINOR.PATCH[-suffix] -> zero-padded comparable integer (portable:
-# sort -V is GNU-only, stock macOS ships BSD sort).
-guardrail_ver_num() {
-    local v="${1#v}"; v="${v%%-*}"
-    local IFS=.
-    # shellcheck disable=SC2086  # intentional word-splitting: fields of $v on IFS=.
-    set -- $v
-    printf '%d%04d%04d' "${1:-0}" "${2:-0}" "${3:-0}"
-}
 guardrail_dest="$HOME/.local/bin/guardrail"
 guardrail_enabled=false
 if [ -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
@@ -286,60 +279,50 @@ if [ -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
         insec && $0 ~ /^[[:space:]]*guardrail[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { print "true"; exit }
     ' "$HOME/.config/chezmoi/chezmoi.toml")
 fi
+guardrail_state=""
+if [ "$guardrail_enabled" = "true" ]; then
+    guardrail_state="enabled"
+elif [ -x "$guardrail_dest" ]; then
+    guardrail_state="disabled"
+fi
 if [ "$guardrail_enabled" = "true" ] && [ -z "$GUARDRAIL_VERSION" ]; then
     echo "  guardrail: pin unavailable from chezmoi data - skipping guardrail steps"
-elif [ "$guardrail_enabled" = "true" ]; then
-    guardrail_have=""
-    if [ -x "$guardrail_dest" ]; then guardrail_have="$("$guardrail_dest" version 2>/dev/null)"; fi
-    if [ "$guardrail_have" = "guardrail ${GUARDRAIL_VERSION}" ]; then
-        echo "  guardrail ${GUARDRAIL_VERSION} already installed"
-    elif [ -n "$guardrail_have" ] && [ "$(guardrail_ver_num "${guardrail_have#guardrail }")" -ge "$(guardrail_ver_num "$GUARDRAIL_UPDATE_FLOOR")" ]; then
-        echo "  Updating guardrail to ${GUARDRAIL_VERSION} via self-update..."
-        "$guardrail_dest" update "$GUARDRAIL_VERSION"
+elif [ -z "$guardrail_state" ]; then
+    echo "  guardrail disabled in config - nothing to do"
+else
+    gbase="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
+    gtmp="$(mktemp -d)"
+    if ! curl -fLo "$gtmp/install.sh" "$gbase/install.sh" ||
+        ! curl -fLo "$gtmp/SHA256SUMS" "$gbase/SHA256SUMS"; then
+        echo "  guardrail: installer download failed - skipping"
+        rm -rf "$gtmp"
     else
-        # No binary, or one older than GUARDRAIL_UPDATE_FLOOR (which predates
-        # `guardrail update`): verified curl bootstrap - works for both.
-        case "$(uname -s)" in Linux) gos=linux ;; Darwin) gos=darwin ;; *) gos= ;; esac
-        case "$(uname -m)" in x86_64|amd64) garch=amd64 ;; aarch64|arm64) garch=arm64 ;; *) garch= ;; esac
-        if [ -n "$gos" ] && [ -n "$garch" ]; then
-            gtmp="$(mktemp -d)"
-            gbase="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
-            # stock macOS ships `shasum`, not `sha256sum` — without this the pipeline
-            # returns 127, the install is skipped, and the Mac is left with NO guard
-            # under a message that misattributes it to a checksum mismatch.
-            SHA_CMD=""
-            if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
-            elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
-            elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
-            else echo "  guardrail: no SHA-256 tool found - cannot verify, skipping install"; fi
-            if [ -z "$SHA_CMD" ]; then
-                :
-            elif curl -fLo "$gtmp/guardrail_${gos}_${garch}" "${gbase}/guardrail_${gos}_${garch}" \
-               && curl -fLo "$gtmp/SHA256SUMS" "${gbase}/SHA256SUMS" \
-               && ( cd "$gtmp" && grep " guardrail_${gos}_${garch}\$" SHA256SUMS | $SHA_CMD -c - ); then
-                mkdir -p "$HOME/.local/bin"
-                if ! install -m 0755 "$gtmp/guardrail_${gos}_${garch}" "$guardrail_dest"; then
-                    echo "  guardrail install failed - skipping"
-                else
-                    echo "  guardrail installed at ${GUARDRAIL_VERSION}"
-                fi
-            else
-                echo "  guardrail bootstrap failed or checksum mismatch - skipping"
-            fi
+        # stock macOS ships `shasum`, not `sha256sum` — without this the
+        # pipeline returns 127 and the run is skipped under a message that
+        # misattributes it to a checksum mismatch.
+        GUARDRAIL_SHA_CMD=""
+        if command -v sha256sum &>/dev/null; then GUARDRAIL_SHA_CMD="sha256sum"
+        elif command -v gsha256sum &>/dev/null; then GUARDRAIL_SHA_CMD="gsha256sum"
+        elif command -v shasum &>/dev/null; then GUARDRAIL_SHA_CMD="shasum -a 256"
+        fi
+        if [ -z "$GUARDRAIL_SHA_CMD" ]; then
+            echo "  guardrail: no SHA-256 tool found - cannot verify installer, skipping"
             rm -rf "$gtmp"
+        elif ! ( cd "$gtmp" && grep " install.sh\$" SHA256SUMS | $GUARDRAIL_SHA_CMD -c - ); then
+            echo "  guardrail: installer CHECKSUM MISMATCH - not running it"
+            rm -rf "$gtmp"
+        else
+            echo "  Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${guardrail_state}); approval URL prints here if WebAuthn is required..."
+            guardrail_code=0
+            sh "$gtmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$guardrail_state" || guardrail_code=$?
+            rm -rf "$gtmp"
+            if [ "$guardrail_code" -ne 0 ]; then
+                echo "  guardrail installer exited with code $guardrail_code - continuing"
+            fi
         fi
     fi
-    if [ -x "$guardrail_dest" ] && [ "$("$guardrail_dest" version 2>/dev/null)" = "guardrail ${GUARDRAIL_VERSION}" ]; then
-        echo "  Enabling guardrail planes (approval URL prints here if WebAuthn is required)..."
-        "$guardrail_dest" plane enable --all
-        # agy has no SessionStart surface - gate antigravity MCP-config
-        # coverage at reconciliation time (exit 1 fails this script).
-        "$guardrail_dest" doctor --coverage antigravity
-    fi
-elif [ -x "$guardrail_dest" ]; then
-    echo "  guardrail disabled in config - disabling planes (binary stays installed)"
-    "$guardrail_dest" plane disable --all
 fi
+# guardrail-section: end
 
 # 2. Claude Code (Native)
 if command -v claude &>/dev/null; then

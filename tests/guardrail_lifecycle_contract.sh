@@ -55,10 +55,11 @@ section() {
 # grep -q): a -q early exit can SIGPIPE awk and, under pipefail, flip the result.
 require_section() { # $1 = file
     local sec
+    if ! grep -Fq -- "$begin_marker" "$1" || ! grep -Fq -- "$end_marker" "$1"; then
+        fail "$1: guardrail section is empty or markers missing"
+    fi
     sec="$(section "$1")"
     [ -n "$sec" ] || fail "$1: guardrail section is empty or markers missing"
-    require "$1" "$begin_marker"
-    require "$1" "$end_marker"
 }
 
 forbid_in_section() { # $1 = file, $2 = literal
