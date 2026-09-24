@@ -177,6 +177,9 @@ jobs:
       - name: Test vscode extensions + ssh_hosts contract
         run: bash tests/vscode_ssh_contract.sh
 
+      - name: Test VS Code settings single-source (no twin duplication)
+        run: bash tests/vscode_settings_source_contract.sh
+
       # Last, because it runs the whole suite again to account for every test.
       # The individual steps above stay for per-test visibility in the UI; this
       # one answers a question they cannot: did any of them decline to run?
@@ -327,16 +330,22 @@ jobs:
 
       - name: Verify PowerShell script syntax
         run: |
-          # Strip chezmoi template directives before parsing. Unlike the bash lint
-          # step's sed (which is line-by-line and cannot span a multi-line {{ }}
-          # block), PowerShell's -replace on a -Raw (whole-file) string with a
-          # negated character class DOES span newlines correctly - verified this
-          # directly against the current file, which parses with zero errors, so
-          # this check is written to actually fail on any parse error rather than
-          # only warn (there is currently nothing to filter).
-          $content = Get-Content "run_onchange_install_packages.ps1.tmpl" -Raw
-          $cleaned = $content -replace '\{\{[^}]*\}\}', ''
-          $cleaned | Out-File -FilePath "$env:TEMP\test.ps1" -Encoding utf8
+          # Parse what actually RUNS, not a text-stripped approximation.
+          # This used to delete {{...}} with a negated character class and parse
+          # the remains. That holds only while templates stay simple: once one
+          # emits syntax AROUND its actions (a type-dispatching {{ if }} inside a
+          # hashtable value), stripping leaves `'' = $"@()` - invalid PowerShell,
+          # and a parse error that says nothing about the real script.
+          # chezmoi renders the true file, so the check tests the artifact.
+          $chezmoi = "$env:USERPROFILE\.local\bin\chezmoi.exe"
+          $rendered = & $chezmoi execute-template `
+            --source="$env:GITHUB_WORKSPACE" `
+            --file "$env:GITHUB_WORKSPACE\run_onchange_install_packages.ps1.tmpl"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "##[error]chezmoi could not render run_onchange_install_packages.ps1.tmpl"
+            exit 1
+          }
+          $rendered | Out-File -FilePath "$env:TEMP\test.ps1" -Encoding utf8
 
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
@@ -349,7 +358,7 @@ jobs:
             $errors | ForEach-Object { Write-Host "##[error]$($_.Message)" }
             exit 1
           }
-          Write-Host "PowerShell syntax check passed (0 errors)"
+          Write-Host "PowerShell syntax check passed on the RENDERED script (0 errors)"
 
       - name: Test chezmoi apply (dry-run)
         run: |

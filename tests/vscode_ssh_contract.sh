@@ -135,9 +135,13 @@ grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci
 # Remote-SSH reads ~/.ssh/config (rendered from ssh_hosts) on every machine:
 # both twins UNSET remote.SSH.configFile, which used to point at a hand-kept
 # OneDrive config that ssh.exe, Windows Terminal and chezmoi never saw.
-grep -Fq "\$vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')" "$ps1_installer" ||
-    fail "$ps1_installer: remote.SSH.configFile must be in the UNSET tier"
-grep -Fq 'UNSET = ["remote.SSH.configFile"]' "$sh_installer" ||
-    fail "$sh_installer: remote.SSH.configFile must be in the UNSET tier"
+# The UNSET tier moved into .chezmoidata.yaml so both twins render it from one
+# source (#83); assert the value there, and that each twin still reads it.
+grep -Fq -- '- remote.SSH.configFile' "$repo_root/.chezmoidata.yaml" ||
+    fail ".chezmoidata.yaml: remote.SSH.configFile must be in vscode.settings.unset"
+grep -Fq -- '.vscode.settings.unset' "$ps1_installer" ||
+    fail "$ps1_installer: no longer renders the UNSET tier from .chezmoidata.yaml"
+grep -Fq -- '.vscode.settings.unset' "$sh_installer" ||
+    fail "$sh_installer: no longer renders the UNSET tier from .chezmoidata.yaml"
 
 printf 'PASS: VS Code extensions + ssh_hosts contracts\n'
