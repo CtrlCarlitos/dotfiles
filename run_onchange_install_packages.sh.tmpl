@@ -258,7 +258,8 @@ install_agent_skills() {
     local -a SK=(npx --yes --loglevel=error skills@latest)
     # The CLI writes $HOME/.claude/skills and $HOME/.agents/skills; OpenCode
     # and Codex discover the latter.
-    local -a AGENTS=(claude-code opencode codex)
+    # From .chezmoidata/agents.yaml (see #83).
+    local -a AGENTS=({{ join " " .agents.skills.agents }})
     local claude_installed=0 claude_skipped=0 claude_failed=0
     local opencode_installed=0 opencode_skipped=0 opencode_failed=0
     local codex_installed=0 codex_skipped=0 codex_failed=0
@@ -1339,16 +1340,10 @@ cfg = {}
 if os.path.exists(p):
     with open(p) as f:
         cfg = json.load(f)
-cfg.setdefault("mcp", {})["serena"] = {
-    "type": "local",
-    "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
-    "enabled": True,
-}
-cfg.setdefault("mcp", {})["graft"] = {
-    "type": "local",
-    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
-    "enabled": True,
-}
+# MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
+# JSON's own escapes intact. OpenCode wants command + args as one list.
+for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
+    cfg.setdefault("mcp", {})[name] = {"type": "local", "command": [srv["command"]] + srv["args"], "enabled": True}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
@@ -1370,11 +1365,10 @@ PYEOF
         python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
 import json, sys
 want = set(filter(None, sys.argv[2].split(",")))
-servers = {}
-if "serena" in want:
-    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
-if "graft" in want:
-    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+# MCP servers come from .chezmoidata/agents.yaml (see #83); only the ones
+# whose binary is present (want) go into the bundle.
+servers = {name: {"command": srv["command"], "args": srv["args"]}
+           for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items() if name in want}
 with open(sys.argv[1], "w") as f:
     json.dump({"mcpServers": servers}, f, indent=2)
 PYEOF
@@ -1426,7 +1420,7 @@ PYEOF
     if command -v npm &>/dev/null; then
         if ! command -v graft &>/dev/null; then
             info "Installing Graft (npm -g)..."
-            net_timeout 300 $SUDO npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
+            net_timeout 300 $SUDO npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
         # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
@@ -1578,7 +1572,7 @@ PYEOF
 {{- end }}
 
 {{- if $chatgpt_cli }}
-    # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
     # superpowers/skills have no codex surface (the skills pass stays
     # presence-gated on its own CLIs; guardrail's plane wiring is done by the
     # agent-guardrails installer; only this npm install lives here).
@@ -1596,7 +1590,7 @@ PYEOF
         fi
 
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
-        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
     else
         warn "npm not found - skipping Codex CLI"
     fi
@@ -1807,16 +1801,10 @@ cfg = {}
 if os.path.exists(p):
     with open(p) as f:
         cfg = json.load(f)
-cfg.setdefault("mcp", {})["serena"] = {
-    "type": "local",
-    "command": ["serena", "start-mcp-server", "--context", "ide-assistant"],
-    "enabled": True,
-}
-cfg.setdefault("mcp", {})["graft"] = {
-    "type": "local",
-    "command": ["npx", "-y", "@nanonets/graft", "mcp"],
-    "enabled": True,
-}
+# MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
+# JSON's own escapes intact. OpenCode wants command + args as one list.
+for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
+    cfg.setdefault("mcp", {})[name] = {"type": "local", "command": [srv["command"]] + srv["args"], "enabled": True}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
@@ -1838,11 +1826,10 @@ PYEOF
         python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
 import json, sys
 want = set(filter(None, sys.argv[2].split(",")))
-servers = {}
-if "serena" in want:
-    servers["serena"] = {"command": "serena", "args": ["start-mcp-server", "--context", "ide-assistant"]}
-if "graft" in want:
-    servers["graft"] = {"command": "npx", "args": ["-y", "@nanonets/graft", "mcp"]}
+# MCP servers come from .chezmoidata/agents.yaml (see #83); only the ones
+# whose binary is present (want) go into the bundle.
+servers = {name: {"command": srv["command"], "args": srv["args"]}
+           for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items() if name in want}
 with open(sys.argv[1], "w") as f:
     json.dump({"mcpServers": servers}, f, indent=2)
 PYEOF
@@ -1893,7 +1880,7 @@ PYEOF
     if command -v npm &>/dev/null; then
         if ! command -v graft &>/dev/null; then
             info "Installing Graft (npm -g)..."
-            net_timeout 300 npm install -g --allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript @nanonets/graft \
+            net_timeout 300 npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
         # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
@@ -1980,14 +1967,14 @@ PYEOF
 {{- end }}
 
 {{- if $chatgpt_cli }}
-    # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
     # superpowers/skills have no codex surface (the skills pass stays
     # presence-gated on its own CLIs; guardrail's plane wiring is done by the
     # agent-guardrails installer; only this npm install lives here).
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
-        command -v codex &>/dev/null || npm install -g @openai/codex || warn "Codex CLI install failed - continuing"
+        command -v codex &>/dev/null || npm install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
     else
         warn "npm not found - skipping Codex CLI"
     fi

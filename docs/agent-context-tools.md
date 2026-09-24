@@ -91,3 +91,14 @@ npm page) for setup; everything above works without a key.
   npm's own warning prints; if you install by hand, include it.
 - **Serena's semantic tools inert for a language**: no language server
   installed for it — see the note above; the LSPs are opt-in per language.
+
+## Where the wiring values live
+
+The MCP server definitions the installers register for OpenCode and agy
+(Serena's `start-mcp-server --context ide-assistant`, Graft's
+`npx -y @nanonets/graft mcp`), Graft's npm `--allow-scripts` list, the Codex
+package name and the list of agent CLIs the curated skills are installed for
+all come from one file: `.chezmoidata/agents.yaml`. Both installers render
+from it and `scripts/update_ai_tools.{sh,ps1}` read it at runtime, so a change
+is one edit; `tests/agent_catalog_contract.sh` fails if any value reappears as
+a literal elsewhere.

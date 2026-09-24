@@ -28,7 +28,11 @@ for tool in codex graft serena; do
     grep -Fq "DOTUPGRADE_DEFER" "$ai_sh" || fail "$ai_sh: no defer hooks"
 done
 # codex upgrades to pinned-latest, not floating npm update semantics
-grep -Fq '@openai/codex@latest' "$ai_ps1" ||
+# The package name comes from .chezmoidata/agents.yaml at runtime (#83); the
+# @latest suffix is what makes it an upgrade rather than a floating update.
+grep -Fq '.agents.npm.codex' "$ai_ps1" ||
+    fail "$ai_ps1: codex package name must be read from the agent catalog"
+grep -Fq '@latest"' "$ai_ps1" ||
     fail "$ai_ps1: codex must upgrade via @latest"
 grep -Fq 'graft upgrade' "$ai_ps1" ||
     fail "$ai_ps1: graft must use its own self-updater"

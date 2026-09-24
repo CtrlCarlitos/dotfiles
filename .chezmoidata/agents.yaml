@@ -1,0 +1,57 @@
+# The agent catalog: values the agent-toolkit logic consumes, written once.
+# Both installer twins render from here; scripts/update_ai_tools.{sh,ps1} read
+# it at runtime through `chezmoi execute-template`, exactly as they read the
+# guardrail pin. See issue #83 (phase C).
+#
+# The logic itself stays in the installers - it is procedure in two languages
+# and cannot be shared. What CAN drift is the data inside it, and it had:
+# the MCP server table was written six times (four in the .sh alone - the
+# agent_toolkit block exists once under install_apt and once under
+# install_brew, byte for byte), the graft allow-scripts list three times, the
+# Codex package name and the skills-CLI agent list four times each.
+#
+# Guardrail is deliberately absent: its install logic and pin are owned by the
+# agent-guardrails repo (docs/invariants.md #11).
+
+agents:
+  # MCP servers registered for OpenCode (global opencode.json, `mcp` block) and
+  # for agy (a plugin bundle under ~/.gemini/config/plugins/dotfiles-mcp, since
+  # agy defers global stdio servers until a manual /mcp but starts
+  # plugin-bundled ones eagerly). Each consumer builds its own shape from
+  # command + args:
+  #   OpenCode  {type: local, command: [command, ...args], enabled: true}
+  #   agy       {command, args}
+  # Registration is still gated on the binary being present on the machine.
+  mcp:
+    serena:
+      command: serena
+      args: [start-mcp-server, --context, ide-assistant]
+    graft:
+      command: npx
+      args: [-y, "@nanonets/graft", mcp]
+
+  npm:
+    # Codex CLI. The installers install it; the updaters upgrade it to @latest.
+    codex: "@openai/codex"
+    # Graft's global install must let npm run these packages' native-build
+    # scripts (tree-sitter grammars); npm 11 blocks lifecycle scripts unless
+    # allowed explicitly. Order preserved as installed.
+    graft_allow_scripts:
+      - "@nanonets/graft"
+      - tree-sitter
+      - tree-sitter-go
+      - tree-sitter-java
+      - tree-sitter-kotlin
+      - tree-sitter-php
+      - tree-sitter-python
+      - "@davisvaughan/tree-sitter-r"
+      - tree-sitter-swift
+      - tree-sitter-typescript
+      - tree-sitter-cli
+      - tree-sitter-javascript
+
+  skills:
+    # `skills add ... -a <agents>`: which agent CLIs the curated skills are
+    # installed for. Antigravity is deliberately NOT here - it has no skills
+    # CLI adapter; the installers copy the Claude skills into its directory.
+    agents: [claude-code, opencode, codex]

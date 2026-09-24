@@ -1,0 +1,12 @@
+{{- /*
+  A PowerShell list body from a template list: 'a', 'b', 'c' (single-quoted,
+  quotes doubled, comma-separated, no trailing comma). Wrap it yourself:
+
+    $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+
+  Ends with -}} so the fragment emits no trailing newline (see pkg-names).
+*/ -}}
+{{- $first := true }}
+{{- range . }}
+{{- if not $first }}, {{ end }}'{{ . | replace "'" "''" }}'{{ $first = false }}
+{{- end -}}

@@ -1,0 +1,22 @@
+{{- /*
+  $mcpCatalog for the .ps1 installer, from .chezmoidata/agents.yaml `agents.mcp`:
+
+    {{ includeTemplate "mcp-servers-ps1" .agents.mcp }}
+
+  renders
+
+    $mcpCatalog = @{
+        graft = @{ command = 'npx'; args = @('-y', '@nanonets/graft', 'mcp') }
+        serena = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+    }
+
+  Keys come out in sorted order (Go template map iteration); nothing depends
+  on their order. Consumers build their own shape from command + args.
+  Ends with -}} so the fragment emits no trailing newline (see pkg-names).
+*/ -}}
+$mcpCatalog = @{
+{{- range $name, $srv := . }}
+    {{ $name }} = @{ command = '{{ $srv.command | replace "'" "''" }}'; args = @({{ includeTemplate "ps-list" $srv.args }}) }
+{{- end }}
+}
+{{- "" -}}

@@ -17,10 +17,14 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 # 1. opencode: graft added to the GLOBAL mcp block, both twins (the serena
 #    merge already proves the merge-not-clobber pattern lives there).
+# The server table lives in .chezmoidata/agents.yaml (#83): both twins must
+# render it, and the catalog must still define graft's MCP entry.
 for f in "$ps1_installer" "$sh_installer"; do
-    grep -Fq '@nanonets/graft' "$f" ||
-        fail "$f: no graft MCP wiring (opencode global block missing graft)"
+    grep -Fq '.agents.mcp' "$f" ||
+        fail "$f: no MCP wiring from the agent catalog (.chezmoidata/agents.yaml)"
 done
+grep -Fq '@nanonets/graft' "$repo_root/.chezmoidata/agents.yaml" ||
+    fail ".chezmoidata/agents.yaml: graft MCP server entry missing"
 grep -Fq 'Registering graft MCP in opencode' "$ps1_installer" ||
     fail "$ps1_installer: no graft registration step for opencode global"
 grep -Fq 'Registering MCP in opencode' "$sh_installer" ||
@@ -36,8 +40,12 @@ done
 
 # 3. The bundle carries both servers with the exact live-verified commands.
 for f in "$ps1_installer" "$sh_installer"; do
-    grep -Fq 'start-mcp-server' "$f" || fail "$f: bundle missing serena"
-    grep -Fq '"-y"' "$f" || fail "$f: bundle missing graft npx -y form"
+    # The exact commands live in .chezmoidata/agents.yaml (#83); the twins render
+    # them. Assert the catalog still carries the live-verified forms.
+    grep -Fq 'args: [start-mcp-server, --context, ide-assistant]' "$repo_root/.chezmoidata/agents.yaml" ||
+        fail ".chezmoidata/agents.yaml: serena MCP command changed from the live-verified form"
+    grep -Fq 'args: [-y, "@nanonets/graft", mcp]' "$repo_root/.chezmoidata/agents.yaml" ||
+        fail ".chezmoidata/agents.yaml: graft MCP command changed from the live-verified npx -y form"
 done
 
 # 4. One-time migration: our keys retire from the old global
