@@ -1,0 +1,16 @@
+{{- /*
+  Chocolatey package lines for one group, from the catalog in
+  .chezmoidata/packages.yaml. Used by run_onchange_install_packages.ps1.tmpl:
+
+    {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
+
+  One `$packages += "name"` per line rather than an @( ... ) array literal, so
+  there is no trailing-comma edge case to get wrong. Order is catalog order.
+  Ends with -}} so the fragment's own trailing newline is not emitted (see the
+  note in pkg-names).
+*/ -}}
+{{- range .catalog }}
+{{- if and (eq .group $.group) (hasKey . "choco") }}
+$packages += {{ .choco | quote }}
+{{- end }}
+{{- end -}}

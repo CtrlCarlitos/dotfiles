@@ -203,6 +203,16 @@ The CI fixtures no longer have twins to keep in step: every job composes its
 `chezmoi.toml` from `tests/fixtures/chezmoi/`, and `tests/ci_fixture_contract.sh`
 fails if a workflow carries an inline one.
 
+Neither do package names: `.chezmoidata/packages.yaml` is the one list, both
+installers render their manager's names from it through `.chezmoitemplates/`
+fragments, and `scripts/migrate-to-choco.ps1` reads it at runtime.
+`tests/package_catalog_contract.sh` fails if a literal list reappears in any of
+the three. Two things learned building it: `includeTemplate` returns the
+fragment *with* its trailing newline (end the last action with `-}}`, or a
+rendered `for x in …` loses its `; do` to the next line), and each installer
+template renders only its own platform's branch - the contract value-checks
+whichever twin the host renders, so both are exercised across the CI matrix.
+
 ---
 
 ## Checking yourself

@@ -1,0 +1,407 @@
+# The package catalog: every tool the installers install through a package
+# manager, once, with its name on each manager. Both installer twins and
+# scripts/migrate-to-choco.ps1 render or read this list; none of them carries
+# a name of its own. See docs/package-groups.md and issue #83.
+#
+# One record per TOOL, not per package name, because the same tool is spelled
+# differently everywhere: fd is fd-find on apt, 7-Zip is p7zip-full / sevenzip /
+# 7zip.install, the Meslo font is a manual download / a cask / nerd-fonts-meslo.
+#
+# Fields
+#   id       the tool, for humans and for the contract test
+#   group    the package group that installs it (a promptBoolOnce key)
+#   apt      Debian/Ubuntu package - ONLY where a plain `apt install` suffices.
+#            Tools that need a repo, a key or a .deb download are installed by a
+#            procedure in run_onchange_install_packages.sh.tmpl and have no apt
+#            key here (their `note` says so).
+#   brew     Homebrew formula
+#   cask     Homebrew cask (macOS desktop apps and fonts)
+#   choco    Chocolatey package (Windows)
+#   note     why this tool, or a caveat worth keeping next to its name
+#   migrate  false = scripts/migrate-to-choco.ps1 must never uninstall/reinstall
+#            this one (migrate_reason says why)
+#   migrate_risk  shown by migrate-to-choco before it asks; the tool IS a
+#            candidate but uninstalling it has a consequence worth reading
+#
+# Order matters within a group: it is the install order on every manager.
+
+catalog:
+  packages:
+    # ------------------------------------------------------------ core
+    - id: git
+      group: core
+      apt: git
+      brew: git
+      choco: git.install
+      migrate_risk: "chezmoi's own source directory is a git repo and open shells may be using git; finish other work first"
+    - id: curl
+      group: core
+      apt: curl
+      brew: curl
+      choco: curl
+    - id: wget
+      group: core
+      apt: wget
+      brew: wget
+      choco: wget
+    - id: jq
+      group: core
+      apt: jq
+      brew: jq
+      choco: jq
+    - id: fzf
+      group: core
+      apt: fzf
+      brew: fzf
+      choco: fzf
+    - id: zsh
+      group: core
+      apt: zsh
+      brew: zsh
+    - id: tmux
+      group: core
+      apt: tmux
+      brew: tmux
+    - id: neovim
+      group: core
+      brew: neovim
+      choco: neovim
+      note: "apt: installed by a procedure with a fallback (the release's neovim may be too old)"
+    - id: ripgrep
+      group: core
+      apt: ripgrep
+      brew: ripgrep
+      choco: ripgrep
+    - id: htop
+      group: core
+      apt: htop
+      brew: htop
+    - id: gh
+      group: core
+      brew: gh
+      choco: gh
+      note: "apt: installed from GitHub's own repo by a procedure"
+    - id: tree
+      group: core
+      apt: tree
+      brew: tree
+      choco: tree
+    - id: 7zip
+      group: core
+      apt: p7zip-full
+      brew: sevenzip
+      choco: 7zip.install
+    - id: cmake
+      group: core
+      apt: cmake
+      brew: cmake
+      choco: cmake
+    - id: ffmpeg
+      group: core
+      apt: ffmpeg
+      brew: ffmpeg
+      choco: ffmpeg
+    - id: python
+      group: core
+      apt: python3
+      brew: python3
+      choco: python
+    - id: python-venv
+      group: core
+      apt: python3-venv
+    - id: node
+      group: core
+      brew: node@24
+      note: "apt: NodeSource setup script by procedure; choco: Install-Node pins 24.x by procedure"
+    - id: coreutils
+      group: core
+      brew: coreutils
+      note: "GNU coreutils on macOS (gtimeout for net_timeout)"
+    - id: build-tools
+      group: core
+      apt: build-essential
+      brew: gcc
+      note: "Windows: the VS C++ Build Tools are installed by the graft step via winget"
+    - id: bc
+      group: core
+      apt: bc
+    - id: openssh-client
+      group: core
+      apt: openssh-client
+    - id: ca-certificates
+      group: core
+      apt: ca-certificates
+    - id: zstd
+      group: core
+      apt: zstd
+    - id: socat
+      group: core
+      apt: socat
+      note: "ssh-agent-relay bridges the Windows agent into WSL through socat"
+    - id: ssh-agent-filter
+      group: core
+      apt: ssh-agent-filter
+      note: "ssh-agent-relay's per-account key filtering"
+    - id: gsudo
+      group: core
+      choco: gsudo
+    - id: powershell-core
+      group: core
+      choco: powershell-core
+      migrate: false
+      migrate_reason: "migrate-to-choco may be running in it"
+    - id: psmux
+      group: core
+      choco: psmux
+      note: >-
+        The native Windows tmux (Rust, github.com/psmux/psmux) - official
+        Chocolatey package, ships psmux/pmux/tmux commands and reads .tmux.conf,
+        so it lands right where tmux sits on Linux/macOS. Listed right after
+        powershell-core deliberately: psmux recommends PS 7+, and the install
+        order follows this list.
+    - id: wsl2
+      group: core
+      choco: wsl2
+      migrate: false
+      migrate_reason: "uninstalling it tears down WSL, which the relay and every distro depend on"
+    - id: npiperelay
+      group: core
+      choco: npiperelay
+      note: >-
+        Bridges the Windows ssh-agent named pipe into WSL, so a WSL distro (and
+        any devcontainer launched from it) uses the Windows agent and holds no
+        private keys of its own. See docs/ssh-agents.md.
+
+    # ------------------------------------------------------ modern_cli
+    - id: bat
+      group: modern_cli
+      brew: bat
+      choco: bat
+      note: "apt: one line per tool in install_apt on purpose - a multi-package apt install fails wholesale if one is unavailable on a release"
+    - id: eza
+      group: modern_cli
+      brew: eza
+      choco: eza
+      note: "apt: from the gierens repo with its signing key, by procedure"
+    - id: fd
+      group: modern_cli
+      brew: fd
+      choco: fd
+    - id: delta
+      group: modern_cli
+      brew: git-delta
+      choco: delta
+      note: "apt: GitHub release .deb by procedure"
+    - id: starship
+      group: modern_cli
+      brew: starship
+      choco: starship
+      note: "apt: upstream install script by procedure"
+    - id: zoxide
+      group: modern_cli
+      brew: zoxide
+      choco: zoxide
+      note: "apt: package where the release has it, upstream script as fallback - by procedure"
+    - id: direnv
+      group: modern_cli
+      brew: direnv
+      choco: direnv
+    - id: lazygit
+      group: modern_cli
+      brew: lazygit
+      choco: lazygit
+      note: "apt: GitHub release tarball by procedure"
+    - id: gum
+      group: modern_cli
+      brew: gum
+      note: "apt: Charm's repo by procedure; choco: not published there - Install-Gum fetches the GitHub release"
+    - id: tealdeer
+      group: modern_cli
+      brew: tealdeer
+      choco: tealdeer
+    - id: dust
+      group: modern_cli
+      brew: dust
+      choco: dust
+      note: "apt: GitHub release .deb by procedure"
+    - id: duf
+      group: modern_cli
+      brew: duf
+      choco: duf
+    - id: procs
+      group: modern_cli
+      brew: procs
+      choco: procs
+      note: "apt: GitHub release by procedure"
+    - id: shellcheck
+      group: modern_cli
+      brew: shellcheck
+      choco: shellcheck
+    - id: shfmt
+      group: modern_cli
+      brew: shfmt
+      choco: shfmt
+    - id: pstop
+      group: modern_cli
+      choco: pstop
+
+    # ----------------------------------------------------------- fonts
+    - id: meslo-nerd-font
+      group: fonts
+      cask: font-meslo-lg-nerd-font
+      choco: nerd-fonts-meslo
+      note: "apt: downloaded from the Nerd Fonts release by procedure"
+
+    # ----------------------------------------------------- dev_desktop
+    # Windows-only utilities first, then the cross-platform apps.
+    - id: powertoys
+      group: dev_desktop
+      choco: powertoys
+    - id: files
+      group: dev_desktop
+      choco: files
+    - id: chocolateygui
+      group: dev_desktop
+      choco: chocolateygui
+    - id: cpu-z
+      group: dev_desktop
+      choco: cpu-z.install
+    - id: crystaldiskinfo
+      group: dev_desktop
+      choco: crystaldiskinfo.install
+    - id: crystaldiskmark
+      group: dev_desktop
+      choco: crystaldiskmark
+    - id: cutepdf
+      group: dev_desktop
+      choco: cutepdf
+    - id: everything
+      group: dev_desktop
+      choco: Everything
+    - id: ghostscript
+      group: dev_desktop
+      apt: ghostscript
+      cask: ghostscript
+      choco: Ghostscript.app
+    - id: docker-desktop
+      group: dev_desktop
+      cask: docker
+      choco: docker-desktop
+      migrate_risk: "uninstalling Docker Desktop removes local images, containers and volumes"
+      note: "apt: official .deb download by procedure"
+    - id: vscode
+      group: dev_desktop
+      cask: visual-studio-code
+      choco: vscode.install
+      migrate_risk: "VS Code is probably open; close it, or the reinstall will fail or restart it"
+      note: "apt: Microsoft's repo by procedure"
+    - id: geany
+      group: dev_desktop
+      apt: geany
+      cask: geany
+      choco: geany
+      note: >-
+        Replaces Notepad++ (Windows-only): free, open source, and the same
+        "lightweight quick-edit GUI editor" role on all three platforms.
+    - id: obs-studio
+      group: dev_desktop
+      apt: obs-studio
+      cask: obs
+      choco: obs-studio.install
+    - id: qbittorrent
+      group: dev_desktop
+      apt: qbittorrent
+      cask: qbittorrent
+      choco: qbittorrent
+    - id: sharex
+      group: dev_desktop
+      choco: sharex
+    - id: meld
+      group: dev_desktop
+      apt: meld
+      cask: meld
+      choco: meld
+      note: >-
+        Replaces WinMerge (Windows-only): Meld is already the Linux/macOS
+        diff/merge tool here and is on Chocolatey too, so one tool everywhere.
+    - id: wiztree
+      group: dev_desktop
+      choco: wiztree
+    - id: termius
+      group: dev_desktop
+      cask: termius
+      choco: termius
+      migrate_risk: "signed-in state lives in the profile; the app itself is replaced"
+      note: >-
+        Replaces FileZilla: one SSH/SFTP client on all three platforms.
+        FileZilla's Homebrew cask was pulled outright (adware concerns).
+        apt: vendor .deb download by procedure.
+    - id: vlc
+      group: dev_desktop
+      apt: vlc
+      cask: vlc
+      choco: vlc
+    - id: handy
+      group: dev_desktop
+      cask: handy
+      choco: handy
+      migrate_risk: "activation and settings may live in the install directory and can be lost"
+      note: >-
+        Speech-to-text (handy.computer). Whisper/Parakeet model choice is GUI-only,
+        nothing to pre-seed: for Spanish + English pick a Whisper model after
+        install (Parakeet is English-only) - Large for accuracy, Turbo for speed.
+        apt: GitHub release .deb by procedure.
+    - id: google-chrome
+      group: dev_desktop
+      cask: google-chrome
+      note: "apt: Google's .deb download by procedure; Windows: Google's own installer by procedure (never choco - see the GoogleChrome note in the .ps1)"
+    - id: ghostty
+      group: dev_desktop
+      cask: ghostty
+      note: "apt: universe on Ubuntu 26.04+, warns elsewhere - by procedure. Windows: Windows Terminal instead"
+    - id: flameshot
+      group: dev_desktop
+      apt: flameshot
+      cask: flameshot
+    - id: rectangle
+      group: dev_desktop
+      cask: rectangle
+    - id: raycast
+      group: dev_desktop
+      cask: raycast
+    - id: codexbar
+      group: dev_desktop
+      cask: codexbar
+      note: "Windows: Win-CodexBar via winget by procedure"
+
+    # --------------------------------------------------- remote_access
+    - id: tailscale
+      group: remote_access
+      cask: tailscale-app
+      choco: tailscale
+      migrate_risk: "LIVE VPN - uninstalling drops your tailnet connection until the reinstall completes"
+      note: "apt: Tailscale's repo by procedure. migrate-to-choco requires typing the name to confirm this one."
+    - id: cloudflared
+      group: remote_access
+      brew: cloudflared
+      choco: cloudflared
+      note: "apt: Cloudflare's repo by procedure"
+
+    # ---------------------------------------------------- agent groups
+    - id: act
+      group: agent_toolkit
+      choco: act-cli
+      note: "brew/apt: installed by procedure in the agent_toolkit block"
+    - id: antigravity-cli
+      group: antigravity_cli
+      choco: antigravity-cli
+    - id: claude-desktop
+      group: claude_desktop
+      choco: claude
+      migrate_risk: "app data stays in the profile; only the app itself is replaced"
+    - id: antigravity-desktop
+      group: antigravity_desktop
+      choco: antigravity
+    - id: opencode-desktop
+      group: opencode_desktop
+      choco: opencode-desktop

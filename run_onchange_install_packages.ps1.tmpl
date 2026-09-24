@@ -231,9 +231,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 {{- end }}
 {{- end }}
 
-# Package universe below is mirrored in scripts/migrate-to-choco.ps1
-# (MIGRATE-UNIVERSE-MARKER) - keep both lists in sync when adding a
-# Chocolatey-managed package.
+# Package names come from .chezmoidata/packages.yaml; scripts/migrate-to-choco.ps1
+# reads the same catalog at runtime, so there is no second list to keep in sync.
 $packages = @()
 
 # On Windows PowerShell 5.1 (this script's target - see #Requires above),
@@ -276,18 +275,8 @@ function Install-Node {
 
 {{- if $core }}
 # Core tools
-# psmux: the native Windows tmux (Rust, github.com/psmux/psmux) - official
-# Chocolatey package, ships psmux/pmux/tmux commands and reads .tmux.conf, so
-# it lands right where tmux sits on Linux/macOS. Right after powershell-core
-# deliberately: psmux recommends PS 7+, and this list installs it first.
-$packages += @(
-    "git.install", "curl", "wget", "jq", "fzf", "neovim", "ripgrep", "gh",
-    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg",
-    # npiperelay: bridges the Windows ssh-agent named pipe into WSL, so a WSL
-    # distro (and any devcontainer launched from it) uses the Windows agent and
-    # holds no private keys of its own. See docs/ssh-agents.md.
-    "npiperelay"
-)
+# Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
+{{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 
 # Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
@@ -297,7 +286,7 @@ Install-Node
 
 {{- if $modern_cli }}
 # Modern CLI tools
-$packages += @("bat", "eza", "fd", "delta", "starship", "zoxide", "direnv", "lazygit", "tealdeer", "dust", "duf", "procs", "shellcheck", "shfmt", "pstop")
+{{ includeTemplate "choco-packages" (dict "group" "modern_cli" "catalog" .catalog.packages) }}
 
 # gum (charmbracelet) - not published to Chocolatey; install from the latest GitHub release
 function Install-Gum {
@@ -340,40 +329,18 @@ Install-Gum
 
 {{- if $fonts }}
 # Fonts - MesloLGS NF is excellent for Starship
-$packages += @("nerd-fonts-meslo")
+{{ includeTemplate "choco-packages" (dict "group" "fonts" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $dev_desktop }}
 # Desktop apps
-# handy (https://handy.computer, Speech-to-Text): Whisper/Parakeet model
-# selection is GUI-only, no CLI flag or config file to pre-seed one. For
-# Spanish + English both, pick a Whisper model post-install (Parakeet is
-# English-only) - Large for best accuracy, Turbo for much faster with a
-# small accuracy trade-off (most noticeable on non-English audio).
-# termius replaces filezilla here (standardized on one SSH/SFTP client
-# across all 3 platforms instead of mixing - FileZilla's Homebrew cask was
-# pulled entirely on macOS, adware concerns).
-# geany replaces notepadplusplus.install here - Notepad++ is genuinely
-# Windows-only (no real Mac/Linux port), Geany is free/open-source and
-# fills the same "lightweight quick-edit GUI editor" role cross-platform.
-# meld replaces winmerge here - Meld is already the Linux/macOS diff/merge
-# tool in this repo and is confirmed on Chocolatey too (v3.22.2), so this
-# standardizes on one tool across all 3 platforms instead of WinMerge being
-# Windows-only.
-$packages += @(
-    "powertoys", "files",
-    "chocolateygui", "cpu-z.install", "crystaldiskinfo.install",
-    "crystaldiskmark", "cutepdf", "Everything", "Ghostscript.app",
-    "docker-desktop", "vscode.install",
-    "geany", "obs-studio.install",
-    "qbittorrent", "sharex", "meld", "wiztree", "termius",
-    "vlc", "handy"
-)
+# Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
+{{ includeTemplate "choco-packages" (dict "group" "dev_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $remote_access }}
 # Remote access tools are intentionally separate from desktop applications.
-$packages += @("tailscale", "cloudflared")
+{{ includeTemplate "choco-packages" (dict "group" "remote_access" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $agent_toolkit }}
@@ -385,7 +352,7 @@ $packages += @("tailscale", "cloudflared")
 # and the devcontainer code path, but can't exercise the core/
 # agent_toolkit/etc section content. Confirmed this session testing a
 # Superpowers install fix - had to fall back to isolated `docker run` tests.
-$packages += @("act-cli")
+{{ includeTemplate "choco-packages" (dict "group" "agent_toolkit" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_cli }}
@@ -395,14 +362,14 @@ $packages += @("act-cli")
 # apps were removed 2026-09-11 (VS Code + agy covered that workflow); the
 # 2.0 desktop app is back since 2026-09-13 as its own antigravity_desktop
 # group (choco `antigravity`, below) - agy here remains the CLI surface.
-$packages += @("antigravity-cli")
+{{ includeTemplate "choco-packages" (dict "group" "antigravity_cli" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $claude_desktop }}
 # Claude Desktop (spec §5) - official Chocolatey package, rides the capped
 # choco loop like every other package. Claude Code (the CLI) is a separate
 # claude_cli group - different software, different gate.
-$packages += @("claude")
+{{ includeTemplate "choco-packages" (dict "group" "claude_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_desktop }}
@@ -410,7 +377,7 @@ $packages += @("claude")
 # proven in this repo's CI history (the pre-removal full-install runs
 # installed it via choco). Windows floats on choco's version - no pinned
 # hub-channel URL here, unlike the sh template's dmg/tar.gz pins.
-$packages += @("antigravity")
+{{ includeTemplate "choco-packages" (dict "group" "antigravity_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $opencode_desktop }}
@@ -419,7 +386,7 @@ $packages += @("antigravity")
 # upstream anomalyco/opencode release train). Rides the capped choco loop
 # like every other desktop package; the OpenCode CLI is a separate
 # opencode_cli group - different software, different gate.
-$packages += @("opencode-desktop")
+{{ includeTemplate "choco-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $hasChocolateyPackages }}
