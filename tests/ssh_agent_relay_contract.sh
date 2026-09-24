@@ -106,4 +106,5 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
     fi
 fi
 
-echo "ssh-agent-relay contract: ok"
+printf 'PASS: ssh-agent-relay - per-account sockets, no key material in the distro
+'
