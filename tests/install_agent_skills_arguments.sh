@@ -58,12 +58,26 @@ EOF
 
 chmod +x "$tmp/bin/timeout" "$tmp/bin/git" "$tmp/bin/npx" "$tmp/bin/chezmoi"
 
+# install_agent_skills now carries {{ }} expressions (the skills agent list
+# renders from .chezmoidata/agents.yaml, #83), so the template must be
+# rendered before its bash can be extracted. Empty config + override-data,
+# never the host's own chezmoi.toml. The fake chezmoi in $tmp/bin is only on
+# PATH for the harness run below, so this uses the real one.
+command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed (needed to render the installer)
+'; exit 0; }
+: > "$tmp/chezmoi.toml"
+groups="{$(grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" | sed -E 's/.*"packages\.([a-z_]+)"/"\1":true/' | paste -sd, -)}"
+rendered="$tmp/installer.sh"
+chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
+    --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"6.8-generic\"}},\"packages\":$groups}" \
+    --file "$template" > "$rendered"
+
 harness="$tmp/harness.sh"
 {
     # shellcheck disable=SC2016  # $1 expands when the generated harness runs.
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'info() { :; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
-    awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$template"
-    awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$template"
+    awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
+    awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
     printf '%s\n' 'install_agent_skills'
 } > "$harness"
 

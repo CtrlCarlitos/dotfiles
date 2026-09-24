@@ -157,9 +157,15 @@ EOF
     done
 
     updater_harness="$tmp/updater.sh"
+    # The stub models both chezmoi calls the updater makes: `source-path`
+    # (answered with the scratch repo) and, since #83, `execute-template` for
+    # the agent list in .chezmoidata/agents.yaml - delegated to the real
+    # chezmoi against the scratch source, which carries a copy of .chezmoidata.
+    # HOME is a scratch dir here, so the real chezmoi would otherwise find no
+    # source at all and the updater would run with an empty agent list.
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -e' \
-            'chezmoi() { printf "%s\\n" "'"$tmp/repo"'"; }'
+            'chezmoi() { if [ "${1:-}" = execute-template ]; then shift; command chezmoi execute-template --source "'"$tmp/repo"'" "$@"; else printf "%s\\n" "'"$tmp/repo"'"; fi; }'
         awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
     } > "$updater_harness"
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$updater_harness")"
@@ -631,7 +637,10 @@ if [[ "$scope" != "windows" ]]; then
 
     for file in "${unix_files[@]}"; do
         require_contains "$file" 'curated-agent-skills.txt'
-        require_contains "$file" 'AGENTS=(claude-code opencode codex)'
+        # The agent list renders from .chezmoidata/agents.yaml (#83): the file
+        # must read it, and the catalog must still name the three CLIs.
+        require_contains "$file" '.agents.skills.agents'
+        require_contains .chezmoidata/agents.yaml 'agents: [claude-code, opencode, codex]'
         if grep -Fq -- '-a antigravity' "$repo_root/$file"; then
             fail "$file must not use the Antigravity skills CLI adapter"
         fi
@@ -675,8 +684,11 @@ if [[ "$scope" != "unix" ]]; then
             require_contains "$file" "$target"
         done
 
-        if grep -F -- "\$skAgents = @(" "$repo_root/$file" | grep -Fvq -- "'codex'"; then
-            fail "$file must include codex in every skills CLI agent array"
+        # Every $skAgents array comes from .chezmoidata/agents.yaml (#83). A
+        # literal array here would be a copy that can drift from the catalog -
+        # which is where codex's membership is asserted (see the unix branch).
+        if grep -F -- "\$skAgents = @(" "$repo_root/$file" | grep -Fvq -- ".agents.skills.agents"; then
+            fail "$file must build every skills CLI agent array from .agents.skills.agents, not a literal"
         fi
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" "\$markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\\r?$'"

@@ -15,7 +15,15 @@ if command -v npm &>/dev/null; then
         echo "  codex deferred - a codex session is live (dot upgrade reports it)."
     else
         echo "📦 Updating NPM packages..."
-        sudo npm install -g @openai/codex@latest --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+        # Package name from .chezmoidata/agents.yaml, read at runtime like the
+        # guardrail pin (chezmoi is a hard prerequisite: this script runs via
+        # `chezmoi source-path`). No literal fallback - that would be a copy.
+        CODEX_PKG="$(chezmoi execute-template '{{ .agents.npm.codex }}' 2>/dev/null || true)"
+        if [ -z "$CODEX_PKG" ]; then
+            echo "   codex package name unavailable from chezmoi data - skipping"
+        else
+            sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+        fi
     fi
 else
     echo "⚠️  npm not found. Skipping npm packages."
@@ -41,7 +49,9 @@ if command -v npx &>/dev/null; then
     SK=(npx --yes --loglevel=error skills@latest)
     # The CLI refreshes $HOME/.claude/skills and $HOME/.agents/skills. OpenCode
     # and Codex discover the shared directory; this is the explicit refresh path.
-    AGENTS=(claude-code opencode codex)
+    # From .chezmoidata/agents.yaml, read at runtime (see CODEX_PKG above).
+    read -r -a AGENTS <<<"$(chezmoi execute-template '{{ join " " .agents.skills.agents }}' 2>/dev/null || true)"
+    [ "${#AGENTS[@]}" -gt 0 ] || echo "   skills agent list unavailable from chezmoi data - skill updates may fail"
     claude_installed=0; claude_skipped=0; claude_failed=0
     opencode_installed=0; opencode_skipped=0; opencode_failed=0
     codex_installed=0; codex_skipped=0; codex_failed=0

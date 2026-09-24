@@ -80,6 +80,9 @@ jobs:
       - name: Test package catalog (one source for every package name)
         run: bash tests/package_catalog_contract.sh
 
+      - name: Test agent catalog (one source for MCP, allow-scripts, CLI pins)
+        run: bash tests/agent_catalog_contract.sh
+
       - name: Test installer hygiene contract
         run: bash tests/installer_hygiene_contract.sh
 

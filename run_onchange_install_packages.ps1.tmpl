@@ -939,6 +939,9 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 #     re-serialized. opencode loads MCP ONLY from this global mcp block
 #     (surveyed live 2026-09-20): without a graft entry here, every fresh
 #     opencode session starts with serena only.
+# MCP servers, from .chezmoidata/agents.yaml (see #83): command + args per
+# server, consumed by the OpenCode registration and the agy plugin bundle.
+{{ includeTemplate "mcp-servers-ps1" .agents.mcp }}
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
     $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
     # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
@@ -957,7 +960,7 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
         $ocDirty = $false
         if ((Get-Command serena -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"serena"')) {
             Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
-            $serenaDef = @{ type = "local"; command = @("serena", "start-mcp-server", "--context", "ide-assistant"); enabled = $true }
+            $serenaDef = @{ type = "local"; command = @($mcpCatalog.serena.command) + $mcpCatalog.serena.args; enabled = $true }
             if (-not $ocJson.PSObject.Properties["mcp"]) {
                 $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ serena = $serenaDef }
             } else {
@@ -971,7 +974,7 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
             # Same npx form graft's own host-writer uses: OS-agnostic,
             # registry-resolved, no global-binary coupling (npx resolves the
             # graft index from cwd at spawn, so one global entry works per repo).
-            $graftDef = @{ type = "local"; command = @("npx", "-y", "@nanonets/graft", "mcp"); enabled = $true }
+            $graftDef = @{ type = "local"; command = @($mcpCatalog.graft.command) + $mcpCatalog.graft.args; enabled = $true }
             if (-not $ocJson.PSObject.Properties["mcp"]) {
                 $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ graft = $graftDef }
             } else {
@@ -1006,10 +1009,10 @@ if ($agyWantServers.Count -gt 0) {
         [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'plugin.json'), '{ "name": "dotfiles-mcp" }', (New-Object System.Text.UTF8Encoding($false)))
         $agyServers = @{}
         if ($agyWantServers -contains 'serena') {
-            $agyServers['serena'] = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+            $agyServers['serena'] = @{ command = $mcpCatalog.serena.command; args = $mcpCatalog.serena.args }
         }
         if ($agyWantServers -contains 'graft') {
-            $agyServers['graft'] = @{ command = 'npx'; args = @('-y', '@nanonets/graft', 'mcp') }
+            $agyServers['graft'] = @{ command = $mcpCatalog.graft.command; args = $mcpCatalog.graft.args }
         }
         $agyBundle = @{ mcpServers = $agyServers } | ConvertTo-Json -Depth 10
         [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'mcp_config.json'), $agyBundle, (New-Object System.Text.UTF8Encoding($false)))
@@ -1129,7 +1132,7 @@ if (-not $graftWorks) {
             $priorNpmConfigPython = $env:NPM_CONFIG_PYTHON
             $env:NPM_CONFIG_PYTHON = $pythonPath
             Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
-                $graftInstallOutput = npm install -g '--allow-scripts=@nanonets/graft,tree-sitter,tree-sitter-go,tree-sitter-java,tree-sitter-kotlin,tree-sitter-php,tree-sitter-python,@davisvaughan/tree-sitter-r,tree-sitter-swift,tree-sitter-typescript,tree-sitter-cli,tree-sitter-javascript' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
+                $graftInstallOutput = npm install -g '--allow-scripts={{ join "," .agents.npm.graft_allow_scripts }}' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE): $($graftInstallOutput.Trim())" }
             }
             if ($null -eq $priorNpmConfigPython) {
@@ -1357,7 +1360,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 {{- end }}
 
 {{- if $chatgpt_cli }}
-# Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
+# Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
 # superpowers/skills have no codex surface (the skills pass stays
 # presence-gated on its own CLIs; guardrail's plane wiring is done by the
 # agent-guardrails installer; only this npm install lives here).
@@ -1367,7 +1370,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # Global NPM packages are usually added to PATH during Node.js install
     # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-         Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g @openai/codex --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+         Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g {{ .agents.npm.codex }} --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
     }
     # Upgrades are `dot upgrade`'s sole domain (dot CLI spec,
     # 2026-09-20): presence-only here by design - install-if-missing.
@@ -1456,10 +1459,10 @@ function Write-CuratedSkillsSkippedSummary {
 }
 
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    $skAgents = @('claude-code', 'opencode', 'codex')
+    $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
     Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -1487,7 +1490,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
         }
         Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
-            $skAgents = @('claude-code', 'opencode', 'codex')
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
             npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
         }
@@ -1498,7 +1501,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
     Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -1507,7 +1510,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # agent search and install skills from skills.sh mid-session.
     Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -1516,7 +1519,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # automation: navigate, click, fill, scrape, screenshot.
     Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
@@ -1525,7 +1528,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }

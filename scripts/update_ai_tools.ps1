@@ -17,7 +17,15 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         Write-Host "  codex deferred - a codex session is live (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
         Write-Host "📦 Updating NPM packages..." -ForegroundColor Yellow
-        npm install -g @openai/codex@latest --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+        # Package name from .chezmoidata/agents.yaml, read at runtime like the
+        # guardrail pin below. No literal fallback - that would be a copy.
+        $codexPkg = ''
+        try { $codexPkg = (chezmoi execute-template '{{ .agents.npm.codex }}' | Out-String).Trim() } catch {}
+        if (-not $codexPkg) {
+            Write-Host "  codex package name unavailable from chezmoi data - skipping" -ForegroundColor Red
+        } else {
+            npm install -g "$($codexPkg)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+        }
     }
 } else {
     Write-Host "⚠️  npm not found. Skipping npm packages." -ForegroundColor Red
@@ -60,7 +68,8 @@ function Write-CuratedSkillsSkippedSummary {
 
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
-    $skAgents = @('claude-code', 'opencode', 'codex')
+    # From .chezmoidata/agents.yaml, read at runtime (see $codexPkg above).
+    try { $skAgents = @(((chezmoi execute-template '{{ join "," .agents.skills.agents }}' | Out-String).Trim()) -split ',') } catch { $skAgents = @() }
     npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
 
