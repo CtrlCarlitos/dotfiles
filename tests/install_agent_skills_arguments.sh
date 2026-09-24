@@ -80,11 +80,11 @@ results=()
 while IFS= read -r result; do
     results+=("$result")
 done < "$SKILLS_ARGUMENT_RESULTS"
-if [[ "${#results[@]}" -ne 6 ]]; then
-    printf 'FAIL: expected 6 controlled npx calls, got %s\n' "${#results[@]}" >&2
+if [[ "${#results[@]}" -ne 7 ]]; then
+    printf 'FAIL: expected 7 controlled npx calls, got %s\n' "${#results[@]}" >&2
     exit 1
 fi
-if [[ "${results[*]}" != "PASS PASS PASS PASS PASS PASS" ]]; then
+if [[ "${results[*]}" != "PASS PASS PASS PASS PASS PASS PASS" ]]; then
     printf 'FAIL: malformed npx argument vector: %s\n' "${results[*]}" >&2
     exit 1
 fi

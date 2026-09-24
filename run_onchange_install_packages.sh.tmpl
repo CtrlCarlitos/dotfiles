@@ -237,10 +237,10 @@ install_node() {
 install_agent_skills() {
     if ! command -v npx &>/dev/null; then
         warn "npx not found - skipping curated agent skills"
-        info "Curated skills: Claude Code installed=0 skipped=16 failed=0"
-        info "Curated skills: OpenCode installed=0 skipped=16 failed=0"
-        info "Curated skills: Antigravity installed=0 skipped=16 failed=0"
-        info "Curated skills: Codex installed=0 skipped=16 failed=0"
+        info "Curated skills: Claude Code installed=0 skipped=18 failed=0"
+        info "Curated skills: OpenCode installed=0 skipped=18 failed=0"
+        info "Curated skills: Antigravity installed=0 skipped=18 failed=0"
+        info "Curated skills: Codex installed=0 skipped=18 failed=0"
         return
     fi
     local catalog
@@ -374,6 +374,22 @@ install_agent_skills() {
     else
         record_cli_result failed 1
         warn "skill-creator skill install failed or timed out - continuing"
+    fi
+
+    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend infers a
+    # visual direction for new pages behind tunable dials plus an anti-slop
+    # checklist; redesign-existing-projects audits an existing UI's styling
+    # and applies targeted fixes without changing behaviour. Chosen 2026-09-24
+    # for function, not popularity - the repo's style presets, image-generation
+    # skills, GPT/Stitch variants and v1 were left out (see
+    # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
+    # purpose; drop one if they double-trigger.
+    info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..."
+    if net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 2
+    else
+        record_cli_result failed 2
+        warn "taste skills install failed or timed out - continuing"
     fi
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to

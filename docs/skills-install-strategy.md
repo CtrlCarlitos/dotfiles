@@ -198,6 +198,49 @@ No overlap with Superpowers or the existing curated set: `skill-creator` is a
 lifecycle/benchmark harness (vs Superpowers' `writing-skills` process guide),
 and `find-skills` / `agent-browser` have no installed equivalent.
 
+## Curated set widened (2026-09-24): +2 taste skills
+
+Two skills from `Leonxlnx/taste-skill` (MIT), picked for function rather than
+install count. Counts from skills.sh on 2026-09-19.
+
+| Skill | Source | Installs | What it does |
+| :-- | :-- | :-- | :-- |
+| `design-taste-frontend` | `Leonxlnx/taste-skill` | 497.0K | greenfield visual direction for landing/marketing pages: infers a style from the brief, three tunable dials (variance, motion, density), pre-flight anti-slop checklist |
+| `redesign-existing-projects` | `Leonxlnx/taste-skill` | 361.9K | brownfield: scans an existing UI's styling, diagnoses generic patterns against a checklist, applies targeted upgrades without changing behaviour |
+
+One `skills add` with a two-name `-s` list, since both come from the same repo:
+
+```sh
+npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a claude-code opencode codex -g -y --copy
+```
+
+Overlap, accepted on purpose: `design-taste-frontend` fires on the same work
+as `anthropics/frontend-design`, which stays installed. If they double-trigger
+in practice, drop one; nothing else depends on either.
+
+Considered from the same repo and left out:
+
+- `design-taste-frontend-v1` — frozen pre-rewrite ruleset, kept upstream for
+  compatibility only.
+- `high-end-visual-design`, `minimalist-ui`, `industrial-brutalist-ui` — style
+  presets, mutually exclusive aesthetics. Add one per project once its look is
+  chosen (`npx skills add Leonxlnx/taste-skill -s <name>` in that repo), not
+  globally where all three would compete on the same prompt.
+- `gpt-taste` — the same rules tuned for GPT/Codex failure modes; a
+  model-specific duplicate of the flagship.
+- `stitch-design-taste` — emits a DESIGN.md for Google Stitch; inert without a
+  Stitch integration.
+- `brandkit`, `image-to-code`, `imagegen-frontend-web`, `imagegen-frontend-mobile`
+  — need an image-generation capability the Claude Code, OpenCode and Codex
+  CLIs do not have; they produce images, not code.
+- `full-output-enforcement` — not a design skill; a completeness guard that
+  Claude Code and the Superpowers verification workflow already cover.
+
+Note: the names above are the skills' `name:` fields, which is what `-s`
+matches; the repo folders are named differently (`taste-skill/`,
+`redesign-skill/`). The wiring contract test checks the on-disk `SKILL.md`,
+so a renamed skill fails loudly on the next apply rather than silently.
+
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
@@ -270,6 +313,10 @@ Skills of interest: `plan-devex-review`, `devex-review`, `qa-only`,
     expected-call count bumped 3 → 7 to match. 2026-09-14:
     `writing-great-skills` removed again (renamed upstream to
     `writing-for-agents`, already installed) — expected-call count now 6.
+7. ✅ 2026-09-24: `design-taste-frontend` and `redesign-existing-projects`
+    from `Leonxlnx/taste-skill` added to all four files as one two-name
+    `skills add` (see "Curated set widened (2026-09-24)"); expected-call
+    count now 7, catalog fallback `skipped=18`.
 
 Not done / open:
 - ~~`-a antigravity` unverified with `agy` present on a box~~ **Verified

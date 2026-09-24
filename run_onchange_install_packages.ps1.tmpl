@@ -1451,7 +1451,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # are deliberately self-contained (literal args + $env:TEMP only).
 function Write-CuratedSkillsSkippedSummary {
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=16 failed=0"
+        Write-Host "  Curated skills: $agent installed=0 skipped=18 failed=0"
     }
 }
 
@@ -1527,6 +1527,18 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
         $skAgents = @('claude-code', 'opencode', 'codex')
         npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend (new-page
+    # visual direction behind tunable dials + anti-slop checklist) and
+    # redesign-existing-projects (audit + targeted fixes for existing UI).
+    # Chosen 2026-09-24 for function, not popularity; presets, image-gen,
+    # GPT/Stitch variants and v1 left out (docs/skills-install-strategy.md).
+    Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -Action {
+        $skAgents = @('claude-code', 'opencode', 'codex')
+        npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 

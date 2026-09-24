@@ -54,7 +54,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # terminating error - keep stderr empty instead (see installer for full notes).
 function Write-CuratedSkillsSkippedSummary {
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=16 failed=0"
+        Write-Host "  Curated skills: $agent installed=0 skipped=18 failed=0"
     }
 }
 
@@ -95,6 +95,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
     npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # taste skills (Leonxlnx/taste-skill) - design-taste-frontend (new-page visual direction) + redesign-existing-projects (audit + fix existing UI)
+    npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
