@@ -541,11 +541,23 @@ function Invoke-Lifecycle {
     param([string]$Script, [string]$Mode)
     $source = Get-Content -Raw -LiteralPath $Script
     if ($Script -like '*installer.ps1') {
-        $match = [regex]::Match($source, '(?ms)^function Write-CuratedSkillsSkippedSummary \{.*\z')
+        # The lifecycle runs from its summary function up to the guardrail
+        # section marker - NOT to end of file. `.*\z` used to be safe only
+        # because everything after the lifecycle rendered empty with the
+        # fixture's groups; since #102 the guardrail section renders an
+        # else-branch that runs the REAL agent-guardrails installer whenever a
+        # guardrail binary exists on the host. CI runners have none, so CI
+        # cannot catch this; a developer machine can, and did.
+        $match = [regex]::Match($source, '(?ms)^function Write-CuratedSkillsSkippedSummary \{.*?(?=^# guardrail-section: begin|\z)')
     } else {
         $match = [regex]::Match($source, '(?ms)^# 1b\. Curated third-party skills.*?^}\s*else\s*\{.*?^\}')
     }
     if (-not $match.Success) { throw "curated lifecycle not found: $Script" }
+    # Belt and braces: a fixture must never execute the real installer. If the
+    # marker moves or the regex regresses, fail here instead of on the host.
+    if ($match.Value -match 'Invoke-GuardrailInstaller|install\.ps1 -Version') {
+        throw "fixture captured the guardrail section from $Script - refusing to execute the real agent-guardrails installer in a test"
+    }
 
     function Get-Command {
         param([string]$Name)
