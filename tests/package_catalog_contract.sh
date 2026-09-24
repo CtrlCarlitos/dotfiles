@@ -19,8 +19,13 @@ set -euo pipefail
 #   2. NO COPY   no consumer carries a name of its own: the .ps1 has no
 #                `$packages += @(` literal, install_brew has no literal `brew
 #                install <names>`, migrate has no `$Universe = @(` list.
-#   3. RENDERS   the twin this platform renders emits exactly the catalog's
-#                names for its manager - none lost, none invented.
+#   3. RENDERS   BOTH twins, rendered with every group on and the OS forced
+#                through --override-data (the way remote_access_package_ownership
+#                does), emit exactly the catalog's names for their managers.
+#                An empty --config keeps the host's own chezmoi.toml out of it:
+#                the first version read the host config, rendered whatever
+#                groups the host had enabled, and failed on the CI lint runner,
+#                which has none.
 #   4. RUNTIME   the expression migrate-to-choco evaluates yields the catalog's
 #                choco names minus those marked migrate: false.
 #
@@ -72,14 +77,28 @@ done
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-render() { chezmoi execute-template --source "$repo_root" "$@"; }
+: > "$tmp/chezmoi.toml"      # empty: the HOST's config must not shape the render
+render() { chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" "$@"; }
+
+grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" \
+    | sed -E 's/.*"packages\.([a-z_]+)"/\1/' > "$tmp/groups.txt"
+# {"core":true,"modern_cli":true,...}: every group on, so every list renders.
+all_on="{$(sed -E 's/.*/"&":true/' "$tmp/groups.txt" | paste -sd, -)}"
 
 render '{{ .catalog.packages | toJson }}' > "$tmp/catalog.json" || fail "catalog does not render (YAML broken?)"
 render '{{ range .catalog.packages }}{{ if and (hasKey . "choco") (not (and (hasKey . "migrate") (not .migrate))) }}{{ .choco }}{{ "\n" }}{{ end }}{{ end }}' \
     > "$tmp/migrate-universe.txt" || fail "the migrate-to-choco universe expression does not render"
-render --file "$ps_t" > "$tmp/ps1.rendered" 2>/dev/null || true
-render --file "$sh_t" > "$tmp/sh.rendered" 2>/dev/null || true
-grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" | sed -E 's/.*"packages\.([a-z_]+)"/\1/' > "$tmp/groups.txt"
+
+# Both twins, every group on, OS forced. darwin for the .sh so install_brew's
+# cask loop (darwin-gated) renders; linux again for the apt lines.
+render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$all_on}" --file "$ps_t" > "$tmp/ps1.rendered" 2>"$tmp/ps1.err" ||
+    fail "the .ps1 twin does not render with os=windows and every group on: $(head -c 300 "$tmp/ps1.err")"
+render --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"kernel\":{\"osrelease\":\"24.0.0\"}},\"packages\":$all_on}" --file "$sh_t" > "$tmp/sh-darwin.rendered" 2>"$tmp/shd.err" ||
+    fail "the .sh twin does not render with os=darwin and every group on: $(head -c 300 "$tmp/shd.err")"
+# kernel.osrelease exists only on a Linux host; the template reads it for WSL
+# detection, so a Windows or macOS host must supply one (a non-WSL value).
+render --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"6.8-generic\"}},\"packages\":$all_on}" --file "$sh_t" > "$tmp/sh-linux.rendered" 2>"$tmp/shl.err" ||
+    fail "the .sh twin does not render with os=linux and every group on: $(head -c 300 "$tmp/shl.err")"
 
 "$PY" - "$tmp" <<'PYEOF' || fail "catalog checks failed (see above)"
 import json, re, sys, io
@@ -120,52 +139,47 @@ for i, r in enumerate(cat):
 choco = [r["choco"] for r in cat if "choco" in r]
 brew  = [r["brew"] for r in cat if "brew" in r]
 cask  = [r["cask"] for r in cat if "cask" in r]
+apt   = [r["apt"] for r in cat if "apt" in r]
 
-# 3. the rendered twin emits exactly the catalog's names
-ps1 = io.open(tmp + "/ps1.rendered", encoding="utf-8", newline="").read()
-if "$packages +=" in ps1:
-    got = re.findall(r'^\$packages \+= "([^"]+)"', ps1, re.M)
-    # rendering is gated by this machine's group toggles, so compare only the
-    # groups that rendered anything: within a rendered group nothing may be
-    # missing or extra
-    by_group = {}
-    for r in cat:
-        if "choco" in r: by_group.setdefault(r["group"], []).append(r["choco"])
-    rendered_groups = {g for g, names in by_group.items() if any(n in got for n in names)}
-    want = [n for g in by_group if g in rendered_groups for n in by_group[g]]
-    if sorted(want) != sorted(got):
-        err("ps1 render: choco names differ from the catalog - missing=%s extra=%s"
-            % (sorted(set(want) - set(got)), sorted(set(got) - set(want))))
-    else:
-        print("  rendered .ps1: %d choco names, %d groups, all from the catalog" % (len(got), len(rendered_groups)))
+def read(name):
+    return io.open("%s/%s" % (tmp, name), encoding="utf-8", newline="").read()
 
-sh = io.open(tmp + "/sh.rendered", encoding="utf-8").read()
-# install_brew's body is macOS-gated, so on a Linux render it is absent and a
-# stray `brew install sevenzip` in a helper must not be mistaken for it. The
-# cask loop only exists inside install_brew, so it is the marker.
+# 3a. the .ps1, every group on: exactly the catalog's choco names, in order
+ps1 = read("ps1.rendered")
+got = re.findall(r'^\$packages \+= "([^"]+)"', ps1, re.M)
+if got != choco:
+    err("ps1 render: choco names differ from the catalog - missing=%s extra=%s (or out of order)"
+        % (sorted(set(choco) - set(got)), sorted(set(got) - set(choco))))
+else:
+    print("  rendered .ps1 (os=windows, all groups): %d choco names, exactly the catalog, in catalog order" % len(got))
+
+# 3b. the .sh on darwin: every formula and every cask
+sh = read("sh-darwin.rendered")
 formulas, casks = set(), set()
-for m in re.finditer(r'^\s*brew install (?!--cask)([^|\n]+)', sh, re.M):
-    formulas |= set(m.group(1).split())
-for m in re.finditer(r'^\s*brew install --cask ([^|\n]+)', sh, re.M):
-    casks |= set(m.group(1).split())
+for m in re.finditer(r'^\s*brew install (?!--cask)([^|\n]+)', sh, re.M): formulas |= set(m.group(1).split())
+for m in re.finditer(r'^\s*brew install --cask ([^|\n]+)', sh, re.M): casks |= set(m.group(1).split())
 m = re.search(r'for cask in ([^;\n]+); do', sh)
 if m: casks |= set(m.group(1).split())
-# Formula lines render on every Unix platform (install_brew is defined
-# everywhere, called only on macOS); the dev_desktop cask loop is inside a
-# darwin gate, so casks are asserted only where that loop rendered.
-if formulas:
-    lost = set(brew) - formulas
-    if lost: err("sh render: catalog brew formulas never rendered: %s" % sorted(lost))
-    else: print("  rendered .sh: every catalog brew formula (%d) appears in install_brew" % len(brew))
-if m:
-    lost = set(cask) - casks
-    if lost: err("sh render: catalog casks never rendered: %s" % sorted(lost))
-    else: print("  rendered .sh: every catalog cask (%d) appears in install_brew" % len(cask))
+else: err("sh render (darwin): the dev_desktop cask loop did not render")
+lost = set(brew) - formulas
+if lost: err("sh render (darwin): catalog brew formulas never rendered: %s" % sorted(lost))
+lost = set(cask) - casks
+if lost: err("sh render (darwin): catalog casks never rendered: %s" % sorted(lost))
+if not (set(brew) - formulas) and not (set(cask) - casks):
+    print("  rendered .sh (os=darwin, all groups): all %d formulas and %d casks present" % (len(brew), len(cask)))
+
+# 3c. the .sh on linux: every apt name, and no list split from its `; do` / `||`
+sh = read("sh-linux.rendered")
+apts = set()
+for m in re.finditer(r'^\s*\$SUDO apt install -y ([^|\n"$]+)', sh, re.M): apts |= set(m.group(1).split())
+for m in re.finditer(r'for pkg in ([^;\n]+); do', sh): apts |= set(m.group(1).split())
+lost = set(apt) - apts
+if lost: err("sh render (linux): catalog apt names never rendered: %s" % sorted(lost))
+else: print("  rendered .sh (os=linux, all groups): all %d apt names present" % len(apt))
 # The bug this catches: a fragment emitting its own trailing newline splits
-# `for pkg in a b c` from `; do` - a syntax error only a Unix render shows.
-# A line ending in a backslash is a deliberate shell continuation (the zoxide
-# install does this), not a split - hence the lookbehind.
-if re.search(r'^(for \w+ in [^\n]*|\s*brew install [^\n]*|\s*\$SUDO apt install -y [^\n]*)(?<!\\)\n\s*(; do|\|\|)', sh, re.M):
+# `for pkg in a b c` from `; do`. A line ending in a backslash is a deliberate
+# shell continuation (the zoxide install does this), not a split.
+if re.search(r'^(for \w+ in [^\n]*|\s*brew install [^\n]*|\s*\$SUDO apt install -y [^\n]*)(?<!\\)\n\s*(; do|\|\|)', sh + read("sh-darwin.rendered"), re.M):
     err("sh render: a package list is split from its `; do` / `||` by a newline - a fragment is emitting its trailing newline")
 
 # 4. migrate universe
@@ -175,7 +189,7 @@ if sorted(uni) != sorted(want):
     err("migrate universe expression: missing=%s extra=%s" % (sorted(set(want)-set(uni)), sorted(set(uni)-set(want))))
 excluded = [r["choco"] for r in cat if r.get("migrate") is False]
 print("  catalog: %d tools, %d choco / %d brew / %d cask / %d apt names; migrate universe %d (excluded: %s)"
-      % (len(cat), len(choco), len(brew), len(cask), sum(1 for r in cat if "apt" in r), len(uni), ", ".join(excluded) or "none"))
+      % (len(cat), len(choco), len(brew), len(cask), len(apt), len(uni), ", ".join(excluded) or "none"))
 sys.exit(1 if bad else 0)
 PYEOF
 
@@ -183,4 +197,4 @@ if [ "$failures" -gt 0 ]; then
     printf '\nFAIL: package catalog (%d problem(s))\n' "$failures" >&2
     exit 1
 fi
-printf 'PASS: package names live only in .chezmoidata/packages.yaml; installers and migrate-to-choco render or read it\n'
+printf 'PASS: package names live only in .chezmoidata/packages.yaml; both twins render exactly them, migrate-to-choco reads them\n'
