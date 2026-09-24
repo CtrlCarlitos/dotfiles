@@ -178,7 +178,7 @@ skills.sh at add time):
 | :-- | :-- | :-- | :-- |
 | `find-skills` | `vercel-labs/skills` | 3.4M | lets an agent search and install skills from skills.sh mid-session |
 | `agent-browser` | `vercel-labs/agent-browser` | 843.8K | browser automation: navigate, click, fill, scrape, screenshot |
-| `skill-creator` | `anthropics/skills` | 380.0K | Anthropic's skill-authoring lifecycle tool with benchmarks and eval viewer |
+| `skill-creator` | `CtrlCarlitos/skills` (fork of `anthropics/skills`, see below) | 380.0K upstream | Anthropic's skill-authoring lifecycle tool with benchmarks and eval viewer |
 
 (`writing-great-skills` from `mattpocock/skills` was in this batch too, but was
 removed 2026-09-14: mattpocock renamed it upstream to `writing-for-agents`
@@ -191,7 +191,7 @@ keep in sync), same `-a claude-code opencode antigravity -g -y --copy` flags:
 ```sh
 npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
 npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
-npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
 ```
 
 No overlap with Superpowers or the existing curated set: `skill-creator` is a
@@ -263,6 +263,31 @@ written by `graft init`) and its AGENTS.md block still say "graph first".
 `code-search` is the gate in front of them: it keeps graft when the probe says
 the graph covers the code and drops it for the session otherwise.
 
+## skill-creator: our drop-in fork (2026-09-24)
+
+`skill-creator` is installed from `CtrlCarlitos/skills`, a fork of
+`anthropics/skills` `skills/skill-creator` (Apache-2.0, license kept). Same
+name and description, so it replaces Anthropic's copy in place and triggers
+identically. The fork exists because the upstream description optimizer
+cannot run on Windows (anthropics/skills#1827): `select()` on a pipe fails
+every query, the HTML report is written in the locale codec, the project root
+is taken from the script's cwd, and a real invocation of the skill under test
+does not count as a trigger.
+
+How it is maintained (in the skills repo):
+
+- `vendor/skill-creator/UPSTREAM` pins the upstream commit;
+  `vendor/skill-creator/patches/000N-*.patch` is the patch queue.
+- `scripts/sync-skill-creator.sh` rebuilds `skills/skill-creator` from the pin
+  plus the patches; `--check` verifies the committed tree equals that rebuild
+  and runs in that repo's CI.
+- To update from upstream: bump `commit=` in UPSTREAM, run the sync script, fix
+  any patch that no longer applies, commit all three together.
+- When upstream ships the fixes, delete the patches that no longer apply and,
+  once none are left, switch these four call sites back to `anthropics/skills`
+  and drop the fork.
+
+||||||| 8605a90
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
