@@ -211,6 +211,7 @@ New to zsh, tmux, or neovim? Start here:
 
 | Doc | What's in it |
 |-----|-------------|
+| [Invariants](docs/invariants.md) | Rules this repo learned the expensive way — read before changing templates, ignores or tests |
 | [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
