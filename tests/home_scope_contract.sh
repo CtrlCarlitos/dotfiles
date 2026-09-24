@@ -63,4 +63,5 @@ if command -v chezmoi >/dev/null; then
         fail "devcontainer render: ~/.ssh/config must stay managed (aliases; keys come from the forwarded agent)"
 fi
 
-echo "home scope contract: ok"
+printf 'PASS: home scope - only intended targets are applied to $HOME
+'

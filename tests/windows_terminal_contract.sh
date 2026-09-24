@@ -159,4 +159,5 @@ if command -v chezmoi >/dev/null; then
     done
 fi
 
-echo "windows terminal contract: ok"
+printf 'PASS: windows terminal - settings merge, never own
+'
