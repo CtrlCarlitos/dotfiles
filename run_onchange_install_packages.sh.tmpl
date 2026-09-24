@@ -1442,10 +1442,11 @@ PYEOF
     # object (guardrail's coverage gate cannot read either state,
     # agent-guardrails#334). A non-empty file is never touched here.
     if [ ! -s "$AGY_GLOBAL_MCP" ]; then
-        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" &&
-            printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP" &&
-            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)" ||
+        if mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" && printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP"; then
+            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)"
+        else
             warn "could not repair agy global mcp_config.json - continuing"
+        fi
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
@@ -1913,10 +1914,11 @@ PYEOF
     # object (guardrail's coverage gate cannot read either state,
     # agent-guardrails#334). A non-empty file is never touched here.
     if [ ! -s "$AGY_GLOBAL_MCP" ]; then
-        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" &&
-            printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP" &&
-            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)" ||
+        if mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" && printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP"; then
+            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)"
+        else
             warn "could not repair agy global mcp_config.json - continuing"
+        fi
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
