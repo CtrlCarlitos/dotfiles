@@ -50,14 +50,27 @@ done
 
 # 4. One-time migration: our keys retire from the old global
 #    mcp_config.json - the bundle is the only MCP source this repo owns
-#    (cross-source doubles otherwise). Surgical: only serena/graft removed;
-#    the file is deleted only when nothing else remains.
-grep -Fq 'Remove-Item $agyGlobalMcp' "$ps1_installer" ||
-    fail "$ps1_installer: no agy global mcp_config.json retirement"
+#    (cross-source doubles otherwise). Surgical: only serena/graft removed.
+#    The file is NEVER deleted: guardrail's `doctor --coverage antigravity`
+#    (the `guardrail setup` gate) fails hard on an absent or 0-byte file
+#    (agent-guardrails#334), so an emptied file keeps `"mcpServers": {}`
+#    and every run repairs an absent/0-byte one to that same shape.
 grep -Fq 'AGY_GLOBAL_MCP' "$sh_installer" ||
     fail "$sh_installer: no agy global mcp_config.json retirement"
-grep -Fq 'os.remove(p)' "$sh_installer" ||
-    fail "$sh_installer: retirement must delete the file only when empty"
+grep -Fq '$agyGlobalMcp' "$ps1_installer" ||
+    fail "$ps1_installer: no agy global mcp_config.json retirement"
+! grep -Fq 'Remove-Item $agyGlobalMcp' "$ps1_installer" ||
+    fail "$ps1_installer: retirement must not delete the global mcp_config.json (agent-guardrails#334)"
+! grep -Fq 'os.remove(p)' "$sh_installer" ||
+    fail "$sh_installer: retirement must not delete the global mcp_config.json (agent-guardrails#334)"
+for f in "$ps1_installer" "$sh_installer"; do
+    grep -Fq '"mcpServers": {}' "$f" ||
+        fail "$f: must leave/repair the global mcp_config.json as an empty mcpServers object"
+done
+grep -Fq -- '-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0' "$ps1_installer" ||
+    fail "$ps1_installer: no absent/0-byte repair of the global mcp_config.json"
+grep -Fq -- '! -s "$AGY_GLOBAL_MCP"' "$sh_installer" ||
+    fail "$sh_installer: no absent/0-byte repair of the global mcp_config.json"
 
 grep -Fq -- 'bash tests/mcp_autowire_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: MCP autowire contract is not a PR CI check\n' >&2
