@@ -60,8 +60,8 @@ are the reference.
 - **`--state enabled`:**
   1. Downloads the binary for your OS and architecture with `SHA256SUMS` and
      verifies it. If a guardrail at or above `v0.19.2-dev` is already
-     installed, it runs `guardrail update <pin>` instead; that is a no-op when
-     the binary already reports the pin.
+     installed, it runs `guardrail update <pin>` instead. It skips the update
+     when the installed binary already reports the pin.
   2. Places the binary and checks that `guardrail version` reports the pin.
   3. On Windows: runs `Unblock-File` and adds the user PATH entry for a fresh
      binary. Every run makes sure a Defender exclusion exists for that exact
@@ -96,6 +96,27 @@ until you do. The next `chezmoi apply` runs the installer again. It finds the
 pin already installed and the hosts already registered, so it doesn't ask for
 approval.
 
+### What changes on an existing Windows machine
+
+Before this change, the Windows installer wired the planes itself with
+`gen-config` and never asked for an approval. Now `install.ps1` hands off to
+`guardrail setup`, which needs three things on that Windows machine:
+
+- an operator enrolled on it,
+- a passkey approval,
+- a console stdin. From an agent's shell, setup exits 2.
+
+If any of them is missing, the installer exits non-zero and
+`run_onchange_install_packages.ps1.tmpl` throws. The throw skips the rest of
+the Windows installer for that run. The script didn't finish, so the next
+`chezmoi apply` runs it again, on every apply until setup succeeds. Run these
+once from a real terminal on that machine, not from an agent's shell:
+
+```powershell
+guardrail operator enroll     # prints a localhost URL; open it and complete the passkey prompt
+guardrail setup               # registers every detected host with one approval, then runs selftest
+```
+
 ## Bumping the version
 
 1. Tag a new `agent-guardrails` release (CI publishes the binaries, the
@@ -109,7 +130,7 @@ approval.
    script, which runs the new tag's installer. The installer updates the binary
    and runs `guardrail setup` to reconcile the registered handlers.
 
-## Verifying after apply (Unix)
+## Verifying after apply
 
 ```bash
 guardrail version        # guardrail <pin>
@@ -131,8 +152,12 @@ OPERATIONS.md lists what each one removes.
   without an interactive terminal (exit 2) and needs a passkey approval, and
   CI can't provide either. Full-install workflows therefore exercise guardrail
   on real machines only.
-- **The contract test is scoped.** `tests/guardrail_lifecycle_contract.sh`
-  checks the fetch-verify-run shape and forbids install logic (binary
-  downloads, plane or update calls, PATH, Defender, `Unblock-File`) between each
-  consumer's `# guardrail-section: begin` and `# guardrail-section: end` lines.
-  Code outside those markers is not checked.
+- **The contract test checks a fixed list.** `tests/guardrail_lifecycle_contract.sh`
+  requires the fetch-verify-run shape between each consumer's
+  `# guardrail-section: begin` and `# guardrail-section: end` lines, and fails
+  a section that holds only comments. It forbids a fixed list of install-era
+  literals (binary asset names, plane and update calls, `doctor --coverage`,
+  Defender, `Unblock-File`) anywhere in the four consumers. Piping into a
+  shell, `iex` and PATH edits are forbidden between the markers only, because
+  other tools in the same files use them. Install logic that uses none of
+  those literals still passes.

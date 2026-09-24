@@ -213,7 +213,10 @@ kept working around two limits that no longer existed
 ([ADR-0029](https://github.com/CtrlCarlitos/agent-guardrails/blob/main/docs/adr/0029-installer-lives-in-this-repo.md)).
 
 **Obey it.** Change the installer upstream. `tests/guardrail_lifecycle_contract.sh`
-forbids anything more between the `# guardrail-section` markers.
+requires the fetch-verify-run shape between the `# guardrail-section` markers
+and forbids a fixed list of install-era literals (plane and update calls,
+binary asset names, Defender, `Unblock-File`) in the four consumers. Logic
+that avoids those literals gets past it, so the rule is yours to keep.
 
 ---
 
