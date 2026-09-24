@@ -1,0 +1,6 @@
+# The smallest valid identity: name and email, and deliberately NOTHING else.
+# minimal-config-test exists to prove every optional key can be absent, and it
+# asserts on these two values. Adding a key here silently weakens that test.
+[[data.accounts]]
+  name = "Minimal User"
+  email = "minimal@example.com"

@@ -1,0 +1,20 @@
+# Two identities. integration-test asserts on these exact values in the
+# rendered ~/.gitconfig and ~/.ssh/config (github-alice, projects/bobcorp,
+# IdentityFile ~/.ssh/id_bob, ...). Rename here and there together, or not at all.
+[[data.accounts]]
+  name = "Alice Personal"
+  email = "alice@personal.com"
+  username = "alice"
+  provider = "github"
+  key = "id_alice"
+  organizations = ["alice"]
+  dirs = ["projects/alice", ".dotfiles"]
+
+[[data.accounts]]
+  name = "Bob Work"
+  email = "bob@work.com"
+  username = "bob"
+  provider = "github"
+  key = "id_bob"
+  organizations = ["bobcorp"]
+  dirs = ["projects/bobcorp"]

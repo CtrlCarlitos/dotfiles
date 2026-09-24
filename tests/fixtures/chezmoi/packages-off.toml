@@ -1,0 +1,20 @@
+# Every group off: the job renders templates and dry-runs, it installs nothing.
+# The key set must match the promptBoolOnce groups in .chezmoi.toml.tmpl exactly;
+# tests/ci_fixture_contract.sh enforces that.
+[data.packages]
+  core = false
+  modern_cli = false
+  fonts = false
+  agent_toolkit = false
+  opencode_cli = false
+  opencode_desktop = false
+  claude_cli = false
+  claude_desktop = false
+  chatgpt_cli = false
+  chatgpt_desktop = false
+  antigravity_cli = false
+  antigravity_desktop = false
+  dev_desktop = false
+  remote_access = false
+  remote_access_server = false
+  guardrail = false
