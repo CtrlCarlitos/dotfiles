@@ -1524,12 +1524,13 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
-    # skill-creator (anthropics/skills, 380K installs) - Anthropic's
+    # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands.
+    # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
         $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add anthropics/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
+        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 

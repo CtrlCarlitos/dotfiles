@@ -133,8 +133,8 @@ if command -v npx &>/dev/null; then
         record_cli_result failed 1
         echo "   agent-browser update failed - skipping"
     fi
-    # skill-creator (anthropics/skills, 380K installs) - skill-authoring lifecycle with benchmarks + eval viewer
-    if "${SK[@]}" add anthropics/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+    # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands
+    if "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
         record_cli_result installed 1
     else
         record_cli_result failed 1

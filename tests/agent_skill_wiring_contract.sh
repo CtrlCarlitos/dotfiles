@@ -717,4 +717,14 @@ if [[ "$failed" == true ]]; then
     exit 1
 fi
 
+# skill-creator comes from our drop-in fork (CtrlCarlitos/skills, Windows fixes,
+# docs/skills-install-strategy.md), never from anthropics/skills, in all four
+# consumers regardless of scope: the source is a wiring fact, not an OS one.
+for file in run_onchange_install_packages.sh.tmpl scripts/update_ai_tools.sh run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
+    require_contains "$file" 'CtrlCarlitos/skills -s skill-creator'
+    if grep -Fq -- 'anthropics/skills -s skill-creator' "$repo_root/$file"; then
+        fail "$file must install skill-creator from CtrlCarlitos/skills, not anthropics/skills"
+    fi
+done
+
 printf '%s\n' 'PASS: agent skill wiring contract'
