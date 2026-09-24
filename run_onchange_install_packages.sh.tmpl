@@ -740,7 +740,7 @@ install_linux_desktop() {
     # role. In Ubuntu's default apt repos, no extra setup needed.
     # Installed individually so one package that's unavailable on this release
     # doesn't take the whole `apt install` (and, under `set -e`, the run) down.
-    for pkg in meld flameshot vlc p7zip-full obs-studio qbittorrent ghostscript geany; do
+    for pkg in {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "dev_desktop" "catalog" .catalog.packages) }}; do
         $SUDO apt install -y "$pkg" || warn "Skipping '$pkg' (not installable on this release)."
     done
 
@@ -831,7 +831,8 @@ install_apt() {
 
 {{- if $core }}
     info "Installing core packages..."
-    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd socat ssh-agent-filter
+    # Names come from .chezmoidata/packages.yaml (see #83).
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }}
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
@@ -1753,7 +1754,8 @@ install_brew() {
     # needs to guard the download-heavy steps further down (modern tools, the
     # agent toolkit, ScreenRec's dmg, Antigravity 2.0's dmg) - macOS has no
     # `timeout` in the base OS.
-    brew install coreutils gcc git curl wget jq fzf zsh tmux neovim ripgrep htop tree node@24 python3 cmake ffmpeg sevenzip gh
+    # Names come from .chezmoidata/packages.yaml (see #83).
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
     brew link --overwrite node@24 || true
 {{- else }}
     info "Core packages disabled in config"
@@ -1761,18 +1763,17 @@ install_brew() {
 
 {{- if $modern_cli }}
     # Modern CLI tools
-    brew install bat eza fd git-delta zoxide starship direnv lazygit gum tealdeer dust duf procs || true
-    brew install shellcheck shfmt || warn "shellcheck/shfmt install failed - continuing"
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "modern_cli" "catalog" .catalog.packages) }} || warn "modern_cli brew install failed - continuing"
 {{- end }}
 
 {{- if $fonts }}
     # Fonts - MesloLGS NF is a great Nerd Font for Starship
-    brew install --cask font-meslo-lg-nerd-font || true
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "fonts" "catalog" .catalog.packages) }} || true
 {{- end }}
 
 {{- if $remote_access }}
-    brew install --cask tailscale-app || warn "tailscale-app install failed - continuing"
-    brew install cloudflared || warn "cloudflared install failed - continuing"
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access cask install failed - continuing"
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access brew install failed - continuing"
 {{- end }}
 
 {{- if $remote_access_server }}
@@ -2119,7 +2120,7 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    for cask in google-chrome visual-studio-code ghostty obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
+    for cask in {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "dev_desktop" "catalog" .catalog.packages) }}; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
 

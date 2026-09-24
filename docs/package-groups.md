@@ -135,3 +135,17 @@ skipping") and moves on. Antigravity 2.0 does ship Linux builds, so
 plugins, curated skills, guardrail planes) targets CLIs — that's where the
 plugin/hook surfaces live. The desktop apps have none of that to wire;
 they're just apps, so they're pure installs.
+
+## Where the package names live
+
+Every package-manager name is in one file: `.chezmoidata/packages.yaml`, one
+record per tool with its `apt`, `brew`, `cask` and `choco` spellings (`fd` is
+`fd-find` on apt; 7-Zip is `p7zip-full` / `sevenzip` / `7zip.install`). Both
+installers render their manager's lists from it, and
+`scripts/migrate-to-choco.ps1` reads the same records at runtime — so adding,
+renaming or dropping a package is one edit, and `tests/package_catalog_contract.sh`
+fails if a name reappears anywhere else.
+
+Tools that need more than a plain install (a repository, a signing key, a
+`.deb` download) stay as procedures in the installers; their catalog record
+says so in its `note` and carries no name for that manager.

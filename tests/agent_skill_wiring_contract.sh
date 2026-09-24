@@ -123,6 +123,7 @@ verify_unix_supported_target_counts() {
     # The scratch source needs the repo's data (guardrail.version, vscode, ...):
     # without it the installer template fails on `.guardrail.version`.
     cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
+    cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$tmp/repo/"   # catalog + fragments the installers include
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
         < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
@@ -184,6 +185,7 @@ verify_unix_skill_lifecycle() {
     config="$tmp/chezmoi.toml"
     : > "$config"
     cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
+    cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$tmp/repo/"   # catalog + fragments the installers include
     rendered="$tmp/installer.sh"
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
@@ -521,6 +523,7 @@ verify_windows_summary_fallbacks() {
     config="$render_dir/chezmoi.toml"
     rendered="$render_dir/installer.ps1"
     cp "$repo_root/.chezmoidata.yaml" "$render_dir/"   # sourceDir stays the scratch dir (catalog-unavailable mode) but data must resolve
+    cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$render_dir/"   # catalog + fragments the installers include
     : > "$config"
     chezmoi execute-template --config "$config" --source "$render_dir" \
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \

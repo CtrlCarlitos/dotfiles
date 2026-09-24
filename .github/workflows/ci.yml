@@ -77,6 +77,9 @@ jobs:
       - name: Test choco probe resilience contract
         run: bash tests/choco_probe_contract.sh
 
+      - name: Test package catalog (one source for every package name)
+        run: bash tests/package_catalog_contract.sh
+
       - name: Test installer hygiene contract
         run: bash tests/installer_hygiene_contract.sh
 

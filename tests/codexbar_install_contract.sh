@@ -10,7 +10,9 @@ require() {
     }
 }
 
-require run_onchange_install_packages.sh.tmpl 'codexbar'
+# The macOS cask list renders from the package catalog (#83); codexbar must be
+# a dev_desktop cask there.
+require .chezmoidata/packages.yaml 'cask: codexbar'
 require run_onchange_install_packages.ps1.tmpl 'Finesssee.Win-CodexBar'
 require docs/tool-parity.md 'Win-CodexBar'
 require docs/tool-parity.md 'manual Linux opt-in'
