@@ -53,9 +53,12 @@ grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
 
 # 5. Guardrail installation (binary, Defender exclusion #132/#146, PATH,
 #    plane wiring) lives in the agent-guardrails installer: this file only
-#    runs the pinned install.ps1 and never touches Defender.
+#    runs the pinned install.ps1 and never touches Defender. The bare literal
+#    'install.ps1' also matches the Chocolatey bootstrap URL
+#    (community.chocolatey.org/install.ps1), so assert the function name
+#    instead - a real signal that the guardrail caller is wired up.
 forbid "$ps1_installer" 'Add-MpPreference'
-require "$ps1_installer" 'install.ps1'
+require "$ps1_installer" 'Invoke-GuardrailInstaller'
 
 grep -Fq -- 'bash tests/installer_hygiene_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: installer hygiene contract is not a PR CI check\n' >&2

@@ -1738,10 +1738,16 @@ function Invoke-GuardrailInstaller {
     # Anchor like the sh twin's `grep " install.sh$"`: file name at end of
     # line, so a longer name can't shadow it; \s*$ also tolerates a trailing
     # CR. No line (partial download) leaves $want empty and fail-closes.
-    $m = Select-String -Path "$guardrailTmp\SHA256SUMS" -Pattern " install\.ps1\s*$" | Select-Object -First 1
+    # try/catch: under the script's EAP=Stop, a Select-String/Get-FileHash
+    # failure (unreadable file, bad path) would otherwise become terminating
+    # instead of the CHECKSUM MISMATCH warning-not-fatal contract below.
     $want = ""
-    if ($m) { $want = ($m.Line.Trim() -split '\s+')[0] }
-    $got = (Get-FileHash -Algorithm SHA256 "$guardrailTmp\install.ps1").Hash
+    $got = ""
+    try {
+        $m = Select-String -Path "$guardrailTmp\SHA256SUMS" -Pattern " install\.ps1\s*$" | Select-Object -First 1
+        if ($m) { $want = ($m.Line.Trim() -split '\s+')[0] }
+        $got = (Get-FileHash -Algorithm SHA256 "$guardrailTmp\install.ps1").Hash
+    } catch {}
     if (-not $want -or ($got.ToLower() -ne $want.ToLower())) {
         Write-Host "  Warning: guardrail installer CHECKSUM MISMATCH - not running it" -ForegroundColor Red
         Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -1760,7 +1766,11 @@ function Invoke-GuardrailInstaller {
         & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State
         $code = $LASTEXITCODE
     } catch {
-        Write-Host "  Warning: guardrail installer could not run - $_" -ForegroundColor Red
+        # The native launch itself never started (e.g. powershell.exe not
+        # found) - distinct from a non-zero exit below, so throw a message
+        # that says so instead of the misleading generic "exited with code 1".
+        Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+        throw "guardrail installer could not be started: $_"
     }
     Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
     # Non-zero (denied/expired/timeout approval, failed install) fails this
