@@ -180,6 +180,9 @@ jobs:
       - name: Test VS Code settings single-source (no twin duplication)
         run: bash tests/vscode_settings_source_contract.sh
 
+      - name: Test CI fixtures (one source for every job's chezmoi.toml)
+        run: bash tests/ci_fixture_contract.sh
+
       # Last, because it runs the whole suite again to account for every test.
       # The individual steps above stay for per-test visibility in the UI; this
       # one answers a question they cannot: did any of them decline to run?
@@ -235,38 +238,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: bash tests/remote_access_package_ownership.sh
 
-      - name: Create test config
-        run: |
-          # Create minimal config to avoid prompts and provide all required data
-          mkdir -p ~/.config/chezmoi
-          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
-          [data]
-
-          [[data.accounts]]
-            name = "CI User"
-            email = "ci@test.local"
-            key = ""
-            organizations = []
-            dirs = []
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          EOF
+      - name: Create test config from fixtures (single account, packages off)
+        run: bash tests/fixtures/chezmoi/compose.sh single off --out ~/.config/chezmoi/chezmoi.toml
 
       - name: Test chezmoi apply (dry-run)
         run: ~/.local/bin/chezmoi apply --dry-run --verbose --source="${GITHUB_WORKSPACE}"
@@ -294,39 +267,12 @@ jobs:
         run: |
           & "$env:USERPROFILE\.local\bin\chezmoi.exe" --version
 
-      - name: Create test config
-        run: |
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
-          @"
-          [data]
-
-          [[data.accounts]]
-            name = "CI User"
-            email = "ci@test.local"
-            username = "ciuser"
-            provider = "github"
-            key = ""
-            organizations = ["ci-org"]
-            dirs = ["scripts"]
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
+      - name: Create test config from fixtures (single account, packages off)
+        # bash on purpose: one composer for every runner. chezmoi.exe reads the
+        # config under USERPROFILE, so the path is built from that rather than
+        # from bash's own HOME, which a runner may point elsewhere.
+        shell: bash
+        run: bash tests/fixtures/chezmoi/compose.sh single off --out "$(cygpath -u "$USERPROFILE")/.config/chezmoi/chezmoi.toml"
 
       - name: Verify PowerShell script syntax
         run: |
@@ -432,48 +378,8 @@ jobs:
           CHEZMOI_VERSION=$(cat .chezmoi-version)
           sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin -t "${CHEZMOI_VERSION}"
 
-      - name: Create multi-account test config
-        run: |
-          mkdir -p ~/.config/chezmoi
-          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
-          [data]
-
-          [[data.accounts]]
-            name = "Personal Account"
-            email = "personal@example.com"
-            username = "myuser"
-            provider = "github"
-            key = "id_personal"
-            organizations = ["myuser"]
-            dirs = ["projects/personal", ".dotfiles"]
-
-          [[data.accounts]]
-            name = "Work Account"
-            email = "work@company.com"
-            username = "work" # Gets github-work alias
-            provider = "github"
-            key = "id_work"
-            organizations = ["mycompany"]
-            dirs = ["projects/work"]
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          EOF
+      - name: Create test config from fixtures (multi account, packages off)
+        run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
 
       - name: Run chezmoi apply
         run: |
@@ -504,48 +410,8 @@ jobs:
           sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Create multi-account test config
-        run: |
-          mkdir -p ~/.config/chezmoi
-          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
-          [data]
-
-          [[data.accounts]]
-            name = "Alice Personal"
-            email = "alice@personal.com"
-            username = "alice"
-            provider = "github"
-            key = "id_alice"
-            organizations = ["alice"]
-            dirs = ["projects/alice", ".dotfiles"]
-
-          [[data.accounts]]
-            name = "Bob Work"
-            email = "bob@work.com"
-            username = "bob"
-            provider = "github"
-            key = "id_bob"
-            organizations = ["bobcorp"]
-            dirs = ["projects/bobcorp"]
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          EOF
+      - name: Create test config from fixtures (multi account, packages off)
+        run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
 
       - name: Run chezmoi apply
         run: ~/.local/bin/chezmoi apply --source="${GITHUB_WORKSPACE}"
@@ -623,35 +489,8 @@ jobs:
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
 
-      - name: Create minimal config (missing optional fields)
-        run: |
-          mkdir -p ~/.config/chezmoi
-          cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
-          [data]
-
-          # Minimal account - only required fields, no detailed identity
-          [[data.accounts]]
-            name = "Minimal User"
-            email = "minimal@example.com"
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          EOF
+      - name: Create test config from fixtures (minimal account, packages off)
+        run: bash tests/fixtures/chezmoi/compose.sh minimal off --out ~/.config/chezmoi/chezmoi.toml
 
       - name: Run install.sh (Universal Installer)
         run: |
@@ -687,36 +526,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Create minimal config (disable desktop apps)
-        run: |
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\chezmoi" | Out-Null
-          @"
-          sourceDir = '$env:GITHUB_WORKSPACE'
-
-          [data]
-
-          [[data.accounts]]
-            name = "CI Windows"
-            email = "ci@windows.local"
-
-          [data.packages]
-            core = false
-            modern_cli = false
-            fonts = false
-            agent_toolkit = false
-            opencode_cli = false
-            opencode_desktop = false
-            claude_cli = false
-            claude_desktop = false
-            chatgpt_cli = false
-            chatgpt_desktop = false
-            antigravity_cli = false
-            antigravity_desktop = false
-            dev_desktop = false
-            remote_access = false
-            remote_access_server = false
-            guardrail = false
-          "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
+      - name: Create test config from fixtures (minimal account, packages off)
+        # bash on purpose: one composer for every runner. chezmoi.exe reads the
+        # config under USERPROFILE, so the path is built from that rather than
+        # from bash's own HOME, which a runner may point elsewhere.
+        shell: bash
+        run: bash tests/fixtures/chezmoi/compose.sh minimal off --source-dir "$GITHUB_WORKSPACE" --out "$(cygpath -u "$USERPROFILE")/.config/chezmoi/chezmoi.toml"
 
       - name: Run install.ps1
         shell: powershell

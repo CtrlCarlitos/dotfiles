@@ -199,6 +199,10 @@ Ubuntu and macOS — making a straightforward bug look platform-specific.
 **Obey it.** When you touch one twin, grep the other for the same concept before
 you commit. Reducing this duplication is tracked in issue #83.
 
+The CI fixtures no longer have twins to keep in step: every job composes its
+`chezmoi.toml` from `tests/fixtures/chezmoi/`, and `tests/ci_fixture_contract.sh`
+fails if a workflow carries an inline one.
+
 ---
 
 ## Checking yourself

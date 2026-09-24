@@ -1,0 +1,12 @@
+# One identity with every optional key present. This is the canonical
+# "fully described account"; username and provider are here ON PURPOSE -
+# their absence from the old Unix fixture (and presence in the Windows one)
+# is what made a plain template bug look platform-specific.
+[[data.accounts]]
+  name = "CI User"
+  email = "ci@test.local"
+  username = "ciuser"
+  provider = "github"
+  key = ""
+  organizations = ["ci-org"]
+  dirs = ["scripts"]
