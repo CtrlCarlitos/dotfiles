@@ -237,10 +237,10 @@ install_node() {
 install_agent_skills() {
     if ! command -v npx &>/dev/null; then
         warn "npx not found - skipping curated agent skills"
-        info "Curated skills: Claude Code installed=0 skipped=18 failed=0"
-        info "Curated skills: OpenCode installed=0 skipped=18 failed=0"
-        info "Curated skills: Antigravity installed=0 skipped=18 failed=0"
-        info "Curated skills: Codex installed=0 skipped=18 failed=0"
+        info "Curated skills: Claude Code installed=0 skipped=19 failed=0"
+        info "Curated skills: OpenCode installed=0 skipped=19 failed=0"
+        info "Curated skills: Antigravity installed=0 skipped=19 failed=0"
+        info "Curated skills: Codex installed=0 skipped=19 failed=0"
         return
     fi
     local catalog
@@ -391,6 +391,21 @@ install_agent_skills() {
     else
         record_cli_result failed 2
         warn "taste skills install failed or timed out - continuing"
+    fi
+
+    # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
+    # Probes once per session which tools can see the code (graft graph built
+    # and covering the language, serena LSP, rg, grep), routes each question
+    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
+    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
+    # task" block cost every session in this repo two empty queries (the graph
+    # covers one Lua file here) - docs/skills-install-strategy.md.
+    info "Installing code-search skill..."
+    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        warn "code-search skill install failed or timed out - continuing"
     fi
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
