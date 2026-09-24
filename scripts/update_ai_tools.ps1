@@ -237,10 +237,10 @@ if ($guardrailEnabled) {
     $guardrailState = "disabled"
 }
 $guardrailVersion = ""
-if ($guardrailEnabled) {
+if ($guardrailState) {
     try { $guardrailVersion = (chezmoi execute-template '{{ .guardrail.version }}' | Out-String).Trim() } catch {}
 }
-if ($guardrailEnabled -and -not $guardrailVersion) {
+if ($guardrailState -and -not $guardrailVersion) {
     Write-Host "  Warning: guardrail pin unavailable from chezmoi data - skipping guardrail steps" -ForegroundColor Red
 } elseif (-not $guardrailState) {
     Write-Host "  guardrail disabled in config - nothing to do"
