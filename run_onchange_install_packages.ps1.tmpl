@@ -1042,16 +1042,31 @@ if (Test-Path $agyGlobalMcp) {
             }
         }
         if ($gChanged) {
+            # Never delete: guardrail's antigravity coverage check (the
+            # `guardrail setup` gate) fails hard on an absent or 0-byte file
+            # (agent-guardrails#334); an empty mcpServers object reads as "none".
+            [System.IO.File]::WriteAllText($agyGlobalMcp, ($gJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
             if (@($msProp.Value.PSObject.Properties).Count -eq 0) {
-                Remove-Item $agyGlobalMcp -Force
-                Write-Host "  Removed old agy global mcp_config.json (empty after retiring serena/graft)" -ForegroundColor Green
+                Write-Host "  Retired serena/graft from agy global mcp_config.json (left an empty mcpServers for guardrail's coverage gate)" -ForegroundColor Green
             } else {
-                [System.IO.File]::WriteAllText($agyGlobalMcp, ($gJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
                 Write-Host "  Retired serena/graft from agy global mcp_config.json (other servers kept)" -ForegroundColor Green
             }
         }
     } catch {
         Write-Host "  Warning: agy global mcp_config.json retirement failed - $_" -ForegroundColor Red
+    }
+}
+# Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
+# object: something on Windows leaves a 0-byte file behind (seen 2026-09-24),
+# and guardrail's coverage gate cannot read either state (agent-guardrails#334).
+# A non-empty file is never touched here, parsable or not.
+if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $agyGlobalMcp) | Out-Null
+        [System.IO.File]::WriteAllText($agyGlobalMcp, ('{' + [Environment]::NewLine + '  "mcpServers": {}' + [Environment]::NewLine + '}' + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)" -ForegroundColor Green
+    } catch {
+        Write-Host "  Warning: could not repair agy global mcp_config.json - $_" -ForegroundColor Red
     }
 }
 
