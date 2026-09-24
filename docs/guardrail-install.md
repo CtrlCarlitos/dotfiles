@@ -80,42 +80,38 @@ already adds it.
 
 ## First install on a machine with no enrolled operator
 
-The dotfiles don't pass `--no-setup`. On a machine where no operator has
-enrolled yet, the installer places and verifies the binary, then
-`guardrail setup` fails its approval, so the apply fails. Enroll once, then
-finish the setup:
+Since `v0.23.2-dev` (agent-guardrails #326, ADR-0030) a first install arms
+the machine on its own. With no operator authenticator enrolled there is
+nothing to approve against, so `guardrail setup` registers the hooks and the
+permissions floor without an approval and without a terminal, runs the
+coverage gate and `selftest`, writes one `operator-action` audit record with
+`transport: bootstrap`, and ends with the one-time instruction to enroll.
+`chezmoi apply` therefore completes unattended on a fresh machine; `doctor`
+reports `planes armed by bootstrap` until you enroll:
 
 ```sh
 guardrail operator enroll     # prints a localhost URL; open it and complete the passkey prompt
-guardrail setup               # registers every detected host with one approval, then runs selftest
 ```
+
+The approval-less path can only tighten. `setup --state disabled`, `plane
+disable`, `recover`, grants and waivers still need a passkey: without one they
+stop before submitting, print `run 'guardrail operator enroll' ...`, and exit
+**3** (distinct from 1, denied or failed, and 2, usage or no terminal). The
+installers pass that code through, so on this machine `packages.guardrail =
+false` fails the apply until an operator is enrolled, which is the intended
+fail-closed direction.
 
 Restart the agents you wired. **For Codex, run `/hooks` inside Codex to review
 and trust the generated hooks**; the runtime doesn't execute registered hooks
-until you do. The next `chezmoi apply` runs the installer again. It finds the
-pin already installed and the hosts already registered, so it doesn't ask for
-approval.
+until you do.
 
-### What changes on an existing Windows machine
+### Pins older than v0.23.2-dev
 
-Before this change, the Windows installer wired the planes itself with
-`gen-config` and never asked for an approval. Now `install.ps1` hands off to
-`guardrail setup`, which needs three things on that Windows machine:
-
-- an operator enrolled on it,
-- a passkey approval,
-- a console stdin. From an agent's shell, setup exits 2.
-
-If any of them is missing, the installer exits non-zero and
-`run_onchange_install_packages.ps1.tmpl` throws. The throw skips the rest of
-the Windows installer for that run. The script didn't finish, so the next
-`chezmoi apply` runs it again, on every apply until setup succeeds. Run these
-once from a real terminal on that machine, not from an agent's shell:
-
-```powershell
-guardrail operator enroll     # prints a localhost URL; open it and complete the passkey prompt
-guardrail setup               # registers every detected host with one approval, then runs selftest
-```
+`v0.23.1-dev` had no bootstrap. On a machine with no enrolled operator its
+`guardrail setup` failed its approval with a misleading `approval daemon
+unavailable`, so the apply failed on every run until `guardrail operator
+enroll` then `guardrail setup` were run once from a real terminal (an agent's
+shell gets exit 2). Bump the pin instead of working around that.
 
 ## Bumping the version
 
