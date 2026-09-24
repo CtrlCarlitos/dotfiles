@@ -1,9 +1,10 @@
 # Every installable group on: the full-install-* jobs run the real installers.
 # Two stay off, each for a reason that is not "we forgot":
 #   remote_access_server - requires manual SSH server setup by design.
-#   guardrail            - `plane enable --all` needs an interactive WebAuthn
-#                          approval CI cannot complete (exit 2 on non-terminal
-#                          stdin fails the run by contract). Exercised on real
+#   guardrail            - the agent-guardrails installer runs `guardrail
+#                          setup`, which needs a terminal and a passkey
+#                          approval CI cannot give (exit 2 without a terminal
+#                          fails the run by contract). Exercised on real
 #                          machines instead.
 [data.packages]
   core = true

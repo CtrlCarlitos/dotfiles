@@ -17,6 +17,14 @@ ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
+require() { # $1 = file, $2 = literal
+    grep -Fq -- "$2" "$1" || fail "$1: missing $2"
+}
+
+forbid() { # $1 = file, $2 = literal
+    ! grep -Fq -- "$2" "$1" || fail "$1: must not contain $2"
+}
+
 # 1. Single-flight guard: named mutex, zero-wait, exit 1 when held.
 grep -Fq 'dotfiles-install' "$ps1_installer" ||
     fail "$ps1_installer: no single-flight mutex (concurrent dotups caused the 2026-09-20 incident)"
@@ -43,10 +51,14 @@ grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
 ! grep -Fq 'Upgrading graft' "$ps1_installer" ||
     fail "$ps1_installer: must not upgrade graft (dot upgrade owns it)"
 
-# 5. Defender exclusion scoping (agent-guardrails #146): exact installed
-#    binary FILE path only - never widened to a directory or process name.
-grep -Fq '#146' "$ps1_installer" ||
-    fail "$ps1_installer: Defender exclusion must document the file-path-only scoping rule (#146)"
+# 5. Guardrail installation (binary, Defender exclusion #132/#146, PATH,
+#    plane wiring) lives in the agent-guardrails installer: this file only
+#    runs the pinned install.ps1 and never touches Defender. The bare literal
+#    'install.ps1' also matches the Chocolatey bootstrap URL
+#    (community.chocolatey.org/install.ps1), so assert the function name
+#    instead - a real signal that the guardrail caller is wired up.
+forbid "$ps1_installer" 'Add-MpPreference'
+require "$ps1_installer" 'Invoke-GuardrailInstaller'
 
 grep -Fq -- 'bash tests/installer_hygiene_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
     printf 'FAIL: ci.yml: installer hygiene contract is not a PR CI check\n' >&2

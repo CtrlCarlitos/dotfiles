@@ -70,8 +70,8 @@ if (-not $__dotupMutex.WaitOne(0)) {
 }
 
 # Cross-generation PSModulePath guard (see run_onchange_generate_identities.
-# ps1.tmpl for the full story): this script's Get-FileHash/Unblock-File live
-# in Microsoft.PowerShell.Utility, the same broken-autoload class as
+# ps1.tmpl for the full story): this script's Get-FileHash lives in
+# Microsoft.PowerShell.Utility, the same broken-autoload class as
 # Security's Set-Acl when 5.1 inherits pwsh 7's module path. Strip the Core
 # module dirs under 5.1 so in-box modules resolve.
 if ($PSVersionTable.PSVersion.Major -le 5) {
@@ -79,10 +79,6 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
         Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
     Import-Module Microsoft.PowerShell.Security, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
 }
-# Set by the guardrail section when the Defender exclusion cannot be added
-# (non-admin / missing Defender); read by the post-install notes at the end.
-$defenderExclusionFailed = $false
-
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with
@@ -1172,8 +1168,8 @@ if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'li
 }
 # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
 # split out of agent_toolkit per the spec's placement rule). choco install +
-# superpowers-for-OpenCode wiring; guardrail's opencode plane stays
-# presence-gated in the guardrail section, and the Serena MCP registration
+# superpowers-for-OpenCode wiring; guardrail's opencode plane wiring is
+# done by the agent-guardrails installer, and the Serena MCP registration
 # into opencode.json stays with Serena in agent_toolkit.
 
 # OpenCode (choco). NOT npm: opencode-ai's npm package only fetches
@@ -1251,7 +1247,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 
         # Both writes below must be BOM-less UTF-8: PS 5.1's
         # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
-        # gen-config (Go) refuses to merge into BOM'd JSON - confirmed live:
+        # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
         # "invalid character 'ï' looking for beginning of value" failed
         # every Windows CI run's opencode wiring while the BOM-less Linux
         # side merged fine. Same WriteAllLines idiom as the mp-code-review
@@ -1362,9 +1358,9 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 
 {{- if $chatgpt_cli }}
 # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-# superpowers/skills/guardrail have no codex surface (the skills and
-# guardrail passes stay presence-gated on their own CLIs; only this npm
-# install lives here).
+# superpowers/skills have no codex surface (the skills pass stays
+# presence-gated on its own CLIs; guardrail's plane wiring is done by the
+# agent-guardrails installer; only this npm install lives here).
 Install-Node
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
@@ -1628,236 +1624,106 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
-{{- if $guardrail }}
-# agent-guardrails hook-enforcement binary (guardrail.exe): pinned release
-# download, checksum-verified, then wired into each present plane by
-# `guardrail gen-config <plane> --merge`. Opt-in gate is packages.guardrail
-# (false = never download, do nothing - Windows has no plane lifecycle this
-# release, so there is no disable step here). The sh installer drives
-# `guardrail plane enable|disable --all` instead on Unix; plane commands exit
-# 2 on Windows and self-update can't rename a running exe, so this block
-# stays curl+merge. Keep $guardrailVersion in sync with
-# scripts/update_ai_tools.ps1.
-# Pin rendered from .chezmoidata.yaml guardrail.version (single source of
-# truth - same key the sh template and the manual updaters use).
+# guardrail-section: begin
+# agent-guardrails: installation lives in agent-guardrails (its install.ps1,
+# ADR-0029 there) - binary download + checksum, Mark-of-the-Web unblock,
+# user-PATH persistence, the Defender exclusion for guardrail.exe
+# (#132/#146; when not elevated it prints the exact exclusion command
+# itself), self-update of an older binary, and `guardrail setup` (plane
+# wiring, coverage). This section only fetches the pinned release's
+# install.ps1 + SHA256SUMS, verifies the installer against SHA256SUMS, and
+# runs it FROM THE TEMP FILE with -File (never piped into the session):
+#   packages.guardrail true  -> install.ps1 -Version <pin> -State enabled
+#   packages.guardrail false -> install.ps1 -Version <pin> -State disabled,
+#                               only when guardrail.exe is already installed
+#                               (never a download just to disable; nothing
+#                               is removed).
+# Windows twin of install_agent_guardrails in the sh installer. Pin rendered
+# from .chezmoidata.yaml guardrail.version (single source of truth - same key
+# the sh template and the manual updaters use).
 $guardrailVersion = "{{ .guardrail.version }}"
 $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
-$guardrailDir     = "$env:USERPROFILE\.local\bin"
-$guardrailExe     = "$guardrailDir\guardrail.exe"
-$guardrailTmp     = "$env:TEMP\guardrail-dl"
-$guardrailBase    = "https://github.com/$guardrailRepo/releases/download/$guardrailVersion"
-
-$haveVer = ""
-if (Test-Path $guardrailExe) {
-    # try/catch, not a bare `2>$null`: under $ErrorActionPreference=Stop a
-    # native command's stderr becomes a terminating error that the redirect
-    # can't prevent (see the PS 5.1 note above Invoke-Quietly) - same shape
-    # as the opencode --version validity check in the AI-tools section.
-    try { $haveVer = (guardrail version 2>&1 | Out-String).Trim() } catch { $haveVer = "" }
-}
-if ($haveVer -eq "guardrail $guardrailVersion") {
-    Write-Host "  guardrail $guardrailVersion already installed" -ForegroundColor Green
-} else {
-    Write-Host "  Installing guardrail $guardrailVersion..." -ForegroundColor Yellow
-    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
-    $asset = "guardrail_windows_$arch.exe"
-    Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+$guardrailExe     = "$env:USERPROFILE\.local\bin\guardrail.exe"
+function Invoke-GuardrailInstaller {
+    param([Parameter(Mandatory)][string]$State)
+    # Unique per run (like agent-guardrails' own install.ps1), so a stale or
+    # concurrent run's files can never be picked up; every path below removes it.
+    $guardrailTmp = Join-Path $env:TEMP ("guardrail-installer-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $guardrailTmp | Out-Null
     # Handoff to the job via $env: - jobs inherit environment variables but
-    # NOT session variables (see the NOTE on the skills scriptblocks below),
+    # NOT session variables (see the NOTE on the skills scriptblocks above),
     # so this keeps one source of truth for repo/version without $using:.
-    $env:GUARDRAIL_BASE  = $guardrailBase
-    $env:GUARDRAIL_ASSET = $asset
-    $env:GUARDRAIL_TMP   = $guardrailTmp
-    Invoke-WithTimeout -Description "guardrail download" -Seconds 180 -Action {
-        New-Item -ItemType Directory -Force -Path "$env:GUARDRAIL_TMP" | Out-Null
-        Invoke-WebRequest -Uri "$env:GUARDRAIL_BASE/$env:GUARDRAIL_ASSET" -OutFile "$env:GUARDRAIL_TMP\$env:GUARDRAIL_ASSET" -UseBasicParsing
+    $env:GUARDRAIL_BASE = "https://github.com/$guardrailRepo/releases/download/$guardrailVersion"
+    $env:GUARDRAIL_TMP  = $guardrailTmp
+    Invoke-WithTimeout -Description "guardrail installer download" -Seconds 60 -Action {
+        # TLS 1.2 first, inside the job: it is a fresh process, so a
+        # SecurityProtocol set in this session would not reach it, and PS 5.1
+        # defaults can still refuse GitHub's TLS.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri "$env:GUARDRAIL_BASE/install.ps1" -OutFile "$env:GUARDRAIL_TMP\install.ps1" -UseBasicParsing
         Invoke-WebRequest -Uri "$env:GUARDRAIL_BASE/SHA256SUMS" -OutFile "$env:GUARDRAIL_TMP\SHA256SUMS" -UseBasicParsing
     }
     # Download job done - reclaim the handoff vars so they can't leak into
-    # later installer sections or any child process it spawns.
-    Remove-Item Env:\GUARDRAIL_BASE, Env:\GUARDRAIL_ASSET, Env:\GUARDRAIL_TMP -ErrorAction SilentlyContinue
-    if (-not (Test-Path "$guardrailTmp\$asset") -or -not (Test-Path "$guardrailTmp\SHA256SUMS")) {
-        Write-Host "  Warning: guardrail download failed - skipping (won't install unverified)" -ForegroundColor Red
-    } else {
-        # try/catch = the repo's warning-not-fatal contract: with no catch, ANY
-        # throw here (Select-String, Get-FileHash, Copy-Item on a locked exe)
-        # terminates under EAP=Stop and kills the rest of the installer.
-        try {
-            # Anchor like the sh installer's `grep " ${asset}\$"`: asset name at
-            # end-of-line, so a longer name can't shadow this one; \s*$ also
-            # tolerates a trailing CR. The $m guard: Select-String coming back
-            # empty (SHA256SUMS present but no asset line - e.g. partial
-            # download) yields "" and fail-closes below instead of crashing.
-            $m = Select-String -Path "$guardrailTmp\SHA256SUMS" -Pattern (" " + [regex]::Escape($asset) + "\s*$")
-            $want = if ($m) { $m.Line.Split(" ")[0].Trim() } else { "" }
-            $got  = (Get-FileHash -Algorithm SHA256 "$guardrailTmp\$asset").Hash.ToLower()
-            if ($want -and ($got -eq $want.ToLower())) {
-                # User-PATH persistence per Install-Gum (session PATH is refreshed elsewhere in this script)
-                New-Item -ItemType Directory -Force -Path $guardrailDir | Out-Null
-                Copy-Item "$guardrailTmp\$asset" $guardrailExe -Force
-                Unblock-File $guardrailExe
-                $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
-                if ($userPath -notlike "*$guardrailDir*") {
-                    [System.Environment]::SetEnvironmentVariable("Path", "$userPath;$guardrailDir", "User")
-                }
-                Write-Host "  guardrail $guardrailVersion installed to $guardrailExe" -ForegroundColor Green
-            } else {
-                Write-Host "  Warning: guardrail CHECKSUM MISMATCH for $asset - not installing" -ForegroundColor Red
-            }
-        } catch {
-            Write-Host "  Warning: guardrail install failed - $_" -ForegroundColor Red
-        }
+    # later installer sections or the installer's own child processes.
+    Remove-Item Env:\GUARDRAIL_BASE, Env:\GUARDRAIL_TMP -ErrorAction SilentlyContinue
+    if (-not (Test-Path "$guardrailTmp\install.ps1") -or -not (Test-Path "$guardrailTmp\SHA256SUMS")) {
+        Write-Host "  Warning: guardrail installer download failed - skipping" -ForegroundColor Red
+        Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+        return
     }
-    # Reclaim the temp dir on every path: installed, mismatched, or failed.
+    # Anchor like the sh twin's `grep " install.sh$"`: file name at end of
+    # line, so a longer name can't shadow it; \s*$ also tolerates a trailing
+    # CR. No line (partial download) leaves $want empty and fail-closes.
+    # try/catch: under the script's EAP=Stop, a Select-String/Get-FileHash
+    # failure (unreadable file, bad path) would otherwise become terminating
+    # instead of the CHECKSUM MISMATCH warning-not-fatal contract below.
+    $want = ""
+    $got = ""
+    try {
+        $m = Select-String -Path "$guardrailTmp\SHA256SUMS" -Pattern " install\.ps1\s*$" | Select-Object -First 1
+        if ($m) { $want = ($m.Line.Trim() -split '\s+')[0] }
+        $got = (Get-FileHash -Algorithm SHA256 "$guardrailTmp\install.ps1").Hash
+    } catch {}
+    if (-not $want -or ($got.ToLower() -ne $want.ToLower())) {
+        Write-Host "  Warning: guardrail installer CHECKSUM MISMATCH - not running it" -ForegroundColor Red
+        Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+        return
+    }
+    Write-Host "  Running agent-guardrails installer $guardrailVersion (-State $State); approval URL prints here if WebAuthn is required..." -ForegroundColor Yellow
+    # In-session, NOT Invoke-WithTimeout: `guardrail setup` prints a WebAuthn
+    # approval URL and blocks until the operator responds, so the console
+    # must stay attached and the output must stream - never capture or
+    # silence it. Function-local EAP=Continue + try/catch: under the script's
+    # EAP=Stop, PS 5.1 turns any native stderr line into a terminating error
+    # (see the note above Invoke-Quietly); the exit code is the real signal.
+    $ErrorActionPreference = 'Continue'
+    $code = 1
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State
+        $code = $LASTEXITCODE
+    } catch {
+        # The native launch itself never started (e.g. powershell.exe not
+        # found) - distinct from a non-zero exit below, so throw a message
+        # that says so instead of the misleading generic "exited with code 1".
+        Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+        throw "guardrail installer could not be started: $_"
+    }
     Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+    # Non-zero (denied/expired/timeout approval, failed install) fails this
+    # script so chezmoi surfaces it and re-runs next apply - the sh twin's
+    # set -e contract. The installer's own output already says why.
+    if ($code -ne 0) { throw "guardrail installer exited with code $code" }
 }
-$guardrailReady = $false
+{{- if $guardrail }}
+Invoke-GuardrailInstaller -State enabled
+{{- else }}
 if (Test-Path $guardrailExe) {
-    try { $guardrailReady = ((& $guardrailExe version 2>&1 | Out-String).Trim() -eq "guardrail $guardrailVersion") } catch {}
-}
-if (-not $guardrailReady) {
-    Write-Host "  Warning: installed guardrail did not report guardrail $guardrailVersion - skipping configuration" -ForegroundColor Red
+    Invoke-GuardrailInstaller -State disabled
 } else {
-    Write-Host "  guardrail version verified: guardrail $guardrailVersion" -ForegroundColor Green
-}
-
-# Exclude guardrail.exe from Defender real-time scanning: the opencode plugin
-# spawns it for EVERY tool call, and Defender's per-spawn scan adds enough
-# latency to hit the plugin's spawnSync timeout (agent-guardrails #132,
-# confirmed live 2026-09-20 - dozens of ETIMEDOUT fail-closes in one session).
-# Idempotent; non-admin degrades to the post-install note.
-# SCOPING RULE (agent-guardrails #146): the exclusion is the exact installed
-# binary FILE path ONLY. Never widen it - not the directory (would exclude
-# everything else dropped in ~/.local/bin), not a process name (would exclude
-# any file named guardrail.exe). A path exclusion survives guardrail's
-# in-place self-update overwrites, which is the seam #146 addresses.
-if ($guardrailExe -and (Test-Path $guardrailExe)) {
-    try {
-        $existingExclusion = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath -ErrorAction SilentlyContinue | Where-Object { $_ -eq $guardrailExe }
-        if (-not $existingExclusion) {
-            Add-MpPreference -ExclusionPath $guardrailExe
-            Write-Host "  Defender exclusion added for guardrail.exe (prevents per-spawn scan latency)" -ForegroundColor Green
-        }
-    } catch {
-        $defenderExclusionFailed = $true
-        Write-Host "  Warning: could not add Defender exclusion for guardrail.exe (requires admin)" -ForegroundColor Red
-        Write-Host "    Add-MpPreference -ExclusionPath `"$guardrailExe`"" -ForegroundColor Yellow
-    }
-}
-
-# Wire into Claude Code (no-op-safe if claude is absent or already wired).
-# ORDERING INVARIANT (agent-guardrails #145/#146 pairing): binary
-# install + version verification ALWAYS precede these gen-config calls, so
-# the deployed plugin is baked from the matching installed version - never
-# reorder gen-config ahead of the install/verify blocks above.
-# Always re-runs gen-config: its owned-entry merge is safe to repeat (same
-# contract as the sh installer). Invoke-WithTimeout, NOT Invoke-Quietly:
-# gen-config prints its SUCCESS message to stderr, and in-session under
-# $ErrorActionPreference=Stop that's the native-stderr terminating-error trap
-# (see above Invoke-Quietly) - Invoke-Quietly would warn "failed" on every
-# success. The job's default-EAP session can't be killed by it, the trailing
-# exit-code throw keeps real failures visible as job failures, and 2>$null
-# keeps the stderr SUCCESS line from reading like failure noise.
-if ($guardrailReady -and (Get-Command claude -ErrorAction SilentlyContinue)) {
-    Write-Host "  Configuring guardrail for Claude Code..." -ForegroundColor Yellow
-    $env:GUARDRAIL_EXE = $guardrailExe
-    Invoke-WithTimeout -Description "guardrail gen-config claude --merge" -Seconds 60 -Action {
-        # 2>&1-captured and printed only on failure: gen-config's SUCCESS
-        # message goes to stderr (why it can't stream raw), but swallowing it
-        # entirely also swallowed the REASON for every failure - the Windows
-        # opencode BOM bug below hid behind that silence for two full-install
-        # generations.
-        $gwOut = & "$env:GUARDRAIL_EXE" gen-config claude --merge "$env:USERPROFILE\.claude\settings.json" --binary "$env:GUARDRAIL_EXE" 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "    gen-config said: $($gwOut.Trim())"
-            throw "gen-config exited with code $LASTEXITCODE"
-        }
-    }
-    Remove-Item Env:\GUARDRAIL_EXE -ErrorAction SilentlyContinue
-}
-
-# Same wiring for OpenCode + Antigravity, one guarded block per plane so an
-# absent tool skips only its own gen-config. Same idiom as the Claude block
-# above: env-var handoff (jobs don't inherit session variables),
-# Invoke-WithTimeout around the stderr-printing gen-config, $LASTEXITCODE
-# throw as the real success signal, GUARDRAIL_* env cleanup after. The
-# mkdirs run in-session - New-Item failures are .NET exceptions, not native
-# stderr, so the EAP=Stop trap doesn't apply - and the target paths inside
-# the jobs are literal $env: reads, which jobs DO inherit.
-if ($guardrailReady -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
-    Write-Host "  Configuring guardrail for OpenCode..." -ForegroundColor Yellow
-    # --plugin-dir deploys the embedded hook adapter there; must exist first.
-    New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\share\guardrail" | Out-Null
-    $env:GUARDRAIL_EXE = $guardrailExe
-    Invoke-WithTimeout -Description "guardrail gen-config opencode --merge" -Seconds 60 -Action {
-        # Same capture-and-report-on-failure contract as the Claude block.
-        # The historical failure this pattern finally surfaces instead of
-        # swallowing: PS 5.1's Set-Content -Encoding utf8 wrote opencode.json
-        # with a BOM, Go's JSON parser rejects BOMs ("invalid character 'ï'"),
-        # and the opencode wiring silently failed every Windows run until the
-        # Superpowers block above switched to BOM-less writes.
-        $gwOut = & "$env:GUARDRAIL_EXE" gen-config opencode --merge "$env:USERPROFILE\.config\opencode\opencode.json" --binary "$env:GUARDRAIL_EXE" --plugin-dir "$env:USERPROFILE\.local\share\guardrail" 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "    gen-config said: $($gwOut.Trim())"
-            throw "gen-config exited with code $LASTEXITCODE"
-        }
-    }
-    Remove-Item Env:\GUARDRAIL_EXE -ErrorAction SilentlyContinue
-}
-
-# Codex: same declarative floor as the planes above (gen-config codex since
-# agent-guardrails PR #29 - the PS1 path predated codex becoming a plane).
-# ADR-0014 caveats carry over unchanged: hosted
-# tools and write_stdin bypass pre-hooks, and the /hooks trust step inside
-# Codex on first use is Codex's own security gate - deliberately NOT
-# automated here. CODEX_HOME honored: the engine checks both locations.
-if ($guardrailReady -and (Get-Command codex -ErrorAction SilentlyContinue)) {
-    Write-Host "  Configuring guardrail for Codex..." -ForegroundColor Yellow
-    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
-    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
-    $env:GUARDRAIL_EXE = $guardrailExe
-    $env:GUARDRAIL_CODEX_HOOKS = Join-Path $codexHome 'hooks.json'
-    Invoke-WithTimeout -Description "guardrail gen-config codex --merge" -Seconds 60 -Action {
-        # Same capture-and-report-on-failure contract as the Claude block.
-        $gwOut = & "$env:GUARDRAIL_EXE" gen-config codex --merge "$env:GUARDRAIL_CODEX_HOOKS" --binary "$env:GUARDRAIL_EXE" 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "    gen-config said: $($gwOut.Trim())"
-            throw "gen-config exited with code $LASTEXITCODE"
-        }
-    }
-    Remove-Item Env:\GUARDRAIL_EXE, Env:\GUARDRAIL_CODEX_HOOKS -ErrorAction SilentlyContinue
-    Write-Host "  Note: run /hooks inside Codex once to trust the generated hooks (Codex's own gate)" -ForegroundColor Yellow
-}
-
-# Antigravity: global hooks.json. No declarative floor exists for this plane
-# (see agent-guardrails ADR-0008) - the hook registration IS the entire
-# enforcement surface, so this is the only guardrail coverage it gets.
-if ($guardrailReady -and (Get-Command agy -ErrorAction SilentlyContinue)) {
-    Write-Host "  Configuring guardrail for Antigravity..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\config" | Out-Null
-    $env:GUARDRAIL_EXE = $guardrailExe
-    Invoke-WithTimeout -Description "guardrail gen-config antigravity --merge" -Seconds 60 -Action {
-        # Same capture-and-report-on-failure contract as the Claude block.
-        $gwOut = & "$env:GUARDRAIL_EXE" gen-config antigravity --merge "$env:USERPROFILE\.gemini\config\hooks.json" --binary "$env:GUARDRAIL_EXE" 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "    gen-config said: $($gwOut.Trim())"
-            throw "gen-config exited with code $LASTEXITCODE"
-        }
-    }
-    Remove-Item Env:\GUARDRAIL_EXE -ErrorAction SilentlyContinue
-}
-if ($guardrailReady) {
-    Write-Host "  Running guardrail doctor..." -ForegroundColor Yellow
-    try {
-        & $guardrailExe doctor
-        if ($LASTEXITCODE -ne 0) { throw "doctor exited with code $LASTEXITCODE" }
-    } catch {
-        Write-Host "  Warning: guardrail doctor reported a problem - continuing" -ForegroundColor Red
-    }
-    # Enrollment guidance is guardrail's own UX now: the approval flow names
-    # its fix when no authenticator is enrolled.
+    Write-Host "  guardrail disabled in config - nothing to do"
 }
 {{- end }}
+# guardrail-section: end
 
 # ScreenRec (Desktop App - Manual Install)
 # https://screenrec.com
@@ -2035,8 +1901,4 @@ Write-Host "  Login and any cloudflared service activation are manual. See docs/
 {{- if $remote_access_server }}
 Write-Host "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md." -ForegroundColor Yellow
 {{- end }}
-if ($defenderExclusionFailed) {
-    Write-Host "[Post-Install] Add the Defender exclusion for guardrail.exe to prevent tool-call timeouts" -ForegroundColor Yellow
-    Write-Host "  Add-MpPreference -ExclusionPath `"$env:USERPROFILE\.local\bin\guardrail.exe`"" -ForegroundColor Cyan
-}
 {{ end -}}

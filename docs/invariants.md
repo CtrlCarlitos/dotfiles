@@ -218,6 +218,25 @@ and `linux` for the `.sh`), so each is value-checked everywhere.
 
 ---
 
+## 11. guardrail install logic lives in agent-guardrails
+
+The dotfiles fetch and verify the pinned release's installer, then pass it a pin
+and a state. Nothing more.
+
+**The incident.** The four consumers carried four copies of the same install
+logic: the binary download, the self-update floor, Windows PATH and Defender
+handling, and the plane wiring. The copies drifted from agent-guardrails, and the Windows twins
+kept working around two limits that no longer existed
+([ADR-0029](https://github.com/CtrlCarlitos/agent-guardrails/blob/main/docs/adr/0029-installer-lives-in-this-repo.md)).
+
+**Obey it.** Change the installer upstream. `tests/guardrail_lifecycle_contract.sh`
+requires the fetch-verify-run shape between the `# guardrail-section` markers
+and forbids a fixed list of install-era literals (plane and update calls,
+binary asset names, Defender, `Unblock-File`) in the four consumers. Logic
+that avoids those literals gets past it, so the rule is yours to keep.
+
+---
+
 ## Checking yourself
 
 ```sh

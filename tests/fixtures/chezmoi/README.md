@@ -38,8 +38,9 @@ With one source, a failure means the code, never the fixture.
 | `packages-on.toml` | the three `full-install-*` jobs |
 
 `packages-on` keeps `remote_access_server = false` (manual SSH setup) and
-`guardrail = false` (its `plane enable` needs an interactive WebAuthn approval
-CI cannot give). Both are commented in the file.
+`guardrail = false` (the agent-guardrails installer runs `guardrail setup`,
+which needs a terminal and a passkey approval CI cannot give). Both are
+commented in the file.
 
 `tests/ci_fixture_contract.sh` checks that the package files carry exactly the
 groups `.chezmoi.toml.tmpl` prompts for, that each account shape still has the

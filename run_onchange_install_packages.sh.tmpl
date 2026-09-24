@@ -491,128 +491,77 @@ install_agent_skills() {
     info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 }
 
-# agent-guardrails release to bootstrap - single source of truth is
+VSCODE_SETTINGS="{{ $vscodeSettings }}"
+
+# guardrail-section: begin
+# agent-guardrails release to install - single source of truth is
 # .chezmoidata.yaml guardrail.version (rendered here, read via
 # `chezmoi execute-template` in scripts/update_ai_tools.sh). Bumps touch
 # that one line; this template must not hardcode a tag.
 GUARDRAIL_VERSION="{{ .guardrail.version }}"
 GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
-# Oldest release whose binary ships `guardrail update`. An installed binary
-# older than this floor exits 2 ("unknown subcommand") on update, so the
-# installer curl-bootstraps over it instead of self-updating.
-GUARDRAIL_UPDATE_FLOOR="v0.19.2-dev"
-
-# vMAJOR.MINOR.PATCH[-suffix] -> zero-padded comparable integer (sort -V is
-# GNU-only; stock macOS ships BSD sort without it, and bash test -ge parses
-# the result as decimal regardless of leading zeros).
-guardrail_ver_num() {
-    local v="${1#v}"; v="${v%%-*}"
-    local IFS=.
-    # shellcheck disable=SC2086  # intentional word-splitting: fields of $v on IFS=.
-    set -- $v
-    printf '%d%04d%04d' "${1:-0}" "${2:-0}" "${3:-0}"
-}
 # Desired enforcement state, rendered from packages.guardrail (single opt-in
-# flag - see .chezmoi.toml.tmpl):
-#   true  = ensure the binary at GUARDRAIL_VERSION, then enable every plane.
-#   false = never download; disable every plane if a binary exists.
-# The binary is never auto-removed in either state.
+# flag - see .chezmoi.toml.tmpl).
 GUARDRAIL_ENABLED="{{ $guardrail }}"
-VSCODE_SETTINGS="{{ $vscodeSettings }}"
 
-# agent-guardrails: a single static Go binary ("guardrail") enforcing the
-# shared hook policy across planes. First install bootstraps from the pinned
-# GitHub release (checksum-verified); every later bump goes through
-# `guardrail update <pin>` (re-verifies SHA256SUMS, replaces itself atomically).
-# Plane wiring (formerly per-plane config-merge calls here) is guardrail-owned
-# now: `plane enable|disable --all` regenerates each floor idempotently and
-# reports planes it can't detect. Those commands print a WebAuthn approval URL
-# and block until the operator responds, so their output streams straight
-# through - never silence them. Any non-zero (denied/expired/timeout/no-TTY
-# exit 2) fails this script so chezmoi surfaces it rather than silently
-# "succeeding" (agent-guardrails contract, 2026-09).
+# agent-guardrails: installation lives in agent-guardrails (its install.sh,
+# ADR-0029 there) - binary download + checksum, self-update of an older
+# binary, and `guardrail setup` (plane wiring, coverage). This function only
+# fetches the pinned release's install.sh + SHA256SUMS, verifies the installer
+# against SHA256SUMS, and runs it from the temp file (never piped):
+#   packages.guardrail true  -> install.sh --version <pin> --state enabled
+#   packages.guardrail false -> install.sh --version <pin> --state disabled,
+#                               only when a binary is already installed (never
+#                               a download just to disable; nothing is removed).
+# `guardrail setup` prints a WebAuthn approval URL and blocks until the
+# operator responds, so the installer's output streams straight through -
+# never capture or silence it. A non-zero installer exit (denied/expired/
+# timeout/no-TTY) fails this script so chezmoi surfaces it; a failed download
+# or a missing SHA-256 tool warns and skips, like every other network step.
 install_agent_guardrails() {
-    local ver="$GUARDRAIL_VERSION" repo="$GUARDRAIL_REPO"
     local dest="$HOME/.local/bin/guardrail"
-
-    if [ "$GUARDRAIL_ENABLED" != "true" ]; then
-        if [ -x "$dest" ]; then
-            info "guardrail disabled in config - disabling planes (binary stays installed)"
-            "$dest" plane disable --all
-        else
-            info "guardrail disabled in config - nothing to do"
-        fi
+    local state
+    if [ "$GUARDRAIL_ENABLED" = "true" ]; then
+        state="enabled"
+    elif [ -x "$dest" ]; then
+        state="disabled"
+    else
+        info "guardrail disabled in config - nothing to do"
         return 0
     fi
 
-    local have=""
-    if [ -x "$dest" ]; then have="$("$dest" version 2>/dev/null)"; fi
-    if [ "$have" = "guardrail ${ver}" ]; then
-        info "guardrail ${ver} already installed"
-    elif [ -n "$have" ] && [ "$(guardrail_ver_num "${have#guardrail }")" -ge "$(guardrail_ver_num "$GUARDRAIL_UPDATE_FLOOR")" ]; then
-        info "Updating guardrail to ${ver} via self-update..."
-        "$dest" update "$ver"
-    else
-        # No binary at all, or one older than GUARDRAIL_UPDATE_FLOOR (which
-        # predates `guardrail update`): verified curl bootstrap is the only
-        # path that works for both.
-        local os arch
-        case "$(uname -s)" in
-            Linux)  os="linux" ;;
-            Darwin) os="darwin" ;;
-            *) warn "guardrail: unsupported OS $(uname -s) - skipping"; return ;;
-        esac
-        case "$(uname -m)" in
-            x86_64|amd64) arch="amd64" ;;
-            aarch64|arm64) arch="arm64" ;;
-            *) warn "guardrail: unsupported arch $(uname -m) - skipping"; return ;;
-        esac
-        local asset="guardrail_${os}_${arch}"
-        local base="https://github.com/${repo}/releases/download/${ver}"
-        local tmp; tmp="$(mktemp -d)"
-
-        info "Installing guardrail ${ver} (${asset})..."
-        if ! net_timeout 180 curl -fLo "$tmp/$asset" "${base}/${asset}"; then
-            warn "guardrail: download failed or timed out - skipping"; rm -rf "$tmp"; return
-        fi
-        if ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "${base}/SHA256SUMS"; then
-            warn "guardrail: SHA256SUMS download failed - skipping (won't install unverified)"; rm -rf "$tmp"; return
-        fi
-        # stock macOS ships `shasum`, not `sha256sum` — without this the pipeline
-        # returns 127, the install is skipped, and the Mac is left with NO guard
-        # under a message that misattributes it to a checksum mismatch.
-        local SHA_CMD
-        if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
-        elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
-        elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
-        else warn "guardrail: no SHA-256 tool found - cannot verify, skipping install"; rm -rf "$tmp"; return; fi
-        if ! ( cd "$tmp" && grep " ${asset}\$" SHA256SUMS | $SHA_CMD -c - ); then
-            warn "guardrail: CHECKSUM MISMATCH for ${asset} - not installing"; rm -rf "$tmp"; return
-        fi
-        mkdir -p "$HOME/.local/bin"
-        install -m 0755 "$tmp/$asset" "$dest" || { warn "guardrail: install to $dest failed - skipping"; rm -rf "$tmp"; return; }
-        rm -rf "$tmp"
-        info "guardrail installed to $dest"
+    local base="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
+    local tmp; tmp="$(mktemp -d)"
+    if ! net_timeout 60 curl -fLo "$tmp/install.sh" "$base/install.sh" ||
+        ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "$base/SHA256SUMS"; then
+        warn "guardrail: installer download failed or timed out - skipping"; rm -rf "$tmp"; return
+    fi
+    # stock macOS ships `shasum`, not `sha256sum` — without this the check
+    # returns 127 and the run is skipped under a message that misattributes it
+    # to a checksum mismatch.
+    local SHA_CMD
+    if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
+    elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
+    elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
+    else warn "guardrail: no SHA-256 tool found - cannot verify installer, skipping"; rm -rf "$tmp"; return; fi
+    # Verify from a one-line file, not stdin (like agent-guardrails' own
+    # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read `-c -`.
+    # No install.sh line fails the grep, so a partial SHA256SUMS fail-closes.
+    if ! ( cd "$tmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
+        $SHA_CMD -c SHA256SUMS.one ); then
+        warn "guardrail: installer CHECKSUM MISMATCH - not running it"; rm -rf "$tmp"; return
     fi
 
-    if [ ! -x "$dest" ] || [ "$("$dest" version 2>/dev/null)" != "guardrail ${ver}" ]; then
-        warn "guardrail: installed binary did not report guardrail ${ver} - skipping plane lifecycle"
-        return
-    fi
-    info "guardrail version verified: $("$dest" version)"
-
-    info "Enabling guardrail planes (approval URL prints here if WebAuthn is required)..."
-    "$dest" plane enable --all
-
-    # agy has no SessionStart surface, so antigravity MCP-config drift has no
-    # "someone ran it" moment - gate its coverage here instead (exit 1 fails
-    # the run; bare call, set -e enforces it).
-    # `doctor --coverage antigravity` already prints the full doctor summary
-    # plus the coverage diff - a second plain `doctor` call doubled the output
-    # on every update. Enrollment guidance is guardrail's own UX now: the
-    # approval flow names its fix when no authenticator is enrolled.
-    "$dest" doctor --coverage antigravity
+    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); approval URL prints here if WebAuthn is required..."
+    # Record the exit code instead of letting set -e abort here, so the temp
+    # dir is removed on the failing path too; the non-zero return then fails
+    # the run at the (bare) call site.
+    local code=0
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" || code=$?
+    rm -rf "$tmp"
+    return "$code"
 }
+# guardrail-section: end
 
 install_linux_desktop() {
     info "Installing Linux Desktop Apps..."
@@ -1514,7 +1463,7 @@ PYEOF
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # stays presence-gated in the guardrail section, and the Serena MCP
+    # wiring is done by the agent-guardrails installer, and the Serena MCP
     # registration into opencode.json stays with Serena in agent_toolkit
     # (same precedent as `serena setup claude-code`).
     # The --version re-check matters: a legacy npm-global opencode-ai shim can
@@ -1630,9 +1579,9 @@ PYEOF
 
 {{- if $chatgpt_cli }}
     # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-    # superpowers/skills/guardrail have no codex surface (the guardrail and
-    # skills passes stay presence-gated on their own CLIs; only this npm
-    # install lives here).
+    # superpowers/skills have no codex surface (the skills pass stays
+    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
+    # agent-guardrails installer; only this npm install lives here).
     install_node
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
@@ -1973,7 +1922,7 @@ PYEOF
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # stays presence-gated in the guardrail section, and the Serena MCP
+    # wiring is done by the agent-guardrails installer, and the Serena MCP
     # registration into opencode.json stays with Serena in agent_toolkit
     # (same precedent as `serena setup claude-code`). No Node prerequisite:
     # the native installer is curl|sh, so this section works standalone even
@@ -2032,9 +1981,9 @@ PYEOF
 
 {{- if $chatgpt_cli }}
     # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-    # superpowers/skills/guardrail have no codex surface (the guardrail and
-    # skills passes stay presence-gated on their own CLIs; only this npm
-    # install lives here).
+    # superpowers/skills have no codex surface (the skills pass stays
+    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
+    # agent-guardrails installer; only this npm install lives here).
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
@@ -2160,9 +2109,10 @@ PYEOF
 }
 
 #-------------------------------------------------------------------------------
-# AI desktop apps (spec §2: pure installs, zero wiring - superpowers, the
-# curated-skills pass and guardrail planes key off the CLI groups only, per
-# the spec's placement rule; nothing in these functions configures anything).
+# AI desktop apps (spec §2: pure installs, zero wiring - superpowers and the
+# curated-skills pass key off the CLI groups only, per the spec's placement
+# rule, and guardrail's plane wiring is done by the agent-guardrails
+# installer; nothing in these functions configures anything).
 #
 # History: the Google Antigravity Desktop App was removed 2026-09-11 (VS Code
 # + the agy CLI covered that workflow; the old Linux apt repo and the

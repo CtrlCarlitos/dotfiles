@@ -81,9 +81,10 @@
     #                       three OSs (mac/Linux use pinned hub-channel URLs).
     antigravity_desktop = false
 
-    # guardrail — Agent guardrails: guardrail binary + per-CLI planes.
-    #             Modifies ~/.claude/settings.json etc. - deliberately a
-    #             separate opt-in from the agent groups.
+    # guardrail — Agent guardrails: runs the pinned agent-guardrails
+    #             installer, which installs the binary and registers its
+    #             hooks with each agent host after your passkey approval.
+    #             Deliberately a separate opt-in from the agent groups.
     #             See docs/guardrail-install.md.
     guardrail = true
     # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,

@@ -35,7 +35,7 @@ the persisted `[data.packages]` section is emitted in.
 | `dev_desktop` | Human desktop apps | Chrome, VS Code, Ghostty (Mac/Linux), Docker Desktop, CodexBar, ScreenRec, Termius, Handy… |
 | `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
 | `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
-| `guardrail` | Agent guardrails | opt-in desired state: true = ensure pinned binary + `guardrail plane enable --all`; false = never download, `plane disable --all` if a binary exists (never auto-removed) |
+| `guardrail` | Agent guardrails | opt-in desired state, passed to the pinned agent-guardrails installer: true = `--state enabled`; false = `--state disabled` only if a binary exists, never a download (never auto-removed). See [guardrail-install.md](guardrail-install.md) |
 
 ## Ground rules
 
@@ -44,10 +44,12 @@ line goes in that vendor's group (Claude Code → `claude_cli`, Claude Desktop
 → `claude_desktop`). Something an *agent* uses → `agent_toolkit` (e.g.
 Playwright Chromium). Something a *human* uses → `dev_desktop` (e.g. Chrome).
 
-**Wiring keys off CLI groups only.** The superpowers plugins, the curated
-skills pass, and the guardrail planes gate on `claude_cli`, `opencode_cli`,
-`antigravity_cli`, and `agent_toolkit` — never on the desktop groups. Desktop
-groups are pure installs: the app lands, nothing gets wired into it.
+**Wiring keys off CLI groups only.** The superpowers plugins and the curated
+skills pass gate on `claude_cli`, `opencode_cli`, `antigravity_cli`, and
+`agent_toolkit` — never on the desktop groups. The guardrail planes are
+registered by the agent-guardrails installer (`guardrail setup`) for each agent
+CLI it detects. Desktop groups are pure installs: the app lands, nothing gets
+wired into it.
 
 **The menu owns `[data.packages]`.** Re-running the menu rewrites the whole
 section — hand-edited keys inside it are intentionally overwritten (that's
