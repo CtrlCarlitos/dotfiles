@@ -149,6 +149,9 @@ jobs:
       - name: Test backup/restore round trip
         run: bash tests/dotbackup_restore.sh
 
+      - name: Test backup key handling (recovery, not provisioning)
+        run: bash tests/backup_key_handling_contract.sh
+
       # Seventh never-wired test. Its Unix twin (tests/select_packages.sh) was
       # already here; this one had never run, and it was broken: the fake gum
       # stub inherited the file's CRLF, so its shebang carried a trailing CR and
