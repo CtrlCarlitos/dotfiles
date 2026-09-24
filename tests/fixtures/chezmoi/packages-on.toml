@@ -1,0 +1,25 @@
+# Every installable group on: the full-install-* jobs run the real installers.
+# Two stay off, each for a reason that is not "we forgot":
+#   remote_access_server - requires manual SSH server setup by design.
+#   guardrail            - the agent-guardrails installer runs `guardrail
+#                          setup`, which needs a terminal and a passkey
+#                          approval CI cannot give (exit 2 without a terminal
+#                          fails the run by contract). Exercised on real
+#                          machines instead.
+[data.packages]
+  core = true
+  modern_cli = true
+  fonts = true
+  agent_toolkit = true
+  opencode_cli = true
+  opencode_desktop = true
+  claude_cli = true
+  claude_desktop = true
+  chatgpt_cli = true
+  chatgpt_desktop = true
+  antigravity_cli = true
+  antigravity_desktop = true
+  dev_desktop = true
+  remote_access = true
+  remote_access_server = false
+  guardrail = false

@@ -199,6 +199,23 @@ Ubuntu and macOS — making a straightforward bug look platform-specific.
 **Obey it.** When you touch one twin, grep the other for the same concept before
 you commit. Reducing this duplication is tracked in issue #83.
 
+The CI fixtures no longer have twins to keep in step: every job composes its
+`chezmoi.toml` from `tests/fixtures/chezmoi/`, and `tests/ci_fixture_contract.sh`
+fails if a workflow carries an inline one.
+
+Neither do package names: `.chezmoidata/packages.yaml` is the one list, both
+installers render their manager's names from it through `.chezmoitemplates/`
+fragments, and `scripts/migrate-to-choco.ps1` reads it at runtime.
+`tests/package_catalog_contract.sh` fails if a literal list reappears in any of
+the three. Two things learned building it: `includeTemplate` returns the
+fragment *with* its trailing newline (end the last action with `-}}`, or a
+rendered `for x in …` loses its `; do` to the next line), and a render that
+reads the host's `chezmoi.toml` is not a test - the CI lint runner seeds none,
+so every group was off there and the check failed. Render with an empty
+`--config` and `--override-data` forcing the groups and the OS you mean; that
+also lets one host render *both* twins (`os: windows` for the `.ps1`, `darwin`
+and `linux` for the `.sh`), so each is value-checked everywhere.
+
 ---
 
 ## 11. guardrail install logic lives in agent-guardrails

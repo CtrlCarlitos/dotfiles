@@ -144,7 +144,9 @@ fi
 gh_tmpl="$repo_root/dot_config/ghostty/config.tmpl"
 [ -f "$gh_tmpl" ] || fail "Ghostty config template missing"
 grep -Fq '.config/ghostty/**' "$ignore" || fail ".chezmoiignore: Ghostty must be excluded on Windows/WSL"
-grep -Fq 'visual-studio-code ghostty' "$repo_root/run_onchange_install_packages.sh.tmpl" || fail "macOS dev_desktop: ghostty cask missing"
+# The cask list renders from the package catalog (#83): ghostty must be a
+# dev_desktop cask there.
+grep -Fq 'cask: ghostty' "$repo_root/.chezmoidata/packages.yaml" || fail "macOS dev_desktop: ghostty cask missing from .chezmoidata/packages.yaml"
 grep -Fq 'apt install -y ghostty' "$repo_root/run_onchange_install_packages.sh.tmpl" || fail "Linux dev_desktop: ghostty apt install missing"
 ! grep -Fq 'snap install' "$repo_root/run_onchange_install_packages.sh.tmpl" || fail "no snap packages: favor the distro package manager"
 if command -v chezmoi >/dev/null; then

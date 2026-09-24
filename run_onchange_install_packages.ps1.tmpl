@@ -227,9 +227,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 {{- end }}
 {{- end }}
 
-# Package universe below is mirrored in scripts/migrate-to-choco.ps1
-# (MIGRATE-UNIVERSE-MARKER) - keep both lists in sync when adding a
-# Chocolatey-managed package.
+# Package names come from .chezmoidata/packages.yaml; scripts/migrate-to-choco.ps1
+# reads the same catalog at runtime, so there is no second list to keep in sync.
 $packages = @()
 
 # On Windows PowerShell 5.1 (this script's target - see #Requires above),
@@ -272,18 +271,8 @@ function Install-Node {
 
 {{- if $core }}
 # Core tools
-# psmux: the native Windows tmux (Rust, github.com/psmux/psmux) - official
-# Chocolatey package, ships psmux/pmux/tmux commands and reads .tmux.conf, so
-# it lands right where tmux sits on Linux/macOS. Right after powershell-core
-# deliberately: psmux recommends PS 7+, and this list installs it first.
-$packages += @(
-    "git.install", "curl", "wget", "jq", "fzf", "neovim", "ripgrep", "gh",
-    "gsudo", "powershell-core", "psmux", "python", "wsl2", "tree", "7zip.install", "cmake", "ffmpeg",
-    # npiperelay: bridges the Windows ssh-agent named pipe into WSL, so a WSL
-    # distro (and any devcontainer launched from it) uses the Windows agent and
-    # holds no private keys of its own. See docs/ssh-agents.md.
-    "npiperelay"
-)
+# Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
+{{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 
 # Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
@@ -293,7 +282,7 @@ Install-Node
 
 {{- if $modern_cli }}
 # Modern CLI tools
-$packages += @("bat", "eza", "fd", "delta", "starship", "zoxide", "direnv", "lazygit", "tealdeer", "dust", "duf", "procs", "shellcheck", "shfmt", "pstop")
+{{ includeTemplate "choco-packages" (dict "group" "modern_cli" "catalog" .catalog.packages) }}
 
 # gum (charmbracelet) - not published to Chocolatey; install from the latest GitHub release
 function Install-Gum {
@@ -336,40 +325,18 @@ Install-Gum
 
 {{- if $fonts }}
 # Fonts - MesloLGS NF is excellent for Starship
-$packages += @("nerd-fonts-meslo")
+{{ includeTemplate "choco-packages" (dict "group" "fonts" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $dev_desktop }}
 # Desktop apps
-# handy (https://handy.computer, Speech-to-Text): Whisper/Parakeet model
-# selection is GUI-only, no CLI flag or config file to pre-seed one. For
-# Spanish + English both, pick a Whisper model post-install (Parakeet is
-# English-only) - Large for best accuracy, Turbo for much faster with a
-# small accuracy trade-off (most noticeable on non-English audio).
-# termius replaces filezilla here (standardized on one SSH/SFTP client
-# across all 3 platforms instead of mixing - FileZilla's Homebrew cask was
-# pulled entirely on macOS, adware concerns).
-# geany replaces notepadplusplus.install here - Notepad++ is genuinely
-# Windows-only (no real Mac/Linux port), Geany is free/open-source and
-# fills the same "lightweight quick-edit GUI editor" role cross-platform.
-# meld replaces winmerge here - Meld is already the Linux/macOS diff/merge
-# tool in this repo and is confirmed on Chocolatey too (v3.22.2), so this
-# standardizes on one tool across all 3 platforms instead of WinMerge being
-# Windows-only.
-$packages += @(
-    "powertoys", "files",
-    "chocolateygui", "cpu-z.install", "crystaldiskinfo.install",
-    "crystaldiskmark", "cutepdf", "Everything", "Ghostscript.app",
-    "docker-desktop", "vscode.install",
-    "geany", "obs-studio.install",
-    "qbittorrent", "sharex", "meld", "wiztree", "termius",
-    "vlc", "handy"
-)
+# Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
+{{ includeTemplate "choco-packages" (dict "group" "dev_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $remote_access }}
 # Remote access tools are intentionally separate from desktop applications.
-$packages += @("tailscale", "cloudflared")
+{{ includeTemplate "choco-packages" (dict "group" "remote_access" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $agent_toolkit }}
@@ -381,7 +348,7 @@ $packages += @("tailscale", "cloudflared")
 # and the devcontainer code path, but can't exercise the core/
 # agent_toolkit/etc section content. Confirmed this session testing a
 # Superpowers install fix - had to fall back to isolated `docker run` tests.
-$packages += @("act-cli")
+{{ includeTemplate "choco-packages" (dict "group" "agent_toolkit" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_cli }}
@@ -391,14 +358,14 @@ $packages += @("act-cli")
 # apps were removed 2026-09-11 (VS Code + agy covered that workflow); the
 # 2.0 desktop app is back since 2026-09-13 as its own antigravity_desktop
 # group (choco `antigravity`, below) - agy here remains the CLI surface.
-$packages += @("antigravity-cli")
+{{ includeTemplate "choco-packages" (dict "group" "antigravity_cli" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $claude_desktop }}
 # Claude Desktop (spec §5) - official Chocolatey package, rides the capped
 # choco loop like every other package. Claude Code (the CLI) is a separate
 # claude_cli group - different software, different gate.
-$packages += @("claude")
+{{ includeTemplate "choco-packages" (dict "group" "claude_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_desktop }}
@@ -406,7 +373,7 @@ $packages += @("claude")
 # proven in this repo's CI history (the pre-removal full-install runs
 # installed it via choco). Windows floats on choco's version - no pinned
 # hub-channel URL here, unlike the sh template's dmg/tar.gz pins.
-$packages += @("antigravity")
+{{ includeTemplate "choco-packages" (dict "group" "antigravity_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $opencode_desktop }}
@@ -415,7 +382,7 @@ $packages += @("antigravity")
 # upstream anomalyco/opencode release train). Rides the capped choco loop
 # like every other desktop package; the OpenCode CLI is a separate
 # opencode_cli group - different software, different gate.
-$packages += @("opencode-desktop")
+{{ includeTemplate "choco-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $hasChocolateyPackages }}
@@ -585,7 +552,9 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 # Note: ConvertTo-Json reformats the entire file (different indentation than
 # each app's own writer), not just the font key - functionally identical,
 # cosmetically a full-file diff the first time this runs.
-$desiredFont = "MesloLGS Nerd Font Mono"
+# Same source as the VS Code font tier, so the Windows Terminal default font
+# and editor.fontFamily cannot drift apart.
+$desiredFont = {{ index .vscode.settings.forced "editor.fontFamily" | quote }}
 
 # ConvertFrom-JsonC: both Windows Terminal and VS Code settings.json are
 # JSONC (comments and trailing commas are legal there; strict JSON parsers
@@ -692,70 +661,36 @@ if ($wtSettings) {
 # Gated by packages.vscode_settings (hasKey pattern: default true, set
 # `[data.packages] vscode_settings = false` in chezmoi.toml to opt out - no prompt, so no
 # CI-seeding burden, see check_workflow_config_keys for that outage class).
+# Every tier below is rendered from .chezmoidata.yaml `vscode.settings`, the
+# single source this twin shares with run_onchange_install_packages.sh.tmpl
+# (#83). Values are emitted as native PowerShell literals rather than parsed at
+# runtime: this script targets Windows PowerShell 5.1 (see #Requires above),
+# where ConvertFrom-Json has no -AsHashtable and returns a PSCustomObject.
 $vsForced = @{
-    'editor.fontFamily' = $desiredFont
-    'terminal.integrated.fontFamily' = $desiredFont
+{{- range $k, $v := .vscode.settings.forced }}
+    '{{ $k }}' = "{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"
+{{- end }}
 }
 $vsDefaults = [ordered]@{
-    'files.autoSave' = 'afterDelay'
-    'files.autoSaveDelay' = 500
-    'files.eol' = "`n"
-    'files.insertFinalNewline' = $true
-    'files.trimFinalNewlines' = $true
-    'files.trimTrailingWhitespace' = $true
-    'explorer.compactFolders' = $false
-    'editor.minimap.enabled' = $false
-    'editor.wordWrap' = 'on'
-    'editor.formatOnSave' = $true
-    'diffEditor.ignoreTrimWhitespace' = $false
-    'diffEditor.wordWrap' = 'on'
-    'workbench.startupEditor' = 'none'
-    'terminal.integrated.scrollback' = 30000
-    'terminal.integrated.shellIntegration.enabled' = $true
-    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
-    'terminal.integrated.fontSize' = 16
-    # Shift+Enter (newline) for claude/codex/opencode: Windows CLIs sit
-    # behind ConPTY, which only forwards the Shift modifier when the
-    # terminal speaks win32-input-mode - Windows Terminal always does, VS
-    # Code only with this (experimental, default off). The kitty protocol
-    # (on by default) can't help: ConPTY drops it. Windows-only key; the
-    # .sh twin omits it.
-    'terminal.integrated.enableWin32InputMode' = $true
-    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
-    # instead of toggling the sidebar / panel while the terminal has focus.
-    'terminal.integrated.commandsToSkipShell' = @('-workbench.action.toggleSidebarVisibility', '-workbench.action.togglePanel')
-    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
-    # right-click always pastes.
-    'terminal.integrated.copyOnSelection' = $true
-    'terminal.integrated.rightClickBehavior' = 'paste'
-    'cSpell.language' = 'en,es'
+{{- range $k, $v := .vscode.settings.defaults }}
+    '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else if kindIs "string" $v }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ else if kindIs "slice" $v }}@({{ range $i, $e := $v }}{{ if $i }}, {{ end }}'{{ $e }}'{{ end }}){{ else }}{{ $v }}{{ end }}
+{{- end }}
+{{- /* Windows-only tier: the .sh twin deliberately renders none of these. */}}
+{{- range $k, $v := .vscode.settings.defaults_windows }}
+    '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ end }}
+{{- end }}
 }
-$vsJunk = @('**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/node_modules/**', '**/*.pyc')
+$vsJunk = @({{ range $i, $g := .vscode.settings.junk }}{{ if $i }}, {{ end }}'{{ $g }}'{{ end }})
 $vsJunkMap = [ordered]@{}
 foreach ($s in $vsJunk) { $vsJunkMap[$s] = $true }
-# Catppuccin Mocha for the integrated terminal only (same palette as the
-# Windows Terminal scheme) - editor theme untouched. Sub-key upsert: any
-# color you set yourself wins.
 $vsTerminalColors = [ordered]@{
-    'terminal.background' = '#1E1E2E'; 'terminal.foreground' = '#CDD6F4'
-    'terminalCursor.foreground' = '#F5E0DC'; 'terminal.selectionBackground' = '#585B70'
-    'terminal.ansiBlack' = '#45475A'; 'terminal.ansiRed' = '#F38BA8'
-    'terminal.ansiGreen' = '#A6E3A1'; 'terminal.ansiYellow' = '#F9E2AF'
-    'terminal.ansiBlue' = '#89B4FA'; 'terminal.ansiMagenta' = '#F5C2E7'
-    'terminal.ansiCyan' = '#94E2D5'; 'terminal.ansiWhite' = '#BAC2DE'
-    'terminal.ansiBrightBlack' = '#585B70'; 'terminal.ansiBrightRed' = '#F38BA8'
-    'terminal.ansiBrightGreen' = '#A6E3A1'; 'terminal.ansiBrightYellow' = '#F9E2AF'
-    'terminal.ansiBrightBlue' = '#89B4FA'; 'terminal.ansiBrightMagenta' = '#F5C2E7'
-    'terminal.ansiBrightCyan' = '#94E2D5'; 'terminal.ansiBrightWhite' = '#A6ADC8'
+{{- range $k, $v := .vscode.settings.terminal_colors }}
+    '{{ $k }}' = '{{ $v }}'
+{{- end }}
 }
 # MERGES: object key -> sub-keys (with values) added only when absent.
 $vsMerges = @{ 'files.exclude' = $vsJunkMap; 'search.exclude' = $vsJunkMap; 'workbench.colorCustomizations' = $vsTerminalColors }
-# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
-# at a hand-kept config (OneDrive Documents\_ssh\config), so its hosts never
-# reached ssh.exe, Windows Terminal's SSH profiles, or chezmoi. With it unset,
-# Remote-SSH reads ~/.ssh/config - rendered from [[data.ssh_hosts]] - like
-# everything else. exclude_settings can keep it on a machine that needs it.
-$vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')
+$vsUnset = [System.Collections.Generic.List[string]]@({{ range $i, $u := .vscode.settings.unset }}{{ if $i }}, {{ end }}'{{ $u }}'{{ end }})
 
 # Machine-local settings drift, rendered from [data.vscode_overrides] (see
 # the extensions comment above for why not [data.vscode]):

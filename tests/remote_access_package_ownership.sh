@@ -77,8 +77,11 @@ for prohibited in 'tailscale up' 'tailscale set --ssh' 'systemctl' 'launchctl' '
     omits linux-server "$prohibited" "remote_access_server must not contain $prohibited"
 done
 
-contains windows-remote '$packages += @("tailscale", "cloudflared")' 'Windows remote_access must install both remote tools'
-omits windows-desktop '"tailscale", "cloudflared"' 'Windows dev_desktop must not install remote tools'
+# Rendered from the package catalog (#83): one `$packages += "name"` per tool.
+contains windows-remote '$packages += "tailscale"' 'Windows remote_access must install Tailscale'
+contains windows-remote '$packages += "cloudflared"' 'Windows remote_access must install cloudflared'
+omits windows-desktop '$packages += "tailscale"' 'Windows dev_desktop must not install Tailscale'
+omits windows-desktop '$packages += "cloudflared"' 'Windows dev_desktop must not install cloudflared'
 contains windows-server 'Administrator rights are required' 'Windows server prerequisite must warn about administrator rights'
 contains windows-server "Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'" 'Windows server prerequisite must install OpenSSH Server capability'
 omits windows-server 'choco list --exact' 'Windows server-only must bypass generic package installation'

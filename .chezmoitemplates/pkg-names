@@ -1,0 +1,20 @@
+{{- /*
+  Space-separated package names for one group on one manager, from the catalog
+  in .chezmoidata/packages.yaml. Used by run_onchange_install_packages.sh.tmpl:
+
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
+
+  manager is the catalog field to read: apt, brew or cask. Order is catalog
+  order. Emits nothing when no tool in the group has that field.
+
+  The final action ends with -}} so the fragment's own trailing newline is
+  trimmed: includeTemplate returns the file verbatim, and an untrimmed newline
+  once landed between `for pkg in ...` and `; do` on Linux - a syntax error in
+  the rendered installer that a Windows render could never show.
+*/ -}}
+{{- $first := true }}
+{{- range .catalog }}
+{{- if and (eq .group $.group) (hasKey . $.manager) }}
+{{- if not $first }} {{ end }}{{ index . $.manager }}{{ $first = false }}
+{{- end }}
+{{- end -}}

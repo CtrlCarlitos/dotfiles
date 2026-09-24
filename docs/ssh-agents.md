@@ -24,6 +24,12 @@ Native mode (Linux, macOS): no Windows, no relay, no filter - one real agent per
 account, each holding only that account's local keys, feeding the same kind of
 per-account socket.
 
+## If the machine dies
+
+One copy per machine is the rule for *live* machines, not a reason to have no copy at all. A key that authorises you to a server may be the only thing that gets you back into that server, and no agent model recovers it for you.
+
+[Backup & Restore](backup-restore.md) creates an AES-256, header-encrypted archive that includes `~/.ssh`, for exactly that case: restoring onto a **replacement** machine. It is not a way to provision an additional one - `dotrestore` refuses to overwrite existing keys, so the two models cannot quietly blur.
+
 ## Why
 
 - **Rotation is one operation.** Generate the key once, register the new public key,

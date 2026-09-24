@@ -16,8 +16,6 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpl="$repo_root/dot_local/bin/executable_ssh-agent-relay.tmpl"
 zshrc="$repo_root/dot_zshrc"
-sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
-ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 doc="$repo_root/docs/ssh-agents.md"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -26,10 +24,14 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 [ -f "$doc" ] || fail "docs/ssh-agents.md missing"
 
 # The relay is useless without its tooling, and each piece has a distinct job.
-grep -Fq 'socat ssh-agent-filter' "$sh_installer" ||
-    fail "$sh_installer: core must install socat (WSL relay) and ssh-agent-filter (per-account isolation)"
-grep -Fq '"npiperelay"' "$ps1_installer" ||
-    fail "$ps1_installer: core must install npiperelay (Windows agent pipe -> WSL)"
+# The core apt line renders from the package catalog (#83), so the requirement
+# is on the catalog: both tools must be core apt packages there.
+grep -Fq 'apt: socat' "$repo_root/.chezmoidata/packages.yaml" ||
+    fail ".chezmoidata/packages.yaml: core must install socat (WSL relay)"
+grep -Fq 'apt: ssh-agent-filter' "$repo_root/.chezmoidata/packages.yaml" ||
+    fail ".chezmoidata/packages.yaml: core must install ssh-agent-filter (per-account isolation)"
+grep -Fq 'choco: npiperelay' "$repo_root/.chezmoidata/packages.yaml" ||
+    fail ".chezmoidata/packages.yaml: core must install npiperelay on Windows (agent pipe -> WSL)"
 
 # The shell hook must never block a prompt or hard-depend on the relay existing.
 grep -Fq 'ssh-agent-relay start' "$zshrc" || fail "dot_zshrc: no ssh-agent-relay startup"

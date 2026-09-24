@@ -689,7 +689,7 @@ install_linux_desktop() {
     # role. In Ubuntu's default apt repos, no extra setup needed.
     # Installed individually so one package that's unavailable on this release
     # doesn't take the whole `apt install` (and, under `set -e`, the run) down.
-    for pkg in meld flameshot vlc p7zip-full obs-studio qbittorrent ghostscript geany; do
+    for pkg in {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "dev_desktop" "catalog" .catalog.packages) }}; do
         $SUDO apt install -y "$pkg" || warn "Skipping '$pkg' (not installable on this release)."
     done
 
@@ -780,7 +780,8 @@ install_apt() {
 
 {{- if $core }}
     info "Installing core packages..."
-    $SUDO apt install -y git curl wget jq fzf zsh tmux ripgrep htop p7zip-full bc tree build-essential cmake openssh-client ca-certificates python3 python3-venv ffmpeg zstd socat ssh-agent-filter
+    # Names come from .chezmoidata/packages.yaml (see #83).
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }}
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
@@ -1092,67 +1093,21 @@ EXTRA_JSON = """{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrid
 EXCLUDE = json.loads(EXCLUDE_JSON) if EXCLUDE_JSON else []
 EXTRA = json.loads(EXTRA_JSON) if EXTRA_JSON else {}
 
-FORCED = {
-    "editor.fontFamily": "MesloLGS Nerd Font Mono",
-    "terminal.integrated.fontFamily": "MesloLGS Nerd Font Mono",
-}
-DEFAULTS = {
-    "files.autoSave": "afterDelay",
-    "files.autoSaveDelay": 500,
-    "files.eol": "\n",
-    "files.insertFinalNewline": True,
-    "files.trimFinalNewlines": True,
-    "files.trimTrailingWhitespace": True,
-    "explorer.compactFolders": False,
-    "editor.minimap.enabled": False,
-    "editor.wordWrap": "on",
-    "editor.formatOnSave": True,
-    "diffEditor.ignoreTrimWhitespace": False,
-    "diffEditor.wordWrap": "on",
-    "workbench.startupEditor": "none",
-    "terminal.integrated.scrollback": 30000,
-    "terminal.integrated.shellIntegration.enabled": True,
-    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
-    "terminal.integrated.fontSize": 16,
-    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
-    # instead of toggling the sidebar / panel while the terminal has focus.
-    # (enableWin32InputMode is the .ps1 twin's Windows-only Shift+Enter fix;
-    # here the default-on kitty keyboard protocol already carries Shift+Enter.)
-    "terminal.integrated.commandsToSkipShell": [
-        "-workbench.action.toggleSidebarVisibility",
-        "-workbench.action.togglePanel",
-    ],
-    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
-    # right-click always pastes.
-    "terminal.integrated.copyOnSelection": True,
-    "terminal.integrated.rightClickBehavior": "paste",
-    "cSpell.language": "en,es",
-}
-JUNK = ["**/__pycache__/**", "**/.venv/**", "**/venv/**",
-        "**/node_modules/**", "**/*.pyc"]
-# Catppuccin Mocha for the integrated terminal only (same palette as the
-# Windows Terminal scheme) - editor theme untouched; any color you set wins.
-TERMINAL_COLORS = {
-    "terminal.background": "#1E1E2E", "terminal.foreground": "#CDD6F4",
-    "terminalCursor.foreground": "#F5E0DC", "terminal.selectionBackground": "#585B70",
-    "terminal.ansiBlack": "#45475A", "terminal.ansiRed": "#F38BA8",
-    "terminal.ansiGreen": "#A6E3A1", "terminal.ansiYellow": "#F9E2AF",
-    "terminal.ansiBlue": "#89B4FA", "terminal.ansiMagenta": "#F5C2E7",
-    "terminal.ansiCyan": "#94E2D5", "terminal.ansiWhite": "#BAC2DE",
-    "terminal.ansiBrightBlack": "#585B70", "terminal.ansiBrightRed": "#F38BA8",
-    "terminal.ansiBrightGreen": "#A6E3A1", "terminal.ansiBrightYellow": "#F9E2AF",
-    "terminal.ansiBrightBlue": "#89B4FA", "terminal.ansiBrightMagenta": "#F5C2E7",
-    "terminal.ansiBrightCyan": "#94E2D5", "terminal.ansiBrightWhite": "#A6ADC8",
-}
+# All four tiers come from .chezmoidata.yaml `vscode.settings`, the single
+# source both installer twins render (see #83). r""" so Python does not touch
+# the JSON's own escapes - files.eol is "
+" and must survive as one.
+FORCED = json.loads(r"""{{ .vscode.settings.forced | toJson }}""")
+DEFAULTS = json.loads(r"""{{ .vscode.settings.defaults | toJson }}""")
+JUNK = json.loads(r"""{{ .vscode.settings.junk | toJson }}""")
+TERMINAL_COLORS = json.loads(r"""{{ .vscode.settings.terminal_colors | toJson }}""")
+# defaults_windows is deliberately NOT rendered here: enableWin32InputMode is a
+# Windows-only fix and this twin never runs there.
 # MERGES: object key -> sub-keys (with values) added only when absent.
 MERGES = {"files.exclude": {s: True for s in JUNK},
           "search.exclude": {s: True for s in JUNK},
           "workbench.colorCustomizations": TERMINAL_COLORS}
-# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
-# at a hand-kept config outside ~/.ssh, so its hosts never reached ssh or
-# chezmoi. Unset, Remote-SSH reads ~/.ssh/config - rendered from
-# [[data.ssh_hosts]]. exclude_settings can keep it on a machine that needs it.
-UNSET = ["remote.SSH.configFile"]
+UNSET = json.loads(r"""{{ .vscode.settings.unset | toJson }}""")
 
 # Machine-local overrides: exclusions strip any tier (FORCED included -
 # excluding a font key stops its forced re-assert); extras join DEFAULTS.
@@ -1748,7 +1703,8 @@ install_brew() {
     # needs to guard the download-heavy steps further down (modern tools, the
     # agent toolkit, ScreenRec's dmg, Antigravity 2.0's dmg) - macOS has no
     # `timeout` in the base OS.
-    brew install coreutils gcc git curl wget jq fzf zsh tmux neovim ripgrep htop tree node@24 python3 cmake ffmpeg sevenzip gh
+    # Names come from .chezmoidata/packages.yaml (see #83).
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
     brew link --overwrite node@24 || true
 {{- else }}
     info "Core packages disabled in config"
@@ -1756,18 +1712,17 @@ install_brew() {
 
 {{- if $modern_cli }}
     # Modern CLI tools
-    brew install bat eza fd git-delta zoxide starship direnv lazygit gum tealdeer dust duf procs || true
-    brew install shellcheck shfmt || warn "shellcheck/shfmt install failed - continuing"
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "modern_cli" "catalog" .catalog.packages) }} || warn "modern_cli brew install failed - continuing"
 {{- end }}
 
 {{- if $fonts }}
     # Fonts - MesloLGS NF is a great Nerd Font for Starship
-    brew install --cask font-meslo-lg-nerd-font || true
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "fonts" "catalog" .catalog.packages) }} || true
 {{- end }}
 
 {{- if $remote_access }}
-    brew install --cask tailscale-app || warn "tailscale-app install failed - continuing"
-    brew install cloudflared || warn "cloudflared install failed - continuing"
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access cask install failed - continuing"
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access brew install failed - continuing"
 {{- end }}
 
 {{- if $remote_access_server }}
@@ -2114,7 +2069,7 @@ PYEOF
     # Installed one-by-one (like the Linux apt loop and the Windows choco loop)
     # so a single unavailable/pulled cask surfaces a warning instead of being
     # swallowed silently by a trailing `|| true` (see the filezilla note above).
-    for cask in google-chrome visual-studio-code ghostty obs docker meld flameshot vlc rectangle raycast qbittorrent ghostscript handy termius geany codexbar; do
+    for cask in {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "dev_desktop" "catalog" .catalog.packages) }}; do
         brew install "$cask" || warn "Skipping '$cask' (brew install failed)."
     done
 

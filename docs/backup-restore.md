@@ -4,6 +4,22 @@ This guide covers the supported backup and recovery flow across **Windows**, **W
 
 ---
 
+## What This Is For
+
+**Disaster recovery for this machine.** The drive dies, the laptop is lost or replaced, the OS is reinstalled — you restore and you are back, including SSH access to every host you had.
+
+Private keys are in the archive deliberately. Not every key can be re-registered from the other end: a GitHub key you can replace in the web UI, but a key authorising you to a server may be the only thing that gets you back into that server. Losing it is not an inconvenience, it is losing access.
+
+**This is not how you set up an additional machine.** For a second machine that will run alongside this one, give it its own keys and register those — see [SSH Agents](ssh-agents.md). Private keys live in exactly one place per machine, and the agent lends signing ability to WSL and devcontainers without copying anything. Restoring this archive onto a live second machine would put the same key in two places and make rotation a hunt.
+
+`dotrestore` enforces the distinction in practice: it **refuses to overwrite** an existing chezmoi config or any existing file under `~/.ssh`. A restore onto a machine that already has keys stops rather than merging.
+
+### When a key rotates
+
+An archive is a snapshot. After rotating or adding a key, take a new backup and destroy the old archives — otherwise the oldest archive still holds a key you believe you retired. `dotbackup` prints how many private key files it captured, so you can see the count change.
+
+---
+
 ## What Is Backed Up
 
 `dotbackup` creates a portable, AES-256 encrypted 7-Zip archive with encrypted archive headers (`-mhe=on`). The archive path is:
@@ -53,6 +69,8 @@ It creates the same AES-256, header-encrypted `.7z` archive under `~/.dot_backup
 The scripts do not upload backups. After creating one, manually copy the encrypted `.7z` archive to independent storage or to the destination machine, for example by USB drive, cloud storage, or SCP/SFTP. Keep the archive and its password-manager passphrase separate.
 
 Because the archive is portable, a backup created on Windows, Linux, macOS, or WSL can be restored on another supported platform. Do not unpack or recreate the archive by hand.
+
+"The destination machine" here means a **replacement** for the one that was backed up - a rebuild, a reinstall, new hardware after a failure. For a machine that will run *alongside* it, see [What This Is For](#what-this-is-for) above: that case wants its own keys, not a copy of these.
 
 ---
 

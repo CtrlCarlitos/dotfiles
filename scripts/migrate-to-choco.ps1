@@ -15,9 +15,8 @@ confirmation each time - NEVER automatically.
 Risk notes are per app; tailscale (live VPN - uninstalling drops your tailnet
 connection mid-run) requires typing its name to proceed even after Y.
 
-The package universe below mirrors every choco package the installer can
-manage (keep in sync with run_onchange_install_packages.ps1.tmpl's
-$packages lists - the contract test enforces the marker line both sides).
+The package universe is read from .chezmoidata/packages.yaml at runtime - the
+same catalog the installer renders its lists from - so nothing here can drift.
 #>
 param([switch]$ListOnly)
 
@@ -41,29 +40,28 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
     Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
 }
 
-# --- package universe: mirrors the installer's choco $packages lists -------
-# MIGRATE-UNIVERSE-MARKER (kept in sync with run_onchange_install_packages.ps1.tmpl)
-# The installer side carries the same marker via its advisory block.
-$Universe = @(
-    # core
-    'gsudo', 'powershell-core', 'psmux', 'python', 'wsl2', 'tree', '7zip.install', 'cmake', 'ffmpeg',
-    # modern_cli
-    'bat', 'eza', 'fd', 'delta', 'starship', 'zoxide', 'direnv', 'lazygit', 'tealdeer', 'dust', 'duf', 'procs', 'shellcheck', 'shfmt', 'pstop',
-    # fonts
-    'nerd-fonts-meslo',
-    # dev_desktop
-    'qbittorrent', 'sharex', 'meld', 'wiztree', 'termius', 'vlc', 'handy',
-    # remote_access
-    'tailscale', 'cloudflared',
-    # agent groups
-    'act-cli', 'antigravity-cli', 'claude', 'antigravity', 'opencode-desktop'
-)
-
-$RiskNotes = @{
-    'tailscale' = 'LIVE VPN - uninstalling drops your tailnet connection until choco reinstall completes. Requires typing the name to confirm.'
-    'handy'     = 'Activation/settings may live in the install directory and can be lost.'
-    'claude'    = 'App data stays in the profile; only the app itself is replaced.'
-    'termius'   = 'Signed-in state lives in the profile; the app itself is replaced.'
+# --- package universe: read from the catalog at runtime --------------------
+# .chezmoidata/packages.yaml is the only list (see #83). The installer renders
+# its $packages from it; this script asks chezmoi for the same records, so
+# there is no mirror to keep in sync. Two fields drive this script:
+#   migrate: false  -> never a candidate (migrate_reason says why)
+#   migrate_risk    -> a candidate, but the consequence is shown before asking
+# chezmoi is a hard prerequisite here already: this script is invoked through
+# `chezmoi source-path`.
+$__catalogJson = ''
+try { $__catalogJson = (chezmoi execute-template '{{ .catalog.packages | toJson }}' | Out-String).Trim() } catch {}
+if (-not $__catalogJson) {
+    Write-Host 'Could not read the package catalog from chezmoi data - is chezmoi initialised?' -ForegroundColor Red
+    exit 1
+}
+$Universe = @()
+$RiskNotes = @{}
+foreach ($__rec in ($__catalogJson | ConvertFrom-Json)) {
+    $__p = $__rec.PSObject.Properties
+    if (-not $__p['choco']) { continue }
+    if ($__p['migrate'] -and $__rec.migrate -eq $false) { continue }
+    $Universe += $__rec.choco
+    if ($__p['migrate_risk']) { $RiskNotes[$__rec.choco] = $__rec.migrate_risk }
 }
 
 # --- detection: same registry normalization as the installer ----------------

@@ -13,6 +13,99 @@
 # installed sets; gitlens and todo-tree are explicitly VETOED by the
 # operator - do not re-add (contract-enforced).
 vscode:
+  # VS Code settings, in ONE place. Both installer twins render from here, so a
+  # change is one edit instead of two in different syntaxes (a PowerShell
+  # [ordered]@{} and a Python dict) that drift apart - which is exactly what
+  # happened when the terminal tiers were last touched. The rationale for each
+  # setting lives here too, rather than being duplicated as comments in both.
+  #
+  # Tiers, applied in this order by both installers:
+  #   forced    re-asserted on every run; your edit is overwritten (consistency
+  #             mandate - the font is the whole point of installing a Nerd Font)
+  #   defaults  written only when the key is absent; your value wins afterwards
+  #   merges    object keys that gain missing sub-keys only (junk + colors)
+  #   unset     keys removed when present
+  settings:
+    forced:
+      editor.fontFamily: MesloLGS Nerd Font Mono
+      terminal.integrated.fontFamily: MesloLGS Nerd Font Mono
+
+    defaults:
+      files.autoSave: afterDelay
+      files.autoSaveDelay: 500
+      files.eol: "\n"
+      files.insertFinalNewline: true
+      files.trimFinalNewlines: true
+      files.trimTrailingWhitespace: true
+      explorer.compactFolders: false
+      editor.minimap.enabled: false
+      editor.wordWrap: "on"
+      editor.formatOnSave: true
+      diffEditor.ignoreTrimWhitespace: false
+      diffEditor.wordWrap: "on"
+      workbench.startupEditor: none
+      terminal.integrated.scrollback: 30000
+      terminal.integrated.shellIntegration.enabled: true
+      # Terminal parity with Windows Terminal (12pt there ~= 16px here).
+      terminal.integrated.fontSize: 16
+      # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline) instead
+      # of toggling the sidebar / panel while the terminal has focus.
+      terminal.integrated.commandsToSkipShell:
+        - -workbench.action.toggleSidebarVisibility
+        - -workbench.action.togglePanel
+      # Clipboard parity with Windows Terminal (copyOnSelect).
+      terminal.integrated.copyOnSelection: true
+      terminal.integrated.rightClickBehavior: paste
+      cSpell.language: en,es
+
+    # Windows only. Shift+Enter (newline) for the agent CLIs: Windows programs
+    # sit behind ConPTY, which forwards the Shift modifier only when the terminal
+    # speaks win32-input-mode. Windows Terminal always does; VS Code only with
+    # this (experimental, default off). The kitty protocol cannot help - ConPTY
+    # drops it. The .sh twin must NOT render these.
+    defaults_windows:
+      terminal.integrated.enableWin32InputMode: true
+
+    # MERGE tier: these globs are added to files.exclude / search.exclude as
+    # <glob>: true, without disturbing entries you added yourself.
+    junk:
+      - "**/__pycache__/**"
+      - "**/.venv/**"
+      - "**/venv/**"
+      - "**/node_modules/**"
+      - "**/*.pyc"
+
+    # UNSET tier. remote.SSH.configFile pointed Remote-SSH at a hand-kept config
+    # outside ~/.ssh, so its hosts never reached ssh.exe, Windows Terminal or
+    # chezmoi. Unset, Remote-SSH reads ~/.ssh/config like everything else.
+    unset:
+      - remote.SSH.configFile
+
+    # MERGE tier: Catppuccin Mocha for the integrated terminal ONLY - the same
+    # palette Windows Terminal and Ghostty use. The editor theme is left alone,
+    # and any colour you set yourself wins.
+    terminal_colors:
+      terminal.background: "#1E1E2E"
+      terminal.foreground: "#CDD6F4"
+      terminalCursor.foreground: "#F5E0DC"
+      terminal.selectionBackground: "#585B70"
+      terminal.ansiBlack: "#45475A"
+      terminal.ansiRed: "#F38BA8"
+      terminal.ansiGreen: "#A6E3A1"
+      terminal.ansiYellow: "#F9E2AF"
+      terminal.ansiBlue: "#89B4FA"
+      terminal.ansiMagenta: "#F5C2E7"
+      terminal.ansiCyan: "#94E2D5"
+      terminal.ansiWhite: "#BAC2DE"
+      terminal.ansiBrightBlack: "#585B70"
+      terminal.ansiBrightRed: "#F38BA8"
+      terminal.ansiBrightGreen: "#A6E3A1"
+      terminal.ansiBrightYellow: "#F9E2AF"
+      terminal.ansiBrightBlue: "#89B4FA"
+      terminal.ansiBrightMagenta: "#F5C2E7"
+      terminal.ansiBrightCyan: "#94E2D5"
+      terminal.ansiBrightWhite: "#A6ADC8"
+
   extensions:
     # Tier 1 - editor core
     - EditorConfig.EditorConfig

@@ -56,11 +56,25 @@ try {
     }
 
     & $sevenZip 'a' '-t7z' '-mhe=on' '-p' $archive $payloadRoot
+    # Twin of the .sh notice: say what the archive holds. Counted by exclusion
+    # so nothing here ever opens a private key.
+    $keyCount = 0
+    $sshRoot = Join-Path $HOME '.ssh'
+    if (Test-Path -LiteralPath $sshRoot) {
+        $skip = @('config', 'known_hosts', 'known_hosts.old', 'authorized_keys', 'environment')
+        $keyCount = @(Get-ChildItem -LiteralPath $sshRoot -File -Recurse |
+            Where-Object { $_.Extension -ne '.pub' -and $skip -notcontains $_.Name }).Count
+    }
+
     if ($LASTEXITCODE -ne 0) {
         throw "7-Zip failed while creating backup (exit code $LASTEXITCODE)."
     }
 
     Write-Output "Backup created: $archive"
+    Write-Output "  Contains $keyCount private key file(s) from ~/.ssh. Treat this archive as key material."
+    Write-Output "  This is disaster recovery for THIS machine, not a way to set up another one:"
+    Write-Output "  give an additional machine its own keys instead (docs/ssh-agents.md)."
+    Write-Output "  Re-run after rotating a key - older archives still hold the old ones."
 }
 finally {
     if (Test-Path -LiteralPath $stage) {

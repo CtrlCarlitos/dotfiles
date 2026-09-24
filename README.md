@@ -26,6 +26,8 @@ iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/insta
 
 That's it. You'll be asked to confirm, then a **menu appears** — pick what you want and press Enter. Packages install, dotfiles apply, and you have a working environment.
 
+> 🌱 **New here?** [**Quickstart**](docs/quickstart.md) — install, what you got, the four commands you will use, and a ten-minute check that it all works.
+
 > 📺 **What the menu looks like:** [docs/menu-demo.md](docs/menu-demo.md)
 
 ### Don't know what to pick?
@@ -211,6 +213,7 @@ New to zsh, tmux, or neovim? Start here:
 
 | Doc | What's in it |
 |-----|-------------|
+| [Quickstart](docs/quickstart.md) | Ten minutes from a fresh machine to a working environment |
 | [Invariants](docs/invariants.md) | Rules this repo learned the expensive way — read before changing templates, ignores or tests |
 | [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
