@@ -46,4 +46,4 @@ vscode:
     - ms-vscode-remote.remote-wsl
 
 guardrail:
-  version: v0.23.0-dev
+  version: v0.23.1-dev

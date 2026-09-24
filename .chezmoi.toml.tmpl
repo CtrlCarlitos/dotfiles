@@ -103,10 +103,11 @@
     # remote_access_server - explicit SSH-server prerequisite opt-in; never preset.
     remote_access_server = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access_server" "Install remote_access_server prerequisites (manual SSH setup required)?" false }}{{ else }}false{{ end }}
 
-    # guardrail - agent guardrails (guardrail binary + per-CLI planes)
-    # guardrail - agent guardrails, single desired-state flag: true = install
-    # binary + enable planes; false = never download, disable planes if a
-    # binary exists (binary is never auto-removed).
+    # guardrail - agent guardrails, single desired-state flag handed to the
+    # agent-guardrails installer: true = install/upgrade the binary and
+    # register planes with your approval; false = disable planes if a binary
+    # is already installed. The binary itself is never removed by the
+    # dotfiles.
     guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
 
     # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
