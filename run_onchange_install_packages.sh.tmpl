@@ -1430,12 +1430,22 @@ for k in ("serena", "graft"):
         changed = True
 if not changed:
     sys.exit(0)
-if servers:
-    with open(p, "w") as f:
-        json.dump(cfg, f, indent=2)
-else:
-    os.remove(p)
+# Never delete: guardrail's antigravity coverage check (the `guardrail
+# setup` gate) fails hard on an absent or 0-byte file (agent-guardrails#334);
+# an empty mcpServers object reads as "none".
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write(chr(10))
 PYEOF
+    fi
+    # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
+    # object (guardrail's coverage gate cannot read either state,
+    # agent-guardrails#334). A non-empty file is never touched here.
+    if [ ! -s "$AGY_GLOBAL_MCP" ]; then
+        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" &&
+            printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP" &&
+            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)" ||
+            warn "could not repair agy global mcp_config.json - continuing"
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
@@ -1891,12 +1901,22 @@ for k in ("serena", "graft"):
         changed = True
 if not changed:
     sys.exit(0)
-if servers:
-    with open(p, "w") as f:
-        json.dump(cfg, f, indent=2)
-else:
-    os.remove(p)
+# Never delete: guardrail's antigravity coverage check (the `guardrail
+# setup` gate) fails hard on an absent or 0-byte file (agent-guardrails#334);
+# an empty mcpServers object reads as "none".
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write(chr(10))
 PYEOF
+    fi
+    # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
+    # object (guardrail's coverage gate cannot read either state,
+    # agent-guardrails#334). A non-empty file is never touched here.
+    if [ ! -s "$AGY_GLOBAL_MCP" ]; then
+        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" &&
+            printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP" &&
+            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)" ||
+            warn "could not repair agy global mcp_config.json - continuing"
     fi
 
     # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
