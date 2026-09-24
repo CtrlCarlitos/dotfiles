@@ -1540,7 +1540,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # GPT/Stitch variants and v1 left out (docs/skills-install-strategy.md).
     Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
     Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -Action {
-        $skAgents = @('claude-code', 'opencode', 'codex')
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
