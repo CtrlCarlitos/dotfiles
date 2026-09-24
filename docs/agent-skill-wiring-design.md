@@ -67,6 +67,8 @@ frontend-design
 find-skills
 agent-browser
 skill-creator
+design-taste-frontend
+redesign-existing-projects
 ```
 
 The existing source-specific fetch logic remains responsible for downloading
