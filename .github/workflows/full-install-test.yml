@@ -84,9 +84,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            # plane enable --all needs an interactive WebAuthn approval that CI
-            # cannot complete (exit 2 on non-terminal stdin fails the run by
-            # contract) - guardrail is exercised on real machines instead.
+            # the agent-guardrails installer runs guardrail setup, which needs
+            # a terminal and a passkey approval CI cannot give (exit 2 without
+            # a terminal fails the run by contract) - guardrail is exercised
+            # on real machines instead.
             guardrail = false
           "@ | Out-File -FilePath "$env:USERPROFILE\.config\chezmoi\chezmoi.toml" -Encoding utf8
 
@@ -245,9 +246,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            # plane enable --all needs an interactive WebAuthn approval that CI
-            # cannot complete (exit 2 on non-terminal stdin fails the run by
-            # contract) - guardrail is exercised on real machines instead.
+            # the agent-guardrails installer runs guardrail setup, which needs
+            # a terminal and a passkey approval CI cannot give (exit 2 without
+            # a terminal fails the run by contract) - guardrail is exercised
+            # on real machines instead.
             guardrail = false
           EOF
 
@@ -352,9 +354,10 @@ jobs:
             dev_desktop = true
             remote_access = true
             remote_access_server = false
-            # plane enable --all needs an interactive WebAuthn approval that CI
-            # cannot complete (exit 2 on non-terminal stdin fails the run by
-            # contract) - guardrail is exercised on real machines instead.
+            # the agent-guardrails installer runs guardrail setup, which needs
+            # a terminal and a passkey approval CI cannot give (exit 2 without
+            # a terminal fails the run by contract) - guardrail is exercised
+            # on real machines instead.
             guardrail = false
           EOF
 

@@ -227,7 +227,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
 | [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
-| [Guardrail Install](docs/guardrail-install.md) | The agent-guardrails system's design doc |
+| [Guardrail Install](docs/guardrail-install.md) | How the dotfiles call the agent-guardrails installer |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
 
 ## ❓ Troubleshooting

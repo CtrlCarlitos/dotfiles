@@ -37,7 +37,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **act** (local GitHub Actions) | install script | install script | `choco install act-cli` | `brew install act` | ❌ | Re-run the install method for your platform. Note: act runs every job inside Docker, and this repo's isDevcontainer check treats any container as one, so it can validate script/template syntax but can never exercise `core`/`agent_toolkit`/etc content - confirmed this session, had to fall back to isolated `docker run` tests instead |
 | **Serena** | `uv tool install -p 3.13 serena-agent` | same | same | same (uv works in WSL) | ❌ | `uv tool upgrade serena-agent`. uv auto-manages Python 3.13 - no system Python needed. Claude checks `claude mcp get serena` before `serena setup claude-code`; Codex uses `serena setup codex`; OpenCode merges its global `mcp` key (graft too); Antigravity gets both via the dotfiles-mcp plugin bundle (eager start). See docs/agent-context-tools.md |
 | **Graft** | `npm i -g @nanonets/graft` (with `--allow-scripts` allowlist for its tree-sitter native builds) | same | same | same | ❌ | `graft upgrade`. Per-repo activation is separate and manual: `graft init` (or e.g. `graft init --agents claude agents`) + `graft build` writes the gitignored local `graft/` graph. Telemetry disabled by the installer. See docs/agent-context-tools.md |
-| guardrail | opt-in flag: pinned curl+SHA256SUMS bootstrap → `~/.local/bin`, then `guardrail update <pin>` + `guardrail plane enable\|disable --all` (desired state from `packages.guardrail`) | same | pinned `.exe` → `%USERPROFILE%\.local\bin` (checksum + Unblock-File) + `gen-config --merge` per plane (no plane/update on Windows this release) | same as Linux | not installed (no `claude` there) | bump `guardrail.version` in `.chezmoidata.yaml` (single source of truth - templates render it, updaters read it at runtime), re-`chezmoi update` (Unix self-updates via `guardrail update`) |
+| guardrail | opt-in flag: fetch + verify the pinned release's `install.sh`, run it with `--version <pin> --state <enabled\|disabled>` (desired state from `packages.guardrail`) | same | opt-in flag: fetch + verify the pinned release's `install.ps1`, run it with `-Version <pin> -State <enabled\|disabled>` | same as Linux | not installed (no `claude` there) | bump `guardrail.version` in `.chezmoidata.yaml` (single source of truth - templates render it, updaters read it at runtime), re-`chezmoi update` (the new tag's installer updates the binary and re-runs `guardrail setup`) |
 
 > **Note on Updates**: Most AI tools do not have a built-in auto-updater. We recommend running `npm update -g` regularly for the npm-based tools. For native tools like Claude and OpenCode, re-running the installation command usually fetches the latest version.
 
@@ -66,15 +66,15 @@ This document outlines the tools installed by the dotfiles configuration across 
 > `antigravity_desktop` group. `agy`, its Superpowers plugin, and the
 > curated skills set all live under `antigravity_cli`.
 
-> **guardrail** is gated by the `guardrail` group (default true). It downloads the
-> pinned `CtrlCarlitos/agent-guardrails` release, verifies it against the release
-> `SHA256SUMS`, installs it to
-> `~/.local/bin/guardrail`, and wires all three planes it supports today —
-> Claude, OpenCode, and Antigravity — via `guardrail gen-config <plane> --merge …`,
-> each plane's wiring independently guarded on that tool being present.
-> Independent of `agent_toolkit` — the installer call sites are hoisted out of
-> that gate. See docs/guardrail-install.md. On stock macOS, checksum verification
-> falls back to `shasum -a 256` when GNU `sha256sum`/`gsha256sum` is unavailable.
+> **guardrail** is gated by the `guardrail` group (prompted, default true;
+> non-interactive default false). The dotfiles download the pinned
+> `CtrlCarlitos/agent-guardrails` release's `install.sh` / `install.ps1`, verify
+> it against that release's `SHA256SUMS`, and run it with the pin and the desired
+> state. The installer does the rest: it downloads and verifies the binary,
+> installs it to `~/.local/bin/guardrail` (`%USERPROFILE%\.local\bin\guardrail.exe`),
+> and runs `guardrail setup`, which registers every detected agent host with one
+> passkey approval. Independent of `agent_toolkit` — the installer call sites
+> are hoisted out of that gate. See docs/guardrail-install.md.
 > The Linux/WSL shfmt release binary is also checksum-verified before installation.
 
 ## Core & Modern CLI Tools

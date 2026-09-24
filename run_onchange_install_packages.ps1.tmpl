@@ -70,8 +70,8 @@ if (-not $__dotupMutex.WaitOne(0)) {
 }
 
 # Cross-generation PSModulePath guard (see run_onchange_generate_identities.
-# ps1.tmpl for the full story): this script's Get-FileHash/Unblock-File live
-# in Microsoft.PowerShell.Utility, the same broken-autoload class as
+# ps1.tmpl for the full story): this script's Get-FileHash lives in
+# Microsoft.PowerShell.Utility, the same broken-autoload class as
 # Security's Set-Acl when 5.1 inherits pwsh 7's module path. Strip the Core
 # module dirs under 5.1 so in-box modules resolve.
 if ($PSVersionTable.PSVersion.Major -le 5) {
@@ -1233,8 +1233,8 @@ if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'li
 }
 # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
 # split out of agent_toolkit per the spec's placement rule). choco install +
-# superpowers-for-OpenCode wiring; guardrail's opencode plane stays
-# presence-gated in the guardrail section, and the Serena MCP registration
+# superpowers-for-OpenCode wiring; guardrail's opencode plane wiring is
+# done by the agent-guardrails installer, and the Serena MCP registration
 # into opencode.json stays with Serena in agent_toolkit.
 
 # OpenCode (choco). NOT npm: opencode-ai's npm package only fetches
@@ -1312,7 +1312,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 
         # Both writes below must be BOM-less UTF-8: PS 5.1's
         # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
-        # gen-config (Go) refuses to merge into BOM'd JSON - confirmed live:
+        # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
         # "invalid character 'ï' looking for beginning of value" failed
         # every Windows CI run's opencode wiring while the BOM-less Linux
         # side merged fine. Same WriteAllLines idiom as the mp-code-review
@@ -1423,9 +1423,9 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 
 {{- if $chatgpt_cli }}
 # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-# superpowers/skills/guardrail have no codex surface (the skills and
-# guardrail passes stay presence-gated on their own CLIs; only this npm
-# install lives here).
+# superpowers/skills have no codex surface (the skills pass stays
+# presence-gated on its own CLIs; guardrail's plane wiring is done by the
+# agent-guardrails installer; only this npm install lives here).
 Install-Node
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "Installing Codex CLI..." -ForegroundColor Cyan

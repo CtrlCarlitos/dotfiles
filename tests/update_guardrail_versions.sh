@@ -40,13 +40,12 @@ for file in "$sh_updater" "$ps1_updater"; do
         fail "$file: does not read the pin via chezmoi execute-template"
 done
 
-# 4. No stray literal pins anywhere in the four consumers. The one allowed
-#    literal is GUARDRAIL_UPDATE_FLOOR - a fixed historical fact (the first
-#    release shipping `guardrail update`), not a pin that ever gets bumped.
+# 4. No stray literal pins anywhere in the four consumers (the self-update
+#    floor they once carried now lives in the agent-guardrails installer).
 #    awk (not grep -Ev | grep -q) so the scan is deterministic: a -q early
 #    exit can SIGPIPE the first grep and nondeterministically drop lines.
 for file in "$sh_installer" "$ps1_installer" "$sh_updater" "$ps1_updater"; do
-    awk '/GUARDRAIL_UPDATE_FLOOR/ {next} /v[0-9]+\.[0-9]+\.[0-9]+-dev/ {bad = 1} END {exit bad ? 1 : 0}' "$file" ||
+    awk '/v[0-9]+\.[0-9]+\.[0-9]+-dev/ {bad = 1} END {exit bad ? 1 : 0}' "$file" ||
         fail "$file: contains a hardcoded vX.Y.Z-dev pin - bump .chezmoidata.yaml instead"
 done
 
