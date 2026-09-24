@@ -285,7 +285,7 @@ if [ "$guardrail_enabled" = "true" ]; then
 elif [ -x "$guardrail_dest" ]; then
     guardrail_state="disabled"
 fi
-if [ "$guardrail_enabled" = "true" ] && [ -z "$GUARDRAIL_VERSION" ]; then
+if [ -n "$guardrail_state" ] && [ -z "$GUARDRAIL_VERSION" ]; then
     echo "  guardrail: pin unavailable from chezmoi data - skipping guardrail steps"
 elif [ -z "$guardrail_state" ]; then
     echo "  guardrail disabled in config - nothing to do"
@@ -298,7 +298,7 @@ else
         rm -rf "$gtmp"
     else
         # stock macOS ships `shasum`, not `sha256sum` — without this the
-        # pipeline returns 127 and the run is skipped under a message that
+        # check returns 127 and the run is skipped under a message that
         # misattributes it to a checksum mismatch.
         GUARDRAIL_SHA_CMD=""
         if command -v sha256sum &>/dev/null; then GUARDRAIL_SHA_CMD="sha256sum"
@@ -308,7 +308,12 @@ else
         if [ -z "$GUARDRAIL_SHA_CMD" ]; then
             echo "  guardrail: no SHA-256 tool found - cannot verify installer, skipping"
             rm -rf "$gtmp"
-        elif ! ( cd "$gtmp" && grep " install.sh\$" SHA256SUMS | $GUARDRAIL_SHA_CMD -c - ); then
+        # Verify from a one-line file, not stdin (like agent-guardrails' own
+        # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read
+        # `-c -`. No install.sh line fails the grep, so a partial SHA256SUMS
+        # fail-closes.
+        elif ! ( cd "$gtmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
+            $GUARDRAIL_SHA_CMD -c SHA256SUMS.one ); then
             echo "  guardrail: installer CHECKSUM MISMATCH - not running it"
             rm -rf "$gtmp"
         else

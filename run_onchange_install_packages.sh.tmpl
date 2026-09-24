@@ -536,7 +536,7 @@ install_agent_guardrails() {
         ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "$base/SHA256SUMS"; then
         warn "guardrail: installer download failed or timed out - skipping"; rm -rf "$tmp"; return
     fi
-    # stock macOS ships `shasum`, not `sha256sum` — without this the pipeline
+    # stock macOS ships `shasum`, not `sha256sum` — without this the check
     # returns 127 and the run is skipped under a message that misattributes it
     # to a checksum mismatch.
     local SHA_CMD
@@ -544,7 +544,11 @@ install_agent_guardrails() {
     elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
     elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
     else warn "guardrail: no SHA-256 tool found - cannot verify installer, skipping"; rm -rf "$tmp"; return; fi
-    if ! ( cd "$tmp" && grep " install.sh\$" SHA256SUMS | $SHA_CMD -c - ); then
+    # Verify from a one-line file, not stdin (like agent-guardrails' own
+    # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read `-c -`.
+    # No install.sh line fails the grep, so a partial SHA256SUMS fail-closes.
+    if ! ( cd "$tmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
+        $SHA_CMD -c SHA256SUMS.one ); then
         warn "guardrail: installer CHECKSUM MISMATCH - not running it"; rm -rf "$tmp"; return
     fi
 
