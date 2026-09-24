@@ -147,6 +147,13 @@ if command -v npx &>/dev/null; then
         record_cli_result failed 2
         echo "   taste skills update failed - skipping"
     fi
+    # code-search (CtrlCarlitos/skills) - search-tool escalation: graft > serena > rg > grep, probed once per session
+    if "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
+        record_cli_result installed 1
+    else
+        record_cli_result failed 1
+        echo "   code-search update failed - skipping"
+    fi
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
@@ -251,10 +258,10 @@ if command -v npx &>/dev/null; then
     echo "   Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
     echo "   Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 else
-    echo "   Curated skills: Claude Code installed=0 skipped=18 failed=0"
-    echo "   Curated skills: OpenCode installed=0 skipped=18 failed=0"
-    echo "   Curated skills: Antigravity installed=0 skipped=18 failed=0"
-    echo "   Curated skills: Codex installed=0 skipped=18 failed=0"
+    echo "   Curated skills: Claude Code installed=0 skipped=19 failed=0"
+    echo "   Curated skills: OpenCode installed=0 skipped=19 failed=0"
+    echo "   Curated skills: Antigravity installed=0 skipped=19 failed=0"
+    echo "   Curated skills: Codex installed=0 skipped=19 failed=0"
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

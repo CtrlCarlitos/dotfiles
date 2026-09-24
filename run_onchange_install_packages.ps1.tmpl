@@ -1454,7 +1454,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # are deliberately self-contained (literal args + $env:TEMP only).
 function Write-CuratedSkillsSkippedSummary {
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=18 failed=0"
+        Write-Host "  Curated skills: $agent installed=0 skipped=19 failed=0"
     }
 }
 
@@ -1542,6 +1542,20 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -Action {
         $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
         npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    }
+
+    # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
+    # Probes once per session which tools can see the code (graft graph built
+    # and covering the language, serena LSP, rg, grep), routes each question
+    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
+    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
+    # task" block cost every session in this repo two empty queries (the graph
+    # covers one Lua file here) - docs/skills-install-strategy.md.
+    Write-Host "  Installing code-search skill..." -ForegroundColor Yellow
+    Invoke-WithTimeout -Description "code-search skill install" -Seconds 300 -Action {
+        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
     }
 
