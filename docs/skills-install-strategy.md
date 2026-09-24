@@ -241,6 +241,28 @@ matches; the repo folders are named differently (`taste-skill/`,
 `redesign-skill/`). The wiring contract test checks the on-disk `SKILL.md`,
 so a renamed skill fails loudly on the next apply rather than silently.
 
+## Curated set widened (2026-09-24): +1 home-grown skill, `code-search`
+
+Our own skill, from `CtrlCarlitos/skills` (MIT). It fixes a failure seen in
+practice on 2026-09-24: graft's fenced AGENTS.md block tells the agent to
+query the graph "for ANY task", but in this repo the graph covers one Lua
+file (no parser for PowerShell, shell or chezmoi templates), so every session
+burned two empty graph queries before falling back to grep, while graft's
+prompt hook kept nagging "run graft ask".
+
+| Skill | Source | What it does |
+| :-- | :-- | :-- |
+| `code-search` | `CtrlCarlitos/skills` | probe once per session which tools can see the code (graft graph built and covering the language, serena LSP for the language, rg, grep), classify the question (structural, textual, API surface, historical, non-code), route down the ladder graft > serena > rg > grep, read hits at the exact range, and stop re-asking a semantic tool after one empty result |
+
+```sh
+npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a claude-code opencode codex -g -y --copy
+```
+
+Overlap, accepted on purpose: graft's own skill (`~/.claude/skills/graft`,
+written by `graft init`) and its AGENTS.md block still say "graph first".
+`code-search` is the gate in front of them: it keeps graft when the probe says
+the graph covers the code and drops it for the session otherwise.
+
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
@@ -317,6 +339,9 @@ Skills of interest: `plan-devex-review`, `devex-review`, `qa-only`,
     from `Leonxlnx/taste-skill` added to all four files as one two-name
     `skills add` (see "Curated set widened (2026-09-24)"); expected-call
     count now 7, catalog fallback `skipped=18`.
+8. ✅ 2026-09-24: `code-search` from `CtrlCarlitos/skills` added to all four
+    files (see "Curated set widened (2026-09-24): +1 home-grown skill");
+    expected-call count now 8, catalog fallback `skipped=19`.
 
 Not done / open:
 - ~~`-a antigravity` unverified with `agy` present on a box~~ **Verified

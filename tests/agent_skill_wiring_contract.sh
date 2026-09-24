@@ -33,6 +33,7 @@ required_skills=(
     writing-for-agents resolving-merge-conflicts mp-code-review frontend-design
     find-skills agent-browser skill-creator
     design-taste-frontend redesign-existing-projects
+    code-search
 )
 failed=false
 scope="${AGENT_SKILL_WIRING_SCOPE:-all}"
@@ -79,7 +80,7 @@ verify_unix_no_npx_summaries() {
     output="$(PATH="$tmp/bin" "$BASH" "$harness")"
 
     for agent in 'Claude Code' OpenCode Antigravity Codex; do
-        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=18 failed=0" <<< "$output"; then
+        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=19 failed=0" <<< "$output"; then
             fail "Unix updater must report skipped curated skills without npx for $agent"
         fi
     done
@@ -538,10 +539,10 @@ verify_windows_summary_fallbacks() {
     cat > "$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
 $summaryRows = @(
-    'Curated skills: Claude Code installed=0 skipped=18 failed=0',
-    'Curated skills: OpenCode installed=0 skipped=18 failed=0',
-    'Curated skills: Antigravity installed=0 skipped=18 failed=0',
-    'Curated skills: Codex installed=0 skipped=18 failed=0'
+    'Curated skills: Claude Code installed=0 skipped=19 failed=0',
+    'Curated skills: OpenCode installed=0 skipped=19 failed=0',
+    'Curated skills: Antigravity installed=0 skipped=19 failed=0',
+    'Curated skills: Codex installed=0 skipped=19 failed=0'
 )
 
 function Invoke-Lifecycle {
