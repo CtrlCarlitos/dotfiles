@@ -131,6 +131,9 @@ jobs:
       - name: Test documentation consistency
         run: bash tests/docs_consistency.sh
 
+      - name: Test documentation structure (TODOs, links, anchors, settings)
+        run: bash tests/docs_contracts.sh
+
       - name: Test remote access docs
         run: bash tests/remote_access_docs.sh
 
