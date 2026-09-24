@@ -246,9 +246,10 @@ if ($guardrailState -and -not $guardrailVersion) {
     Write-Host "  guardrail disabled in config - nothing to do"
 } else {
     $guardrailRepo = "CtrlCarlitos/agent-guardrails"
-    $guardrailTmp  = "$env:TEMP\guardrail-installer"
+    # Unique per run (like agent-guardrails' own install.ps1), so a stale or
+    # concurrent run's files can never be picked up; every path below removes it.
+    $guardrailTmp  = Join-Path $env:TEMP ("guardrail-installer-" + [guid]::NewGuid().ToString('N'))
     $guardrailBase = "https://github.com/$guardrailRepo/releases/download/$guardrailVersion"
-    Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $guardrailTmp | Out-Null
     try {
         # TLS 1.2 first: PS 5.1 defaults can still refuse GitHub's TLS.

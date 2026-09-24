@@ -1711,8 +1711,9 @@ $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
 $guardrailExe     = "$env:USERPROFILE\.local\bin\guardrail.exe"
 function Invoke-GuardrailInstaller {
     param([Parameter(Mandatory)][string]$State)
-    $guardrailTmp = "$env:TEMP\guardrail-installer"
-    Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+    # Unique per run (like agent-guardrails' own install.ps1), so a stale or
+    # concurrent run's files can never be picked up; every path below removes it.
+    $guardrailTmp = Join-Path $env:TEMP ("guardrail-installer-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $guardrailTmp | Out-Null
     # Handoff to the job via $env: - jobs inherit environment variables but
     # NOT session variables (see the NOTE on the skills scriptblocks above),
