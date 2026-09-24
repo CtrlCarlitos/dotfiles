@@ -1508,7 +1508,7 @@ PYEOF
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # stays presence-gated in the guardrail section, and the Serena MCP
+    # wiring is done by the agent-guardrails installer, and the Serena MCP
     # registration into opencode.json stays with Serena in agent_toolkit
     # (same precedent as `serena setup claude-code`).
     # The --version re-check matters: a legacy npm-global opencode-ai shim can
@@ -1624,9 +1624,9 @@ PYEOF
 
 {{- if $chatgpt_cli }}
     # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-    # superpowers/skills/guardrail have no codex surface (the guardrail and
-    # skills passes stay presence-gated on their own CLIs; only this npm
-    # install lives here).
+    # superpowers/skills have no codex surface (the skills pass stays
+    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
+    # agent-guardrails installer; only this npm install lives here).
     install_node
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
@@ -1967,7 +1967,7 @@ PYEOF
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # stays presence-gated in the guardrail section, and the Serena MCP
+    # wiring is done by the agent-guardrails installer, and the Serena MCP
     # registration into opencode.json stays with Serena in agent_toolkit
     # (same precedent as `serena setup claude-code`). No Node prerequisite:
     # the native installer is curl|sh, so this section works standalone even
@@ -2026,9 +2026,9 @@ PYEOF
 
 {{- if $chatgpt_cli }}
     # Codex CLI (@openai/codex via npm). Spec §2: zero wiring by design -
-    # superpowers/skills/guardrail have no codex surface (the guardrail and
-    # skills passes stay presence-gated on their own CLIs; only this npm
-    # install lives here).
+    # superpowers/skills have no codex surface (the skills pass stays
+    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
+    # agent-guardrails installer; only this npm install lives here).
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
@@ -2154,9 +2154,10 @@ PYEOF
 }
 
 #-------------------------------------------------------------------------------
-# AI desktop apps (spec §2: pure installs, zero wiring - superpowers, the
-# curated-skills pass and guardrail planes key off the CLI groups only, per
-# the spec's placement rule; nothing in these functions configures anything).
+# AI desktop apps (spec §2: pure installs, zero wiring - superpowers and the
+# curated-skills pass key off the CLI groups only, per the spec's placement
+# rule, and guardrail's plane wiring is done by the agent-guardrails
+# installer; nothing in these functions configures anything).
 #
 # History: the Google Antigravity Desktop App was removed 2026-09-11 (VS Code
 # + the agy CLI covered that workflow; the old Linux apt repo and the
