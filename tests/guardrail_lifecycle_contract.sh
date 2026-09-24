@@ -13,9 +13,13 @@ set -euo pipefail
 # Each consumer marks its guardrail code with two literal lines:
 #     # guardrail-section: begin
 #     # guardrail-section: end
-# `require`s are whole-file; every `forbid_in_section` applies only between
-# the markers, because other tools' installers in the same files legitimately
-# use `| sh`, `iex`, Unblock-File, Add-MpPreference and PATH edits.
+# The meaningful requires (download URL, SHA256SUMS, both states, the
+# run-from-a-file shape, Tls12) are section-scoped, and the section must hold
+# real code, not just comments - otherwise code moved out of the markers would
+# still pass. The install-era literals only guardrail ever used are forbidden
+# in the WHOLE file, so they cannot come back just outside the markers. Only
+# literals other tools' installers in the same files legitimately use
+# (`| sh`, `iex`, Invoke-Expression, PATH edits) are forbidden section-only.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
@@ -53,13 +57,21 @@ section() {
 
 # The section is captured into a variable before grepping (not piped into
 # grep -q): a -q early exit can SIGPIPE awk and, under pipefail, flip the result.
+# A section of only comments and blank lines counts as empty.
 require_section() { # $1 = file
     local sec
     if ! grep -Fq -- "$begin_marker" "$1" || ! grep -Fq -- "$end_marker" "$1"; then
         fail "$1: guardrail section is empty or markers missing"
     fi
     sec="$(section "$1")"
-    [ -n "$sec" ] || fail "$1: guardrail section is empty or markers missing"
+    grep -Eq '^[[:space:]]*[^[:space:]#]' <<<"$sec" ||
+        fail "$1: guardrail section is empty or markers missing"
+}
+
+require_in_section() { # $1 = file, $2 = literal
+    local sec
+    sec="$(section "$1")"
+    grep -Fq -- "$2" <<<"$sec" || fail "$1: guardrail section is missing $2"
 }
 
 forbid_in_section() { # $1 = file, $2 = literal
@@ -72,10 +84,11 @@ forbid_in_section() { # $1 = file, $2 = literal
 
 common_checks() { # $1 = file
     require_section "$1"
-    require "$1" 'releases/download'
-    require "$1" 'SHA256SUMS'
+    require_in_section "$1" 'releases/download'
+    require_in_section "$1" 'SHA256SUMS'
     # The dotfiles never wire planes, self-update, or fetch a binary asset
-    # any more - all of that is the installer's job.
+    # any more - all of that is the installer's job. Whole-file: none of these
+    # has a legitimate use anywhere in the four consumers.
     local literal
     for literal in \
         'gen-config' \
@@ -88,11 +101,10 @@ common_checks() { # $1 = file
         'Add-MpPreference' \
         'Get-MpPreference' \
         'Unblock-File' \
-        'SetEnvironmentVariable("Path"' \
         'guardrail_linux_' \
         'guardrail_darwin_' \
         'guardrail_windows_'; do
-        forbid_in_section "$1" "$literal"
+        forbid "$1" "$literal"
     done
 }
 
@@ -101,8 +113,8 @@ common_checks() { # $1 = file
 unix_checks() { # $1 = file
     require "$1" 'install.sh'
     require "$1" '--version "'
-    require "$1" '--state enabled'
-    require "$1" '--state disabled'
+    require_in_section "$1" '--state enabled'
+    require_in_section "$1" '--state disabled'
     local sec
     sec="$(section "$1")"
     grep -Eq 'sh +"?\$[A-Za-z_]+/install\.sh"? +--version' <<<"$sec" ||
@@ -116,14 +128,17 @@ unix_checks() { # $1 = file
 windows_checks() { # $1 = file
     require "$1" 'install.ps1'
     require "$1" '-Version'
-    require "$1" '-State enabled'
-    require "$1" '-State disabled'
-    require "$1" 'Tls12'
     require "$1" '-File'
-    forbid_in_section "$1" 'Invoke-Expression'
-    # Whole word, so msiexec does not match.
+    require_in_section "$1" '-State enabled'
+    require_in_section "$1" '-State disabled'
+    require_in_section "$1" 'Tls12'
     local sec
     sec="$(section "$1")"
+    grep -Eq -- '-File +"?\$[A-Za-z_]+\\install\.ps1"? +-Version' <<<"$sec" ||
+        fail "$1: guardrail section does not run install.ps1 with -File (-File \"\$dir\\install.ps1\" -Version ...)"
+    forbid_in_section "$1" 'Invoke-Expression'
+    forbid_in_section "$1" 'SetEnvironmentVariable("Path"'
+    # Whole word, so msiexec does not match.
     ! grep -Eq '(^|[^[:alnum:]_])iex([^[:alnum:]_]|$)' <<<"$sec" ||
         fail "$1: guardrail section must not contain iex"
 }
