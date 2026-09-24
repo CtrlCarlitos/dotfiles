@@ -589,7 +589,9 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 # Note: ConvertTo-Json reformats the entire file (different indentation than
 # each app's own writer), not just the font key - functionally identical,
 # cosmetically a full-file diff the first time this runs.
-$desiredFont = "MesloLGS Nerd Font Mono"
+# Same source as the VS Code font tier, so the Windows Terminal default font
+# and editor.fontFamily cannot drift apart.
+$desiredFont = {{ index .vscode.settings.forced "editor.fontFamily" | quote }}
 
 # ConvertFrom-JsonC: both Windows Terminal and VS Code settings.json are
 # JSONC (comments and trailing commas are legal there; strict JSON parsers
@@ -696,70 +698,36 @@ if ($wtSettings) {
 # Gated by packages.vscode_settings (hasKey pattern: default true, set
 # `[data.packages] vscode_settings = false` in chezmoi.toml to opt out - no prompt, so no
 # CI-seeding burden, see check_workflow_config_keys for that outage class).
+# Every tier below is rendered from .chezmoidata.yaml `vscode.settings`, the
+# single source this twin shares with run_onchange_install_packages.sh.tmpl
+# (#83). Values are emitted as native PowerShell literals rather than parsed at
+# runtime: this script targets Windows PowerShell 5.1 (see #Requires above),
+# where ConvertFrom-Json has no -AsHashtable and returns a PSCustomObject.
 $vsForced = @{
-    'editor.fontFamily' = $desiredFont
-    'terminal.integrated.fontFamily' = $desiredFont
+{{- range $k, $v := .vscode.settings.forced }}
+    '{{ $k }}' = "{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"
+{{- end }}
 }
 $vsDefaults = [ordered]@{
-    'files.autoSave' = 'afterDelay'
-    'files.autoSaveDelay' = 500
-    'files.eol' = "`n"
-    'files.insertFinalNewline' = $true
-    'files.trimFinalNewlines' = $true
-    'files.trimTrailingWhitespace' = $true
-    'explorer.compactFolders' = $false
-    'editor.minimap.enabled' = $false
-    'editor.wordWrap' = 'on'
-    'editor.formatOnSave' = $true
-    'diffEditor.ignoreTrimWhitespace' = $false
-    'diffEditor.wordWrap' = 'on'
-    'workbench.startupEditor' = 'none'
-    'terminal.integrated.scrollback' = 30000
-    'terminal.integrated.shellIntegration.enabled' = $true
-    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
-    'terminal.integrated.fontSize' = 16
-    # Shift+Enter (newline) for claude/codex/opencode: Windows CLIs sit
-    # behind ConPTY, which only forwards the Shift modifier when the
-    # terminal speaks win32-input-mode - Windows Terminal always does, VS
-    # Code only with this (experimental, default off). The kitty protocol
-    # (on by default) can't help: ConPTY drops it. Windows-only key; the
-    # .sh twin omits it.
-    'terminal.integrated.enableWin32InputMode' = $true
-    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
-    # instead of toggling the sidebar / panel while the terminal has focus.
-    'terminal.integrated.commandsToSkipShell' = @('-workbench.action.toggleSidebarVisibility', '-workbench.action.togglePanel')
-    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
-    # right-click always pastes.
-    'terminal.integrated.copyOnSelection' = $true
-    'terminal.integrated.rightClickBehavior' = 'paste'
-    'cSpell.language' = 'en,es'
+{{- range $k, $v := .vscode.settings.defaults }}
+    '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else if kindIs "string" $v }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ else if kindIs "slice" $v }}@({{ range $i, $e := $v }}{{ if $i }}, {{ end }}'{{ $e }}'{{ end }}){{ else }}{{ $v }}{{ end }}
+{{- end }}
+{{- /* Windows-only tier: the .sh twin deliberately renders none of these. */}}
+{{- range $k, $v := .vscode.settings.defaults_windows }}
+    '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ end }}
+{{- end }}
 }
-$vsJunk = @('**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/node_modules/**', '**/*.pyc')
+$vsJunk = @({{ range $i, $g := .vscode.settings.junk }}{{ if $i }}, {{ end }}'{{ $g }}'{{ end }})
 $vsJunkMap = [ordered]@{}
 foreach ($s in $vsJunk) { $vsJunkMap[$s] = $true }
-# Catppuccin Mocha for the integrated terminal only (same palette as the
-# Windows Terminal scheme) - editor theme untouched. Sub-key upsert: any
-# color you set yourself wins.
 $vsTerminalColors = [ordered]@{
-    'terminal.background' = '#1E1E2E'; 'terminal.foreground' = '#CDD6F4'
-    'terminalCursor.foreground' = '#F5E0DC'; 'terminal.selectionBackground' = '#585B70'
-    'terminal.ansiBlack' = '#45475A'; 'terminal.ansiRed' = '#F38BA8'
-    'terminal.ansiGreen' = '#A6E3A1'; 'terminal.ansiYellow' = '#F9E2AF'
-    'terminal.ansiBlue' = '#89B4FA'; 'terminal.ansiMagenta' = '#F5C2E7'
-    'terminal.ansiCyan' = '#94E2D5'; 'terminal.ansiWhite' = '#BAC2DE'
-    'terminal.ansiBrightBlack' = '#585B70'; 'terminal.ansiBrightRed' = '#F38BA8'
-    'terminal.ansiBrightGreen' = '#A6E3A1'; 'terminal.ansiBrightYellow' = '#F9E2AF'
-    'terminal.ansiBrightBlue' = '#89B4FA'; 'terminal.ansiBrightMagenta' = '#F5C2E7'
-    'terminal.ansiBrightCyan' = '#94E2D5'; 'terminal.ansiBrightWhite' = '#A6ADC8'
+{{- range $k, $v := .vscode.settings.terminal_colors }}
+    '{{ $k }}' = '{{ $v }}'
+{{- end }}
 }
 # MERGES: object key -> sub-keys (with values) added only when absent.
 $vsMerges = @{ 'files.exclude' = $vsJunkMap; 'search.exclude' = $vsJunkMap; 'workbench.colorCustomizations' = $vsTerminalColors }
-# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
-# at a hand-kept config (OneDrive Documents\_ssh\config), so its hosts never
-# reached ssh.exe, Windows Terminal's SSH profiles, or chezmoi. With it unset,
-# Remote-SSH reads ~/.ssh/config - rendered from [[data.ssh_hosts]] - like
-# everything else. exclude_settings can keep it on a machine that needs it.
-$vsUnset = [System.Collections.Generic.List[string]]@('remote.SSH.configFile')
+$vsUnset = [System.Collections.Generic.List[string]]@({{ range $i, $u := .vscode.settings.unset }}{{ if $i }}, {{ end }}'{{ $u }}'{{ end }})
 
 # Machine-local settings drift, rendered from [data.vscode_overrides] (see
 # the extensions comment above for why not [data.vscode]):

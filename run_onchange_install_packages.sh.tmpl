@@ -1143,67 +1143,21 @@ EXTRA_JSON = """{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrid
 EXCLUDE = json.loads(EXCLUDE_JSON) if EXCLUDE_JSON else []
 EXTRA = json.loads(EXTRA_JSON) if EXTRA_JSON else {}
 
-FORCED = {
-    "editor.fontFamily": "MesloLGS Nerd Font Mono",
-    "terminal.integrated.fontFamily": "MesloLGS Nerd Font Mono",
-}
-DEFAULTS = {
-    "files.autoSave": "afterDelay",
-    "files.autoSaveDelay": 500,
-    "files.eol": "\n",
-    "files.insertFinalNewline": True,
-    "files.trimFinalNewlines": True,
-    "files.trimTrailingWhitespace": True,
-    "explorer.compactFolders": False,
-    "editor.minimap.enabled": False,
-    "editor.wordWrap": "on",
-    "editor.formatOnSave": True,
-    "diffEditor.ignoreTrimWhitespace": False,
-    "diffEditor.wordWrap": "on",
-    "workbench.startupEditor": "none",
-    "terminal.integrated.scrollback": 30000,
-    "terminal.integrated.shellIntegration.enabled": True,
-    # Terminal parity with Windows Terminal (12pt there ~= 16px here).
-    "terminal.integrated.fontSize": 16,
-    # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline)
-    # instead of toggling the sidebar / panel while the terminal has focus.
-    # (enableWin32InputMode is the .ps1 twin's Windows-only Shift+Enter fix;
-    # here the default-on kitty keyboard protocol already carries Shift+Enter.)
-    "terminal.integrated.commandsToSkipShell": [
-        "-workbench.action.toggleSidebarVisibility",
-        "-workbench.action.togglePanel",
-    ],
-    # Clipboard parity with Windows Terminal (copyOnSelect): highlight copies,
-    # right-click always pastes.
-    "terminal.integrated.copyOnSelection": True,
-    "terminal.integrated.rightClickBehavior": "paste",
-    "cSpell.language": "en,es",
-}
-JUNK = ["**/__pycache__/**", "**/.venv/**", "**/venv/**",
-        "**/node_modules/**", "**/*.pyc"]
-# Catppuccin Mocha for the integrated terminal only (same palette as the
-# Windows Terminal scheme) - editor theme untouched; any color you set wins.
-TERMINAL_COLORS = {
-    "terminal.background": "#1E1E2E", "terminal.foreground": "#CDD6F4",
-    "terminalCursor.foreground": "#F5E0DC", "terminal.selectionBackground": "#585B70",
-    "terminal.ansiBlack": "#45475A", "terminal.ansiRed": "#F38BA8",
-    "terminal.ansiGreen": "#A6E3A1", "terminal.ansiYellow": "#F9E2AF",
-    "terminal.ansiBlue": "#89B4FA", "terminal.ansiMagenta": "#F5C2E7",
-    "terminal.ansiCyan": "#94E2D5", "terminal.ansiWhite": "#BAC2DE",
-    "terminal.ansiBrightBlack": "#585B70", "terminal.ansiBrightRed": "#F38BA8",
-    "terminal.ansiBrightGreen": "#A6E3A1", "terminal.ansiBrightYellow": "#F9E2AF",
-    "terminal.ansiBrightBlue": "#89B4FA", "terminal.ansiBrightMagenta": "#F5C2E7",
-    "terminal.ansiBrightCyan": "#94E2D5", "terminal.ansiBrightWhite": "#A6ADC8",
-}
+# All four tiers come from .chezmoidata.yaml `vscode.settings`, the single
+# source both installer twins render (see #83). r""" so Python does not touch
+# the JSON's own escapes - files.eol is "
+" and must survive as one.
+FORCED = json.loads(r"""{{ .vscode.settings.forced | toJson }}""")
+DEFAULTS = json.loads(r"""{{ .vscode.settings.defaults | toJson }}""")
+JUNK = json.loads(r"""{{ .vscode.settings.junk | toJson }}""")
+TERMINAL_COLORS = json.loads(r"""{{ .vscode.settings.terminal_colors | toJson }}""")
+# defaults_windows is deliberately NOT rendered here: enableWin32InputMode is a
+# Windows-only fix and this twin never runs there.
 # MERGES: object key -> sub-keys (with values) added only when absent.
 MERGES = {"files.exclude": {s: True for s in JUNK},
           "search.exclude": {s: True for s in JUNK},
           "workbench.colorCustomizations": TERMINAL_COLORS}
-# UNSET: keys removed when present. remote.SSH.configFile pointed Remote-SSH
-# at a hand-kept config outside ~/.ssh, so its hosts never reached ssh or
-# chezmoi. Unset, Remote-SSH reads ~/.ssh/config - rendered from
-# [[data.ssh_hosts]]. exclude_settings can keep it on a machine that needs it.
-UNSET = ["remote.SSH.configFile"]
+UNSET = json.loads(r"""{{ .vscode.settings.unset | toJson }}""")
 
 # Machine-local overrides: exclusions strip any tier (FORCED included -
 # excluding a font key stops its forced re-assert); extras join DEFAULTS.

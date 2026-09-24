@@ -174,6 +174,9 @@ jobs:
       - name: Test vscode extensions + ssh_hosts contract
         run: bash tests/vscode_ssh_contract.sh
 
+      - name: Test VS Code settings single-source (no twin duplication)
+        run: bash tests/vscode_settings_source_contract.sh
+
       # Last, because it runs the whole suite again to account for every test.
       # The individual steps above stay for per-test visibility in the UI; this
       # one answers a question they cannot: did any of them decline to run?
