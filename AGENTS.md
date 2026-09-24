@@ -39,3 +39,19 @@ re-read whole files.
 After big code changes, refresh the graph with `graft build` (deterministic,
 no API key, $0).
 <!-- graft:end -->
+
+## Searching this repo: read this before the graft block above
+
+The graft block above is graft's own default text, written by `graft init`
+inside its fence. It does not hold here: this repo is PowerShell, shell and
+chezmoi templates, and graft has no parser for any of them. The graph covers
+one file (`dot_config/nvim/init.lua`), so `graft ask` returns nothing for
+installer, updater, template or test questions, and the prompt hook that says
+"run graft ask" is noise in this repo.
+
+Use the `code-search` skill instead (installed with the curated skills; source
+in `CtrlCarlitos/skills`). In this repo its probe step lands on ripgrep for
+everything: search with the Grep tool or `rg -n`, narrow with `--glob`, then
+read the hit at its line range. `git grep <pattern> <ref>` for anything about
+a tag or a commit that is not checked out. Do not re-ask graft after one empty
+result.

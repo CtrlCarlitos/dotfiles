@@ -287,6 +287,7 @@ How it is maintained (in the skills repo):
   once none are left, switch these four call sites back to `anthropics/skills`
   and drop the fork.
 
+||||||| 8605a90
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
