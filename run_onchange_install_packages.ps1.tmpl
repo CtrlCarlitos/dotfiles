@@ -269,7 +269,7 @@ function Install-Node {
     # The pins come from .chezmoidata.yaml versions.* (#125): the major gate
     # and the full Chocolatey package version. The major is bound to a
     # variable first: the lint strips template actions to nothing, and a bare
-    # -lt {{ ... }} would not parse as a comparison.
+    # -lt with a stripped operand would not parse as a comparison.
     $nodeMajor = {{ .versions.node_major }}
     if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt $nodeMajor) {
         Write-Host "  Installing Node.js $nodeMajor..." -ForegroundColor Yellow
