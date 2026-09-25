@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 # dot upgrade - the single owner of ALL tool upgrades.
-# `dot up` NEVER upgrades; this script does, with live-session guards.
+# Runs on demand via `dot upgrade` (the dot command family in the shell
+# profiles). `dot up` NEVER upgrades; this script does, with live-session guards.
 $ErrorActionPreference = 'Continue'
 
 # --- Elevation: choco upgrade needs admin; fail loudly, not degraded. ---

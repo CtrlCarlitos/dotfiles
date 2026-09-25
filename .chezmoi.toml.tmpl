@@ -154,9 +154,6 @@
 
 {{- if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
-  primaryName = "Devcontainer User"
-  primaryEmail = "devcontainer@local"
-
 [[data.accounts]]
   name = "Devcontainer User"
   email = "devcontainer@local"
@@ -178,6 +175,7 @@
 #   provider      = "github"                # github (default) or gitlab
 #   key           = "id_work"               # optional: ~/.ssh key filename
 #   signingKey    = "id_work_sign"          # optional: falls back to key
+#   agent_key_comments = ["<email>", "<email>-sign"]  # optional: ssh-agent-relay key comments
 #   organizations = ["company-org"]         # optional: URL rewrite scope
 #   dirs          = ["projects/work"]       # paths using this identity
 #
@@ -196,6 +194,13 @@
 {{- end }}
 {{- if and (not (hasKey . "signingKey")) (hasKey . "signingkey") }}
   signingkey = {{ .signingkey | quote }}
+{{- end }}
+{{- if hasKey . "agent_key_comments" }}
+{{-   if kindOf .agent_key_comments | eq "string" }}
+  agent_key_comments = [{{ .agent_key_comments | quote }}]
+{{-   else }}
+  agent_key_comments = [{{ range $i, $c := .agent_key_comments }}{{ if $i }}, {{ end }}{{ $c | quote }}{{ end }}]
+{{-   end }}
 {{- end }}
 {{- if hasKey . "organizations" }}
 {{-   if kindOf .organizations | eq "string" }}
@@ -282,9 +287,14 @@
 
 [add]
   secrets = "warning"
+{{- if and (hasKey . "packages") (hasKey .packages "modern_cli") .packages.modern_cli }}
 
 [diff]
+  # Gated on modern_cli for the same reason dot_gitconfig gates git's pager:
+  # with modern_cli=false delta is not installed, and 'chezmoi diff' would
+  # die on the missing binary.
   pager = "delta"
+{{- end }}
 
 {{- if eq .chezmoi.os "darwin" }}
 [interpreters.ps1]
