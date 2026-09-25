@@ -146,4 +146,32 @@ tied 'github-alice'               accounts-multi.toml   'username = "alice"'    
 tied 'IdentityFile ~/.ssh/id_bob' accounts-multi.toml   'key = "id_bob"'        "integration-test asserts on id_bob but accounts-multi no longer sets it"
 tied 'name = "Minimal User"'      accounts-minimal.toml 'name = "Minimal User"' 'minimal-config-test asserts on "Minimal User" but accounts-minimal no longer uses that name'
 
+# ------------------- 4. every affected template renders on both edge fixtures
+# #112: the regression class is a template that dereferences an OPTIONAL key
+# (.accounts / .username / .packages) and aborts every apply on a hand-written
+# config - chezmoi renders with missingkey=error. accounts-minimal (accounts
+# present, packages absent) and packages-off (packages present, accounts
+# absent) sit on the two edges of the optional data; each template below reads
+# at least one of them, so it must render cleanly on both.
+affected_templates=(
+    dot_gitconfig.tmpl
+    private_dot_ssh/private_config.tmpl
+    run_onchange_generate_identities.sh.tmpl
+    run_onchange_generate_identities.ps1.tmpl
+    run_onchange_install_packages.ps1.tmpl
+    dot_local/bin/executable_ssh-agent-relay.tmpl
+)
+edge_fixtures=("$fx/accounts-minimal.toml" "$fx/packages-off.toml")
+if command -v chezmoi >/dev/null; then
+    for tmpl in "${affected_templates[@]}"; do
+        [ -f "$repo_root/$tmpl" ] || { fail "missing affected template $tmpl"; continue; }
+        for fixture in "${edge_fixtures[@]}"; do
+            if ! chezmoi execute-template --config "$fixture" --source "$repo_root" \
+                <"$repo_root/$tmpl" >/dev/null 2>"$tmp/render-err"; then
+                fail "$tmpl does not render with $(basename -- "$fixture"): $(cat "$tmp/render-err")"
+            fi
+        done
+    done
+fi
+
 finish

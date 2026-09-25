@@ -23,7 +23,7 @@ AddKeysToAgent yes
 UseKeychain yes
 {{- end }}
 
-{{- if .accounts }}
+{{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- $username := "" }}
 {{- $provider := "github" }}
