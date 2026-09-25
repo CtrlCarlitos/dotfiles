@@ -63,4 +63,33 @@ if command -v chezmoi >/dev/null; then
         fail "devcontainer render: ~/.ssh/config must stay managed (aliases; keys come from the forwarded agent)"
 fi
 
+# End-to-end view: 'chezmoi managed' = rendered ignore rules against rendered
+# source state. #119's leak class is only visible here: modify_ templates run
+# with empty stdin on a machine whose agent config dir does not exist and
+# CREATE the file (.codex/config.toml, .config/opencode/tui.json), and
+# Unix-only scripts shipped to Windows (.local/bin/ssh-agent-relay). The
+# fixture home is /nonexistent, so every stat-guarded rule is active - the
+# same shape as a fresh machine, where the leaks used to happen.
+if command -v chezmoi >/dev/null; then
+    managed_for() {  # $1 = os, $2 = kernel osrelease
+        chezmoi managed --config "$tmp/chezmoi.toml" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"$2\"},\"homeDir\":\"/nonexistent\"}}"
+    }
+    win_managed="$(managed_for windows '')"
+    for p in '.codex/config.toml' '.config/opencode/tui.json' \
+        '.local/bin/ssh-agent-relay' '.local/bin/devprofile' \
+        '.tmux.conf' '.zshrc' '.aliases.zsh'; do
+        printf '%s\n' "$win_managed" | grep -Fxq "$p" && fail "windows: managed lists '$p'"
+    done
+    lin_managed="$(managed_for linux '6.8.0-generic')"
+    for p in '.codex/config.toml' '.config/opencode/tui.json' '.local/bin/devprofile.ps1'; do
+        printf '%s\n' "$lin_managed" | grep -Fxq "$p" && fail "linux: managed lists '$p'"
+    done
+    # Positive controls: the fixtures must not be ignoring the world.
+    printf '%s\n' "$lin_managed" | grep -Fxq '.local/bin/ssh-agent-relay' ||
+        fail "linux: .local/bin/ssh-agent-relay must stay managed"
+    printf '%s\n' "$lin_managed" | grep -Fxq '.gitconfig' ||
+        fail "linux: .gitconfig must stay managed"
+fi
+
 finish
