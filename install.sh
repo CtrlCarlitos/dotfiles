@@ -245,8 +245,27 @@ fi
 # 2. Install Chezmoi if missing
 if ! command -v chezmoi >/dev/null 2>&1; then
   echo "Installing chezmoi..."
-  # shellcheck disable=SC2016  # $HOME must expand inside the child sh, not here
-  _net 180 sh -c 'curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"'
+  # Pin coherence (#133): deliberately install the SAME chezmoi CI tests -
+  # the repo's .chezmoi-version pin, read when a checkout is on disk (same
+  # lookup rule as the gum pin above). On the bare one-liner run the script
+  # was downloaded alone and no pin file exists yet, so this falls back to
+  # latest - `doctor` flags the drift after the checkout lands.
+  _pin=""
+  for _pin_loc in "$(dirname "$0")/.chezmoi-version" \
+                   "$HOME/.local/share/chezmoi/.chezmoi-version"; do
+      if [ -f "$_pin_loc" ]; then
+          _pin="$(cat "$_pin_loc")"
+          break
+      fi
+  done
+  # shellcheck disable=SC2016  # $HOME and the pin must expand inside the child sh
+  if [ -n "$_pin" ]; then
+      CHEZMOI_PIN="$_pin"
+      export CHEZMOI_PIN
+      _net 180 sh -c 'curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin" -t "$CHEZMOI_PIN"'
+  else
+      _net 180 sh -c 'curl -fsLS get.chezmoi.io | sh -s -- -b "$HOME/.local/bin"'
+  fi
 fi
 
 # 2. Initialize & Apply

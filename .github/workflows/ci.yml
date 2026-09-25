@@ -175,10 +175,21 @@ jobs:
         # credential-shaped - caught at PR time instead of after a manual
         # audit. The pinned binary runs directly (the gitleaks-action
         # wrapper's SARIF upload exits 1 on clean scans; the binary is
-        # deterministic and the version pin is the URL itself).
+        # deterministic). Version comes from ONE place (.gitleaks-version,
+        # shared with the pre-commit hook rev) and the tarball is verified
+        # against the release's published checksums before it runs (#133;
+        # the three versions here used to drift: v8.18.4 / 8.24.3 / latest).
+        # --no-git scans the working tree; history scanning is a deliberate
+        # follow-up (see .gitleaks.toml).
         run: |
-          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
-            | tar -xzf - -C /tmp gitleaks
+          GITLEAKS_VERSION="$(cat .gitleaks-version)"
+          curl -fsSL -o "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "/tmp/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "/tmp/gitleaks_${GITLEAKS_VERSION}_checksums.txt" |
+            (cd /tmp && sha256sum -c -)
+          tar -xzf "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -C /tmp gitleaks
           /tmp/gitleaks detect --source . --redact -v --no-git
 
       - name: Validate all TOML and YAML files

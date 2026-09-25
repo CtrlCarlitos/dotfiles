@@ -1,0 +1,24 @@
+# Minimal gitleaks config (issue #133). Both the CI scan (ci.yml lint job)
+# and the pre-commit hook read this file from the repo root automatically.
+#
+# [extend] useDefault keeps every built-in rule active - a bare custom config
+# would REPLACE them, silently weakening the scan. The allowlist below is the
+# only deliberate customization.
+#
+#   tests/fixtures/chezmoi/ holds deliberately fake account TOMLs (alice/bob
+#   example.com identities) that compose every CI-seeded config. They are
+#   test data, never credentials; credential-shaped strings added there in
+#   the future must not gate the scan.
+#
+# History: the CI scan stays --no-git (working tree). Push protection is on,
+# which covers the push path; a full `gitleaks git` history scan on push to
+# main is a deliberate follow-up, not an omission of this file.
+
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Test fixtures: intentionally fake identity data"
+  paths = [
+    '''tests/fixtures/chezmoi/''',
+  ]

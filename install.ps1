@@ -177,8 +177,33 @@ try {
     # 1. Install Chezmoi if missing
     if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
         Write-Info "Chezmoi not found. Installing via Chocolatey..."
+        # Pin coherence (#133): deliberately install the SAME chezmoi CI
+        # tests - the repo's .chezmoi-version pin, read when a checkout is on
+        # disk (same lookup rule as the gum pin above; choco wants the bare
+        # semver, no leading v). On the bare one-liner run no pin file exists
+        # yet, so choco floats to latest - `doctor` flags the drift after the
+        # checkout lands. If the pinned version is missing from the community
+        # repo (package lag), fall back to latest rather than fail the install.
+        $chezmoiPin = $null
+        $chezmoiPinCandidates = @()
+        if ($PSScriptRoot) { $chezmoiPinCandidates += (Join-Path $PSScriptRoot '.chezmoi-version') }
+        $chezmoiPinCandidates += (Join-Path $env:USERPROFILE '.local\share\chezmoi\.chezmoi-version')
+        foreach ($chezmoiPinFile in $chezmoiPinCandidates) {
+            if (Test-Path $chezmoiPinFile) {
+                $chezmoiPin = ([IO.File]::ReadAllText($chezmoiPinFile)).Trim() -replace '^v', ''
+                break
+            }
+        }
         try {
-            choco install chezmoi -y --no-progress
+            if ($chezmoiPin) {
+                choco install chezmoi -y --no-progress --version $chezmoiPin
+                if ($LASTEXITCODE -ne 0 -or -not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
+                    Write-Fail "chezmoi $chezmoiPin not installable via Chocolatey (package lag?) - falling back to latest."
+                    choco install chezmoi -y --no-progress
+                }
+            } else {
+                choco install chezmoi -y --no-progress
+            }
             # Refresh env path for current session
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
             if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {

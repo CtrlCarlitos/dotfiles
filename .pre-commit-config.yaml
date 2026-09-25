@@ -2,9 +2,11 @@
 # Install: pip install pre-commit && pre-commit install
 
 repos:
-  # Secret scanning
+  # Secret scanning. The rev mirrors .gitleaks-version - the same pin the
+  # CI scan downloads and checksum-verifies (#133) - so the two cannot scan
+  # with different rule sets. Bump both together.
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.4
+    rev: v8.30.1
     hooks:
       - id: gitleaks
 
@@ -16,7 +18,7 @@ repos:
   # loop does. --shell=bash: dot_aliases.zsh has no shebang (it is sourced)
   # and shellcheck has no zsh dialect; SC2148 (missing shebang) is by design.
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
         types: [file]
@@ -25,7 +27,7 @@ repos:
 
   # Validate TOML files
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: check-toml
       - id: check-yaml
