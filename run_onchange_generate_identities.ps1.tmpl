@@ -1,5 +1,5 @@
 {{ if eq .chezmoi.os "windows" -}}
-{{ if .accounts -}}
+{{ if and (hasKey . "accounts") .accounts -}}
 # Generate git identity files from accounts configuration
 # This script runs whenever the accounts list changes
 # Hash: {{ .accounts | toJson | sha256sum }}
@@ -35,8 +35,10 @@ New-Item -ItemType Directory -Force -Path (Join-Path $env:USERPROFILE "{{ . }}")
 {{- end }}
 
 {{- range .accounts }}
-{{- $provider := .provider | default "github" }}
-{{- $username := .username }}
+{{- $username := "" }}
+{{- $provider := "github" }}
+{{- if hasKey . "username" }}{{ $username = .username }}{{ end }}
+{{- if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
 {{- $alias := printf "%s-%s" $provider $username }}
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ end }}

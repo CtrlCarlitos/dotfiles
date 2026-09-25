@@ -71,7 +71,8 @@ function gb { git branch $args }
 # alias), `ps`->procs and `top`->htop (would shadow Get-Process / need a
 # TUI Windows doesn't have), the rm/mv/cp -i safety wrappers (pwsh prompts
 # differently by design), and `vi` is added below rather than shadowing
-# anything. `cd -` works natively in pwsh 7 - no `-` alias needed.
+# anything. `cd -` is pwsh 7-only - 5.1 has no `-` alias; use the
+# `..`/`...`/`....` helpers below.
 if (Get-Command eza -ErrorAction SilentlyContinue) {
     function lt { eza --tree --icons --level 2 @args }
     function lta { eza --tree --icons --level 2 -a @args }
@@ -88,7 +89,9 @@ function nrb { npm run build }
 function serve { python -m http.server 8000 }
 function ff { Get-ChildItem -Recurse -File -Filter "$args" }
 function path { $env:Path -split ';' }
-function reload { . $PROFILE }
+# No `reload`: dot-sourcing $PROFILE inside a function defines everything in
+# that function's scope, which is discarded on return. After installing or
+# refreshing, restart the terminal instead.
 function prof { nvim $PROFILE }
 function get { curl.exe -sS @args }
 function post { curl.exe -sS -X POST @args }
@@ -145,7 +148,7 @@ function dp { devprofile @args }
 # Navigation - depth semantics match dot_aliases.zsh exactly (.. = 1 up,
 # ... = 2 up, .... = 3 up). The old twin had `...` defined twice; the second
 # (4-up) definition silently won, so `...` jumped four levels and 2-up was
-# unreachable. `cd -` needs no alias - pwsh 7 supports it natively.
+# unreachable. (`cd -` is pwsh 7-only - it is not available in 5.1.)
 function ~ { Set-Location ~ }
 function .. { cd .. }
 function ... { cd ..\.. }
@@ -172,9 +175,26 @@ function devprofile {
     # Fallback to local script if installed via dot_local/bin
     $ScriptPath = Join-Path $env:USERPROFILE ".local\bin\devprofile.ps1"
     if (Test-Path $ScriptPath) {
-        & "$ScriptPath" $args
+        # Splat: $args as one object[] cannot bind to devprofile.ps1's
+        # [string]$Command (every `devprofile <cmd>` failed before the splat).
+        & $ScriptPath @args
     } else {
         Write-Host "devprofile.ps1 not found at $ScriptPath" -ForegroundColor Red
+    }
+}
+
+#-------------------------------------------------------------------------------
+# PATH Additions
+#-------------------------------------------------------------------------------
+$UserNodeModules = Join-Path $env:APPDATA "npm"
+if (Test-Path $UserNodeModules) {
+    $env:Path = "$UserNodeModules;" + $env:Path
+}
+
+$LocalBin = Join-Path $env:USERPROFILE ".local\bin"
+if (Test-Path $LocalBin) {
+    if ($env:Path -notlike "*$LocalBin*") {
+        $env:Path = "$LocalBin;" + $env:Path
     }
 }
 

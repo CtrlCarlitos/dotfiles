@@ -55,6 +55,31 @@ for f in "${acc_fixtures[@]}"; do
     [[ "$n" -ge 1 ]] || fail "$(basename -- "$f"): seeds no [[data.accounts]] - promptStringOnce would prompt"
 done
 
+# 2b. docs/chezmoi.toml.example bills itself as the complete config
+#     (README: "Complete chezmoi.toml with all options"), so its
+#     [data.packages] must carry exactly the keys the template can prompt
+#     for (#121: remote_access and remote_access_server were missing, and
+#     the template later grew keys the example never mirrored).
+example="$repo_root/docs/chezmoi.toml.example"
+[[ -f "$example" ]] || fail "missing $example"
+example_keys="$(awk '
+    /^[[:space:]]*\[data\.packages\]/ { inblk = 1; next }
+    inblk && (/^\[/ || /^# ===/)      { inblk = 0 }
+    inblk && /^[[:space:]]*[a-z_]+[[:space:]]*=/ {
+        split($0, a, "="); gsub(/[ \t]/, "", a[1]); print a[1]
+    }
+' "$example" | sort -u)"
+template_keys="$(printf '%s\n' "${keys[@]}" | sed -E 's/^packages\.//' | sort -u)"
+if [[ "$example_keys" != "$template_keys" ]]; then
+    fail "docs/chezmoi.toml.example [data.packages] keys differ from the template's promptBoolOnce list: example-only=[$(comm -13 <(printf '%s\n' "$template_keys") <(printf '%s\n' "$example_keys"))] template-only=[$(comm -23 <(printf '%s\n' "$template_keys") <(printf '%s\n' "$example_keys"))]"
+fi
+# The example must also document the keys that survive chezmoi init only if
+# the template re-emits them (agent_key_comments used to be destroyed by
+# every 'chezmoi init') and the top-level [add]/[diff] behaviour tables.
+require "$example" 'agent_key_comments'
+require "$example" '[add]'
+require "$example" '[diff]'
+
 # 2. Every workflow config comes from those fixtures. An inline block would be
 #    a config this test cannot see; a composer call naming a missing fixture
 #    would fail at runtime, after the job has already been scheduled.

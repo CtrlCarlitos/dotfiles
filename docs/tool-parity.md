@@ -99,7 +99,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 | **Df replacement** | `duf` | `duf` | `duf` | `duf` | ❌ | ✅ Aliased over `df` when present |
 | **Ps replacement** | `procs` | `procs` | `procs` | `procs` | ❌ | ✅ Aliased over `ps` when present. Linux extracts the GitHub `.zip` directly (not in apt until Ubuntu 25.04/plucky) |
 | **Tab completion** | `fzf-tab` (zsh plugin) | `fzf-tab` (zsh plugin) | ❌ (PowerShell, no zsh) | `fzf-tab` (zsh plugin) | ❌ | Not gated by a package toggle - installed the same way as the other OMZ custom plugins (`.chezmoiexternal.toml`), zsh platforms only |
-| **Multiplexer** | `tmux` | `tmux` | `psmux` (choco; ships `psmux`/`pmux`/`tmux` commands, reads `.tmux.conf` - github.com/psmux/psmux) | `tmux` | ❌ | Windows finally has a real native tmux (Rust, ConPTY). Gated by `core`, right after powershell-core in the list (psmux recommends PS 7+) |
+| **Multiplexer** | `tmux` | `tmux` | `psmux` (choco; ships `psmux`/`pmux`/`tmux` commands - github.com/psmux/psmux) | `tmux` | ❌ | Binary install only: the dotfiles stay tmux-free on Windows - `.tmux.conf` and `.tmux/` are Windows-ignored, so no tmux config is managed there. Gated by `core`, right after powershell-core in the list (psmux recommends PS 7+) |
 
 ## Desktop Applications
 
