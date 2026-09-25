@@ -22,7 +22,16 @@ if command -v npm &>/dev/null; then
         if [ -z "$CODEX_PKG" ]; then
             echo "   codex package name unavailable from chezmoi data - skipping"
         else
-            sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+            # Same user-managed-npm decision the installer template makes
+            # (#114): sudo only for the system-owned /usr prefix - a
+            # user-managed npm (nvm, homebrew) must never be sudo'd.
+            npm_bin="$(command -v npm)"
+            npm_sudo="sudo"
+            if [[ "$npm_bin" != /usr* ]]; then
+                echo "   user-managed npm at $npm_bin - dropping sudo"
+                npm_sudo=""
+            fi
+            $npm_sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
         fi
     fi
 else
@@ -356,10 +365,22 @@ fi
 # 2. Claude Code (Native)
 if command -v claude &>/dev/null; then
     echo "🧠 Updating Claude Code..."
-    # Try built-in update first (if it exists/works), otherwise reinstall
+    # Try built-in update first (if it exists/works), otherwise reinstall.
+    # Same installer URL as the installer template (the old linux-only
+    # download path was wrong on macOS). Fetch-then-run, never piped: a
+    # piped `curl | bash` exits 0 on a failed fetch (empty stdin) and would
+    # both skip the update silently and - unguarded - abort this set -e
+    # script before Playwright/agent-browser/Serena/Graft update (#114;
+    # this script promises warn-and-continue).
     if ! claude update &>/dev/null; then
         echo "   Running installer to update..."
-        curl -L https://claude.ai/download/cli/linux | sh
+        cl_inst="$(mktemp)"
+        if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
+            bash "$cl_inst" || echo "   Claude Code installer failed - continuing"
+        else
+            echo "   Claude Code installer download failed - continuing"
+        fi
+        rm -f "$cl_inst"
     fi
 
     # Superpowers skills plugin
@@ -373,7 +394,15 @@ if command -v opencode &>/dev/null; then
         echo "  opencode deferred - an opencode session is live (upgrading it races the running binary)."
     else
         echo "💻 Updating OpenCode..."
-        curl -fsSL https://opencode.ai/install | bash
+        # Fetch-then-run with the same guard shape as the Claude installer
+        # above (#114).
+        oc_inst="$(mktemp)"
+        if curl -fsSL -o "$oc_inst" https://opencode.ai/install; then
+            bash "$oc_inst" || echo "   OpenCode installer failed - continuing"
+        else
+            echo "   OpenCode installer download failed - continuing"
+        fi
+        rm -f "$oc_inst"
     fi
     # A legacy npm-global opencode-ai shim (dead binary - postinstall never
     # ran) can shadow the native binary this installer just refreshed; remove

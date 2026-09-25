@@ -174,7 +174,9 @@ alias agy='agy --dangerously-skip-permissions'
 # no-op inside devcontainers - image rebuilds own those).
 dot() {
     local sub="${1:-}" cfg before after
-    local repo_scripts="$HOME/.local/share/chezmoi/scripts"
+    # scripts/ lives in the SOURCE repo (never deployed to $HOME); DOTFILES_DIR
+    # (exported by ~/.zshrc) is the source path and the layout's single source.
+    local repo_scripts="${DOTFILES_DIR:-$(chezmoi source-path)}/scripts"
     case "$sub" in
         up)
             chezmoi update --apply || return
@@ -182,7 +184,12 @@ dot() {
             before=""; [ -f "$cfg" ] && before="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
             chezmoi init || return
             after=""; [ -f "$cfg" ] && after="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
-            [ "$before" != "$after" ] && chezmoi apply
+            # An if, not `[ ... ] && cmd`: the config being unchanged is the
+            # NORMAL path, and the failed test there made the whole function
+            # return 1 - breaking every `dot up && ...` chain (#116).
+            if [ "$before" != "$after" ]; then
+                chezmoi apply
+            fi
             ;;
         upgrade)  shift; bash "$repo_scripts/dotupgrade.sh" "$@" ;;
         backup)   shift; bash "$repo_scripts/dotbackup.sh" "$@" ;;

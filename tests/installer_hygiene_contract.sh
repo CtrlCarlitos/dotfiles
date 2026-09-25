@@ -52,4 +52,59 @@ grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
 forbid "$ps1_installer" 'Add-MpPreference'
 require "$ps1_installer" 'Invoke-GuardrailInstaller'
 
+# 6. Unix installer temp-file hygiene (#126): one WORK dir with an EXIT trap,
+#    and no literal /tmp/ paths anywhere - fixed shared names are a symlink
+#    surface, and set -e leaks whatever predates a failure. Checked on the
+#    template source: template actions never manufacture a /tmp path, so the
+#    rendered script contains one iff the source does.
+sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
+identities="$repo_root/run_onchange_generate_identities.sh.tmpl"
+install_sh="$repo_root/install.sh"
+[ -f "$sh_installer" ] || fail "$sh_installer missing"
+[ -f "$identities" ] || fail "$identities missing"
+require "$sh_installer" 'WORK="$(mktemp -d)"'
+grep -Eq "^trap .*rm -rf ..WORK.* EXIT$" "$sh_installer" ||
+    fail "$sh_installer: WORK has no EXIT trap (#126)"
+require "$identities" 'WORK="$(mktemp -d)"'
+grep -Eq "^trap .*rm -rf ..WORK.* EXIT$" "$identities" ||
+    fail "$identities: WORK has no EXIT trap (#126)"
+! grep -Fq '/tmp/' "$sh_installer" ||
+    fail "$sh_installer: literal /tmp/ path found - route downloads under WORK (#126)"
+! grep -Fq '/tmp/' "$install_sh" ||
+    fail "$install_sh: literal /tmp/ path found - use a mktemp dir (#126)"
+
+# 7. Rate-limit-proof version lookups (#114): the six GitHub-API tag lookups
+#    neutralize grep's no-match exit INSIDE the substitution, so a 403 (60
+#    req/h unauthenticated) cannot abort the run under set -e at the Meslo
+#    font - the very first install step - or anywhere else.
+while IFS= read -r line; do
+    fail "tag lookup without an in-substitution guard (#114): $line"
+done < <(grep -n 'grep -Po' "$sh_installer" | grep -v '|| true')
+
+# 8. Third-party apt repos go through one &&-chained add_apt_repo helper with
+#    a single warn at the call site (#114): a failed key download must never
+#    install an empty keyring plus a repo line that wedges every later
+#    `apt update`.
+require "$sh_installer" 'add_apt_repo()'
+for repo in githubcli nodesource vscode cloudflared charm gierens; do
+    grep -Eq "^ +add_apt_repo $repo " "$sh_installer" ||
+        fail "$sh_installer: $repo must install via add_apt_repo (#114)"
+done
+
+# 9. The dot-upgrade path keeps the same warn-and-continue promise (#114):
+#    both installer fetches are guarded (fetch-then-run, never piped - a
+#    piped curl|bash exits 0 on a failed fetch), the Claude installer uses
+#    the same URL as the installer template (the old linux-only download URL
+#    is gone), and the npm sudo decision follows the /usr-prefix rule.
+ai_sh="$repo_root/scripts/update_ai_tools.sh"
+require "$ai_sh" 'curl -fsSL -o "$cl_inst" https://claude.ai/install.sh'
+require "$ai_sh" 'curl -fsSL -o "$oc_inst" https://opencode.ai/install'
+require "$ai_sh" 'Claude Code installer failed - continuing'
+require "$ai_sh" 'OpenCode installer failed - continuing'
+require "$ai_sh" 'Claude Code installer download failed - continuing'
+require "$ai_sh" 'OpenCode installer download failed - continuing'
+! grep -Fq 'claude.ai/download/cli/linux' "$ai_sh" ||
+    fail "$ai_sh: stale Claude installer URL - the installer template uses claude.ai/install.sh (#114)"
+require "$ai_sh" '!= /usr*'
+
 finish
