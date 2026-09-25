@@ -63,4 +63,36 @@ if command -v chezmoi >/dev/null; then
         fail "devcontainer render: ~/.ssh/config must stay managed (aliases; keys come from the forwarded agent)"
 fi
 
+# End-to-end view: 'chezmoi managed' = rendered ignore rules against rendered
+# source state. #119's leak class is only visible here: modify_ templates run
+# with empty stdin on a machine whose agent config dir does not exist and
+# CREATE the file (.codex/config.toml, .config/opencode/tui.json), and
+# Unix-only scripts shipped to Windows (.local/bin/ssh-agent-relay). The
+# fixture home is /nonexistent, so every stat-guarded rule is active - the
+# same shape as a fresh machine, where the leaks used to happen.
+if command -v chezmoi >/dev/null; then
+    managed_for() {  # $1 = os, $2 = kernel osrelease, $3 = output file
+        # Output goes to a file, not a pipe: the test runs under pipefail, and
+        # `printf | grep -Fxq` false-fails when grep exits early on a match
+        # while printf is still writing a long listing (SIGPIPE = write error).
+        chezmoi managed --config "$tmp/chezmoi.toml" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"$2\"},\"homeDir\":\"/nonexistent\"}}" >"$3"
+    }
+    managed_for windows '' "$tmp/win-managed.txt"
+    for p in '.codex/config.toml' '.config/opencode/tui.json' \
+        '.local/bin/ssh-agent-relay' '.local/bin/devprofile' \
+        '.tmux.conf' '.zshrc' '.aliases.zsh'; do
+        grep -Fxq "$p" "$tmp/win-managed.txt" && fail "windows: managed lists '$p'"
+    done
+    managed_for linux '6.8.0-generic' "$tmp/lin-managed.txt"
+    for p in '.codex/config.toml' '.config/opencode/tui.json' '.local/bin/devprofile.ps1'; do
+        grep -Fxq "$p" "$tmp/lin-managed.txt" && fail "linux: managed lists '$p'"
+    done
+    # Positive controls: the fixtures must not be ignoring the world.
+    grep -Fxq '.local/bin/ssh-agent-relay' "$tmp/lin-managed.txt" ||
+        fail "linux: .local/bin/ssh-agent-relay must stay managed"
+    grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
+        fail "linux: .gitconfig must stay managed"
+fi
+
 finish

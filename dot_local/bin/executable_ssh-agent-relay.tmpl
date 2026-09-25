@@ -56,6 +56,7 @@ sock_reachable() {
 # carry different comments.
 declare -A ACCOUNT_COMMENTS=()
 declare -A ACCOUNT_KEYS=()
+{{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- $username := "" }}{{ if hasKey . "username" }}{{ $username = .username }}{{ end }}
 {{- $provider := "github" }}{{ if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
@@ -71,6 +72,7 @@ ACCOUNT_COMMENTS[{{ $alias | quote }}]={{ (printf "%s|%s-sign" .email .email) | 
 {{- if and (not $signKey) (hasKey . "signingkey") }}{{ $signKey = .signingkey }}{{ end }}
 {{- if hasKey . "key" }}
 ACCOUNT_KEYS[{{ $alias | quote }}]={{ (printf "%s%s" .key (ternary (printf "|%s" $signKey) "" (ne $signKey ""))) | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -180,10 +182,12 @@ start_filter() { # $1 = alias
 # Which account a shell gets when it does not choose one. Override with
 # SSH_AGENT_RELAY_DEFAULT=<alias>; otherwise the first configured account.
 {{- $default := "" }}
+{{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- if and (not $default) (hasKey . "username") }}
 {{- $provider := "github" }}{{ if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
 {{- $default = printf "%s-%s" $provider .username }}
+{{- end }}
 {{- end }}
 {{- end }}
 DEFAULT_ALIAS="${SSH_AGENT_RELAY_DEFAULT:-{{ $default }}}"
