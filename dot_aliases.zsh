@@ -1,6 +1,6 @@
 #===============================================================================
 # SHELL ALIASES
-# Shared across zsh and bash
+# Sourced by dot_zshrc as ~/.aliases.zsh
 #===============================================================================
 
 #-------------------------------------------------------------------------------
@@ -98,7 +98,7 @@ alias du='du -h'
 alias free='free -h'
 command -v htop &> /dev/null && alias top='htop'
 
-# Rust-based replacements, only aliased if actually installed (install_modern)
+# Rust-based replacements, only aliased if actually installed
 if command -v dust &> /dev/null; then
   alias du='dust'
 fi
@@ -164,7 +164,8 @@ alias dp='devprofile'
 alias agy='agy --dangerously-skip-permissions'
 
 #-------------------------------------------------------------------------------
-# Management - the dot command family
+# Management - the dot command family (`dot init` / `dot up` / `dot upgrade`;
+# wiring lives in dot_zshrc and scripts/dotupgrade.*)
 #-------------------------------------------------------------------------------
 # `dot up` NEVER upgrades: chezmoi update owns the pull; init re-runs the
 # config template AFTER the pull (init does not fetch); a final apply

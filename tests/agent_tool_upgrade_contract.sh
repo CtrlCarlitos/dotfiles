@@ -19,10 +19,8 @@ ps1_updater="$ai_ps1"
 . "$repo_root/tests/lib.sh"
 
 # 1. Every dir-recreating upgrade in the AI section is defer-aware.
-for tool in codex graft serena; do
-    grep -Fq "DOTUPGRADE_DEFER" "$ai_ps1" || fail "$ai_ps1: no defer hooks"
-    grep -Fq "DOTUPGRADE_DEFER" "$ai_sh" || fail "$ai_sh: no defer hooks"
-done
+grep -Fq "DOTUPGRADE_DEFER" "$ai_ps1" || fail "$ai_ps1: no defer hooks"
+grep -Fq "DOTUPGRADE_DEFER" "$ai_sh" || fail "$ai_sh: no defer hooks"
 # codex upgrades to pinned-latest, not floating npm update semantics
 # The package name comes from .chezmoidata/agents.yaml at runtime (#83); the
 # @latest suffix is what makes it an upgrade rather than a floating update.

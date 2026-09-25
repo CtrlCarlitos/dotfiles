@@ -2,11 +2,14 @@
 
 set -e
 
+# Run from the repo root no matter where the script is invoked from.
+cd "$(dirname "$0")/.."
+
 echo "Starting Auto-Update Script..."
 
 # 1. Update Chezmoi Version
 echo "Fetching latest Chezmoi version..."
-LATEST_CHEZMOI=$(curl -s "https://api.github.com/repos/twpayne/chezmoi/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+LATEST_CHEZMOI=$(curl -s "https://api.github.com/repos/twpayne/chezmoi/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | cut -d'"' -f4)
 if [ -n "$LATEST_CHEZMOI" ]; then
     echo "Latest Chezmoi: $LATEST_CHEZMOI"
     # Update in .chezmoi-version
@@ -69,7 +72,11 @@ if [ -n "$LATEST" ]; then
         # installs Antigravity via Chocolatey, which floats to whatever the
         # community package carries - there is no pin in the ps1 template to
         # bump.
-        sed -i -E "s/ANTIGRAVITY_HUB_VERSION=\"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\"/ANTIGRAVITY_HUB_VERSION=\"$LATEST\"/" run_onchange_install_packages.sh.tmpl
+        # Portable in-place edit (BSD sed has no `sed -i` without an arg):
+        # write to a temp file, then mv over the original.
+        tmp_tmpl="$(mktemp)"
+        sed -E "s/ANTIGRAVITY_HUB_VERSION=\"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\"/ANTIGRAVITY_HUB_VERSION=\"$LATEST\"/" run_onchange_install_packages.sh.tmpl > "$tmp_tmpl"
+        mv "$tmp_tmpl" run_onchange_install_packages.sh.tmpl
     else
         echo "Warning: Not updating Antigravity hub version - one or more asset URLs are broken."
         echo "  This usually means Google changed the hub channel layout; the URL"
@@ -79,7 +86,79 @@ else
     echo "Warning: Could not derive Antigravity hub version from the download page - leaving pin unchanged."
 fi
 
-# 3. agent-guardrails stays pinned to the reviewed release in the installer
+# 3. Refresh .chezmoiexternal.toml pins: resolve each external repo's
+# default-branch SHA (git ls-remote - no API auth), rewrite the
+# /archive/<sha>.tar.gz URL, download the archive once, and pin its sha256 so
+# every `chezmoi apply` verifies byte-identical content. The weekly updater
+# PR carries the fresh pins through CI like every other version bump.
+refresh_external() {
+    repo="$1"
+    sha="$(git ls-remote "https://github.com/${repo}" HEAD 2>/dev/null | cut -f1)"
+    if [ -z "$sha" ]; then
+        echo "  Warning: could not resolve HEAD for $repo - pin left unchanged."
+        return 0
+    fi
+    sum=""
+    if [ -n "$SHA_CMD" ]; then
+        tarball="$(mktemp)"
+        if curl -fsSL "https://github.com/${repo}/archive/${sha}.tar.gz" -o "$tarball"; then
+            sum="$($SHA_CMD "$tarball" | cut -d' ' -f1)"
+        else
+            echo "  Warning: could not download ${repo}@${sha} - pin left unchanged."
+            rm -f "$tarball"
+            return 0
+        fi
+        rm -f "$tarball"
+    fi
+    tmp_file="$(mktemp)"
+    # The archive URL is the version: point it at the new HEAD SHA.
+    sed -E "s|(github\.com/${repo}/archive/)[0-9a-f]{40}\.tar\.gz|\1${sha}.tar.gz|" "$EXTERNALS" > "$tmp_file"
+    mv "$tmp_file" "$EXTERNALS"
+    if [ -n "$sum" ]; then
+        # One entry per repo: re-pin the checksum inside the entry whose URL
+        # carries this repo (the checksum line follows the url line).
+        tmp_file="$(mktemp)"
+        awk -v repo="$repo" -v sum="$sum" '
+            index($0, "github.com/" repo "/archive/") { in_repo = 1 }
+            in_repo && /checksum\.sha256/ && !done { sub(/"[0-9a-f]*"/, "\"" sum "\""); done = 1 }
+            { print }
+        ' "$EXTERNALS" > "$tmp_file"
+        mv "$tmp_file" "$EXTERNALS"
+        # An entry whose URL moved but which carries no checksum line would
+        # silently skip chezmoi's verification - keep that visible.
+        if ! grep -A5 -E "github\.com/${repo}/archive" "$EXTERNALS" | grep -q 'checksum\.sha256'; then
+            echo "  Warning: $repo entry has no checksum.sha256 line - verification skipped by chezmoi."
+        fi
+    else
+        echo "  Warning: refreshed URL for $repo without checksum (no sha256 tool) - re-run on a host with sha256sum/shasum."
+    fi
+    echo "  $repo -> $(printf '%s' "$sha" | cut -c1-12)"
+}
+
+EXTERNALS=".chezmoiexternal.toml"
+if [ ! -f "$EXTERNALS" ]; then
+    echo "Warning: $EXTERNALS not found - external pins not refreshed."
+else
+    echo "Refreshing external pins in $EXTERNALS..."
+    # Same sha256 detection ladder as the installers: Linux ships sha256sum,
+    # macOS ships shasum (gsha256sum if coreutils is installed).
+    SHA_CMD=""
+    if command -v sha256sum >/dev/null 2>&1; then
+        SHA_CMD="sha256sum"
+    elif command -v gsha256sum >/dev/null 2>&1; then
+        SHA_CMD="gsha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        SHA_CMD="shasum -a 256"
+    else
+        echo "  Warning: no sha256 tool found - URLs will move but checksums cannot be recomputed."
+    fi
+    repos="$(grep -oE 'github\.com/[^/"]+/[^/"]+/archive' "$EXTERNALS" | sed 's|github\.com/||; s|/archive$||' | sort -u)"
+    for repo in $repos; do
+        refresh_external "$repo"
+    done
+fi
+
+# 4. agent-guardrails stays pinned to the reviewed release in the installer
 # templates and manual updaters. Never replace that pin with GitHub's latest.
 
 # Note: Node.js is not dynamically bumped here. It is pinned to 24.x in
