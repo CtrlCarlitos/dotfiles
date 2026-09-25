@@ -1,7 +1,8 @@
 # Agent context tools — Serena & Graft
 
 Practical guide (2026-09-12) to the two agent-context tools this repo installs
-under `install_ai_tools`: what each is for, what the installer already wired
+under the `agent_toolkit` package group: what each is for, what the installer
+already wired
 up, and the one manual step (per-repo Graft activation) that's deliberately
 left to you.
 
@@ -19,7 +20,8 @@ left to you.
   fit together* cheaply and statically; Serena answers *exactly what this
   symbol references* at edit time. Graft first for orientation, Serena when
   you're about to cut.
-- **Installer state**: both are installed everywhere `install_ai_tools` runs,
+- **Installer state**: both are installed wherever the `agent_toolkit` group
+  runs,
   Serena is registered as an MCP server in every client it finds, Graft's
   telemetry is off. The only manual step is per-repo: `graft init && graft
   build`.
@@ -53,6 +55,11 @@ already wired (dogfooding) — see the Graft block in `AGENTS.md` for how to
 query it.
 
 ### CLI greatest hits
+
+The only in-repo copy of this table — `AGENTS.md` deliberately does not
+repeat it. Note the graph itself only covers `dot_config/nvim/init.lua` in
+this repo (graft has no parser for `.sh`/`.ps1`/`.tmpl`/`.toml`), so these
+commands answer only for that file here.
 
 | Command | What it's for |
 | :--- | :--- |

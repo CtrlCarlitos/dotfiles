@@ -75,7 +75,7 @@ status, not just permissions.
 
 | Alias | Expands to |
 |---|---|
-| `dc` / `dcu` / `dcd` / `dcl` | `docker compose` / `up -d` / `down` / `logs -f` |
+| `dco` / `dcupd` / `dcdn` / `dclf` | `docker compose` / `up -d` / `down` / `logs -f` (Oh-My-Zsh `docker-compose` plugin) |
 | `dp` (or `devprofile`) | Show/switch which git identity is active — bare `dp` shows the current one |
 | `reload` / `zshrc` / `aliases` | Reload `.zshrc` / edit `.zshrc` / edit `.aliases.zsh` |
 | `dot up` | `chezmoi update --apply` + config re-init — pull and apply the latest dotfiles (never upgrades) |
@@ -94,7 +94,7 @@ Oh-My-Zsh's `git` plugin also loads a full set of git shortcuts (`gst`, `gco`, `
 4. Run `lazygit` in a repo with uncommitted changes and stage a file with `Space` instead of typing
    `git add`.
 5. Type out a full command that has an alias (e.g. `docker compose up -d`) and watch
-   `zsh-you-should-use` remind you that `dcu` exists.
+   `zsh-you-should-use` remind you that `dcupd` exists.
 
 ---
 
@@ -146,11 +146,12 @@ top of it.
 | Keys | What it does |
 |---|---|
 | `Ctrl+a` | Prefix — press first, release, then press the next key. |
+| `Ctrl+a` → `Ctrl+a` | Send a real `Ctrl+A` to the running program (e.g. beginning-of-line in the shell). |
 | `Ctrl+a` → `\|` | Split pane vertically (side by side). |
 | `Ctrl+a` → `-` | Split pane horizontally (stacked). |
 | `Ctrl+a` → `h j k l` | Move between panes (vim directions: left/down/up/right). |
 | `Ctrl+a` → `c` | New window, same directory you're already in. |
-| `Shift` + `←`/`→` | Switch windows — no prefix needed. |
+| `Ctrl+Shift` + `←`/`→` | Move the current window left/right in the strip — no prefix needed. |
 | `Ctrl+a` → `H J K L` | Resize the current pane (holdable — keep pressing). |
 | `Ctrl+a` → `d` | Detach — leaves everything running in the background. |
 | `Ctrl+a` → `[` | Enter copy/scroll mode. `v` starts a selection, `y` copies it (goes to your system clipboard). |

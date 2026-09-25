@@ -5,11 +5,14 @@ Vercel-maintained `vercel-labs/agent-browser` repository.
 
 ## Findings
 
-- The recommended global install is exactly `npm install -g agent-browser`.
+- The recommended global install is exactly
+  `npm install -g --allow-scripts=agent-browser agent-browser`.
   It installs the `agent-browser` command. The package declares that command in
   its `bin` field and its post-install hook downloads a platform-specific native
   binary; for global installs it rewrites the npm Unix symlink or Windows shims
-  to invoke that binary directly. [npm README][npm] [package manifest][package]
+  to invoke that binary directly. The `--allow-scripts` allowlist is required:
+  npm 12 blocks install scripts by default, which would silently skip the
+  post-install binary download. [npm README][npm] [package manifest][package]
   [post-install source][postinstall]
 - A browser is required for local browser automation. `agent-browser install`
   downloads Chrome for Testing; it also detects existing Chrome, Brave,
@@ -39,7 +42,7 @@ directory is already on `PATH`.
 ### chezmoi shell installer
 
 ```sh
-npm install -g agent-browser </dev/null
+npm install -g --allow-scripts=agent-browser agent-browser </dev/null
 agent_browser="$(npm prefix -g)/bin/agent-browser"
 "$agent_browser" install </dev/null
 "$agent_browser" doctor --json </dev/null
@@ -54,7 +57,7 @@ when dependencies cannot all be installed.
 ### PowerShell installer
 
 ```powershell
-npm install -g agent-browser
+npm install -g --allow-scripts=agent-browser agent-browser
 if ($LASTEXITCODE -ne 0) { throw "agent-browser install failed" }
 $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
 & $agentBrowser install

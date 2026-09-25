@@ -1,5 +1,12 @@
 # Agent Skill Wiring Design
 
+_Status (2026-09-25): this is the original design document (2026-09-15,
+#28). The design it describes is implemented — the as-built behavior,
+current flags and catalog live in
+[skills-install-strategy.md](skills-install-strategy.md), enforced by
+`tests/agent_skill_wiring_contract.sh`. Kept as the rationale record; where
+the two disagree, the strategy doc wins._
+
 ## Goal
 
 Install the same curated skill set globally for Claude Code, OpenCode,

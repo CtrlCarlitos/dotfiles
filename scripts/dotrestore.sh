@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# dotrestore.sh - restore an archive created by dotbackup.sh onto this machine.
+# Validates the manifest, restores the allowlisted config + ~/.ssh files, and
+# refuses to overwrite an existing chezmoi config or any existing ~/.ssh file.
+# Usage: bash dotrestore.sh <backup.7z>   (or: dot restore <archive>)
+# Afterwards run `chezmoi init` then `chezmoi apply` - see
+# docs/backup-restore.md for the full flow.
 set -euo pipefail
 
 [ "$#" -eq 1 ] || { printf 'ERROR: usage: %s <backup.7z>\n' "$0" >&2; exit 1; }

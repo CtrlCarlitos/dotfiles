@@ -1,3 +1,10 @@
+<#
+dotbackup.ps1 - encrypted portable backup of this machine's dotfiles state
+(Windows twin of scripts/dotbackup.sh). Packs the chezmoi config and every
+regular file under ~/.ssh into an AES-256 7-Zip archive under ~/.dot_backups.
+Prompts for the passphrase; never echoed or passed on the command line.
+Usage: .\dotbackup.ps1    (or: dot backup)  - docs/backup-restore.md
+#>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 

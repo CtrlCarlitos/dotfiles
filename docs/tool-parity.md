@@ -170,7 +170,7 @@ are never touched, and are never flushed.
 | **Agent** | OMZ `ssh-agent` plugin (per-user process) | same | `ssh-agent` **service** (`Automatic` + `Running`), set by the identity generator |
 | **Key list** | `run_onchange_generate_identities.sh.tmpl` writes `~/.ssh/agent-identities.zsh` (a `zstyle :omz:plugins:ssh-agent identities …` line); `~/.zshrc` sources it *before* oh-my-zsh, the plugin does the `ssh-add` | same as Linux, plus `zstyle … ssh-add-args --apple-use-keychain` | `run_onchange_generate_identities.ps1.tmpl` `ssh-add`s them directly + writes `~/.ssh/agent-identities.ps1`; both PowerShell profiles do an idempotent startup top-up |
 | **Passphrase persistence** | agent lifetime only (re-enter on logout) | login keychain (survives reboot) | service persists keys DPAPI-encrypted in `HKCU\…\OpenSSH\Agent\Keys`, reloads on boot |
-| **Removing a key** | `ssh-add -d` / ends with the agent | `ssh-add -d` + remove from keychain | `ssh-add -d` **required** - see [testing-windows.md](testing-windows.md), de-declaring the account does not evict it |
+| **Removing a key** | `ssh-add -d` / ends with the agent | `ssh-add -d` + remove from keychain | `ssh-add -d` **required** - see [testing.md](testing.md), de-declaring the account does not evict it |
 
 `commit.gpgsign` is unaffected by any of this - signing key *selection* is
 per-account gitconfig, and whether a commit is signed is the existing

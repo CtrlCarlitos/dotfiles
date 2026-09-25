@@ -30,6 +30,7 @@
 | :--- | :--- |
 | **Move Cursor** | `h` (left), `j` (down), `k` (up), `l` (right) |
 | **Window Split** | `Ctrl + h/j/k/l` to move between splits |
+| **Resize Split** | `Ctrl + Arrow` (Up/Down change height, Left/Right change width) |
 | **Next Buffer** | `Shift + l` (next tab) |
 | **Prev Buffer** | `Shift + h` (previous tab) |
 | **Close Buffer** | `Space` `b` `d` |
@@ -42,14 +43,27 @@
 | **Comment Line** | `gcc` |
 | **Comment Block** | Select text with `v`, then `gc` |
 | **Auto-Indent** | `=` |
+| **Move Line(s) Down/Up** | `J` / `K` in visual mode (auto re-indents) |
+| **Clear Search Highlight** | `Esc` (after a `/` search) |
+
+**On save:** trailing whitespace is stripped from the whole buffer
+(`BufWritePre`), and yanks flash briefly (`TextYankPost` highlight).
 
 ## 🔌 Plugins Included
 
-*   **Lazy.nvim**: Plugin manager (updates plugins automatically).
-*   **Telescope**: Powerful fuzzy finder for everything.
-*   **Nvim-Tree**: File explorer sidebar.
-*   **Treesitter**: Better syntax highlighting.
+*   **Lazy.nvim**: Plugin manager — installs plugins on first launch; run
+    `:Lazy update` yourself to pull updates (no automatic checker).
+*   **Catppuccin**: Color scheme (Mocha flavor).
+*   **lualine.nvim**: Status line at the bottom.
+*   **Telescope**: Powerful fuzzy finder for everything (`Space f f` files, `Space f g` live grep, `Space f b` buffers, `Space f h` help tags).
+*   **Nvim-Tree**: File explorer sidebar (`Space e`).
+*   **Treesitter**: Better syntax highlighting and indenting.
+*   **gitsigns.nvim**: Git change markers in the gutter.
+*   **nvim-autopairs**: Auto-close brackets/quotes.
+*   **Comment.nvim**: The `gcc` / `gc` commenting.
 *   **Which-Key**: Pop-up helper that shows you available keys if you wait a second after pressing `Space`.
+*   **indent-blankline**: Indent guides.
+*   **nvim-surround**: Add/change/delete surrounding quotes and brackets (`ys`/`cs`/`ds`).
 
 ## 📋 Clipboard
 `y` (yank) and `p` (paste) use the system clipboard (`clipboard = unnamedplus`), so

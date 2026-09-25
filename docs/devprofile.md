@@ -32,8 +32,14 @@ identity, creating a new account:
 | `devprofile` | Which identity is active in this repo? |
 | `devprofile list` | All configured accounts and their SSH keys |
 | `devprofile use <username>` | Override identity for this repo only |
-| `devprofile init <name> <email> --passphrase` | New account with fresh keys |
-| `devprofile verify --install-hook` | Sanity check + pre-commit safety net |
+| `devprofile init <username> <email> [--passphrase\|--no-passphrase]` | New account with fresh keys |
+| `devprofile verify [--install-hook]` | Sanity check; `--install-hook` adds a pre-commit hook that prints the identity and fails a commit only when `user.name`/`user.email` are unset (git's `useConfigOnly` already blocks that — the hook is a visibility aid, not a gate against the wrong account) |
+
+Passphrase handling for `init`: with neither flag, an interactive terminal
+gets a `[y/N]` prompt (default **no** passphrase); `--passphrase` forces the
+`ssh-keygen` prompt, `--no-passphrase` skips it. On bash,
+`DEVPROFILE_PASSPHRASE` (`1`/`0`, or `true`/`yes`/`no`/`false`) sets the
+default when neither flag is given — explicit flags win over the env var.
 
 Short alias everywhere (zsh and PowerShell): `dp`.
 
@@ -213,5 +219,5 @@ account's directory, or a `devprofile use` run in the wrong repo.
 **Platform docs?**
 - [Windows specifics](windows.md) — PowerShell profiles, Chocolatey, the
   Windows `ssh-agent` service
-- [WSL specifics](testing-wsl.md) — WSL has its own agent, separate from
+- [WSL specifics](testing.md) — WSL has its own agent, separate from
   Windows

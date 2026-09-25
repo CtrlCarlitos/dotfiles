@@ -1,3 +1,10 @@
+<#
+dotrestore.ps1 - restore a dotbackup archive onto this machine (Windows twin
+of scripts/dotrestore.sh). Validates the manifest, restores the allowlisted
+config + ~/.ssh files, and refuses to overwrite an existing chezmoi config or
+any existing ~/.ssh file. Afterwards run `chezmoi init` then `chezmoi apply`.
+Usage: .\dotrestore.ps1 -Archive <backup.7z>   (or: dot restore <archive>)
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]

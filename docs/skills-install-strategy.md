@@ -1,5 +1,10 @@
 # Skills install strategy — findings
 
+_Status (2026-09-25): implemented and current. This is the as-built
+strategy; the original design rationale is
+[agent-skill-wiring-design.md](agent-skill-wiring-design.md), and
+`tests/agent_skill_wiring_contract.sh` enforces the wiring._
+
 Investigation (2026-08-30) into how this repo should install curated skill
 subsets across agents, prompted by wanting a few [GStack](https://github.com/garrytan/gstack)
 skills without the whole thing.
@@ -13,9 +18,8 @@ skills without the whole thing.
   OpenCode and Codex discover `~/.agents/skills`; the verified Claude Code copy supplies
   Antigravity because the Antigravity adapter has an incompatible destination.
 - The installer verifies every `<target>/<name>/SKILL.md`, then generates an
-  OpenCode-only command at `~/.config/opencode/commands/<name>.md`. Claude
-  Code, Antigravity CLI, and OpenCode use `/teach <topic>`; Codex uses
-  `/skills`, then `$teach <topic>`.
+  OpenCode-only command at `~/.config/opencode/commands/<name>.md`.
+  Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`. Codex CLI: open `/skills`, then enter `$teach <topic>`.
 - Only OpenCode receives generated command adapters.
 - Codex has no generated command files. It discovers the shared skill catalog.
 - Generated commands carry a dotfiles ownership marker. Refresh replaces or
@@ -127,7 +131,7 @@ Replace the entire clone + `cp -r` curated-copy + `plugin.json` +
 npx --yes skills@latest add mattpocock/skills \
   -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
      code-review prototype research grilling handoff \
-  -a claude-code opencode antigravity -g -y --copy
+  -a claude-code opencode codex -g -y --copy
 ```
 
 Update path: `npx --yes skills@latest update -g -y` (or re-run the `add`).
@@ -155,19 +159,21 @@ avoid confusion with this repo's own `/code-review` command and Superpowers'
 
 ~~Recommend **1**.~~
 
-## `frontend-design` (parked note)
+## `frontend-design` (installed)
 
 Anthropic's `frontend-design` skill lives in **`anthropics/skills`** (not
 `vercel-labs/agent-skills` — the `skills` README example is wrong).
 `anthropics/skills` also has `canvas-design`, `brand-guidelines`,
 `artifacts-builder`, `webapp-testing`, `mcp-builder`.
 
-If wanted:
+No longer parked: `frontend-design` is in the curated catalog
+(`scripts/curated-agent-skills.txt`) and installs for every agent in the same
+sequence:
+
 ```sh
 npx --yes skills@latest add anthropics/skills -s frontend-design \
-  -a claude-code opencode antigravity -g -y --copy
+  -a claude-code opencode codex -g -y --copy
 ```
-User's call — candidate, not decided.
 
 ## Curated set widened (2026-09-13): +3 skills
 
@@ -186,12 +192,12 @@ removed 2026-09-14: mattpocock renamed it upstream to `writing-for-agents`
 name failed silently on every run.)
 
 Each gets its own `skills add` (one skill per source repo, so no `-s` list to
-keep in sync), same `-a claude-code opencode antigravity -g -y --copy` flags:
+keep in sync), same `-a claude-code opencode codex -g -y --copy` flags:
 
 ```sh
-npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
-npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
-npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode codex -g -y --copy
+npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode codex -g -y --copy
+npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a claude-code opencode codex -g -y --copy
 ```
 
 No overlap with Superpowers or the existing curated set: `skill-creator` is a

@@ -24,6 +24,25 @@ Sudo-style alternatives to opening a separate elevated terminal:
   builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
+### `dot upgrade` on Windows: admin + winget
+
+`dot upgrade` is the single owner of tool upgrades (system packages + AI
+tools; `dot up` never upgrades). On Windows it is administrator-only by
+design — `scripts/dotupgrade.ps1` checks `IsInRole(Administrator)` and
+**exits without changing anything** from a normal shell, printing the
+re-run hint. The same UAC constraints as `dot up` apply: use an elevated
+terminal, Windows 11 `sudo`, or gsudo.
+
+The Windows sweep upgrades system packages with `choco upgrade all` (the
+reason elevation is required) and `winget upgrade --all
+--include-unknown` (store apps can abort on interactive source agreements —
+the script warns and continues), then the AI tools via
+`update_ai_tools.ps1`. Like its Unix twin it
+defers upgrades for tools whose directories live agent sessions are
+currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
+quiet. Inside a devcontainer, upgrades ship via image rebuild and the
+script no-ops.
+
 Windows provides the host side of the setup:
 
 - **Windows Terminal**, configured by chezmoi. Details are in [Terminal Experience](terminal.md).
@@ -88,7 +107,7 @@ What the PowerShell 7 profile sets up:
 | Modern tools | `ls`→eza (`ll`, `la`, `lt`, `lta`), `cat`→bat, `vim`/`vi`/`v`→nvim |
 | Git | OMZ-style `gst`, `gd`, `gl`, `gp`, `gco`, `ga`, `gcam`, `gb` |
 | Parity with `dot_aliases.zsh` | `c`, `h`, `py`, `nr`/`nrd`/`nrb`, `serve`, `ff`, `path`, `prof`, `get`/`post`, docker `d`/`dc*` |
-| Dotfiles | `dotup` (chezmoi update + apply), `devprofile` / `dp` |
+| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor`), `devprofile` / `dp` |
 | Windows Terminal | reports the current folder (OSC 9;9), so splits open where you are (the 5.1 profile does too) |
 | SSH agent | tops up the Windows ssh-agent with your declared keys (only adds, never removes) |
 
@@ -113,7 +132,7 @@ aliases. Windows-specific points:
 
 `devprofile` manages which Git identity (name/email/signing key) is active, based on your chezmoi accounts.
 
-**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit safety net, or creating a new account. See [devprofile](devprofile.md#example-outputs) for annotated example output of each command.
+**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit identity check, or creating a new account. See [devprofile](devprofile.md#example-outputs) for annotated example output of each command.
 
 ```powershell
 devprofile                                      # Show the identity active in the current repo

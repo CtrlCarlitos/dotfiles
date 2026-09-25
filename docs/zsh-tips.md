@@ -33,13 +33,13 @@ A guide to getting the most out of your Zsh setup.
 | `ssh-agent` | Auto-starts/reuses an SSH agent, loads keys |
 | `ubuntu` | Ubuntu-specific commands |
 
-## Modern CLI Tools (`install_modern`)
+## Modern CLI Tools (`modern_cli`)
 
 Installed alongside the plugins above, not part of Oh-My-Zsh itself:
 
 | Tool | What it does | Try it |
 |------|--------------|--------|
-| `gh` | GitHub CLI (installed under `install_core`, not `install_modern` - it's needed for basic repo access) | `gh auth login`, `gh pr create`, `gh repo clone owner/repo` |
+| `gh` | GitHub CLI (installed under the `core` group, not `modern_cli` - it's needed for basic repo access) | `gh auth login`, `gh pr create`, `gh repo clone owner/repo` |
 | `tealdeer` (`tldr`) | Example-based cheatsheets instead of full man pages | `tldr tar` |
 | `dust` | Visual `du` replacement - aliased over `du` automatically when installed | `du` (now runs `dust`) |
 | `duf` | Colorized `df` replacement - aliased over `df` automatically when installed | `df` (now runs `duf`) |
@@ -51,7 +51,7 @@ Installed alongside the plugins above, not part of Oh-My-Zsh itself:
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+A` | Beginning of line |
+| `Ctrl+A` | Beginning of line (inside tmux: press prefix `Ctrl+a` twice — the second one is sent through to the shell) |
 | `Ctrl+E` | End of line |
 | `Ctrl+U` | Clear line before cursor |
 | `Ctrl+K` | Clear line after cursor |
@@ -123,8 +123,8 @@ the [Oh-My-Zsh Git Aliases](#oh-my-zsh-git-aliases) section below (`gst`,
 `glo`, `glg`, etc). You usually don't need to check or switch identity
 manually at all - it's already selected automatically by which folder a
 repo lives in. When you do (a repo outside any mapped folder, or just to
-double-check), use `devprofile` (aliased to `dp` here; no equivalent alias
-exists in PowerShell yet, see [windows.md](windows.md)) - full annotated
+double-check), use `devprofile` (aliased to `dp` in both zsh and PowerShell,
+see [windows.md](windows.md)) - full annotated
 example output is in [devprofile](devprofile.md#example-outputs):
 ```bash
 dp             # Show current repo's git identity (bare devprofile)
@@ -134,11 +134,14 @@ dp verify      # Sanity-check the active identity against this repo's folder
 ```
 
 ### Docker
+No personal aliases to memorize: `d` is `docker`, and the `docker` /
+`docker-compose` Oh-My-Zsh plugins provide the compose shortcuts. The ones
+you'll actually type:
 ```bash
-dc          # docker compose
-dcu         # docker compose up -d
-dcd         # docker compose down
-dcl         # docker compose logs -f
+dco         # docker compose
+dcupd       # docker compose up -d
+dcdn        # docker compose down
+dclf        # docker compose logs -f
 ```
 
 ### General

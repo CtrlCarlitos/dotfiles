@@ -142,6 +142,24 @@ the pinned release's installer by hand with `--uninstall` (`-Uninstall`), or
 add `--purge` (`-Purge`) to delete guardrail's state too. The agent-guardrails
 OPERATIONS.md lists what each one removes.
 
+## Config the dotfiles ship
+
+The repo root carries a `guardrail.toml` — guardrail's own config overlay:
+
+```toml
+[slots]
+  web_hosts = ["starship.rs"]
+```
+
+Location semantics matter here: guardrail reads this overlay from the
+**source repo** (the chezmoi source dir), not from `$HOME`. A
+`guardrail.toml` copy in `$HOME` is dead weight — `guardrail doctor` run
+there reports `overlay: none` — which is why the file is on
+`.chezmoiignore`'s never-deploy list, pinned by
+`tests/home_scope_contract.sh`. The shipped entry (`starship.rs`, a docs
+site your prompt config references) is the only trusted web host; edit the
+file in the repo to change it — never a `$HOME` copy, which nothing reads.
+
 ## Caveats
 
 - **CI seeds keep `guardrail = false`.** `guardrail setup` refuses to run

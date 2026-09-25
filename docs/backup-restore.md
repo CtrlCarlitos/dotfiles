@@ -42,6 +42,15 @@ Before continuing, install `7z` or `7zz` and ensure `chezmoi.toml` exists. The s
 
 ## Backup
 
+The one command to remember — both shells alias the whole flow:
+
+```sh
+dot backup
+```
+
+It runs the platform script below for you. The raw paths, if you ever need
+them directly:
+
 ### Linux / macOS / WSL
 
 Run the supported backup script from the machine being backed up:
@@ -77,6 +86,12 @@ Because the archive is portable, a backup created on Windows, Linux, macOS, or W
 ## Restore
 
 Restore only onto a machine where any existing `~/.config/chezmoi/chezmoi.toml` and conflicting files under `~/.ssh` have been reviewed. `dotrestore` refuses to overwrite either an existing ChezMoi config or any existing SSH file. Resolve collisions manually, then rerun the script.
+
+The one command:
+
+```sh
+dot restore ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
+```
 
 ### Linux / macOS / WSL
 
@@ -228,11 +243,11 @@ If chezmoi is installed but config is missing:
 ```toml
 [data]
   [data.packages]
-    install_core = true
-    install_modern = true
-    install_fonts = true
-    install_ai_tools = true
-    install_desktop = false
+    core = true
+    modern_cli = true
+    fonts = true
+    agent_toolkit = true
+    dev_desktop = false
 
 [[data.accounts]]
   name = "Your Name"
