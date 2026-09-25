@@ -1,5 +1,5 @@
 {{- if eq .chezmoi.os "linux" "darwin" -}}
-{{- if .accounts -}}
+{{- if and (hasKey . "accounts") .accounts -}}
 {{- /* Same container rule as dot_gitconfig.tmpl: a devcontainer has no key
        FILES (keys arrive through the forwarded agent socket), so pinning
        `-i <path> -o IdentitiesOnly=yes` there would refuse the agent's keys,
