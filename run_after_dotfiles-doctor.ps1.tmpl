@@ -24,13 +24,18 @@ if (-not (Test-Path $doctor)) {
     exit 0
 }
 $env:DOTFILES_DOCTOR_IN_APPLY = '1'
-& pwsh -NoProfile -File $doctor
+# pwsh is not guaranteed: powershell-core sits in package group `core`, and a
+# non-interactive apply (all groups false) renders without it. A missing pwsh
+# left $LASTEXITCODE at $null, `$null -ne 0` was true, and the apply failed
+# with "doctor reported errors" without the doctor ever running.
+$hostExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+& $hostExe -NoProfile -File $doctor
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "dotfiles-doctor reported errors - apply stops here." -ForegroundColor Red
     Write-Host "  Inspect the results above, then either:"
-    Write-Host "    pwsh -File `"$doctor`" -Fix   # auto-repair what is safe"
-    Write-Host "    pwsh -File `"$doctor`"         # full standalone run (all checks)"
+    Write-Host "    $hostExe -File `"$doctor`" -Fix   # auto-repair what is safe"
+    Write-Host "    $hostExe -File `"$doctor`"         # full standalone run (all checks)"
     Write-Host "  or open $env:USERPROFILE\.config\chezmoi\chezmoi.toml in an editor (save as UTF-8)"
     Write-Host "  and re-run: chezmoi apply"
     exit 1

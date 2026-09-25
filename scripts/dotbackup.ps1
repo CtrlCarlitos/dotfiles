@@ -35,18 +35,25 @@ try {
         Get-ChildItem -LiteralPath $sshSource -File -Recurse -Force |
             Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
             ForEach-Object {
-                $relative = [IO.Path]::GetRelativePath($sshSource, $_.FullName)
+                # Twin of dotrestore.ps1's relative-path slice. 5.1 is the
+                # documented host (docs/backup-restore.md) and has no
+                # [IO.Path]::GetRelativePath (.NET Core only).
+                $relative = $_.FullName.Substring($sshSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
                 $destination = Join-Path $sshRoot $relative
                 New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
                 Copy-Item -LiteralPath $_.FullName -Destination $destination
             }
     }
 
-    [ordered]@{
+    # WriteAllText with UTF8Encoding($false) = no BOM, same as every other
+    # script here. 5.1 has no `-Encoding utf8NoBOM` (pwsh 6+), and 5.1's
+    # default Set-Content encoding writes a BOM.
+    $manifest = [ordered]@{
         format_version = 'dotfiles-backup-v1'
         created_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         source_platform = [Environment]::OSVersion.Platform.ToString()
-    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payloadRoot 'manifest.json') -Encoding utf8NoBOM
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $payloadRoot 'manifest.json'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
 
     $backupDirectory = Join-Path $HOME '.dot_backups'
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
