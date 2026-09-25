@@ -81,6 +81,14 @@
     #                       three OSs (mac/Linux use pinned hub-channel URLs).
     antigravity_desktop = false
 
+    # remote_access — Private mesh access and approved app tunneling
+    #                 (Tailscale, cloudflared). No login or tunnel setup.
+    remote_access = false
+
+    # remote_access_server — Explicit SSH-server prerequisite opt-in.
+    #                        Never preset; manual SSH setup required.
+    remote_access_server = false
+
     # guardrail — Agent guardrails: runs the pinned agent-guardrails
     #             installer, which installs the binary and registers its
     #             hooks with each agent host after your passkey approval.
@@ -125,8 +133,10 @@
 #   - URL rewrites for organizations
 #
 # name, email, username, provider, and dirs define identity/routing. `key` and
-# `signingKey` are filenames in ~/.ssh, never key material. Repeat this array
-# table for every identity; only fields shown below survive `chezmoi init`.
+# `signingKey` are filenames in ~/.ssh, never key material. `agent_key_comments`
+# overrides the comments ssh-agent-relay allows by (default "<email>" and
+# "<email>-sign", see docs/ssh-agents.md). Repeat this array table for every
+# identity; only fields shown below survive `chezmoi init`.
 
 [[data.accounts]]
   name = "Your Name"
@@ -136,6 +146,7 @@
   key = "id_ed25519"                   # SSH key filename in ~/.ssh/
   # signingKey = "id_ed25519_sign"     # Optional: separate key for commit signing
   # If you use separate auth/sign keys, a passphrase on both is recommended.
+  # agent_key_comments = ["your.email@example.com", "your.email@example.com-sign"]
   organizations = []                   # Orgs to rewrite URLs for
   dirs = ["projects", ".local/share/chezmoi"]  # Directories using this identity (auto-created)
 
@@ -172,6 +183,20 @@
 #   comment  = "Bastion for staging"  # optional  block header (memory hook)
 #   os       = "linux"                # optional  mac|linux: Windows Terminal tab color/icon
 #   tmux     = true                   # optional  Terminal tab re-attaches to tmux "main" (or a name)
+
+# ==============================================================================
+# CHEZMOI BEHAVIOUR ([add] / [diff])
+# ==============================================================================
+# Top-level chezmoi tables (not [data]): `chezmoi init` writes these from
+# .chezmoi.toml.tmpl.
+[add]
+  secrets = "warning"        # warn instead of erroring on secret-shaped files
+
+# The [diff] pager exists only when modern_cli is on, for the same reason
+# git's pager is gated: with modern_cli = false delta is not installed and
+# `chezmoi diff` would die on the missing binary.
+# [diff]
+#   pager = "delta"
 
 # ==============================================================================
 # QUICK SETUP
