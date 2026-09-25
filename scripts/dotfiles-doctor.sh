@@ -159,9 +159,13 @@ if [ -n "$IN_APPLY" ]; then
 else
 src="$(chezmoi source-path 2>/dev/null || true)"
 if [ -n "$src" ] && [ -d "$src" ]; then
+    # Brace groups the dirtiness disjunction so it is only evaluated when
+    # the dir IS a repo: unbraced, `(A && !B) || !C` turned a failed
+    # `git diff --cached` (non-git source dir) into a bogus "uncommitted
+    # changes" warning.
     if git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
-       ! git -C "$src" diff --quiet >/dev/null 2>&1 || \
-       ! git -C "$src" diff --cached --quiet >/dev/null 2>&1; then
+       { ! git -C "$src" diff --quiet >/dev/null 2>&1 || \
+         ! git -C "$src" diff --cached --quiet >/dev/null 2>&1; }; then
         result warn source-dir "$src has uncommitted changes"
     else
         result ok source-dir "$src (clean)"

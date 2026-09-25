@@ -133,7 +133,20 @@ grep -q 'config-parse     chezmoi loads' <<<"$out" &&
     fail "[6a] in-apply mode must not run chezmoi data (state-lock deadlock)"
 echo "  ok: in-apply mode skips chezmoi-invoking checks"
 
-# [6b] Contract: chezmoi runs the doctor after every apply, never with the
+# [6b] A source dir that is NOT a git repo (interrupted first install class)
+# must be reported clean: the dirtiness checks are only meaningful inside a
+# repo, and unbraced `A && !B || !C` turned the failed `git diff --cached`
+# of a non-repo into a bogus "uncommitted changes" warning.
+H="$TMP/home-nongit"; valid_config "$H"
+mkdir -p "$H/.local/share/chezmoi"
+printf 'stray file\n' > "$H/.local/share/chezmoi/stray"
+out7="$(env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" 2>&1 || true)"
+grep -q 'source-dir' <<<"$out7" || fail "[6b] source-dir not reported: $out7"
+grep -q '(clean)' <<<"$out7" || fail "[6b] non-git source dir must pass as clean: $out7"
+grep -q 'uncommitted' <<<"$out7" && fail "[6b] non-git source dir flagged uncommitted: $out7"
+echo "  ok: non-git source dir reported clean"
+
+# [6c] Contract: chezmoi runs the doctor after every apply, never with the
 # fix flag, and a failure stops the apply with guidance.
 run_after_sh="$repo_root/run_after_dotfiles-doctor.sh.tmpl"
 run_after_ps1="$repo_root/run_after_dotfiles-doctor.ps1.tmpl"
