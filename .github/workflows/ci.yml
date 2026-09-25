@@ -163,11 +163,11 @@ jobs:
           # silently-skipped step. Version + checksum mirror the gitleaks
           # pattern below (#133: pinned download, verified before use).
           ACTIONLINT_VERSION=1.7.12
-          curl -fsSL -o /tmp/actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "/tmp/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           curl -fsSL -o /tmp/actionlint_checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
           grep "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" /tmp/actionlint_checksums.txt |
             (cd /tmp && sha256sum -c -)
-          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          tar -xzf "/tmp/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -C /tmp actionlint
           /tmp/actionlint -color
 
       - name: Secret/PII scan (gitleaks)
