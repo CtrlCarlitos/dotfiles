@@ -1,71 +1,90 @@
 # Chezmoi External Dependencies
-# Manages Oh-My-Zsh and its plugins
+# Manages Oh-My-Zsh, its plugins, and the tmux plugin set (TPM included)
 # Run `chezmoi apply` to install/update these
 #
-# Version Pinning (updated 2026-02-27)
-# Using commit hashes instead of tags for better stability, security, and to avoid GitHub tag archive 502 errors.
+# Every pin is a default-branch commit SHA plus the matching sha256, refreshed
+# by scripts/update-versions.sh (the weekly updater PR re-resolves HEAD,
+# rewrites the URLs, and recomputes the checksums). No refreshPeriod anywhere:
+# the URL carries the version, so re-fetching an immutable archive is waste.
+# zsh-z was removed 2026-09-24: never loaded (no plugins= entry), zoxide owns `z`.
 
 [".oh-my-zsh"]
   type = "archive"
-  url = "https://github.com/ohmyzsh/ohmyzsh/archive/5c4f27b7166360bd23709f24642b247eac30a147.tar.gz"
+  url = "https://github.com/ohmyzsh/ohmyzsh/archive/74965c96098134b192f00084f966b4b02438a739.tar.gz"
+  # exact = false on purpose: oh-my-zsh owns this tree (its own updater plus
+  # everything under custom/); chezmoi must not prune files it did not ship.
   exact = false
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "6c198596500d9701ac42f7be894fae38ebc6b4140f649693c16c4ca061b3ad50"
 
 [".oh-my-zsh/custom/plugins/zsh-autosuggestions"]
   type = "archive"
   url = "https://github.com/zsh-users/zsh-autosuggestions/archive/85919cd1ffa7d2d5412f6d3fe437ebdbeeec4fc5.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "20665e469e720e674964a66854d5534b9af78cdfd438512746ecd1ade8e819ce"
 
 [".oh-my-zsh/custom/plugins/zsh-syntax-highlighting"]
   type = "archive"
-  url = "https://github.com/zsh-users/zsh-syntax-highlighting/archive/1d85c692615a25fe2293bdd44b34c217d5d2bf04.tar.gz"
+  url = "https://github.com/zsh-users/zsh-syntax-highlighting/archive/0bfcb582e71d3abe604ce67bc0fe5a21f377507e.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "898766fe913588bb8e022ccddc263fc618a1308da914d397cd8b0c305b8ad3aa"
 
 [".oh-my-zsh/custom/plugins/zsh-completions"]
   type = "archive"
-  url = "https://github.com/zsh-users/zsh-completions/archive/684021f2a1eb3ba1735d86268c07bce8b0ea0588.tar.gz"
+  url = "https://github.com/zsh-users/zsh-completions/archive/b5e8e0a22deb05a807bb8655aef809a29f3cffed.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "2a7a140e2698f39fb215a0ea86694c8c59ad51c97133cf3f2709c46dfe28bf34"
 
 [".oh-my-zsh/custom/plugins/zsh-history-substring-search"]
   type = "archive"
-  url = "https://github.com/zsh-users/zsh-history-substring-search/archive/14c8d2e0ffaee98f2df9850b19944f32546fdea5.tar.gz"
+  url = "https://github.com/zsh-users/zsh-history-substring-search/archive/a0bdb0d47dbaba31dba2db7af8c48a5d9c74049a.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "b9edc11a4a04d2a5cc23bb7bafd8f02935240a45efe8a2fa61605b7636ecb22f"
 
 [".oh-my-zsh/custom/plugins/zsh-you-should-use"]
   type = "archive"
-  url = "https://github.com/MichaelAquilina/zsh-you-should-use/archive/ff371d6a11b653e1fa8dda4e61c896c78de26bfa.tar.gz"
+  url = "https://github.com/MichaelAquilina/zsh-you-should-use/archive/5f3d129864ee4505043d88c3486224f1d75b692e.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
-
-[".oh-my-zsh/custom/plugins/zsh-z"]
-  type = "archive"
-  url = "https://github.com/agkozak/zsh-z/archive/cf9225feebfae55e557e103e95ce20eca5eff270.tar.gz"
-  exact = true
-  stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "273907a3529525834b434071d3d761479ff393b1869fbd41c971cf2cd620b65e"
 
 [".oh-my-zsh/custom/plugins/fzf-tab"]
   type = "archive"
   url = "https://github.com/Aloxaf/fzf-tab/archive/24105b15714bfec37989ed5c5b6e60f572253019.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "67ee2bb60be09b6054b6b149549bb5e341be7d0ecf374f327f2d43e2349b31b1"
 
-# Tmux Plugin Manager
+# Tmux Plugin Manager - the three dot_tmux.conf plugins are externals too, so
+# TPM never needs its own `prefix + I` installer run.
 [".tmux/plugins/tpm"]
   type = "archive"
-  # Pinned to commit to avoid 502 Bad Gateway on tag archive
-  url = "https://github.com/tmux-plugins/tpm/archive/99469c4a9b1ccf77fade25842dc7bafbc8ce9946.tar.gz"
+  url = "https://github.com/tmux-plugins/tpm/archive/e261deb1b47614eed3400089ce7197dc68acc4eb.tar.gz"
   exact = true
   stripComponents = 1
-  refreshPeriod = "168h"
+  checksum.sha256 = "72d92c512270d4857e27519ac97b92a52cf149afe4d92f26860c710f60bbbe37"
+
+[".tmux/plugins/tmux-sensible"]
+  type = "archive"
+  url = "https://github.com/tmux-plugins/tmux-sensible/archive/25cb91f42d020f675bb0a2ce3fbd3a5d96119efa.tar.gz"
+  exact = true
+  stripComponents = 1
+  checksum.sha256 = "0af1e1eb7139ded74fe03c1ebba7fb4533f5c7d345e42b73f718a9d822d88903"
+
+[".tmux/plugins/tmux-resurrect"]
+  type = "archive"
+  url = "https://github.com/tmux-plugins/tmux-resurrect/archive/cff343cf9e81983d3da0c8562b01616f12e8d548.tar.gz"
+  exact = true
+  stripComponents = 1
+  checksum.sha256 = "9f1dda18554291ee7f8a0f499e2af90bbadc2ebceb7a995bb13b76529fe0c5c9"
+
+[".tmux/plugins/tmux-continuum"]
+  type = "archive"
+  url = "https://github.com/tmux-plugins/tmux-continuum/archive/0698e8f4b17d6454c71bf5212895ec055c578da0.tar.gz"
+  exact = true
+  stripComponents = 1
+  checksum.sha256 = "a1b9a2f0715163472ca713679204a1ca55d3f845cf1c659ae04222db3553424f"

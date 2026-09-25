@@ -13,7 +13,8 @@ set -euo pipefail
 #   - scans tracked files (git ls-files; falls back to find) for extensions
 #   - writes .gitattributes: `* text=auto eol=lf` default, explicit LF for
 #     shell types, CRLF for Windows-native scripts, `binary` for binary types
-#   - writes a matching .editorconfig (utf-8, lf, CRLF for ps1/bat/cmd)
+#   - writes a matching .editorconfig (utf-8, lf, trim trailing, CRLF for
+#     ps1/ps1.tmpl/bat/cmd)
 #   - runs `git add --renormalize .` in a git repo and reports the count
 #   - idempotent: existing files are NOT overwritten without --force
 
@@ -22,7 +23,7 @@ REPO_DIR="$(pwd)"
 for arg in "$@"; do
     case "$arg" in
     --force) FORCE=true ;;
-    -h|--help) sed -n '3,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '3,18p' "$0"; exit 0 ;;
     *) REPO_DIR="$arg" ;;
     esac
 done
@@ -36,7 +37,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
     FILES="$(find . -type f -not -path './.git/*')"
 fi
-EXTS="$(printf '%s\n' "$FILES" | sed 's/.*\.//' | tr 'A-Z' 'a-z' | sort -u)"
+EXTS="$(printf '%s\n' "$FILES" | sed 's/.*\.//' | tr '[:upper:]' '[:lower:]' | sort -u)"
 
 has() { printf '%s\n' "$EXTS" | grep -Fxq "$1"; }
 
@@ -89,7 +90,7 @@ else
         echo "charset = utf-8"
         echo "end_of_line = lf"
         echo "insert_final_newline = true"
-        echo "trim_trailing_whitespace = false"
+        echo "trim_trailing_whitespace = true"
         for ext in sh bash zsh py lua; do
             if has "$ext"; then
                 echo
@@ -118,7 +119,7 @@ else
             echo
             echo "# Windows-native scripts: CRLF here and in .gitattributes."
             sect=""
-            has ps1 && sect="*.ps1"
+            has ps1 && sect="*.{ps1,ps1.tmpl}"
             has bat && sect="${sect:+$sect,}*.bat"
             has cmd && sect="${sect:+$sect,}*.cmd"
             echo "[${sect}]"

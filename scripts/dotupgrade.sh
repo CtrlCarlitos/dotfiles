@@ -1,6 +1,5 @@
 #!/bin/bash
 # dot upgrade - the single owner of ALL tool upgrades.
-# Spec: docs/superpowers/specs/2026-09-20-dot-cli-design.md
 # `dot up` NEVER upgrades; this script does, with live-session guards.
 set -u
 
@@ -16,10 +15,10 @@ echo "dot upgrade - sweeping all tooling..."
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run. ---
 live() { for p in "$@"; do pgrep -x "$p" >/dev/null 2>&1 && return 0; done; return 1; }
 DEFER=""
-pgrep -x codex >/dev/null 2>&1 && DEFER="codex"
+live codex && DEFER="codex"
 live opencode claude codex agy && DEFER="${DEFER:+$DEFER,}graft"
-pgrep -x serena >/dev/null 2>&1 && DEFER="${DEFER:+$DEFER,}serena"
-pgrep -x opencode >/dev/null 2>&1 && DEFER="${DEFER:+$DEFER,}opencode"
+live serena && DEFER="${DEFER:+$DEFER,}serena"
+live opencode && DEFER="${DEFER:+$DEFER,}opencode"
 export DOTUPGRADE_DEFER="$DEFER"
 if [ -n "$DEFER" ]; then
     LIVE_NAMES="$(for p in opencode claude codex agy serena; do pgrep -x "$p" >/dev/null 2>&1 && echo "$p"; done | sort -u | tr '\n' ' ')"
@@ -75,4 +74,3 @@ if [ -n "$DEFER" ]; then
 else
     echo "dot upgrade complete."
 fi
-unset DOTUPGRADE_DEFER
