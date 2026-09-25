@@ -78,6 +78,11 @@ jobs:
       - name: Test select-packages.ps1 (pwsh twin)
         run: pwsh -NoProfile -File tests/select_packages.ps1
 
+      # The scripts under test run under powershell.exe (5.1, the documented
+      # host) inside the test - see tests/dotbackup_restore.ps1.
+      - name: Test dotbackup/restore round-trip (pwsh twin)
+        run: pwsh -NoProfile -File tests/dotbackup_restore.ps1
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual
