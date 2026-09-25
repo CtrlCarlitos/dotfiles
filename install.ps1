@@ -5,7 +5,11 @@ $ErrorActionPreference = "Stop"
 
 function Write-Info { param([string]$Message) Write-Host "[:] $Message" -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host "[v] $Message" -ForegroundColor Green }
-function Write-Error { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
+# Write-Fail, NOT a custom Write-Error: redefining Write-Error shadows the
+# built-in cmdlet for this whole session (issue #123) - any library code
+# loaded later that legitimately calls Write-Error would silently get this
+# host-print instead of the error record. Same output, honest name.
+function Write-Fail { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
 
 # Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
 # only: on failure warn and continue - without gum the menu self-skips and
@@ -38,7 +42,7 @@ function Bootstrap-Gum {
             Write-Info "gum extracted to $gumDir but not runnable - menu will self-skip."
         }
     } catch {
-        Write-Error "gum bootstrap failed: $_ - continuing (menu will self-skip)."
+        Write-Fail "gum bootstrap failed: $_ - continuing (menu will self-skip)."
     }
 }
 
@@ -155,7 +159,7 @@ try {
                 throw "Chezmoi installation failed or path not updated."
             }
         } catch {
-            Write-Error "Failed to install chezmoi: $_"
+            Write-Fail "Failed to install chezmoi: $_"
             Write-Host "Please install manually: choco install chezmoi -y"
             exit 1
         }
@@ -175,7 +179,7 @@ try {
                  }
             }
         } catch {
-             Write-Error "Failed to install Git. Please install manually."
+             Write-Fail "Failed to install Git. Please install manually."
              exit 1
         }
     }
@@ -195,7 +199,7 @@ try {
                 return
             }
             
-            Write-Error "chezmoi operation failed (exit code $($global:LASTEXITCODE)). Attempt $attempt of $max_attempts."
+            Write-Fail "chezmoi operation failed (exit code $($global:LASTEXITCODE)). Attempt $attempt of $max_attempts."
             if ($attempt -lt $max_attempts) {
                 Write-Info "Waiting $delay seconds before retrying..."
                 Start-Sleep -Seconds $delay

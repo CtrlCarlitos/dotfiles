@@ -4,9 +4,11 @@
 # profiles). `dot up` NEVER upgrades; this script does, with live-session guards.
 $ErrorActionPreference = 'Continue'
 
+# Shared helpers (scripts/lib/ps-common.ps1, issue #123).
+. (Join-Path $PSScriptRoot 'lib\ps-common.ps1')
+
 # --- Elevation: choco upgrade needs admin; fail loudly, not degraded. ---
-$__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $__isAdmin) {
+if (-not (Test-IsAdmin)) {
     Write-Host "dot upgrade requires an elevated PowerShell (choco upgrade needs it)." -ForegroundColor Red
     Write-Host "  Open a terminal as Administrator and re-run: dot upgrade" -ForegroundColor Yellow
     exit 1

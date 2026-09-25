@@ -125,6 +125,9 @@ verify_unix_supported_target_counts() {
     # without it the installer template fails on `.guardrail.version`.
     cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
     cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$tmp/repo/"   # catalog + fragments the installers include
+    # #123: the installer template inlines scripts/lib/agent-skills.sh - the
+    # scratch source needs it for the include to resolve.
+    cp -r "$repo_root/scripts/lib" "$tmp/repo/scripts/"
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
         < "$repo_root/run_onchange_install_packages.sh.tmpl" > "$rendered"
@@ -140,7 +143,12 @@ EOF
     chmod +x "$tmp/bin/npx" "$tmp/bin/git"
     harness="$tmp/lifecycle.sh"
     {
+        # #123: net_timeout and the skills add/verify bodies live in
+        # scripts/lib/agent-skills.sh, shared with the updater; the rendered
+        # installer inlines the lib, the fixture sources it (path baked in)
+        # before the stubs that follow, which then override the lib's.
         printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+            ". $repo_root/scripts/lib/agent-skills.sh" \
             'info() { printf "%s\\n" "$1"; }' 'warn() { :; }'
         awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
         awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
@@ -170,6 +178,9 @@ EOF
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -e' \
             'chezmoi() { if [ "${1:-}" = execute-template ]; then shift; command chezmoi execute-template --source "'"$tmp/repo"'" "$@"; else printf "%s\\n" "'"$tmp/repo"'"; fi; }'
+        # #123: skills_add_all/verify_curated_skill_targets live in the
+        # shared lib now; source it (path baked in) before the captured region.
+        printf '%s\n' ". $repo_root/scripts/lib/agent-skills.sh"
         # Capture from the catalog assignment (not the npx guard): the
         # verification below needs the catalog path, the fallback helper and
         # the derived total, all defined before the npx branch in the source.
@@ -200,6 +211,9 @@ verify_unix_skill_lifecycle() {
     : > "$config"
     cp "$repo_root/.chezmoidata.yaml" "$tmp/repo/"
     cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$tmp/repo/"   # catalog + fragments the installers include
+    # #123: the installer template inlines scripts/lib/agent-skills.sh - the
+    # scratch source needs it for the include to resolve.
+    cp -r "$repo_root/scripts/lib" "$tmp/repo/scripts/"
     rendered="$tmp/installer.sh"
     chezmoi execute-template --config "$config" --source "$tmp/repo" \
         --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
@@ -227,7 +241,10 @@ EOF
 
     harness="$tmp/lifecycle.sh"
     {
+        # #123: source the shared lib (path baked in) before the stubs that
+        # follow, which then override the lib's helpers.
         printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+            ". $repo_root/scripts/lib/agent-skills.sh" \
             'info() { printf "%s\\n" "$1"; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
         awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
         cat <<'EOF'
@@ -666,26 +683,31 @@ if [[ "$scope" != "windows" ]]; then
             fail "$file must not use the Antigravity skills CLI adapter"
         fi
 
-        for target in \
-            '$HOME/.claude/skills' \
-            '$HOME/.agents/skills' \
-            '$HOME/.gemini/antigravity-cli/skills' \
-            '$HOME/.config/opencode/commands'; do
-            require_contains "$file" "$target"
-        done
-
-        require_contains "$file" 'managed-by: chezmoi-curated-skills'
-        require_contains "$file" 'SKILL.md'
-        require_contains "$file" '$ARGUMENTS'
-        require_contains "$file" '$HOME/.agents/skills/$skill'
-        require_contains "$file" 'backup='
-        require_contains "$file" 'mv "$target" "$backup"'
-        require_contains "$file" 'mv "$backup" "$target"'
-        require_contains "$file" 'rm -rf "$backup"'
         for agent in 'Claude Code' OpenCode Antigravity Codex; do
         require_contains "$file" "Curated skills: $agent installed="
         done
     done
+
+    # #123: the target paths, the managed-by marker and the backup/restore
+    # choreography moved verbatim into scripts/lib/agent-skills.sh (both unix
+    # consumers execute it - the unix lifecycle fixtures above pin its
+    # behavior); the literals live with the implementation now.
+    for target in \
+        '$HOME/.claude/skills' \
+        '$HOME/.agents/skills' \
+        '$HOME/.gemini/antigravity-cli/skills' \
+        '$HOME/.config/opencode/commands'; do
+        require_contains scripts/lib/agent-skills.sh "$target"
+    done
+
+    require_contains scripts/lib/agent-skills.sh 'managed-by: chezmoi-curated-skills'
+    require_contains scripts/lib/agent-skills.sh 'SKILL.md'
+    require_contains scripts/lib/agent-skills.sh '$ARGUMENTS'
+    require_contains scripts/lib/agent-skills.sh '$HOME/.agents/skills/$skill'
+    require_contains scripts/lib/agent-skills.sh 'backup='
+    require_contains scripts/lib/agent-skills.sh 'mv "$target" "$backup"'
+    require_contains scripts/lib/agent-skills.sh 'mv "$backup" "$target"'
+    require_contains scripts/lib/agent-skills.sh 'rm -rf "$backup"'
     require_contains 'run_onchange_install_packages.sh.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"'\\\"'\\\"'\" }}"
     require_contains 'run_onchange_install_packages.sh.tmpl' 'claude mcp get serena'
 fi
@@ -736,7 +758,13 @@ fi
 # skill-creator comes from our drop-in fork (CtrlCarlitos/skills, Windows fixes,
 # docs/skills-install-strategy.md), never from anthropics/skills, in all four
 # consumers regardless of scope: the source is a wiring fact, not an OS one.
-for file in run_onchange_install_packages.sh.tmpl scripts/update_ai_tools.sh run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
+# #123: on the unix side the add batch lives in the shared lib, so the fork
+# pin is checked there instead of in each consumer.
+require_contains scripts/lib/agent-skills.sh 'CtrlCarlitos/skills -s skill-creator'
+if grep -Fq -- 'anthropics/skills -s skill-creator' "$repo_root/scripts/lib/agent-skills.sh"; then
+    fail "scripts/lib/agent-skills.sh must install skill-creator from CtrlCarlitos/skills, not anthropics/skills"
+fi
+for file in run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
     require_contains "$file" 'CtrlCarlitos/skills -s skill-creator'
     if grep -Fq -- 'anthropics/skills -s skill-creator' "$repo_root/$file"; then
         fail "$file must install skill-creator from CtrlCarlitos/skills, not anthropics/skills"

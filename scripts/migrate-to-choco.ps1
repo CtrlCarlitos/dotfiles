@@ -22,23 +22,21 @@ param([switch]$ListOnly)
 
 $ErrorActionPreference = 'Stop'
 
+# Shared helpers (scripts/lib/ps-common.ps1, issue #123).
+. (Join-Path $PSScriptRoot 'lib\ps-common.ps1')
+
 # Hard elevation gate (same contract as the installer: nothing runs degraded;
 # admin is required for uninstall + choco install).
-$__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $__isAdmin -and -not $ListOnly) {
+if (-not (Test-IsAdmin) -and -not $ListOnly) {
     Write-Host "migrate-to-choco requires an elevated terminal (uninstall + choco install)." -ForegroundColor Red
     Write-Host "  Re-run as Administrator, or use -ListOnly to just see candidates." -ForegroundColor Yellow
     exit 1
 }
 
-# Cross-generation PSModulePath guard (see run_onchange_generate_identities
-# .ps1.tmpl): registry/Get-ItemProperty + Write-Host live in the in-box
-# modules 5.1 fails to autoload under pwsh 7's inherited module path.
-if ($PSVersionTable.PSVersion.Major -le 5) {
-    $env:PSModulePath = (($env:PSModulePath -split ';') |
-        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
-    Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
-}
+# Cross-generation PSModulePath guard: registry/Get-ItemProperty + Write-Host
+# live in the in-box modules 5.1 fails to autoload under pwsh 7's inherited
+# module path (shared implementation, issue #123).
+Use-InBoxModules
 
 # --- package universe: read from the catalog at runtime --------------------
 # .chezmoidata/packages.yaml is the only list (see #83). The installer renders

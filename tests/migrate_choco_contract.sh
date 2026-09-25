@@ -19,7 +19,9 @@ installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 
 [ -f "$script" ] || fail "scripts/migrate-to-choco.ps1 missing"
 
-grep -Fq 'WindowsBuiltInRole]::Administrator' "$script" ||
+# #123: the elevation check moved into scripts/lib/ps-common.ps1
+# (Test-IsAdmin); accept either the shared helper call or the inline literal.
+grep -Eq 'WindowsBuiltInRole\]::Administrator|Test-IsAdmin' "$script" ||
     fail "script: no elevation gate"
 grep -Fq 'Read-Host' "$script" || fail "script: no per-app confirmation"
 grep -Fq 'Type "tailscale" to confirm' "$script" ||

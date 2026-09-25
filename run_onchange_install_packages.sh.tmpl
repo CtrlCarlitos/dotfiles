@@ -107,47 +107,12 @@ fi
 #===============================================================================
 
 #-------------------------------------------------------------------------------
-# Colors
+# Shared helpers (logging, net_timeout, sha256_cmd, fetch_and_verify) and the
+# curated-agent-skills lifecycle come from scripts/lib/agent-skills.sh
+# (issue #123), inlined here at RENDER time: a run_onchange script must stay
+# self-contained, so the installer cannot source the lib at runtime.
 #-------------------------------------------------------------------------------
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info()    { printf "${BLUE}▸${NC} %s\n" "$1"; }
-success() { printf "${GREEN}✓${NC} %s\n" "$1"; }
-warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1"; }
-error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
-
-#-------------------------------------------------------------------------------
-# net_timeout <seconds> <cmd...> - wall-clock guard for network install steps.
-#
-# A stalled download or `curl | sh` installer (no built-in timeout) otherwise
-# freezes this whole `set -e` run indefinitely - confirmed live: Ollama's
-# ~1.5GB bundle stalled mid-transfer for 15+ min with nothing else able to
-# proceed. Wrap the fetch so a dead connection is killed and the caller's
-# `|| warn` can carry on. Pipelines: `net_timeout N bash -c '... | sh'`.
-#
-# Uses coreutils `timeout` (always present on Linux) or `gtimeout` (macOS -
-# `coreutils` is first in the brew core list so it lands before the guarded
-# steps); if neither exists the command runs unguarded rather than failing.
-# Resolved per-call, not cached, so a `gtimeout` installed partway through a
-# macOS run is picked up by later steps. `-k 10` follows SIGTERM with SIGKILL
-# after 10s for processes that ignore the first signal. Exit 124 = timed out.
-#-------------------------------------------------------------------------------
-net_timeout() {
-    local secs="$1"; shift
-    local bin=""
-    if command -v timeout &>/dev/null; then bin="timeout"
-    elif command -v gtimeout &>/dev/null; then bin="gtimeout"
-    fi
-    if [ -n "$bin" ]; then
-        "$bin" -k 10 "$secs" "$@"
-    else
-        "$@"
-    fi
-}
+{{ include "scripts/lib/agent-skills.sh" }}
 
 #-------------------------------------------------------------------------------
 # add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its
@@ -335,136 +300,11 @@ install_agent_skills() {
         done
     }
 
-    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
-    # teach + writing-for-agents live under skills/productivity/, the rest under
-    # skills/engineering/; the CLI resolves by skill name, not path (grilling and
-    # handoff are already productivity/ skills that resolve fine here).
-    info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
-    if net_timeout 300 "${SK[@]}" add mattpocock/skills \
-        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
-           prototype research grilling handoff teach writing-for-agents \
-           resolving-merge-conflicts \
-        -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 11
-    else
-        record_cli_result failed 11
-        warn "Matt Pocock skills install failed or timed out - continuing"
-    fi
-
-    # code-review -> mp-code-review. The `skills` CLI has no rename flag, so
-    # stage a renamed copy with its `name:` frontmatter patched and install
-    # that local directory. "mp-" keeps it distinct from this repo's own
-    # /code-review command and Superpowers' receiving-code-review skill.
-    local sk_tmp; sk_tmp="$(mktemp -d)"
-    # net_timeout: same wall-clock contract as every other network fetch here
-    # (docs/tool-parity.md's Network-step timeouts section includes git clones).
-    if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
-        local src="$sk_tmp/repo/skills/engineering/code-review"
-        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
-        if [[ -d "$src" ]]; then
-            mkdir -p "$sk_tmp/stage/mp-code-review"
-            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
-            local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
-            if [[ -f "$skf" ]]; then
-                # portable in-place edit (GNU and BSD sed differ on -i).
-                # Guarded: a bare failing `sed ... && mv` here would trip
-                # set -e and abort the whole run - frontend-design, Playwright,
-                # act, desktop apps and shell setup all come after this.
-                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-                    record_cli_result installed 1
-                else
-                    record_cli_result failed 1
-                    warn "mp-code-review skill install failed - continuing"
-                fi
-            else
-                record_cli_result skipped 1
-                warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
-            fi
-        else
-            record_cli_result skipped 1
-            warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
-        fi
-    else
-        record_cli_result failed 1
-        warn "mp-code-review skill source clone failed or timed out - continuing"
-    fi
-    rm -rf "$sk_tmp"
-
-    # Anthropic's frontend-design skill - distinctive visual direction for new UI.
-    info "Installing Anthropic's frontend-design skill..."
-    if net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "frontend-design skill install failed or timed out - continuing"
-    fi
-
-    # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
-    # agent search and install skills from skills.sh mid-session.
-    info "Installing find-skills skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "find-skills skill install failed or timed out - continuing"
-    fi
-
-    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
-    # automation: navigate, click, fill, scrape, screenshot.
-    info "Installing agent-browser skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "agent-browser skill install failed or timed out - continuing"
-    fi
-
-    # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands.
-    # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
-    # skill-authoring lifecycle tool with benchmarks and eval viewer.
-    info "Installing Anthropic's skill-creator skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "skill-creator skill install failed or timed out - continuing"
-    fi
-
-    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend infers a
-    # visual direction for new pages behind tunable dials plus an anti-slop
-    # checklist; redesign-existing-projects audits an existing UI's styling
-    # and applies targeted fixes without changing behaviour. Chosen 2026-09-24
-    # for function, not popularity - the repo's style presets, image-generation
-    # skills, GPT/Stitch variants and v1 were left out (see
-    # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
-    # purpose; drop one if they double-trigger.
-    info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..."
-    if net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 2
-    else
-        record_cli_result failed 2
-        warn "taste skills install failed or timed out - continuing"
-    fi
-
-    # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
-    # Probes once per session which tools can see the code (graft graph built
-    # and covering the language, serena LSP, rg, grep), routes each question
-    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
-    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
-    # task" block cost every session in this repo two empty queries (the graph
-    # covers one Lua file here) - docs/skills-install-strategy.md.
-    info "Installing code-search skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "code-search skill install failed or timed out - continuing"
-    fi
-
-    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
-    #  writing-for-agents, which is already in the batch above — the old name
-    #  failed silently on every run.)
+    # The eight curated `skills add` fetches live in the shared lib
+    # (scripts/lib/agent-skills.sh - issue #123), verbatim: same argument
+    # vector (tests/install_agent_skills_arguments.sh pins it), same
+    # net_timeout walls, same </dev/null guard.
+    skills_add_all
 
     if [[ ! -r "$catalog" ]]; then
         warn "Curated skill catalog is not readable: $catalog"
@@ -475,101 +315,14 @@ install_agent_skills() {
         return
     fi
 
-    local skill source target tmp backup command_dir command_file antigravity_status
     local claude_reported="$claude_installed" opencode_reported="$opencode_installed" codex_reported="$codex_installed"
     claude_installed=0
     opencode_installed=0
     codex_installed=0
-    while IFS= read -r skill || [[ -n "$skill" ]]; do
-        [[ -z "$skill" || "$skill" == \#* ]] && continue
-
-        # A successful CLI exit only means its copy operation completed. Count
-        # an agent installed only after its supported discovery target exists.
-        if [[ -f "$HOME/.claude/skills/$skill/SKILL.md" ]]; then
-            claude_installed=$((claude_installed + 1))
-        elif ((claude_reported > 0)); then
-            claude_failed=$((claude_failed + 1))
-        fi
-        if [[ -f "$HOME/.agents/skills/$skill/SKILL.md" ]]; then
-            opencode_installed=$((opencode_installed + 1))
-            codex_installed=$((codex_installed + 1))
-        else
-            if ((opencode_reported > 0)); then
-                opencode_failed=$((opencode_failed + 1))
-            fi
-            if ((codex_reported > 0)); then
-                codex_failed=$((codex_failed + 1))
-            fi
-        fi
-
-        source="$HOME/.claude/skills/$skill"
-        target="$HOME/.gemini/antigravity-cli/skills/$skill"
-        if [[ -f "$source/SKILL.md" ]]; then
-            antigravity_status=failed
-            mkdir -p "$HOME/.gemini/antigravity-cli/skills"
-            tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
-            if cp -R "$source/." "$tmp/"; then
-                backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
-                if ! rmdir "$backup"; then
-                    rm -rf "$tmp"
-                    warn "Failed to prepare Antigravity skill backup: $skill"
-                elif [[ -e "$target" || -L "$target" ]]; then
-                    if mv "$target" "$backup"; then
-                        if mv "$tmp" "$target"; then
-                            rm -rf "$backup"
-                            antigravity_status=installed
-                        else
-                            rm -rf "$tmp"
-                            warn "Failed to promote curated skill for Antigravity: $skill"
-                            mv "$backup" "$target" || warn "Failed to restore Antigravity skill backup: $skill"
-                        fi
-                    else
-                        rm -rf "$tmp"
-                        warn "Failed to back up existing Antigravity skill: $skill"
-                    fi
-                elif mv "$tmp" "$target"; then
-                    antigravity_status=installed
-                else
-                    rm -rf "$tmp"
-                    warn "Failed to promote curated skill for Antigravity: $skill"
-                fi
-            else
-                rm -rf "$tmp"
-                warn "Failed to copy curated skill for Antigravity: $skill"
-            fi
-        else
-            antigravity_status=skipped
-            warn "Claude skill missing; skipping Antigravity copy: $skill"
-        fi
-
-        case "$antigravity_status" in
-            installed) ((antigravity_installed += 1)) ;;
-            skipped) ((antigravity_skipped += 1)) ;;
-            *) ((antigravity_failed += 1)) ;;
-        esac
-
-        command_dir="$HOME/.config/opencode/commands"
-        command_file="$command_dir/$skill.md"
-        source="$HOME/.agents/skills/$skill"
-        if [[ -f "$source/SKILL.md" ]]; then
-            mkdir -p "$command_dir"
-            if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-                warn "OpenCode command is user-managed; leaving unchanged: $command_file"
-            else
-                tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
-                {
-                    printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
-                    printf 'description: Run the %s skill\n' "$skill"
-                    printf '%s\n' '---'
-                    # shellcheck disable=SC2016 # OpenCode expands this placeholder at command invocation.
-                    printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
-                } > "$tmp"
-                mv "$tmp" "$command_file"
-            fi
-        elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-            rm -f "$command_file"
-        fi
-    done < "$catalog"
+    # Target verification, the Antigravity fan-out with backup/restore and
+    # the OpenCode command shims: shared verbatim in
+    # scripts/lib/agent-skills.sh (issue #123).
+    verify_curated_skill_targets
 
     info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
     info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
@@ -618,24 +371,11 @@ install_agent_guardrails() {
 
     local base="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
     local tmp; tmp="$(mktemp -d)"
-    if ! net_timeout 60 curl -fLo "$tmp/install.sh" "$base/install.sh" ||
-        ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "$base/SHA256SUMS"; then
-        warn "guardrail: installer download failed or timed out - skipping"; rm -rf "$tmp"; return
-    fi
-    # stock macOS ships `shasum`, not `sha256sum` — without this the check
-    # returns 127 and the run is skipped under a message that misattributes it
-    # to a checksum mismatch.
-    local SHA_CMD
-    if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
-    elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
-    elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
-    else warn "guardrail: no SHA-256 tool found - cannot verify installer, skipping"; rm -rf "$tmp"; return; fi
-    # Verify from a one-line file, not stdin (like agent-guardrails' own
-    # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read `-c -`.
-    # No install.sh line fails the grep, so a partial SHA256SUMS fail-closes.
-    if ! ( cd "$tmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
-        $SHA_CMD -c SHA256SUMS.one ); then
-        warn "guardrail: installer CHECKSUM MISMATCH - not running it"; rm -rf "$tmp"; return
+    # Fetch + verify via the shared lib helper (issue #123/#125): download to
+    # temp (net_timeout-guarded, never piped) and checksum-verify against the
+    # release's SHA256SUMS before anything runs.
+    if ! fetch_and_verify guardrail "$base/install.sh" "$base/SHA256SUMS" install.sh "$tmp"; then
+        rm -rf "$tmp"; return
     fi
 
     info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); approval URL prints here if WebAuthn is required..."
@@ -965,20 +705,19 @@ install_apt() {
         esac
 
         if [[ -n "$shfmt_arch" ]]; then
-            local -a shfmt_sha_cmd=()
-            if command -v sha256sum &>/dev/null; then shfmt_sha_cmd=(sha256sum)
-            elif command -v gsha256sum &>/dev/null; then shfmt_sha_cmd=(gsha256sum)
-            elif command -v shasum &>/dev/null; then shfmt_sha_cmd=(shasum -a 256)
-            else warn "shfmt: no SHA-256 tool found - cannot verify, skipping install"; fi
+            # sha256_cmd comes from the shared lib (issue #123); same ladder
+            # the guardrail fetch uses (sha256sum / gsha256sum / shasum -a 256).
+            local shfmt_sha_cmd
+            shfmt_sha_cmd="$(sha256_cmd)"
 
-            if (( ${#shfmt_sha_cmd[@]} > 0 )); then
+            if [[ -n "$shfmt_sha_cmd" ]]; then
                 local shfmt_tmp shfmt_url
                 shfmt_url="https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_${shfmt_arch}"
                 if shfmt_tmp="$(mktemp)"; then
                     info "Installing shfmt..."
                     if ! net_timeout 120 curl -fLo "$shfmt_tmp" "$shfmt_url"; then
                         warn "shfmt download failed or timed out - continuing"
-                    elif ! printf '%s  %s\n' "$shfmt_sha256" "$shfmt_tmp" | "${shfmt_sha_cmd[@]}" -c -; then
+                    elif ! printf '%s  %s\n' "$shfmt_sha256" "$shfmt_tmp" | $shfmt_sha_cmd -c -; then
                         warn "shfmt checksum verification failed - not installing"
                     elif ! $SUDO install "$shfmt_tmp" /usr/local/bin/shfmt; then
                         warn "shfmt install failed - continuing"

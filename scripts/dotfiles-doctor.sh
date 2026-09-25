@@ -32,6 +32,10 @@ set -euo pipefail
 FIX=false
 [ "${1:-}" = "--fix" ] && FIX=true
 
+# The 16-group list + the [data.packages] section scanner come from the
+# shared lib (issue #123) - one vocabulary and one scanner instead of copies.
+. "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
+
 # In-apply mode: invoked by run_after_dotfiles-doctor.sh during a chezmoi
 # apply, which HOLDS chezmoi's persistent-state lock - sub-chezmoi calls
 # (data/source-path/execute-template) deadlock on it, and those checks are
@@ -126,15 +130,8 @@ fi
 #-------------------------------------------------------------------------------
 if [ -f "$config" ]; then
     missing=""
-    for key in core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
-        claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
-        antigravity_desktop dev_desktop remote_access remote_access_server guardrail; do
-        awk -v k="$key" '
-            /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
-            insec && /^[[:space:]]*\[/ { insec = 0 }
-            insec && $0 ~ "^[[:space:]]*" k "[[:space:]]*=" { found = 1 }
-            END { exit found ? 0 : 1 }
-        ' "$config" || missing="$missing $key"
+    for key in "${PKG_GROUPS[@]}"; do
+        pkg_config_has "$config" "$key" || missing="$missing $key"
     done
     if [ -n "$missing" ]; then
         result error prompted-keys "missing [data.packages] keys (map-has-no-entry outage class):$missing"

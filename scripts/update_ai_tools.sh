@@ -6,6 +6,13 @@
 # list) or direct: bash scripts/update_ai_tools.sh
 set -e
 
+# Shared helpers + the curated-skills lifecycle (issue #123): logging,
+# net_timeout (the updater previously had none - the 2026-08-30 hang class),
+# sha256_cmd, fetch_and_verify, skills_add_all, verify_curated_skill_targets.
+. "${BASH_SOURCE[0]%/*}/lib/agent-skills.sh"
+# The [data.packages] scanner + the 16-group taxonomy (issue #123).
+. "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
+
 echo "🤖 Updating AI Coding Tools..."
 
 # Defer protocol: scripts/dotupgrade.sh (the ONLY entry point - `dot
@@ -52,15 +59,18 @@ if command -v agy &>/dev/null; then
 fi
 
 # 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
-# Re-running the same `skills add` re-fetches latest (--copy overwrites). Keep
-# this list in sync with install_agent_skills() in
-# run_onchange_install_packages.sh.tmpl. --loglevel=error kills npm 12's benign
-# per-run "npm notice run ..." stderr hint; </dev/null keeps any prompt from
-# ever holding the terminal (see installer for full notes).
-# The catalog sits next to this script (both live in the source repo's
-# scripts/), and the no-npx fallback below derives its skipped count from it -
-# never a literal, which drifted every time the catalog gained a skill. Pure
-# builtins only: the count must also resolve where chezmoi/grep are absent.
+# Re-running the same `skills add` re-fetches latest (--copy overwrites). The
+# add batch and the target-verification pass are shared verbatim with
+# install_agent_skills() in run_onchange_install_packages.sh.tmpl via
+# scripts/lib/agent-skills.sh (issue #123) - the "keep this list in sync"
+# comment this block used to carry is obsolete: there is one copy now. The
+# per-consumer glue below is only what differs: the catalog sits next to this
+# script, the agent list renders from .chezmoidata/agents.yaml at runtime
+# (chezmoi is a hard prerequisite: this script runs via `chezmoi
+# source-path`), and the no-npx fallback derives its skipped count from the
+# catalog - never a literal, which drifted every time the catalog gained a
+# skill. Pure builtins in the fallback: the count must also resolve where
+# chezmoi/grep are absent.
 catalog="${BASH_SOURCE[0]%/*}/curated-agent-skills.txt"
 curated_total=0
 if [[ -r "$catalog" ]]; then
@@ -96,186 +106,13 @@ if command -v npx &>/dev/null; then
             esac
         done
     }
-    if "${SK[@]}" add mattpocock/skills \
-        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
-           prototype research grilling handoff teach writing-for-agents \
-           resolving-merge-conflicts \
-        -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 11
-    else
-        record_cli_result failed 11
-        echo "   Matt Pocock skills update failed - skipping"
-    fi
-    sk_tmp="$(mktemp -d)"
-    if git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" &>/dev/null; then
-        src="$sk_tmp/repo/skills/engineering/code-review"
-        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
-        if [[ -d "$src" ]]; then
-            mkdir -p "$sk_tmp/stage/mp-code-review"
-            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
-            skf="$sk_tmp/stage/mp-code-review/SKILL.md"
-            # guarded: bare `sed && mv` aborts this set -e script if SKILL.md
-            # is missing (upstream layout drift) - mirrors the installer
-            if [[ -f "$skf" ]]; then
-                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                if "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-                    record_cli_result installed 1
-                else
-                    record_cli_result failed 1
-                    echo "   mp-code-review update failed - skipping"
-                fi
-            else
-                record_cli_result skipped 1
-                echo "   Warning: SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
-            fi
-        else
-            record_cli_result skipped 1
-            echo "   Warning: code-review skill dir not found in mattpocock/skills - upstream layout changed?"
-        fi
-    else
-        record_cli_result failed 1
-        echo "   Warning: mp-code-review skill source clone failed - continuing"
-    fi
-    rm -rf "$sk_tmp"
-    if "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        echo "   frontend-design update failed - skipping"
-    fi
-    # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
-    if "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        echo "   find-skills update failed - skipping"
-    fi
-    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
-    if "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        echo "   agent-browser update failed - skipping"
-    fi
-    # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands
-    if "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        echo "   skill-creator update failed - skipping"
-    fi
-    # taste skills (Leonxlnx/taste-skill) - design-taste-frontend (new-page visual direction) + redesign-existing-projects (audit + fix existing UI)
-    if "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 2
-    else
-        record_cli_result failed 2
-        echo "   taste skills update failed - skipping"
-    fi
-    # code-search (CtrlCarlitos/skills) - search-tool escalation: graft > serena > rg > grep, probed once per session
-    if "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null &>/dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        echo "   code-search update failed - skipping"
-    fi
-    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
-    #  writing-for-agents, which is already in the batch above — the old name
-    #  failed silently on every run.)
-
+    skills_add_all
     if [[ ! -r "$catalog" ]]; then
         echo "   Warning: curated skill catalog is not readable: $catalog"
     else
         claude_reported="$claude_installed"; opencode_reported="$opencode_installed"; codex_reported="$codex_installed"
         claude_installed=0; opencode_installed=0; codex_installed=0
-        while IFS= read -r skill || [[ -n "$skill" ]]; do
-            [[ -z "$skill" || "$skill" == \#* ]] && continue
-
-            # Count an agent installed only after its supported discovery
-            # target exists; the CLI exit status alone is insufficient.
-            if [[ -f "$HOME/.claude/skills/$skill/SKILL.md" ]]; then
-                claude_installed=$((claude_installed + 1))
-            elif ((claude_reported > 0)); then
-                claude_failed=$((claude_failed + 1))
-            fi
-            if [[ -f "$HOME/.agents/skills/$skill/SKILL.md" ]]; then
-                opencode_installed=$((opencode_installed + 1))
-                codex_installed=$((codex_installed + 1))
-            else
-                if ((opencode_reported > 0)); then
-                    opencode_failed=$((opencode_failed + 1))
-                fi
-                if ((codex_reported > 0)); then
-                    codex_failed=$((codex_failed + 1))
-                fi
-            fi
-
-            source="$HOME/.claude/skills/$skill"
-            target="$HOME/.gemini/antigravity-cli/skills/$skill"
-            if [[ -f "$source/SKILL.md" ]]; then
-                antigravity_status=failed
-                mkdir -p "$HOME/.gemini/antigravity-cli/skills"
-                tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
-                if cp -R "$source/." "$tmp/"; then
-                    backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
-                    if ! rmdir "$backup"; then
-                        rm -rf "$tmp"
-                        echo "   Warning: failed to prepare Antigravity skill backup: $skill"
-                    elif [[ -e "$target" || -L "$target" ]]; then
-                        if mv "$target" "$backup"; then
-                            if mv "$tmp" "$target"; then
-                                rm -rf "$backup"
-                                antigravity_status=installed
-                            else
-                                rm -rf "$tmp"
-                                echo "   Warning: failed to promote curated skill for Antigravity: $skill"
-                                mv "$backup" "$target" || echo "   Warning: failed to restore Antigravity skill backup: $skill"
-                            fi
-                        else
-                            rm -rf "$tmp"
-                            echo "   Warning: failed to back up existing Antigravity skill: $skill"
-                        fi
-                    elif mv "$tmp" "$target"; then
-                        antigravity_status=installed
-                    else
-                        rm -rf "$tmp"
-                        echo "   Warning: failed to promote curated skill for Antigravity: $skill"
-                    fi
-                else
-                    rm -rf "$tmp"
-                    echo "   Warning: failed to copy curated skill for Antigravity: $skill"
-                fi
-            else
-                antigravity_status=skipped
-                echo "   Warning: Claude skill missing; skipping Antigravity copy: $skill"
-            fi
-
-            case "$antigravity_status" in
-                installed) ((antigravity_installed += 1)) ;;
-                skipped) ((antigravity_skipped += 1)) ;;
-                *) ((antigravity_failed += 1)) ;;
-            esac
-
-            command_dir="$HOME/.config/opencode/commands"
-            command_file="$command_dir/$skill.md"
-            source="$HOME/.agents/skills/$skill"
-            if [[ -f "$source/SKILL.md" ]]; then
-                mkdir -p "$command_dir"
-                if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-                    echo "   Warning: OpenCode command is user-managed; leaving unchanged: $command_file"
-                else
-                    tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
-                    {
-                        printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
-                        printf 'description: Run the %s skill\n' "$skill"
-                        printf '%s\n' '---'
-                        printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
-                    } > "$tmp"
-                    mv "$tmp" "$command_file"
-                fi
-            elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-                rm -f "$command_file"
-            fi
-        done < "$catalog"
+        verify_curated_skill_targets
     fi
     echo "   Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
     echo "   Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
@@ -321,11 +158,9 @@ GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails"
 guardrail_dest="$HOME/.local/bin/guardrail"
 guardrail_enabled=false
 if [ -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
-    guardrail_enabled=$(awk '
-        /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
-        insec && /^[[:space:]]*\[/ { insec = 0 }
-        insec && $0 ~ /^[[:space:]]*guardrail[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { print "true"; exit }
-    ' "$HOME/.config/chezmoi/chezmoi.toml")
+    # [data.packages] section scanner shared via scripts/lib/chezmoi-config.sh
+    # (issue #123); the literal section name above keeps the shape greppable.
+    guardrail_enabled="$(pkg_config_flag_true "$HOME/.config/chezmoi/chezmoi.toml" guardrail || true)"
 fi
 guardrail_state=""
 if [ "$guardrail_enabled" = "true" ]; then
@@ -340,38 +175,18 @@ elif [ -z "$guardrail_state" ]; then
 else
     gbase="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
     gtmp="$(mktemp -d)"
-    if ! curl -fLo "$gtmp/install.sh" "$gbase/install.sh" ||
-        ! curl -fLo "$gtmp/SHA256SUMS" "$gbase/SHA256SUMS"; then
-        echo "  guardrail: installer download failed - skipping"
+    # Fetch + verify via the shared lib helper (issue #123): download to temp
+    # (net_timeout-guarded - the updater previously had no wall-clock guard
+    # here at all) and checksum-verify against the release's SHA256SUMS.
+    if ! fetch_and_verify guardrail "$gbase/install.sh" "$gbase/SHA256SUMS" install.sh "$gtmp"; then
         rm -rf "$gtmp"
     else
-        # stock macOS ships `shasum`, not `sha256sum` — without this the
-        # check returns 127 and the run is skipped under a message that
-        # misattributes it to a checksum mismatch.
-        GUARDRAIL_SHA_CMD=""
-        if command -v sha256sum &>/dev/null; then GUARDRAIL_SHA_CMD="sha256sum"
-        elif command -v gsha256sum &>/dev/null; then GUARDRAIL_SHA_CMD="gsha256sum"
-        elif command -v shasum &>/dev/null; then GUARDRAIL_SHA_CMD="shasum -a 256"
-        fi
-        if [ -z "$GUARDRAIL_SHA_CMD" ]; then
-            echo "  guardrail: no SHA-256 tool found - cannot verify installer, skipping"
-            rm -rf "$gtmp"
-        # Verify from a one-line file, not stdin (like agent-guardrails' own
-        # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read
-        # `-c -`. No install.sh line fails the grep, so a partial SHA256SUMS
-        # fail-closes.
-        elif ! ( cd "$gtmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
-            $GUARDRAIL_SHA_CMD -c SHA256SUMS.one ); then
-            echo "  guardrail: installer CHECKSUM MISMATCH - not running it"
-            rm -rf "$gtmp"
-        else
-            echo "  Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${guardrail_state}); approval URL prints here if WebAuthn is required..."
-            guardrail_code=0
-            sh "$gtmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$guardrail_state" || guardrail_code=$?
-            rm -rf "$gtmp"
-            if [ "$guardrail_code" -ne 0 ]; then
-                echo "  guardrail installer exited with code $guardrail_code - continuing"
-            fi
+        echo "  Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${guardrail_state}); approval URL prints here if WebAuthn is required..."
+        guardrail_code=0
+        sh "$gtmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$guardrail_state" || guardrail_code=$?
+        rm -rf "$gtmp"
+        if [ "$guardrail_code" -ne 0 ]; then
+            echo "  guardrail installer exited with code $guardrail_code - continuing"
         fi
     fi
 fi

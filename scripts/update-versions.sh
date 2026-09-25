@@ -7,6 +7,10 @@
 
 set -e
 
+# Shared helpers (issue #123): net_timeout + sha256_cmd (the sha256-tool
+# detection ladder the installers use - this script used to carry its own copy).
+. "$(dirname "$0")/lib/agent-skills.sh"
+
 # Run from the repo root no matter where the script is invoked from.
 cd "$(dirname "$0")/.."
 
@@ -145,16 +149,11 @@ if [ ! -f "$EXTERNALS" ]; then
     echo "Warning: $EXTERNALS not found - external pins not refreshed."
 else
     echo "Refreshing external pins in $EXTERNALS..."
-    # Same sha256 detection ladder as the installers: Linux ships sha256sum,
-    # macOS ships shasum (gsha256sum if coreutils is installed).
-    SHA_CMD=""
-    if command -v sha256sum >/dev/null 2>&1; then
-        SHA_CMD="sha256sum"
-    elif command -v gsha256sum >/dev/null 2>&1; then
-        SHA_CMD="gsha256sum"
-    elif command -v shasum >/dev/null 2>&1; then
-        SHA_CMD="shasum -a 256"
-    else
+    # Same sha256 detection ladder as the installers, via the shared lib
+    # (scripts/lib/agent-skills.sh): Linux ships sha256sum, macOS ships shasum
+    # (gsha256sum if coreutils is installed).
+    SHA_CMD="$(sha256_cmd)"
+    if [ -z "$SHA_CMD" ]; then
         echo "  Warning: no sha256 tool found - URLs will move but checksums cannot be recomputed."
     fi
     repos="$(grep -oE 'github\.com/[^/"]+/[^/"]+/archive' "$EXTERNALS" | sed 's|github\.com/||; s|/archive$||' | sort -u)"

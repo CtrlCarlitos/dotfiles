@@ -22,13 +22,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Cross-generation PSModulePath guard (same class as the other Windows
-# scripts in this repo - Get-ChildItem/Out-File live in Management/Utility).
-if ($PSVersionTable.PSVersion.Major -le 5) {
-    $env:PSModulePath = (($env:PSModulePath -split ';') |
-        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
-    Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
-}
+# Cross-generation PSModulePath guard: Get-ChildItem/Out-File live in
+# Management/Utility, the in-box modules 5.1 fails to autoload under pwsh 7's
+# inherited module path (shared implementation, issue #123).
+. (Join-Path $PSScriptRoot 'lib\ps-common.ps1')
+Use-InBoxModules
 
 if (-not (Test-Path -LiteralPath $RepoDir -PathType Container)) {
     Write-Error "init-line-endings: no such directory: $RepoDir"
