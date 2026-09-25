@@ -225,6 +225,7 @@ catalog:
       group: modern_cli
       brew: tealdeer
       choco: tealdeer
+      note: "apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar)"
     - id: dust
       group: modern_cli
       brew: dust
@@ -251,6 +252,7 @@ catalog:
       group: modern_cli
       brew: shfmt
       choco: shfmt
+      note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
     - id: pstop
       group: modern_cli
       choco: pstop
@@ -386,12 +388,11 @@ catalog:
     - id: screenrec
       group: dev_desktop
       note: >-
-        Screen capture recorder; no package-manager name anywhere by design.
-        Linux: vendor apt repo + signing key, then apt install - all by
-        procedure (its .deb hard-depends on the removed libgdk-pixbuf2.0-0 on
-        Ubuntu 24.04+, so the source is rolled back on failure). macOS: the
-        vendor .dmg by procedure (no Homebrew cask). Windows: the vendor .exe
-        by procedure.
+        Screen capture recorder; no package-manager name on any platform by
+        design. apt: vendor repo + signing key, then apt install, by procedure
+        - the .deb hard-depends on the removed libgdk-pixbuf2.0-0 on Ubuntu
+        24.04+, so the source is rolled back on failure. cask: none - the
+        vendor .dmg by procedure. choco: none - the vendor .exe by procedure.
 
     # --------------------------------------------------- remote_access
     - id: tailscale

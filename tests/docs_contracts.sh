@@ -162,4 +162,27 @@ print("  checked %d docs: no visible TODOs, links and anchors resolve," % len(do
 print("  %d package groups agree with .chezmoi.toml.tmpl, documented settings exist" % len(canonical))
 PYEOF
 
+# ------------------------------------------ 5. generated tool-parity table
+# The per-program package table in docs/tool-parity.md is generated from
+# .chezmoidata/packages.yaml by scripts/gen-tool-parity.sh (#105). The
+# committed section must equal a fresh render: the hand-maintained copy this
+# replaced drifted the moment the catalog gained a record.
+if [ -f "$repo_root/scripts/gen-tool-parity.sh" ]; then
+    command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (tool-parity render check skipped)"
+    tmp_doc="$(mktemp)"
+    cp "$repo_root/docs/tool-parity.md" "$tmp_doc"
+    if bash "$repo_root/scripts/gen-tool-parity.sh" "$tmp_doc" >&2; then
+        if cmp -s "$tmp_doc" "$repo_root/docs/tool-parity.md"; then
+            pass
+        else
+            fail "docs/tool-parity.md: generated table differs from a fresh render - run bash scripts/gen-tool-parity.sh and commit the result"
+        fi
+    else
+        fail "docs/tool-parity.md: gen-tool-parity.sh failed to run"
+    fi
+    rm -f "$tmp_doc"
+else
+    fail "scripts/gen-tool-parity.sh missing - the tool-parity table has no generator"
+fi
+
 finish
