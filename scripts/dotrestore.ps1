@@ -20,9 +20,10 @@ function Get-SevenZip {
 }
 
 function Test-DestinationParentsSafe {
-    param([string]$Destination, [string]$Home)
+    # $HOME itself is ReadOnly+AllScope, so a parameter must not be named $Home.
+    param([string]$Destination, [string]$HomeDir)
 
-    $homePath = [IO.Path]::GetFullPath($Home).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $homePath = [IO.Path]::GetFullPath($HomeDir).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
     $parent = Split-Path -Parent ([IO.Path]::GetFullPath($Destination))
     while ($true) {
         $parentPath = [IO.Path]::GetFullPath($parent).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
@@ -99,7 +100,7 @@ try {
     }
 
     $configDestination = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
-    Test-DestinationParentsSafe -Destination $configDestination -Home $env:USERPROFILE
+    Test-DestinationParentsSafe -Destination $configDestination -HomeDir $env:USERPROFILE
     $configDestinationItem = Get-Item -LiteralPath $configDestination -Force -ErrorAction SilentlyContinue
     if ($null -ne $configDestinationItem) {
         if ($configDestinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
@@ -111,11 +112,11 @@ try {
     $sshDestinationRoot = Join-Path $env:USERPROFILE '.ssh'
     $sshFiles = @(Get-ChildItem -LiteralPath $sshSource -File -Recurse -Force)
 
-    Test-DestinationParentsSafe -Destination (Join-Path $sshDestinationRoot '.dotrestore-parent-check') -Home $env:USERPROFILE
+    Test-DestinationParentsSafe -Destination (Join-Path $sshDestinationRoot '.dotrestore-parent-check') -HomeDir $env:USERPROFILE
     foreach ($source in $sshFiles) {
         $relative = $source.FullName.Substring($sshSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
         $destination = Join-Path $sshDestinationRoot $relative
-        Test-DestinationParentsSafe -Destination $destination -Home $env:USERPROFILE
+        Test-DestinationParentsSafe -Destination $destination -HomeDir $env:USERPROFILE
         $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
         if ($null -ne $destinationItem) {
             if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {

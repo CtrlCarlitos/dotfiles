@@ -160,6 +160,7 @@ function Invoke-WithTimeout {
 {{- $remote_access := false -}}
 {{- $remote_access_server := false -}}
 {{- $guardrail := false -}}
+{{- $vscodeSettings := true -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
@@ -177,6 +178,7 @@ function Invoke-WithTimeout {
   {{- if hasKey .packages "remote_access" }}{{- $remote_access = .packages.remote_access }}{{- end -}}
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
+  {{- if hasKey .packages "vscode_settings" }}{{- if not .packages.vscode_settings }}{{- $vscodeSettings = false }}{{- end }}{{- end -}}
 {{- end }}
 {{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
 
@@ -730,7 +732,7 @@ if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
 
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 $vsApply = $true
-{{- if and (hasKey .packages "vscode_settings") (not .packages.vscode_settings) }}
+{{- if not $vscodeSettings }}
 $vsApply = $false
 {{- end }}
 if (-not $vsApply) {

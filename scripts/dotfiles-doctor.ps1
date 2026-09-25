@@ -103,8 +103,16 @@ if ($InApply) {
 } elseif (Test-Path -LiteralPath $config) {
     # --config pins chezmoi to the file every other check inspects (see the
     # .sh twin): bare `chezmoi data` resolves its own config independently.
-    & chezmoi --config $config data *> $null
-    if ($LASTEXITCODE -eq 0) {
+    # try/catch like every other native call here: under EAP=Stop the 5.1
+    # profile's `dot doctor` turned chezmoi's config-parse stderr into a
+    # terminating NativeCommandError - crashing on exactly the input this
+    # check exists to report.
+    $configParses = $false
+    try {
+        & chezmoi --config $config data *> $null
+        if ($LASTEXITCODE -eq 0) { $configParses = $true }
+    } catch { }
+    if ($configParses) {
         Result 'ok' 'config-parse' 'chezmoi loads the config'
     } else {
         Result 'error' 'config-parse' 'chezmoi cannot parse the config (encoding above? run: chezmoi execute-template "{{ .chezmoi.sourceDir }}" to see raw errors)'
