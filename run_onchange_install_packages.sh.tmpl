@@ -107,47 +107,12 @@ fi
 #===============================================================================
 
 #-------------------------------------------------------------------------------
-# Colors
+# Shared helpers (logging, net_timeout, sha256_cmd, fetch_and_verify) and the
+# curated-agent-skills lifecycle come from scripts/lib/agent-skills.sh
+# (issue #123), inlined here at RENDER time: a run_onchange script must stay
+# self-contained, so the installer cannot source the lib at runtime.
 #-------------------------------------------------------------------------------
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info()    { printf "${BLUE}▸${NC} %s\n" "$1"; }
-success() { printf "${GREEN}✓${NC} %s\n" "$1"; }
-warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1"; }
-error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
-
-#-------------------------------------------------------------------------------
-# net_timeout <seconds> <cmd...> - wall-clock guard for network install steps.
-#
-# A stalled download or `curl | sh` installer (no built-in timeout) otherwise
-# freezes this whole `set -e` run indefinitely - confirmed live: Ollama's
-# ~1.5GB bundle stalled mid-transfer for 15+ min with nothing else able to
-# proceed. Wrap the fetch so a dead connection is killed and the caller's
-# `|| warn` can carry on. Pipelines: `net_timeout N bash -c '... | sh'`.
-#
-# Uses coreutils `timeout` (always present on Linux) or `gtimeout` (macOS -
-# `coreutils` is first in the brew core list so it lands before the guarded
-# steps); if neither exists the command runs unguarded rather than failing.
-# Resolved per-call, not cached, so a `gtimeout` installed partway through a
-# macOS run is picked up by later steps. `-k 10` follows SIGTERM with SIGKILL
-# after 10s for processes that ignore the first signal. Exit 124 = timed out.
-#-------------------------------------------------------------------------------
-net_timeout() {
-    local secs="$1"; shift
-    local bin=""
-    if command -v timeout &>/dev/null; then bin="timeout"
-    elif command -v gtimeout &>/dev/null; then bin="gtimeout"
-    fi
-    if [ -n "$bin" ]; then
-        "$bin" -k 10 "$secs" "$@"
-    else
-        "$@"
-    fi
-}
+{{ include "scripts/lib/agent-skills.sh" }}
 
 #-------------------------------------------------------------------------------
 # add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its
@@ -263,8 +228,12 @@ install_fonts() {
 }
 
 install_node() {
-    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 24 ]]; then
-        info "Installing Node.js 24.x..."
+    # The major comes from .chezmoidata.yaml versions.node_major (#125).
+    # Bound to a variable first: the lint strips template actions to nothing,
+    # and a bare -lt with a stripped operand would not parse as a test.
+    node_major="{{ .versions.node_major }}"
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt "$node_major" ]]; then
+        info "Installing Node.js ${node_major}.x..."
         # NodeSource's repo via the guarded helper: the old
         # `curl setup_24.x | bash` ran an unguarded fetched script whose own
         # trailing apt update could abort the whole run (#114). Key + list +
@@ -272,13 +241,13 @@ install_node() {
         # third-party repos.
         command -v curl &>/dev/null || $SUDO apt install -y curl
         add_apt_repo nodesource "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ .versions.node_major }}.x nodistro main" \
             nodejs || warn "Node.js install failed - continuing"
     fi
     # Upgrade npm to latest
     if command -v npm &>/dev/null; then
         info "Upgrading npm to latest..."
-        $SUDO npm install -g npm@latest --fund=false 2>/dev/null || true
+        $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
     fi
 }
 
@@ -301,14 +270,14 @@ install_agent_skills() {
     # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /
     # npm notice run 'skills' add ..." hint to stderr on every invocation -
     # pure console noise here, suppressed like the Windows side does.
-    # </dev/null on every $SK call: chezmoi run_onchange scripts inherit the
+    # The npx wrapper (SK) is defined inside the shared skills_add_all.
+    # </dev/null on every call: chezmoi run_onchange scripts inherit the
     # terminal's TTY on stdin, and a CLI that decides to prompt (or a stalled
     # fetch with no internal timeout) then blocks the whole run holding the
     # terminal - confirmed live 2026-08-30, first real run hung indefinitely
     # at the skills CLI's intro banner. With stdin at EOF the same commands
     # complete non-interactively in ~5s (verified: 8 skills + mp-code-review +
     # frontend-design). net_timeout stays as the wall-clock backstop.
-    local -a SK=(npx --yes --loglevel=error skills@latest)
     # The CLI writes $HOME/.claude/skills and $HOME/.agents/skills; OpenCode
     # and Codex discover the latter.
     # From .chezmoidata/agents.yaml (see #83).
@@ -335,136 +304,11 @@ install_agent_skills() {
         done
     }
 
-    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
-    # teach + writing-for-agents live under skills/productivity/, the rest under
-    # skills/engineering/; the CLI resolves by skill name, not path (grilling and
-    # handoff are already productivity/ skills that resolve fine here).
-    info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
-    if net_timeout 300 "${SK[@]}" add mattpocock/skills \
-        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
-           prototype research grilling handoff teach writing-for-agents \
-           resolving-merge-conflicts \
-        -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 11
-    else
-        record_cli_result failed 11
-        warn "Matt Pocock skills install failed or timed out - continuing"
-    fi
-
-    # code-review -> mp-code-review. The `skills` CLI has no rename flag, so
-    # stage a renamed copy with its `name:` frontmatter patched and install
-    # that local directory. "mp-" keeps it distinct from this repo's own
-    # /code-review command and Superpowers' receiving-code-review skill.
-    local sk_tmp; sk_tmp="$(mktemp -d)"
-    # net_timeout: same wall-clock contract as every other network fetch here
-    # (docs/tool-parity.md's Network-step timeouts section includes git clones).
-    if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
-        local src="$sk_tmp/repo/skills/engineering/code-review"
-        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
-        if [[ -d "$src" ]]; then
-            mkdir -p "$sk_tmp/stage/mp-code-review"
-            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
-            local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
-            if [[ -f "$skf" ]]; then
-                # portable in-place edit (GNU and BSD sed differ on -i).
-                # Guarded: a bare failing `sed ... && mv` here would trip
-                # set -e and abort the whole run - frontend-design, Playwright,
-                # act, desktop apps and shell setup all come after this.
-                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-                    record_cli_result installed 1
-                else
-                    record_cli_result failed 1
-                    warn "mp-code-review skill install failed - continuing"
-                fi
-            else
-                record_cli_result skipped 1
-                warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
-            fi
-        else
-            record_cli_result skipped 1
-            warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
-        fi
-    else
-        record_cli_result failed 1
-        warn "mp-code-review skill source clone failed or timed out - continuing"
-    fi
-    rm -rf "$sk_tmp"
-
-    # Anthropic's frontend-design skill - distinctive visual direction for new UI.
-    info "Installing Anthropic's frontend-design skill..."
-    if net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "frontend-design skill install failed or timed out - continuing"
-    fi
-
-    # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
-    # agent search and install skills from skills.sh mid-session.
-    info "Installing find-skills skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "find-skills skill install failed or timed out - continuing"
-    fi
-
-    # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
-    # automation: navigate, click, fill, scrape, screenshot.
-    info "Installing agent-browser skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "agent-browser skill install failed or timed out - continuing"
-    fi
-
-    # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands.
-    # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
-    # skill-authoring lifecycle tool with benchmarks and eval viewer.
-    info "Installing Anthropic's skill-creator skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "skill-creator skill install failed or timed out - continuing"
-    fi
-
-    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend infers a
-    # visual direction for new pages behind tunable dials plus an anti-slop
-    # checklist; redesign-existing-projects audits an existing UI's styling
-    # and applies targeted fixes without changing behaviour. Chosen 2026-09-24
-    # for function, not popularity - the repo's style presets, image-generation
-    # skills, GPT/Stitch variants and v1 were left out (see
-    # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
-    # purpose; drop one if they double-trigger.
-    info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..."
-    if net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 2
-    else
-        record_cli_result failed 2
-        warn "taste skills install failed or timed out - continuing"
-    fi
-
-    # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
-    # Probes once per session which tools can see the code (graft graph built
-    # and covering the language, serena LSP, rg, grep), routes each question
-    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
-    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
-    # task" block cost every session in this repo two empty queries (the graph
-    # covers one Lua file here) - docs/skills-install-strategy.md.
-    info "Installing code-search skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 1
-    else
-        record_cli_result failed 1
-        warn "code-search skill install failed or timed out - continuing"
-    fi
-
-    # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
-    #  writing-for-agents, which is already in the batch above — the old name
-    #  failed silently on every run.)
+    # The eight curated `skills add` fetches live in the shared lib
+    # (scripts/lib/agent-skills.sh - issue #123), verbatim: same argument
+    # vector (tests/install_agent_skills_arguments.sh pins it), same
+    # net_timeout walls, same </dev/null guard.
+    skills_add_all
 
     if [[ ! -r "$catalog" ]]; then
         warn "Curated skill catalog is not readable: $catalog"
@@ -475,101 +319,15 @@ install_agent_skills() {
         return
     fi
 
-    local skill source target tmp backup command_dir command_file antigravity_status
     local claude_reported="$claude_installed" opencode_reported="$opencode_installed" codex_reported="$codex_installed"
     claude_installed=0
     opencode_installed=0
     codex_installed=0
-    while IFS= read -r skill || [[ -n "$skill" ]]; do
-        [[ -z "$skill" || "$skill" == \#* ]] && continue
-
-        # A successful CLI exit only means its copy operation completed. Count
-        # an agent installed only after its supported discovery target exists.
-        if [[ -f "$HOME/.claude/skills/$skill/SKILL.md" ]]; then
-            claude_installed=$((claude_installed + 1))
-        elif ((claude_reported > 0)); then
-            claude_failed=$((claude_failed + 1))
-        fi
-        if [[ -f "$HOME/.agents/skills/$skill/SKILL.md" ]]; then
-            opencode_installed=$((opencode_installed + 1))
-            codex_installed=$((codex_installed + 1))
-        else
-            if ((opencode_reported > 0)); then
-                opencode_failed=$((opencode_failed + 1))
-            fi
-            if ((codex_reported > 0)); then
-                codex_failed=$((codex_failed + 1))
-            fi
-        fi
-
-        source="$HOME/.claude/skills/$skill"
-        target="$HOME/.gemini/antigravity-cli/skills/$skill"
-        if [[ -f "$source/SKILL.md" ]]; then
-            antigravity_status=failed
-            mkdir -p "$HOME/.gemini/antigravity-cli/skills"
-            tmp="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.tmp.XXXXXX")"
-            if cp -R "$source/." "$tmp/"; then
-                backup="$(mktemp -d "$HOME/.gemini/antigravity-cli/skills/.${skill}.backup.XXXXXX")"
-                if ! rmdir "$backup"; then
-                    rm -rf "$tmp"
-                    warn "Failed to prepare Antigravity skill backup: $skill"
-                elif [[ -e "$target" || -L "$target" ]]; then
-                    if mv "$target" "$backup"; then
-                        if mv "$tmp" "$target"; then
-                            rm -rf "$backup"
-                            antigravity_status=installed
-                        else
-                            rm -rf "$tmp"
-                            warn "Failed to promote curated skill for Antigravity: $skill"
-                            mv "$backup" "$target" || warn "Failed to restore Antigravity skill backup: $skill"
-                        fi
-                    else
-                        rm -rf "$tmp"
-                        warn "Failed to back up existing Antigravity skill: $skill"
-                    fi
-                elif mv "$tmp" "$target"; then
-                    antigravity_status=installed
-                else
-                    rm -rf "$tmp"
-                    warn "Failed to promote curated skill for Antigravity: $skill"
-                fi
-            else
-                rm -rf "$tmp"
-                warn "Failed to copy curated skill for Antigravity: $skill"
-            fi
-        else
-            antigravity_status=skipped
-            warn "Claude skill missing; skipping Antigravity copy: $skill"
-        fi
-
-        case "$antigravity_status" in
-            installed) ((antigravity_installed += 1)) ;;
-            skipped) ((antigravity_skipped += 1)) ;;
-            *) ((antigravity_failed += 1)) ;;
-        esac
-
-        command_dir="$HOME/.config/opencode/commands"
-        command_file="$command_dir/$skill.md"
-        source="$HOME/.agents/skills/$skill"
-        if [[ -f "$source/SKILL.md" ]]; then
-            mkdir -p "$command_dir"
-            if [[ -f "$command_file" ]] && ! grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-                warn "OpenCode command is user-managed; leaving unchanged: $command_file"
-            else
-                tmp="$(mktemp "$command_dir/.${skill}.tmp.XXXXXX")"
-                {
-                    printf '%s\n' '<!-- managed-by: chezmoi-curated-skills -->' '---'
-                    printf 'description: Run the %s skill\n' "$skill"
-                    printf '%s\n' '---'
-                    # shellcheck disable=SC2016 # OpenCode expands this placeholder at command invocation.
-                    printf 'Load the native `%s` skill with the skill tool, then follow it for: $ARGUMENTS\n' "$skill"
-                } > "$tmp"
-                mv "$tmp" "$command_file"
-            fi
-        elif [[ -f "$command_file" ]] && grep -Fq 'managed-by: chezmoi-curated-skills' "$command_file"; then
-            rm -f "$command_file"
-        fi
-    done < "$catalog"
+    # Target verification, the Antigravity fan-out with backup/restore and
+    # the OpenCode command shims: shared verbatim in
+    # scripts/lib/agent-skills.sh (issue #123). The CLI-phase tallies pass as
+    # arguments - a target only counts failed when its CLI phase ran.
+    verify_curated_skill_targets "$claude_reported" "$opencode_reported" "$codex_reported"
 
     info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
     info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
@@ -618,24 +376,11 @@ install_agent_guardrails() {
 
     local base="https://github.com/${GUARDRAIL_REPO}/releases/download/${GUARDRAIL_VERSION}"
     local tmp; tmp="$(mktemp -d)"
-    if ! net_timeout 60 curl -fLo "$tmp/install.sh" "$base/install.sh" ||
-        ! net_timeout 60 curl -fLo "$tmp/SHA256SUMS" "$base/SHA256SUMS"; then
-        warn "guardrail: installer download failed or timed out - skipping"; rm -rf "$tmp"; return
-    fi
-    # stock macOS ships `shasum`, not `sha256sum` — without this the check
-    # returns 127 and the run is skipped under a message that misattributes it
-    # to a checksum mismatch.
-    local SHA_CMD
-    if command -v sha256sum &>/dev/null; then SHA_CMD="sha256sum"
-    elif command -v gsha256sum &>/dev/null; then SHA_CMD="gsha256sum"
-    elif command -v shasum &>/dev/null; then SHA_CMD="shasum -a 256"
-    else warn "guardrail: no SHA-256 tool found - cannot verify installer, skipping"; rm -rf "$tmp"; return; fi
-    # Verify from a one-line file, not stdin (like agent-guardrails' own
-    # install.sh): a BSD-compatible sha256sum (macOS 14+) may not read `-c -`.
-    # No install.sh line fails the grep, so a partial SHA256SUMS fail-closes.
-    if ! ( cd "$tmp" && grep " install.sh\$" SHA256SUMS >SHA256SUMS.one &&
-        $SHA_CMD -c SHA256SUMS.one ); then
-        warn "guardrail: installer CHECKSUM MISMATCH - not running it"; rm -rf "$tmp"; return
+    # Fetch + verify via the shared lib helper (issue #123/#125): download to
+    # temp (net_timeout-guarded, never piped) and checksum-verify against the
+    # release's SHA256SUMS before anything runs.
+    if ! fetch_and_verify guardrail "$base/install.sh" "$base/SHA256SUMS" install.sh "$tmp"; then
+        rm -rf "$tmp"; return
     fi
 
     info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); approval URL prints here if WebAuthn is required..."
@@ -893,7 +638,7 @@ install_apt() {
             gh || warn "GitHub CLI install failed - continuing"
     fi
 
-    # Node.js 24.x
+    # Node.js (the versions.node_major pin, #125)
     install_node
 
     # Neovim
@@ -965,20 +710,19 @@ install_apt() {
         esac
 
         if [[ -n "$shfmt_arch" ]]; then
-            local -a shfmt_sha_cmd=()
-            if command -v sha256sum &>/dev/null; then shfmt_sha_cmd=(sha256sum)
-            elif command -v gsha256sum &>/dev/null; then shfmt_sha_cmd=(gsha256sum)
-            elif command -v shasum &>/dev/null; then shfmt_sha_cmd=(shasum -a 256)
-            else warn "shfmt: no SHA-256 tool found - cannot verify, skipping install"; fi
+            # sha256_cmd comes from the shared lib (issue #123); same ladder
+            # the guardrail fetch uses (sha256sum / gsha256sum / shasum -a 256).
+            local shfmt_sha_cmd
+            shfmt_sha_cmd="$(sha256_cmd)"
 
-            if (( ${#shfmt_sha_cmd[@]} > 0 )); then
+            if [[ -n "$shfmt_sha_cmd" ]]; then
                 local shfmt_tmp shfmt_url
                 shfmt_url="https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_${shfmt_arch}"
                 if shfmt_tmp="$(mktemp)"; then
                     info "Installing shfmt..."
                     if ! net_timeout 120 curl -fLo "$shfmt_tmp" "$shfmt_url"; then
                         warn "shfmt download failed or timed out - continuing"
-                    elif ! printf '%s  %s\n' "$shfmt_sha256" "$shfmt_tmp" | "${shfmt_sha_cmd[@]}" -c -; then
+                    elif ! printf '%s  %s\n' "$shfmt_sha256" "$shfmt_tmp" | $shfmt_sha_cmd -c -; then
                         warn "shfmt checksum verification failed - not installing"
                     elif ! $SUDO install "$shfmt_tmp" /usr/local/bin/shfmt; then
                         warn "shfmt install failed - continuing"
@@ -1140,6 +884,32 @@ install_apt() {
     info "Fonts disabled in config"
 {{- end }}
 
+}
+
+#-------------------------------------------------------------------------------
+# OS-independent install/wiring sections (#124): install_apt/install_brew
+# keep only the package-manager-specific work; everything below is shared
+# and called from main() after the dispatch. Per-manager divergences key
+# off $PKG_MANAGER (set in main). These sections used to be copy-pasted
+# into both branches and had already drifted: brew never ran
+# configure_claude_attribution or the VS Code settings (its Darwin arm was
+# unreachable), and apt repeated the npm-sudo decision per site, ignoring
+# it at the graft/npm@latest call sites.
+#-------------------------------------------------------------------------------
+
+# pkg_install <pkg...> - install a package with the detected manager.
+pkg_install() {
+    case "$PKG_MANAGER" in
+        apt)  $SUDO apt install -y "$@" ;;
+        brew) brew install "$@" ;;
+    esac
+}
+
+ensure_jq() {
+    command -v jq &>/dev/null || pkg_install jq
+}
+
+configure_vscode() {
     # VS Code global defaults (terminal + editor) - gated by the
     # `packages.vscode_settings` config key (hasKey pattern: default true, set
     # `[data.packages] vscode_settings = false` in chezmoi.toml to opt out; no prompt, so no
@@ -1315,13 +1085,93 @@ VSEXT
     else
         info "VS Code settings defaults disabled in config"
     fi
+}
 
-{{- if $agent_toolkit }}
+configure_claude_attribution() {
+    local settings_dir="$HOME/.claude"
+    local settings="$settings_dir/settings.json"
+    local temporary
+    local mode
+
+    if ! command -v jq &>/dev/null; then
+        pkg_install jq || {
+            warn "jq is required to configure Claude Code attribution - skipping"
+            return
+        }
+    fi
+    if ! command -v jq &>/dev/null; then
+        warn "jq is required to configure Claude Code attribution - skipping"
+        return
+    fi
+
+    mkdir -p "$settings_dir"
+    if ! temporary="$(mktemp "$settings_dir/.settings.json.XXXXXX")"; then
+        warn "Could not create temporary Claude Code settings"
+        return
+    fi
+
+    if [[ -s "$settings" ]]; then
+        if ! jq '.attribution = ((.attribution // {}) + {commit: "", pr: "", sessionUrl: false})' "$settings" > "$temporary"; then
+            rm -f "$temporary"
+            warn "Could not parse Claude Code settings - leaving them untouched"
+            return
+        fi
+        if [[ "$(uname -s)" == Darwin ]]; then
+            mode="$(stat -f '%Lp' "$settings")"
+        else
+            mode="$(stat -c '%a' "$settings")"
+        fi
+        if ! chmod "$mode" "$temporary"; then
+            rm -f "$temporary"
+            warn "Could not preserve Claude Code settings permissions"
+            return
+        fi
+    else
+        if ! jq -n '{attribution: {commit: "", pr: "", sessionUrl: false}}' > "$temporary"; then
+            rm -f "$temporary"
+            warn "Could not create Claude Code settings"
+            return
+        fi
+        chmod 600 "$temporary"
+    fi
+    if ! mv -f "$temporary" "$settings"; then
+        rm -f "$temporary"
+        warn "Could not replace Claude Code settings"
+    fi
+}
+
+install_claude_cli() {
+    # Claude Code (Native Installer - Recommended). Deliberately NOT nested
+    # under an npm-presence check (its former home inside the old ai_tools
+    # npm block): the native installer is curl|sh and needs no Node - so
+    # claude_cli now works standalone even with core/agent_toolkit off.
+
+    if ! command -v claude &>/dev/null; then
+         info "Installing Claude Code (Native)..."
+         net_timeout 300 bash -c 'curl -fsSL {{ .versions.claude_install_sh }} | bash' || warn "Claude Code installer failed or timed out - continuing"
+    fi
+
+    # configure_claude_attribution is called on macOS too (#124: the brew
+    # branch never called it - macOS users never got the attribution config).
+    # Superpowers skills plugin for Claude Code (global - active in every
+    # session once installed, via Claude Code's own plugin marketplace
+    # mechanism, not npm). Re-running add/install is safe if already present.
+    if command -v claude &>/dev/null; then
+        configure_claude_attribution
+        info "Installing Superpowers plugin for Claude Code..."
+        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+    fi
+}
+
+install_agent_toolkit() {
     # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
     # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
     # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli: vendor
     # products live in vendor groups per the spec's placement rule).
-    install_node
+    if [ "$PKG_MANAGER" = apt ]; then
+        install_node
+    fi
 
     # Ollama - needs zstd (added to core's apt list above) to extract its release
     # archive; confirmed live on WSL that without it the installer fails outright
@@ -1338,23 +1188,28 @@ VSEXT
     if ! command -v ollama &>/dev/null; then
         info "Installing Ollama..."
         # ~1.5GB bundle (GPU libs); its installer's curl has no timeout of its
-        # own - confirmed live stalling 15+ min. `rm -f` the binary on failure
-        # so a half-extracted install isn't seen as "installed" next run.
-        net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' \
-            || { warn "Ollama install failed or timed out - continuing"; $SUDO rm -f /usr/local/bin/ollama; }
+        # own - confirmed live stalling 15+ min, and its post-install GUI
+        # auto-launch fails outright on a headless Mac (confirmed live: it
+        # exits non-zero AFTER ollama itself landed; apt additionally rm -f's
+        # the binary so a half-extracted install isn't seen as "installed").
+        case "$PKG_MANAGER" in
+            apt)
+                net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' \
+                    || { warn "Ollama install failed or timed out - continuing"; $SUDO rm -f /usr/local/bin/ollama; }
+                ;;
+            brew)
+                net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' || warn "Ollama installer failed, timed out, or (often harmless) could not auto-launch its GUI - continuing"
+                ;;
+        esac
     fi
 
     if command -v npm &>/dev/null; then
         info "Installing agent toolkit (Playwright)..."
         NPM_BIN="$(which npm)"
 
-        # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
-        # If path starts with /usr, valid to use sudo. Otherwise (home dir), drop sudo.
-        local npm_sudo="$SUDO"
-        if [[ "$NPM_BIN" != /usr* ]]; then
-            warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
-            npm_sudo=""
-        fi
+        # The npm sudo decision is computed ONCE in main (#124): sudo only for
+        # the system-owned /usr prefix; a user-managed npm (nvm, homebrew) is
+        # never sudo'd, and brew's user-writable prefix computes to no sudo.
 
         # Playwright Chromium - headless browser for coding-agent browser
         # automation. Deliberately here, not under dev_desktop: that's
@@ -1373,7 +1228,10 @@ VSEXT
         # the pty. net_timeout wraps coreutils `timeout` (always on Linux) /
         # `gtimeout` (macOS only with coreutils brewed), running unguarded if
         # neither is present - so it's safe to reuse in the brew/macOS block too.
-        net_timeout 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+        # install-deps is apt-specific: the concept does not exist on macOS.
+        if [ "$PKG_MANAGER" = apt ]; then
+            net_timeout 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+        fi
         net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
 
         info "Installing agent-browser..."
@@ -1544,7 +1402,7 @@ PYEOF
     if command -v npm &>/dev/null; then
         if ! command -v graft &>/dev/null; then
             info "Installing Graft (npm -g)..."
-            net_timeout 300 $SUDO npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
+            net_timeout 300 $npm_sudo npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
                 || warn "Graft install failed - skipping"
         fi
         # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
@@ -1569,15 +1427,26 @@ PYEOF
     # enabled for this distro (Settings > Resources > WSL Integration on the
     # Windows host) - the same existing assumption this repo already relies
     # on for Docker generally on WSL (see docs/tool-parity.md's Container row).
-    if ! command -v act &>/dev/null; then
-        info "Installing act (local GitHub Actions runner)..."
-        net_timeout 180 bash -c 'curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | '"$SUDO"' bash -s -- -b /usr/local/bin' || warn "act install failed or timed out"
-    fi
-{{- else }}
-    info "Agent toolkit disabled in config"
-{{- end }}
+    case "$PKG_MANAGER" in
+        apt)
+            if ! command -v act &>/dev/null; then
+                info "Installing act (local GitHub Actions runner)..."
+                # Compose the fetched script in a variable instead of splicing
+                # $SUDO in through quote-juggling (SC2027): same result - the
+                # script is single-quoted shell, with $SUDO expanded once, and
+                # an empty SUDO just leaves a harmless extra space for bash -c.
+                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${SUDO} bash -s -- -b /usr/local/bin"
+                net_timeout 180 bash -c "$act_script" || warn "act install failed or timed out"
+            fi
+            ;;
+        brew)
+            # Confirmed current on Homebrew (formula, not cask).
+            command -v act &>/dev/null || brew install act || warn "act install failed"
+            ;;
+    esac
+}
 
-{{- if $opencode_cli }}
+install_opencode_cli() {
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
@@ -1604,7 +1473,7 @@ PYEOF
     # the file.
     if command -v opencode &>/dev/null; then
         info "Configuring Superpowers for OpenCode..."
-        command -v jq &>/dev/null || $SUDO apt install -y jq
+        ensure_jq
         local oc_config_dir="$HOME/.config/opencode"
         local oc_config="$oc_config_dir/opencode.json"
         local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
@@ -1615,104 +1484,24 @@ PYEOF
             jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
         fi
     fi
-{{- else }}
-    info "OpenCode CLI disabled in config"
-{{- end }}
+}
 
-{{- if $claude_cli }}
-    # Claude Code (Native Installer - Recommended). Deliberately NOT nested
-    # under an npm-presence check (its former home inside the old ai_tools
-    # npm block): the native installer is curl|sh and needs no Node - so
-    # claude_cli now works standalone even with core/agent_toolkit off.
-    if ! command -v claude &>/dev/null; then
-         info "Installing Claude Code (Native)..."
-         net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
-    fi
-
-    configure_claude_attribution() {
-        local settings_dir="$HOME/.claude"
-        local settings="$settings_dir/settings.json"
-        local temporary
-        local mode
-
-        if ! command -v jq &>/dev/null; then
-            $SUDO apt install -y jq || {
-                warn "jq is required to configure Claude Code attribution - skipping"
-                return
-            }
-        fi
-        if ! command -v jq &>/dev/null; then
-            warn "jq is required to configure Claude Code attribution - skipping"
-            return
-        fi
-
-        mkdir -p "$settings_dir"
-        if ! temporary="$(mktemp "$settings_dir/.settings.json.XXXXXX")"; then
-            warn "Could not create temporary Claude Code settings"
-            return
-        fi
-
-        if [[ -s "$settings" ]]; then
-            if ! jq '.attribution = ((.attribution // {}) + {commit: "", pr: "", sessionUrl: false})' "$settings" > "$temporary"; then
-                rm -f "$temporary"
-                warn "Could not parse Claude Code settings - leaving them untouched"
-                return
-            fi
-            if [[ "$(uname -s)" == Darwin ]]; then
-                mode="$(stat -f '%Lp' "$settings")"
-            else
-                mode="$(stat -c '%a' "$settings")"
-            fi
-            if ! chmod "$mode" "$temporary"; then
-                rm -f "$temporary"
-                warn "Could not preserve Claude Code settings permissions"
-                return
-            fi
-        else
-            if ! jq -n '{attribution: {commit: "", pr: "", sessionUrl: false}}' > "$temporary"; then
-                rm -f "$temporary"
-                warn "Could not create Claude Code settings"
-                return
-            fi
-            chmod 600 "$temporary"
-        fi
-        if ! mv -f "$temporary" "$settings"; then
-            rm -f "$temporary"
-            warn "Could not replace Claude Code settings"
-        fi
-    }
-
-    # Superpowers skills plugin for Claude Code (global - active in every
-    # session once installed, via Claude Code's own plugin marketplace
-    # mechanism, not npm). Re-running add/install is safe if already present.
-    if command -v claude &>/dev/null; then
-        configure_claude_attribution
-        info "Installing Superpowers plugin for Claude Code..."
-        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
-    fi
-{{- else }}
-    info "Claude Code disabled in config"
-{{- end }}
-
-{{- if $chatgpt_cli }}
+install_chatgpt_cli() {
     # Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
     # curated-skills pass below gates on this group too (chatgpt_cli sits in
     # its cross-cutting gate, matching the .ps1 twin); superpowers' plugin for
     # Codex is the one piece with no codex wiring (see the block below);
     # guardrail's plane wiring is done by the agent-guardrails installer.
-    install_node
+    if [ "$PKG_MANAGER" = apt ]; then
+        install_node
+    fi
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
         NPM_BIN="$(which npm)"
 
         # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
         # If path starts with /usr, valid to use sudo. Otherwise (home dir), drop sudo.
-        local npm_sudo="$SUDO"
-        if [[ "$NPM_BIN" != /usr* ]]; then
-            warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
-            npm_sudo=""
-        fi
+        # The npm sudo decision is computed ONCE in main (#124).
 
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
         command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
@@ -1729,21 +1518,30 @@ PYEOF
     # regardless of flags. Codex's real install path for this plugin is
     # its native in-app `/plugins` search UI - genuinely GUI/session-only,
     # no config file or CLI command reaches it from outside a session.
-{{- else }}
-    info "Codex CLI disabled in config"
-{{- end }}
+}
 
-{{- if $antigravity_cli }}
+install_antigravity_cli() {
     # Antigravity CLI (agy) - official install script, no apt package.
     # Google retired standalone Gemini Code Assist for individuals in
     # favor of the Antigravity suite (see docs/tool-parity.md) - this
     # repo no longer installs Gemini CLI, agy replaces it here. Like
     # Claude Code above, the install.sh is self-contained: no Node/npm
     # prerequisite, so this section works standalone.
-    if ! command -v agy &>/dev/null; then
-         info "Installing Antigravity CLI (agy)..."
-         net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
-    fi
+    case "$PKG_MANAGER" in
+        apt)
+            # Official install script, no apt package; self-contained (no
+            # Node/npm prerequisite), so this section works standalone.
+            if ! command -v agy &>/dev/null; then
+                 info "Installing Antigravity CLI (agy)..."
+                 net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
+            fi
+            ;;
+        brew)
+            # Homebrew cask (v1.1.22, confirmed current on formulae.brew.sh,
+            # matching the exact version Chocolatey ships on Windows).
+            command -v agy &>/dev/null || net_timeout 600 brew install --cask antigravity-cli || warn "Antigravity CLI install failed or timed out - continuing"
+            ;;
+    esac
 
     # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
     # <url>` is the officially-documented mechanism (obra/superpowers'
@@ -1762,441 +1560,9 @@ PYEOF
         info "Installing Superpowers plugin for Antigravity..."
         agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
     fi
-{{- else }}
-    info "Antigravity CLI disabled in config"
-{{- end }}
-
-{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
-    # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity /
-    # Codex, via the `skills` CLI - see install_agent_skills above.
-    # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
-    # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
-    # chatgpt_cli) is
-    # enabled - the CLIs it writes to may have arrived from any of those
-    # gates, and the pass is idempotent either way. npx presence is checked
-    # inside the function.
-    install_agent_skills
-{{- end }}
-
-    # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
-    install_agent_guardrails
-
-    # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
-    # is a second runtime check for genuine headless Linux hosts, not the
-    # primary WSL/devcontainer guard anymore)
-{{- if and $dev_desktop $isHost }}
-    if [[ -n "${DISPLAY:-}" ]]; then
-        install_linux_desktop
-    fi
-{{- else }}
-    info "Desktop apps disabled (WSL/Devcontainer/config)"
-{{- end }}
 }
 
-install_brew() {
-    info "Installing packages with Brew..."
-    
-    if ! command -v brew &>/dev/null; then
-        info "Homebrew not found. Installing..."
-        # Fetch and run as two guarded steps so a stalled download is covered
-        # too, while keeping Homebrew's documented `bash -c "$(...)"` exec form.
-        # net_timeout falls back to unguarded when no timeout/gtimeout exists
-        # (the usual case on a fresh Mac), so this can't make matters worse.
-        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
-        _brew_installer=$(net_timeout 120 curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) \
-            && net_timeout 900 env NONINTERACTIVE=1 /bin/bash -c "$_brew_installer" || {
-            error "Failed to install Homebrew (or timed out)"
-            exit 1
-        }
-        
-        # Add brew to path for this session
-        if [[ -d "/opt/homebrew/bin" ]]; then
-             eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [[ -d "/home/linuxbrew/.linuxbrew/bin" ]]; then
-             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-        fi
-    fi
-
-{{- if $core }}
-    # Core packages. coreutils first: it provides `gtimeout`, which net_timeout
-    # needs to guard the download-heavy steps further down (modern tools, the
-    # agent toolkit, ScreenRec's dmg, Antigravity 2.0's dmg) - macOS has no
-    # `timeout` in the base OS.
-    # Names come from .chezmoidata/packages.yaml (see #83).
-    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
-    brew link --overwrite node@24 || true
-{{- else }}
-    info "Core packages disabled in config"
-{{- end }}
-
-{{- if $modern_cli }}
-    # Modern CLI tools
-    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "modern_cli" "catalog" .catalog.packages) }} || warn "modern_cli brew install failed - continuing"
-{{- end }}
-
-{{- if $fonts }}
-    # Fonts - MesloLGS NF is a great Nerd Font for Starship
-    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "fonts" "catalog" .catalog.packages) }} || true
-{{- end }}
-
-{{- if $remote_access }}
-    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access cask install failed - continuing"
-    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access brew install failed - continuing"
-{{- end }}
-
-{{- if $remote_access_server }}
-    info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
-{{- end }}
-
-{{- if $agent_toolkit }}
-    # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
-    # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
-    # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli - vendor
-    # products live in vendor groups per the spec's placement rule).
-
-    # Ollama
-    if ! command -v ollama &>/dev/null; then
-        info "Installing Ollama..."
-        # Confirmed live: Ollama's official macOS installer exits non-zero after
-        # ollama itself is genuinely installed, because it also tries to
-        # auto-launch the Ollama.app GUI post-install, which fails outright with
-        # no desktop session (e.g. headless CI: "Unable to find application named
-        # 'Ollama'"). Under this script's `set -euo pipefail`, letting that
-        # propagate silently aborts every remaining install in this whole run -
-        # confirmed live too: nothing after this point ran at all. net_timeout
-        # also guards the ~1.5GB download from stalling the run (no-op on a Mac
-        # without coreutils' gtimeout).
-        net_timeout 1200 bash -c 'curl -fsSL https://ollama.com/install.sh | sh' || warn "Ollama installer failed, timed out, or (often harmless) could not auto-launch its GUI - continuing"
-    fi
-
-    if command -v npm &>/dev/null; then
-        info "Installing agent toolkit (Playwright)..."
-
-        # Playwright Chromium - headless browser for coding-agent browser
-        # automation. Deliberately here, not under dev_desktop: that's
-        # gated host-only ($isHost) and never runs on WSL/containers, exactly
-        # where coding agents most often run. No install-deps step on macOS -
-        # that concept is apt-specific and unsupported/unneeded here.
-        info "Installing Playwright Chromium (headless browser for agent automation)..."
-        net_timeout 600 npx --yes playwright install chromium || warn "Playwright Chromium install failed or timed out - continuing"
-    fi
-
-    # Serena (oraios/serena) - MCP semantic code toolkit (LSP-backed find/
-    # references/rename/replace-symbol). uv-managed: uv ships its own CPython
-    # 3.13, so no system Python prerequisite. Register per-client: native
-    # `serena setup` for claude-code/codex; JSON/TOML/manual for the rest.
-    if ! command -v uv &>/dev/null; then
-        info "Installing uv (Astral)..."
-        net_timeout 180 bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' \
-            || warn "uv install failed or timed out - skipping Serena"
-    fi
-    if command -v uv &>/dev/null; then
-        if ! command -v serena &>/dev/null; then
-            info "Installing Serena via uv..."
-            net_timeout 600 uv tool install -p 3.13 serena-agent \
-                || warn "Serena install failed - skipping"
-        fi
-        # Upgrades: `dot upgrade` only (defer-aware there).
-        if command -v serena &>/dev/null; then
-            net_timeout 120 serena init || warn "serena init failed - continuing"
-            # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
-            # per-machine override [data.agents.serena] open_dashboard = true in
-            # chezmoi.toml). serena init regenerates the file with Serena's default
-            # (true), so only this one line is re-asserted; nothing else is touched.
-            # Same for the interface: empty means the platform default, which on
-            # macOS is the native app with one tray icon per instance.
-            SERENA_CFG="$HOME/.serena/serena_config.yml"
-            SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
-            SERENA_IFACE="{{ .agents.serena.dashboard_interface }}"
-            if [ -f "$SERENA_CFG" ] && { ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG" ||
-                                          ! grep -Eq "^web_dashboard_interface: ${SERENA_IFACE}[[:space:]]*\$" "$SERENA_CFG"; }; then
-                if sed -i.bak -E -e "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" \
-                                -e "s/^web_dashboard_interface:.*\$/web_dashboard_interface: ${SERENA_IFACE}/" "$SERENA_CFG"; then
-                    rm -f "$SERENA_CFG.bak"
-                    info "Serena dashboard: auto-open=${SERENA_OPEN} interface=${SERENA_IFACE}"
-                else
-                    warn "could not set Serena dashboard settings - continuing"
-                fi
-            fi
-            if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
-                net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
-            fi
-            # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when codex absent - benign skip)
-            command -v codex &>/dev/null && net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
-        fi
-    fi
-
-    # opencode: global config mcp keys (merge, never clobber the plugin
-    # key). opencode loads MCP ONLY from this global block - graft needs an
-    # entry here too, or every fresh session starts with serena only
-    # (surveyed live 2026-09-20).
-    if command -v opencode &>/dev/null; then
-        OC_GLOBAL="$HOME/.config/opencode/opencode.json"
-        mkdir -p "$(dirname "$OC_GLOBAL")"
-        OC_WANT=""
-        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
-        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
-        if [ -n "$OC_WANT" ]; then
-            info "Registering MCP in opencode ($OC_WANT)..."
-            python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
-import json, os, sys
-p = sys.argv[1]
-cfg = {}
-if os.path.exists(p):
-    with open(p) as f:
-        cfg = json.load(f)
-# MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
-# JSON's own escapes intact. OpenCode wants command + args as one list.
-for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
-    cfg.setdefault("mcp", {})[name] = {"type": "local", "command": [srv["command"]] + srv["args"], "enabled": True}
-with open(p, "w") as f:
-    json.dump(cfg, f, indent=2)
-PYEOF
-        fi
-    fi
-    # agy: MCP via plugin bundle, NOT the global mcp_config.json - agy
-    # defers global stdio servers until a manual /mcp (fast-startup design),
-    # while plugin-bundled servers start eagerly at session init (agy's own
-    # documented auto-wire path; surveyed live 2026-09-20). Idempotent:
-    # rewriting the bundle is a refresh.
-    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
-    AGY_WANT=""
-    command -v serena &>/dev/null && AGY_WANT="serena"
-    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
-    if [ -n "$AGY_WANT" ]; then
-        info "Writing agy MCP plugin bundle ($AGY_WANT)..."
-        mkdir -p "$AGY_PLUGIN_DIR"
-        printf '{ "name": "dotfiles-mcp" }\n' > "$AGY_PLUGIN_DIR/plugin.json"
-        python3 - "$AGY_PLUGIN_DIR/mcp_config.json" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP plugin bundle failed - continuing"
-import json, sys
-want = set(filter(None, sys.argv[2].split(",")))
-# MCP servers come from .chezmoidata/agents.yaml (see #83); only the ones
-# whose binary is present (want) go into the bundle.
-servers = {name: {"command": srv["command"], "args": srv["args"]}
-           for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items() if name in want}
-with open(sys.argv[1], "w") as f:
-    json.dump({"mcpServers": servers}, f, indent=2)
-PYEOF
-    fi
-    # One-time migration: retire serena/graft from the old global
-    # mcp_config.json - the plugin bundle is the only MCP source this repo
-    # owns (cross-source doubles otherwise; operator instruction
-    # 2026-09-20). Surgical: only OUR keys are removed; the file is deleted
-    # only when nothing else remains, so a user-added server survives.
-    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
-    if [ -f "$AGY_GLOBAL_MCP" ]; then
-        python3 - "$AGY_GLOBAL_MCP" <<'PYEOF' 2>/dev/null || warn "agy global mcp_config.json retirement failed - continuing"
-import json, os, sys
-p = sys.argv[1]
-try:
-    with open(p) as f:
-        cfg = json.load(f)
-except Exception:
-    sys.exit(0)
-servers = cfg.get("mcpServers")
-if not isinstance(servers, dict):
-    sys.exit(0)
-changed = False
-for k in ("serena", "graft"):
-    if k in servers:
-        del servers[k]
-        changed = True
-if not changed:
-    sys.exit(0)
-# Never delete: guardrail's antigravity coverage check (the `guardrail
-# setup` gate) fails hard on an absent or 0-byte file (agent-guardrails#334);
-# an empty mcpServers object reads as "none".
-with open(p, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write(chr(10))
-PYEOF
-    fi
-    # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
-    # object (guardrail's coverage gate cannot read either state,
-    # agent-guardrails#334). A non-empty file is never touched here.
-    if [ ! -s "$AGY_GLOBAL_MCP" ]; then
-        if mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" && printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP"; then
-            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)"
-        else
-            warn "could not repair agy global mcp_config.json - continuing"
-        fi
-    fi
-
-    # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
-    # per-repo activation is `graft init` (documented in
-    # docs/agent-context-tools.md). Telemetry off per repo decision.
-    # --allow-scripts: npm 12 blocks install scripts by default, which
-    # silently skips graft's tree-sitter parser native builds - the binary
-    # then crashes with "No native build was found" (node-gyp-build). The
-    # allowlist is the exact list npm's own warning prints for this graft
-    # version; if a graft update changes its parser set, npm's error output
-    # prints the new list to paste here. (No $SUDO here, unlike the apt
-    # branch: brew-Node's global prefix is user-writable.)
-    if command -v npm &>/dev/null; then
-        if ! command -v graft &>/dev/null; then
-            info "Installing Graft (npm -g)..."
-            net_timeout 300 npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
-                || warn "Graft install failed - skipping"
-        fi
-        # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
-        # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
-        command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
-            || true
-    else
-        warn "npm not found - skipping Graft"
-    fi
-
-    # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
-    # Confirmed current on Homebrew (formula, not cask). Note: act runs every
-    # job inside a real Docker container, and this repo's isDevcontainer
-    # check treats any container as one (see .chezmoi.toml.tmpl) - so
-    # $interactive can never be true under act, meaning it can validate
-    # template/script syntax and the devcontainer code path, but can't
-    # exercise the core/agent_toolkit/etc section content. Confirmed this
-    # session testing a Superpowers install fix - had to fall back to
-    # isolated `docker run` tests for that instead.
-    command -v act &>/dev/null || brew install act || warn "act install failed"
-{{- else }}
-    info "Agent toolkit disabled in config"
-{{- end }}
-
-{{- if $opencode_cli }}
-    # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
-    # split out of agent_toolkit per the spec's placement rule). Native
-    # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # wiring is done by the agent-guardrails installer, and the Serena MCP
-    # registration into opencode.json stays with Serena in agent_toolkit
-    # (same precedent as `serena setup claude-code`). No Node prerequisite:
-    # the native installer is curl|sh, so this section works standalone even
-    # with core/agent_toolkit off (the sh twin of claude_cli's arrangement).
-    # --version re-check + legacy npm shim removal: a dead npm-global
-    # opencode-ai on PATH otherwise counts as "installed" forever.
-    if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
-         info "Installing OpenCode..."
-         net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
-         npm rm -g opencode-ai &>/dev/null || true
-    fi
-
-    # Superpowers skills for OpenCode (separate mechanism from Claude
-    # Code's plugin marketplace, which lives in the claude_cli section
-    # now - OpenCode reads its own opencode.json config). jq merges into
-    # the plugin array without clobbering any other settings already in
-    # the file.
-    if command -v opencode &>/dev/null; then
-        info "Configuring Superpowers for OpenCode..."
-        command -v jq &>/dev/null || brew install jq
-        local oc_config_dir="$HOME/.config/opencode"
-        local oc_config="$oc_config_dir/opencode.json"
-        local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
-        mkdir -p "$oc_config_dir"
-        if [[ ! -f "$oc_config" ]]; then
-            echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
-        elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
-            jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
-        fi
-    fi
-{{- else }}
-    info "OpenCode CLI disabled in config"
-{{- end }}
-
-{{- if $claude_cli }}
-    # Claude Code (Native Installer - Recommended). Not nested under an
-    # npm-presence check (its former home inside the old ai_tools npm
-    # block): the native installer is curl|sh and needs no Node - so
-    # claude_cli now works standalone even with core/agent_toolkit off.
-    if ! command -v claude &>/dev/null; then
-         info "Installing Claude Code (Native)..."
-         net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
-    fi
-
-    # Superpowers skills plugin for Claude Code (global - active in every
-    # session once installed, via Claude Code's own plugin marketplace
-    # mechanism, not npm). Re-running add/install is safe if already present.
-    if command -v claude &>/dev/null; then
-        info "Installing Superpowers plugin for Claude Code..."
-        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
-    fi
-{{- else }}
-    info "Claude Code disabled in config"
-{{- end }}
-
-{{- if $chatgpt_cli }}
-    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
-    # curated-skills pass below gates on this group too (chatgpt_cli sits in
-    # its cross-cutting gate, matching the .ps1 twin); superpowers' plugin for
-    # Codex is the one piece with no codex wiring (see the block below);
-    # guardrail's plane wiring is done by the agent-guardrails installer.
-    if command -v npm &>/dev/null; then
-        info "Installing Codex CLI..."
-        # Upgrades: `dot upgrade` only - install-if-missing here by design.
-        command -v codex &>/dev/null || npm install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
-    else
-        warn "npm not found - skipping Codex CLI"
-    fi
-
-    # Superpowers for Codex CLI: deliberately NOT automated. Confirmed
-    # live via an isolated Docker test that the third-party `codex-plugin`
-    # npm helper (the only scriptable option) doesn't just prompt
-    # interactively - it expects a plugins/<name>/ marketplace layout
-    # that obra/superpowers doesn't use (it ships a root-level
-    # .codex-plugin/plugin.json manifest instead), so it fails outright
-    # regardless of flags. Codex's real install path for this plugin is
-    # its native in-app `/plugins` search UI - genuinely GUI/session-only,
-    # no config file or CLI command reaches it from outside a session.
-{{- else }}
-    info "Codex CLI disabled in config"
-{{- end }}
-
-{{- if $antigravity_cli }}
-    # Antigravity CLI (agy) - Homebrew cask (v1.1.22, confirmed current
-    # on formulae.brew.sh, matching the exact version Chocolatey ships on
-    # Windows). Google retired standalone Gemini Code Assist for
-    # individuals in favor of the Antigravity suite (see
-    # docs/tool-parity.md) - this repo no longer installs Gemini CLI, agy
-    # replaces it here.
-    command -v agy &>/dev/null || net_timeout 600 brew install --cask antigravity-cli || warn "Antigravity CLI install failed or timed out - continuing"
-
-    # Superpowers plugin for Antigravity CLI (agy). `agy plugin install
-    # <url>` is the officially-documented mechanism (obra/superpowers'
-    # own README.md Antigravity section, confirmed against the locally-
-    # installed copy's docs) - NOT hand-copying skill files into a
-    # guessed plugin directory: Superpowers' own contributor docs
-    # (docs/porting-to-a-new-harness.md) explicitly call that fragile/
-    # unsupported ("Everything arrives through the install mechanism -
-    # not by editing the user's config"). This also sidesteps needing to
-    # hardcode Antigravity's actual plugin storage path here (confirmed
-    # live: `~/.gemini/config/plugins/<name>/` - antigravity.google's own
-    # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
-    # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
-    # not us, so it stays correct even if/when that path changes again.
-    if command -v agy &>/dev/null; then
-        info "Installing Superpowers plugin for Antigravity..."
-        agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
-    fi
-{{- else }}
-    info "Antigravity CLI disabled in config"
-{{- end }}
-
-{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
-    # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity /
-    # Codex, via the `skills` CLI - see install_agent_skills above.
-    # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
-    # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
-    # chatgpt_cli) is
-    # enabled - the CLIs it writes to may have arrived from any of those
-    # gates, and the pass is idempotent either way. npx presence is checked
-    # inside the function.
-    install_agent_skills
-{{- end }}
-
-    # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
-    install_agent_guardrails
-
-    # Mac Desktop Apps (Cask) - hosts only, see the top-of-file $isHost comment
-{{- if and $dev_desktop $isHost }}
+install_mac_desktop() {
     info "Installing Mac Desktop Apps..."
     # filezilla intentionally omitted: confirmed removed from homebrew-cask
     # entirely (adware concerns, not a naming/renaming issue like Antigravity) -
@@ -2250,8 +1616,65 @@ PYEOF
              rm -f "$WORK/ScreenRec.dmg"
         fi
     fi
-{{- end }}
 }
+
+install_brew() {
+    info "Installing packages with Brew..."
+    
+    if ! command -v brew &>/dev/null; then
+        info "Homebrew not found. Installing..."
+        # Fetch and run as two guarded steps so a stalled download is covered
+        # too, while keeping Homebrew's documented `bash -c "$(...)"` exec form.
+        # net_timeout falls back to unguarded when no timeout/gtimeout exists
+        # (the usual case on a fresh Mac), so this can't make matters worse.
+        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+        _brew_installer=$(net_timeout 120 curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) \
+            && net_timeout 900 env NONINTERACTIVE=1 /bin/bash -c "$_brew_installer" || {
+            error "Failed to install Homebrew (or timed out)"
+            exit 1
+        }
+        
+        # Add brew to path for this session
+        if [[ -d "/opt/homebrew/bin" ]]; then
+             eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [[ -d "/home/linuxbrew/.linuxbrew/bin" ]]; then
+             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        fi
+    fi
+
+{{- if $core }}
+    # Core packages. coreutils first: it provides `gtimeout`, which net_timeout
+    # needs to guard the download-heavy steps further down (modern tools, the
+    # agent toolkit, ScreenRec's dmg, Antigravity 2.0's dmg) - macOS has no
+    # `timeout` in the base OS.
+    # Names come from .chezmoidata/packages.yaml (see #83).
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
+    brew link --overwrite node@{{ .versions.node_major }} || true
+{{- else }}
+    info "Core packages disabled in config"
+{{- end }}
+
+{{- if $modern_cli }}
+    # Modern CLI tools
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "modern_cli" "catalog" .catalog.packages) }} || warn "modern_cli brew install failed - continuing"
+{{- end }}
+
+{{- if $fonts }}
+    # Fonts - MesloLGS NF is a great Nerd Font for Starship
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "fonts" "catalog" .catalog.packages) }} || true
+{{- end }}
+
+{{- if $remote_access }}
+    brew install --cask {{ includeTemplate "pkg-names" (dict "manager" "cask" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access cask install failed - continuing"
+    brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "remote_access" "catalog" .catalog.packages) }} || warn "remote_access brew install failed - continuing"
+{{- end }}
+
+{{- if $remote_access_server }}
+    info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
+{{- end }}
+
+}
+
 
 #-------------------------------------------------------------------------------
 # AI desktop apps (spec §2: pure installs, no wiring - superpowers and the
@@ -2320,11 +1743,12 @@ install_chatgpt_desktop() {
 # the extraction layout is logged verbatim below so the CI verify (and docs)
 # can be designed from real first-run evidence.
 install_antigravity_desktop() {
-    # Antigravity 2.0 hub release pin - single source of truth for both the
-    # macOS dmg and the Linux tar.gz below. scripts/update-versions.sh scrapes
-    # antigravity.google/download and re-checks both asset URLs before
-    # rewriting this line (Windows floats via choco, no pin needed there).
-    ANTIGRAVITY_HUB_VERSION="2.17.0-5217732355031040"
+    # Antigravity 2.0 hub release pin - single source of truth is
+    # .chezmoidata.yaml versions.antigravity_hub (#125, like guardrail.version);
+    # scripts/update-versions.sh scrapes antigravity.google/download, re-checks
+    # both asset URLs and rewrites the pin there. Windows floats via choco, no
+    # pin needed.
+    ANTIGRAVITY_HUB_VERSION="{{ .versions.antigravity_hub }}"
     local ag_base="https://storage.googleapis.com/antigravity-public/antigravity-hub/${ANTIGRAVITY_HUB_VERSION}"
 
     case "$(uname -s)" in
@@ -2585,6 +2009,18 @@ main() {
     local pkg_manager
     pkg_manager=$(detect_package_manager)
     info "Detected Package Manager: $pkg_manager"
+    PKG_MANAGER="$pkg_manager"
+
+    # The npm sudo decision, computed ONCE for the whole run (#124): sudo
+    # only for the system-owned /usr prefix - a user-managed npm (nvm,
+    # homebrew) must never be sudo'd (root-owned files under nvm). brew's
+    # prefix is user-writable, so the same test drops sudo there.
+    NPM_BIN="$(command -v npm || true)"
+    npm_sudo="$SUDO"
+    if [[ -z "$NPM_BIN" || "$NPM_BIN" != /usr* ]]; then
+        [[ -n "$NPM_BIN" ]] && warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
+        npm_sudo=""
+    fi
 
     case "$pkg_manager" in
         apt)  install_apt ;;
@@ -2592,6 +2028,69 @@ main() {
         *)    warn "Skipping package installation (unsupported manager: $pkg_manager)" ;;
     esac
 
+    # VS Code settings + extensions - hoisted out of install_apt (#124) so the
+    # Darwin settings arm is reachable on macOS too.
+    configure_vscode
+
+{{- if $agent_toolkit }}
+    install_agent_toolkit
+{{- else }}
+    info "Agent toolkit disabled in config"
+{{- end }}
+{{- if $opencode_cli }}
+    install_opencode_cli
+{{- else }}
+    info "OpenCode CLI disabled in config"
+{{- end }}
+{{- if $claude_cli }}
+    install_claude_cli
+{{- else }}
+    info "Claude Code disabled in config"
+{{- end }}
+{{- if $chatgpt_cli }}
+    install_chatgpt_cli
+{{- else }}
+    info "Codex CLI disabled in config"
+{{- end }}
+{{- if $antigravity_cli }}
+    install_antigravity_cli
+{{- else }}
+    info "Antigravity CLI disabled in config"
+{{- end }}
+
+{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
+    # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
+    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity /
+    # Codex, via the `skills` CLI - see install_agent_skills above.
+    # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
+    # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
+    # chatgpt_cli) is
+    # enabled - the CLIs it writes to may have arrived from any of those
+    # gates, and the pass is idempotent either way. npx presence is checked
+    # inside the function.
+    install_agent_skills
+{{- end }}
+
+    # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
+    install_agent_guardrails
+
+    # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
+    # is a second runtime check for genuine headless Linux hosts, not the
+    # primary WSL/devcontainer guard anymore)
+{{- if and $dev_desktop $isHost }}
+    case "$(uname -s)" in
+        Darwin)
+            install_mac_desktop
+            ;;
+        Linux)
+            if [[ -n "${DISPLAY:-}" ]]; then
+                install_linux_desktop
+            fi
+            ;;
+    esac
+{{- else }}
+    info "Desktop apps disabled (WSL/Devcontainer/config)"
+{{- end }}
     # AI desktop apps (hosts only - the config template host-gates the
     # desktop groups too, spec §3; dispatched here, after install_apt/
     # install_brew, so brew is guaranteed present for the macOS casks)

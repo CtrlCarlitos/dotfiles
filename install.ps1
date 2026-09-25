@@ -5,22 +5,42 @@ $ErrorActionPreference = "Stop"
 
 function Write-Info { param([string]$Message) Write-Host "[:] $Message" -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host "[v] $Message" -ForegroundColor Green }
-function Write-Error { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
+# Write-Fail, NOT a custom Write-Error: redefining Write-Error shadows the
+# built-in cmdlet for this whole session (issue #123) - any library code
+# loaded later that legitimately calls Write-Error would silently get this
+# host-print instead of the error record. Same output, honest name.
+function Write-Fail { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
 
-# Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
+# Bootstrap gum (pinned) for the interactive package menu. Best-effort
 # only: on failure warn and continue - without gum the menu self-skips and
 # chezmoi's native config prompts take over.
+#
+# The pin's single source is .chezmoidata.yaml versions.gum (#125): read it
+# when a checkout is on disk. The inline fallback only covers the one-liner
+# run, where this script was downloaded alone - scripts/update-versions.sh
+# syncs it to the yaml pin, so the two cannot drift silently.
+$gumVersion = '2.0.1'
+$gumYamlCandidates = @()
+# $PSScriptRoot is empty under the iex one-liner - guard the Join-Path.
+if ($PSScriptRoot) { $gumYamlCandidates += (Join-Path $PSScriptRoot '.chezmoidata.yaml') }
+$gumYamlCandidates += (Join-Path $env:USERPROFILE '.local\share\chezmoi\.chezmoidata.yaml')
+foreach ($gumYaml in $gumYamlCandidates) {
+    if ($gumYaml -and (Test-Path $gumYaml)) {
+        $gumMatch = Select-String -LiteralPath $gumYaml -Pattern '^\s{2}gum:\s*"?([^"]+)"?\s*$' | Select-Object -First 1
+        if ($gumMatch) { $gumVersion = $gumMatch.Matches[0].Groups[1].Value; break }
+    }
+}
 function Bootstrap-Gum {
     if (Get-Command gum -ErrorAction SilentlyContinue) { return }
 
     $gumDir = Join-Path $env:USERPROFILE '.local\bin'
-    $zipUrl = 'https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Windows_x86_64.zip'
+    $zipUrl = "https://github.com/charmbracelet/gum/releases/download/v$gumVersion/gum_${gumVersion}_Windows_x86_64.zip"
     try {
         # PS 5.1 defaults can lack TLS 1.2 (same fix as the Chocolatey fetch)
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
         New-Item -ItemType Directory -Force -Path $gumDir | Out-Null
         # -TimeoutSec so a stalled download errors out instead of hanging
-        $zipPath = Join-Path $env:TEMP 'gum_2.0.1_Windows_x86_64.zip'
+        $zipPath = Join-Path $env:TEMP "gum_${gumVersion}_Windows_x86_64.zip"
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
         Expand-Archive -Path $zipPath -DestinationPath $gumDir -Force
         Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
@@ -38,7 +58,7 @@ function Bootstrap-Gum {
             Write-Info "gum extracted to $gumDir but not runnable - menu will self-skip."
         }
     } catch {
-        Write-Error "gum bootstrap failed: $_ - continuing (menu will self-skip)."
+        Write-Fail "gum bootstrap failed: $_ - continuing (menu will self-skip)."
     }
 }
 
@@ -155,7 +175,7 @@ try {
                 throw "Chezmoi installation failed or path not updated."
             }
         } catch {
-            Write-Error "Failed to install chezmoi: $_"
+            Write-Fail "Failed to install chezmoi: $_"
             Write-Host "Please install manually: choco install chezmoi -y"
             exit 1
         }
@@ -175,7 +195,7 @@ try {
                  }
             }
         } catch {
-             Write-Error "Failed to install Git. Please install manually."
+             Write-Fail "Failed to install Git. Please install manually."
              exit 1
         }
     }
@@ -195,7 +215,7 @@ try {
                 return
             }
             
-            Write-Error "chezmoi operation failed (exit code $($global:LASTEXITCODE)). Attempt $attempt of $max_attempts."
+            Write-Fail "chezmoi operation failed (exit code $($global:LASTEXITCODE)). Attempt $attempt of $max_attempts."
             if ($attempt -lt $max_attempts) {
                 Write-Info "Waiting $delay seconds before retrying..."
                 Start-Sleep -Seconds $delay

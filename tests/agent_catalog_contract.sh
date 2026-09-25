@@ -129,9 +129,14 @@ ps1 = read("ps1.rendered")
 sh = read("sh.rendered")
 
 if allow_str not in ps1: err("ps1 render: graft allow-scripts string not rendered verbatim")
-if sh.count(allow_str) != 2: err("sh render: graft allow-scripts string expected twice (apt + brew copies), found %d" % sh.count(allow_str))
+# #124 hoisted the shared agent-toolkit sections out of install_apt/install_brew
+# into one install_agent_toolkit, so the string renders ONCE now (was 2).
+if sh.count(allow_str) != 1: err("sh render: graft allow-scripts string expected once (shared toolkit), found %d" % sh.count(allow_str))
 if ("npm install -g %s " % codex) not in ps1: err("ps1 render: codex install line not rendered")
-if ("npm install -g %s " % codex) not in sh: err("sh render: codex install line not rendered")
+# #124: the sh Codex install is shared now and runs through the run-once
+# $NPM_BIN/$npm_sudo pair, so pin the package name + install verb instead of
+# the literal "npm install -g" prefix.
+if ("install -g %s " % codex) not in sh: err("sh render: codex install line not rendered")
 ps_list = ", ".join("'%s'" % x for x in agents)
 if ps1.count("$skAgents = @(%s)" % ps_list) < 1: err("ps1 render: skills agent list not rendered")
 if ("AGENTS=(%s)" % " ".join(agents)) not in sh: err("sh render: skills agent list not rendered")
@@ -146,12 +151,14 @@ else:
         if want not in body: err("ps1 render: $mcpCatalog lacks %s as %s" % (name, want))
     for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.graft.args"):
         if ref not in ps1: err("ps1 render: OpenCode/agy wiring does not consume %s" % ref)
-# the sh embeds the table as JSON inside its python heredocs, four times.
-# Anchor on the `srv in` loop/comprehension: the VS Code tiers (phase B) are
-# also json.loads(r"""{...}""") blocks and must not be counted here.
+# the sh embeds the table as JSON inside its python heredocs. #124: the two
+# registration blocks live in the shared install_agent_toolkit now, so the
+# table renders twice (opencode + agy), not four times (was 2 blocks x
+# apt/brew). Anchor on the `srv in` loop/comprehension: the VS Code tiers
+# (phase B) are also json.loads(r"""{...}""") blocks and must not be counted.
 sh_json = json.dumps(mcp, separators=(",", ":"), sort_keys=True)
 found = [json.loads(x) for x in re.findall(r'srv in json\.loads\(r"""(\{.*?\})"""\)', sh)]
-if len(found) != 4: err("sh render: expected the MCP table embedded 4 times (2 blocks x apt/brew), found %d" % len(found))
+if len(found) != 2: err("sh render: expected the MCP table embedded 2 times (shared toolkit), found %d" % len(found))
 for d in found:
     if json.dumps(d, separators=(",", ":"), sort_keys=True) != sh_json: err("sh render: an embedded MCP table differs from the catalog")
 

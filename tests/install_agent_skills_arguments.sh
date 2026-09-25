@@ -77,7 +77,12 @@ chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
 harness="$tmp/harness.sh"
 {
     # shellcheck disable=SC2016  # $1 expands when the generated harness runs.
-    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'info() { :; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
+    # #123: the add batch lives in scripts/lib/agent-skills.sh (inlined into
+    # the rendered installer); the fixture sources it directly - before the
+    # stubs, which then override the lib's helpers.
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+        ". $repo_root/scripts/lib/agent-skills.sh" \
+        'info() { :; }' 'warn() { printf "WARN: %s\\n" "$1" >&2; }'
     awk '/^net_timeout\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
     awk '/^install_agent_skills\(\) \{/{copy=1} copy{print} copy && /^}$/{exit}' "$rendered"
     printf '%s\n' 'install_agent_skills'

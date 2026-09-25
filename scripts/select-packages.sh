@@ -26,16 +26,14 @@
 
 set -euo pipefail
 
+# The 16-group list + the [data.packages] section scanner come from the shared
+# lib (issue #123) - one vocabulary and one scanner instead of three copies.
+. "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
+
 info() { printf '▸ %s\n' "$1"; }
 warn() { printf '⚠ %s\n' "$1" >&2; }
 
 CONFIG_FILE="$HOME/.config/chezmoi/chezmoi.toml"
-
-# The 16 package groups, taxonomy order (docs/research/package-groups-spec.md §2).
-# This is the single vocabulary shared with the config template, installers, and CI.
-PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
-    claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
-    antigravity_desktop dev_desktop remote_access remote_access_server guardrail)
 
 # Preset → pre-check sets (spec §3). Presets are NOT persisted.
 preset_set() {
@@ -54,13 +52,7 @@ preset_set() {
 # chezmoi exists on a brand-new machine).
 existing_true_keys() {
     [ -f "$CONFIG_FILE" ] || return 0
-    awk '
-        /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
-        insec && /^[[:space:]]*\[/ { insec = 0 }
-        insec && $0 ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*true[[:space:]]*$/ {
-            print $1
-        }
-    ' "$CONFIG_FILE" | while IFS= read -r key; do
+    pkg_config_true_keys "$CONFIG_FILE" | while IFS= read -r key; do
         case " ${PKG_GROUPS[*]} " in *" $key "*) printf '%s\n' "$key" ;; esac
     done
 }
@@ -69,11 +61,8 @@ existing_true_keys() {
 # an explicit user value when the menu rewrites its otherwise-owned table.
 existing_vscode_settings() {
     [ -f "$CONFIG_FILE" ] || return 0
-    awk '
-        /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
-        insec && /^[[:space:]]*\[/ { insec = 0 }
-        insec && $0 ~ /^[[:space:]]*vscode_settings[[:space:]]*=[[:space:]]*(true|false)([[:space:]]*#.*)?[[:space:]]*$/ { print $0; exit }
-    ' "$CONFIG_FILE"
+    pkg_config_lines "$CONFIG_FILE" |
+        grep -m1 -E '^[[:space:]]*vscode_settings[[:space:]]*=[[:space:]]*(true|false)([[:space:]]*#.*)?[[:space:]]*$' || true
 }
 
 has_packages_section() {
@@ -173,15 +162,7 @@ else
     # original file preserves its inode and mode.
     tmp="$(mktemp)"
     trap 'rm -f "$tmp"' EXIT
-    awk '
-        /^[[:space:]]*\[data\.packages\][[:space:]]*$/ { insec = 1; next }
-        insec && /^[[:space:]]*\[/ { insec = 0 }
-        !insec { lines[++n] = $0 }
-        END {
-            while (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--  # drop EOF blanks
-            for (i = 1; i <= n; i++) print lines[i]
-        }
-    ' "$CONFIG_FILE" >"$tmp"
+    pkg_config_without_packages_section "$CONFIG_FILE" >"$tmp"
     if [ -s "$tmp" ]; then
         printf '\n%s\n' "$section" >>"$tmp"
     else

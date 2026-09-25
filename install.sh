@@ -74,13 +74,27 @@ install_package() {
     fi
 }
 
-# Bootstrap gum (pinned; the single GUM_VERSION below is the one source for
-# the version in every asset URL) for the interactive package menu. Best-
-# effort only: every failure warns and continues - without gum the menu
-# self-skips and chezmoi's native config prompts take over. Each asset is
-# verified against the release's published checksums.txt before it is
-# installed (three copy-pasted hardcoded v2.0.1 URLs before, no verification).
-GUM_VERSION="2.0.1"
+# Bootstrap gum (pinned) for the interactive package menu. Best-effort only:
+# every failure warns and continues - without gum the menu self-skips and
+# chezmoi's native config prompts take over. Each asset is verified against
+# the release's published checksums.txt before it is installed.
+#
+# The pin's single source is .chezmoidata.yaml versions.gum (#125): read it
+# when a checkout is on disk (direct run, devcontainer). The inline fallback
+# below only covers the one-liner run, where this script was downloaded
+# alone - scripts/update-versions.sh syncs it to the yaml pin, so the two
+# cannot drift silently.
+GUM_VERSION="${GUM_VERSION:-2.0.1}"
+for _gum_yaml in "$(dirname "$0")/.chezmoidata.yaml" \
+                  "$HOME/.local/share/chezmoi/.chezmoidata.yaml"; do
+    if [ -f "$_gum_yaml" ]; then
+        _yaml_gum="$(sed -n 's/^  gum: .\{0,1\}\([^"]*\).\{0,1\}$/\1/p' "$_gum_yaml" | head -n 1)"
+        if [ -n "$_yaml_gum" ]; then
+            GUM_VERSION="$_yaml_gum"
+            break
+        fi
+    fi
+done
 
 # Print the sha256 of a file; empty output when no SHA-256 tool exists.
 sha256_of() {
