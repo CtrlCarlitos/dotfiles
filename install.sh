@@ -23,7 +23,8 @@ cleanup_tmp() {
         rm -rf "$GUM_TMP"
     fi
 }
-trap 'rc=$?; cleanup_tmp; if [ "${rc:-1}" -ne 0 ]; then error_handler; fi' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap body itself
+trap 'rc=$?; cleanup_tmp; if [ "$rc" -ne 0 ]; then error_handler; fi' EXIT
 
 # Wall-clock guard for the unbounded network fetches below - a stalled
 # download otherwise freezes this `set -e` bootstrap indefinitely. Uses
