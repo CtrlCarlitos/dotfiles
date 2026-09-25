@@ -51,7 +51,7 @@ alias mkdir='mkdir -p'
 #-------------------------------------------------------------------------------
 # Docker
 #-------------------------------------------------------------------------------
-# Short docker/compose aliases (dc, dcup, dcdn, dcl, dce, ...) come from Oh My
+# Short docker/compose aliases (dco, dcupd, dcdn, dclf, dce, ...) come from Oh My
 # Zsh's `docker` and `docker-compose` plugins now (see ~/.zshrc) - not
 # redefined here. Only the cleanup helpers the plugins don't provide are kept.
 #-------------------------------------------------------------------------------

@@ -39,7 +39,7 @@ failure modes. Port the *method*, not the *fixes*.
    `isHost := not isDevcontainer and not isWsl`. This used to cascade into a real
    behavior difference via `install_antigravity()`'s host-only gate (that function
    is a removed no-op now); the live example of the same mechanism is
-   `install_desktop`'s host-only gate — i.e. desktop apps are expected to **not**
+   `dev_desktop`'s host-only gate — i.e. desktop apps are expected to **not**
    install under WSL, by design. Since there's no
    stored value to inspect via `chezmoi data` anymore, verify by checking the actual
    *effect*: run `chezmoi execute-template '{{ .chezmoi.kernel.osrelease }}'` and
@@ -51,8 +51,8 @@ failure modes. Port the *method*, not the *fixes*.
    verify it's skipped for that reason, not by luck.** This was tightened this
    session after a real bug was found live on this exact WSL setup: the *only*
    guard used to be `install_linux_desktop()`'s runtime `if [[ -n "$DISPLAY" ]]`
-   check, and WSLg (the default GUI stack on current Windows 11) sets `$DISPLAY`
-   automatically — so with `install_desktop = true` in `chezmoi.toml`, that
+    check, and WSLg (the default GUI stack on current Windows 11) sets `$DISPLAY`
+    automatically — so with `dev_desktop = true` in `chezmoi.toml`, that
    runtime check alone let Chrome/VS Code/Docker Desktop actually attempt to
    install *inside* WSL, duplicating what's already on the Windows host (and, for
    Docker Desktop specifically, plausibly conflicting with the host's own
@@ -62,9 +62,9 @@ failure modes. Port the *method*, not the *fixes*.
    with `$DISPLAY` kept only as a secondary safety net for genuine headless Linux
    hosts. To verify: confirm `$DISPLAY` is actually set on your WSL instance (it
    likely is, under WSLg) *and* confirm desktop apps were still skipped anyway —
-   if desktop apps only appear skipped because `$DISPLAY` happens to be unset on
-   your particular setup, that's not proof this gate works; test with
-   `install_desktop = true` and a WSLg session (`$DISPLAY` set) specifically.
+    if desktop apps only appear skipped because `$DISPLAY` happens to be unset on
+    your particular setup, that's not proof this gate works; test with
+    `dev_desktop = true` and a WSLg session (`$DISPLAY` set) specifically.
 4. **Interop paths and line endings.** WSL can see and execute Windows binaries via
    `PATH` interop (e.g. `code.exe`), and `dot_gitconfig.tmpl` has logic
    (`lookPath "code"`) that changes `core.editor` based on whether `code` is
@@ -98,7 +98,8 @@ failure modes. Port the *method*, not the *fixes*.
    ground rules below, create and test as a non-root user with passwordless
    sudo inside it — don't just run everything as the container's default root.
 6. **`act` (local GitHub Actions runner) works here, with a caveat.** Installed
-   under `install_ai_tools` on WSL like everywhere else (via the Linux/apt install
+   under the `agent_toolkit` group on WSL like everywhere else (via the Linux/apt
+   install
    script, since WSL runs that same code path) - it genuinely works, but only if
    Docker Desktop's WSL integration is enabled for this distro (Settings >
    Resources > WSL Integration on the Windows host; off by default per-distro).
@@ -107,8 +108,8 @@ failure modes. Port the *method*, not the *fixes*.
    and more fundamentally: `act` runs every job inside a real Docker container, and
    this repo's `isDevcontainer` check (point 2 above) treats *any* Docker container
    as one - so `$interactive` can never be `true` under `act`, on WSL or anywhere
-   else, meaning it can validate script/template syntax but can never actually
-   exercise `install_core`/`install_ai_tools`/etc content. Confirmed this
+    else, meaning it can validate script/template syntax but can never actually
+    exercise `core`/`agent_toolkit`/etc content. Confirmed this
    limitation directly while testing a real fix this session - had to fall back to
    isolated `docker run` tests instead of `act` for anything package-install-related.
 7. **`chezmoi doctor`'s `hardlink` check reports `error` here - that's a false
@@ -119,8 +120,8 @@ failure modes. Port the *method*, not the *fixes*.
    `invalid cross-device link`, which hardlinks fundamentally can't cross by
    design. Doesn't affect `chezmoi apply`/`status`/anything real - only this one
    diagnostic self-test. Don't "fix" it (e.g. by trying to remount `/tmp`); just
-   don't mistake it for output of your own testing. Also confirmed live: this is
-   independent of `install_desktop` correctly force-`false`
+    don't mistake it for output of your own testing. Also confirmed live: this is
+    independent of `dev_desktop` correctly force-`false`
    on WSL - not just via the apply-time `$isHost` gate (points 2-3 above), but
    *also* at `chezmoi init` time itself, since `.chezmoi.toml.tmpl` writes
    `false` whenever `$isHost` is false, regardless of what a
@@ -132,7 +133,7 @@ failure modes. Port the *method*, not the *fixes*.
    `install-deps` can hang indefinitely under `sudo` here (now `timeout`-wrapped,
    see the comment at that call site in `run_onchange_install_packages.sh.tmpl`),
    and Ollama's installer silently fails outright without `zstd` present (now
-   added to `install_core`, see the comment above the Ollama install block in
+   added to the `core` group, see the comment above the Ollama install block in
    the same file). If either regresses, the fix and the live evidence that
    motivated it are documented right at the call site, not just here.
 

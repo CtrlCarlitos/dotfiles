@@ -16,7 +16,7 @@ vscode_settings = false
 |---|---|
 | Extension baseline (23 curated + 1 Windows-only) | `.chezmoidata.yaml` → `vscode.extensions` (+ `extensions_windows`) |
 | Whole-feature gate | `~/.config/chezmoi/chezmoi.toml` → `[data.packages]` → `vscode_settings` |
-| Settings baseline (forced/upsert/merge/unset tiers) | embedded in both installer templates |
+| Settings baseline (forced/upsert/merge/unset tiers) | `.chezmoidata.yaml` → `vscode.settings` — both installer templates render from it |
 | Keybindings (agent keys) | `.chezmoitemplates/vscode-keybindings.json`, applied by per-OS `modify_keybindings.json` wrappers |
 | Machine overrides | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode_overrides]` |
 

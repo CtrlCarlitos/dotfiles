@@ -88,7 +88,7 @@ What the PowerShell 7 profile sets up:
 | Modern tools | `ls`→eza (`ll`, `la`, `lt`, `lta`), `cat`→bat, `vim`/`vi`/`v`→nvim |
 | Git | OMZ-style `gst`, `gd`, `gl`, `gp`, `gco`, `ga`, `gcam`, `gb` |
 | Parity with `dot_aliases.zsh` | `c`, `h`, `py`, `nr`/`nrd`/`nrb`, `serve`, `ff`, `path`, `prof`, `get`/`post`, docker `d`/`dc*` |
-| Dotfiles | `dotup` (chezmoi update + apply), `devprofile` / `dp` |
+| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor`), `devprofile` / `dp` |
 | Windows Terminal | reports the current folder (OSC 9;9), so splits open where you are (the 5.1 profile does too) |
 | SSH agent | tops up the Windows ssh-agent with your declared keys (only adds, never removes) |
 
@@ -113,7 +113,7 @@ aliases. Windows-specific points:
 
 `devprofile` manages which Git identity (name/email/signing key) is active, based on your chezmoi accounts.
 
-**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit safety net, or creating a new account. See [devprofile](devprofile.md#example-outputs) for annotated example output of each command.
+**You usually don't need to run this at all** - each account's `dirs` list is already wired into `~/.gitconfig` as a conditional include, so the right identity is selected automatically by which folder a repo lives in. `devprofile` is for the exceptions: a repo outside any mapped `dirs` path, double-checking the active identity, installing a pre-commit identity check, or creating a new account. See [devprofile](devprofile.md#example-outputs) for annotated example output of each command.
 
 ```powershell
 devprofile                                      # Show the identity active in the current repo

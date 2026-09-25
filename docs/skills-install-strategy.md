@@ -127,7 +127,7 @@ Replace the entire clone + `cp -r` curated-copy + `plugin.json` +
 npx --yes skills@latest add mattpocock/skills \
   -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
      code-review prototype research grilling handoff \
-  -a claude-code opencode antigravity -g -y --copy
+  -a claude-code opencode codex -g -y --copy
 ```
 
 Update path: `npx --yes skills@latest update -g -y` (or re-run the `add`).
@@ -155,19 +155,21 @@ avoid confusion with this repo's own `/code-review` command and Superpowers'
 
 ~~Recommend **1**.~~
 
-## `frontend-design` (parked note)
+## `frontend-design` (installed)
 
 Anthropic's `frontend-design` skill lives in **`anthropics/skills`** (not
 `vercel-labs/agent-skills` — the `skills` README example is wrong).
 `anthropics/skills` also has `canvas-design`, `brand-guidelines`,
 `artifacts-builder`, `webapp-testing`, `mcp-builder`.
 
-If wanted:
+No longer parked: `frontend-design` is in the curated catalog
+(`scripts/curated-agent-skills.txt`) and installs for every agent in the same
+sequence:
+
 ```sh
 npx --yes skills@latest add anthropics/skills -s frontend-design \
-  -a claude-code opencode antigravity -g -y --copy
+  -a claude-code opencode codex -g -y --copy
 ```
-User's call — candidate, not decided.
 
 ## Curated set widened (2026-09-13): +3 skills
 
@@ -186,12 +188,12 @@ removed 2026-09-14: mattpocock renamed it upstream to `writing-for-agents`
 name failed silently on every run.)
 
 Each gets its own `skills add` (one skill per source repo, so no `-s` list to
-keep in sync), same `-a claude-code opencode antigravity -g -y --copy` flags:
+keep in sync), same `-a claude-code opencode codex -g -y --copy` flags:
 
 ```sh
-npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode antigravity -g -y --copy
-npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode antigravity -g -y --copy
-npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a claude-code opencode antigravity -g -y --copy
+npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a claude-code opencode codex -g -y --copy
+npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a claude-code opencode codex -g -y --copy
+npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a claude-code opencode codex -g -y --copy
 ```
 
 No overlap with Superpowers or the existing curated set: `skill-creator` is a

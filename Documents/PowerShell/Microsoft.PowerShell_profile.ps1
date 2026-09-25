@@ -113,8 +113,7 @@ if (Get-Command pstop -ErrorAction SilentlyContinue) {
     function top { pstop @args }
 }
 
-# Dotfiles command family (dot CLI). Source of truth:
-# docs/superpowers/specs/2026-09-20-dot-cli-design.md. `dot up` syncs
+# Dotfiles command family (dot CLI). `dot up` syncs
 # state and NEVER upgrades (chezmoi update owns the pull; init re-runs the
 # config template AFTER the pull - init does not fetch - and a final apply
 # fires only when init actually rewrote the config). `dot upgrade` is the

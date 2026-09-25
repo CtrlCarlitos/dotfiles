@@ -66,4 +66,24 @@ forbid_regex docs/backup-restore.md '(^|[[:space:]`])(tar|zip|unzip|compress-arc
 forbid_regex docs/backup-restore.md '(^|[^[:alnum:]])[^[:space:]`]+\.(tar|tar\.gz|tgz|zip)([^[:alnum:]]|$)'
 forbid_regex docs/backup-restore.md '(^|[[:space:]`])(cp|copy-item|scp|rsync|robocopy|xcopy)[[:space:]].*(\.ssh|\\\.ssh)'
 
+# ---------------------------------------------------------------- #137 sweep
+# Stale references that made agents/users type commands that fail. Forbidden
+# phrases, so they cannot come back:
+#   - dead install_* toggle names (the config template has zero install_*
+#     keys; dotfiles-doctor errors on them) - allowed ONLY in the
+#     docs/package-groups.md rename map, which documents them on purpose
+#   - the never-existed docker-compose aliases dc/dcu/dcd/dcl (OMZ's real
+#     ones are dco/dcupd/dcdn/dclf) - matched as the literal 'alias dcu'
+#   - 'dotup', the pre-`dot`-family command name (\b keeps this from
+#     matching the legit scripts/dotupgrade.* mentions)
+#   - 'opencode antigravity', the pre-codex `-a` agent list (codex replaced it)
+for d in README.md docs/*.md; do
+    [ "${d##*/}" = "package-groups.md" ] && continue
+    forbid_regex "$d" 'install_ai_tools|install_modern'
+    forbid_regex "$d" '\bdotup\b'
+    forbid_regex "$d" 'opencode antigravity'
+done
+forbid_regex docs/zsh-tips.md 'alias dcu'
+forbid_regex docs/tmux-nvim-tutorial.md 'alias dcu'
+
 finish

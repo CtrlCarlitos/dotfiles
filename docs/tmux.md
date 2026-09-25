@@ -28,11 +28,12 @@ You must press `Ctrl+a`, **release it**, and then press the command key.
 
 | Action | Key Binding | Mnemonic |
 | :--- | :--- | :--- |
-| **Split Vertically** | `Ctrl+a` then `|` | (Visual split) |
+| **Split Vertically** | `Ctrl+a` then `\|` | (Visual split) |
 | **Split Horizontally** | `Ctrl+a` then `-` | (Visual split) |
 | **New Window** | `Ctrl+a` then `c` | **C**reate |
 | **Close Pane** | `Ctrl+d` (or `exit`) | Standard shell exit |
 | **Detach Session** | `Ctrl+a` then `d` | **D**etach |
+| **Send real Ctrl+A** | `Ctrl+a` then `Ctrl+a` | Passes a literal `Ctrl+A` (beginning-of-line) to the program in the pane |
 
 ### Navigation (Vim-style)
 Move between panes using `h` `j` `k` `l` (Left, Down, Up, Right):
@@ -44,7 +45,7 @@ Move between panes using `h` `j` `k` `l` (Left, Down, Up, Right):
 ### Windows (Tabs)
 *   `Ctrl+a` then `n` → **N**ext window
 *   `Ctrl+a` then `p` → **P**revious window
-*   `Shift + Left/Right` → Switch windows instantly (no prefix needed!)
+*   `Ctrl+Shift + Left/Right` → **Swap** the current window with its neighbour (no prefix needed!)
 
 ### Resizing Panes
 *   `Ctrl+a` then `H` / `J` / `K` / `L` (capitalized) to resize.

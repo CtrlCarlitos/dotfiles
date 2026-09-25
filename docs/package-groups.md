@@ -1,7 +1,8 @@
 # Package Groups
 
-_Added 2026-09-13 with the package-groups project
-(docs/research/package-groups-spec.md)._
+_Added 2026-09-13 with the package-groups project (the design spec lived in
+the gitignored `docs/research/` scratch area and is not part of the repo;
+this page is the canonical taxonomy)._
 
 How this repo decides what to install. The 16 groups below are the single
 vocabulary shared by everything that touches packages: the interactive menu

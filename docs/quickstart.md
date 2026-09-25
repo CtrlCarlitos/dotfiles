@@ -30,7 +30,7 @@ packages install and the dotfiles apply.
 | **Windows** | Must be an **elevated** PowerShell. Package managers cannot install machine-wide otherwise. |
 | **WSL** | Turn on Docker Desktop's WSL integration *before* installing if you want Docker — Settings → Resources → WSL Integration → toggle your distro on, then restart the terminal. |
 | **macOS** | If Homebrew is not installed yet, the installer gets it first. Expect a password prompt. |
-| **Devcontainer** | Nothing to do. It detects the container and skips desktop apps automatically. |
+| **Devcontainer** | Nothing to do. It detects the container (via `DEVCONTAINER`/`REMOTE_CONTAINERS` or `/.dockerenv`) and installs **no packages at all** — config only. |
 
 Not sure what to select? Take **standard**. You can change any of it later
 (step 3), and nothing here is one-way.

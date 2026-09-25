@@ -228,11 +228,11 @@ If chezmoi is installed but config is missing:
 ```toml
 [data]
   [data.packages]
-    install_core = true
-    install_modern = true
-    install_fonts = true
-    install_ai_tools = true
-    install_desktop = false
+    core = true
+    modern_cli = true
+    fonts = true
+    agent_toolkit = true
+    dev_desktop = false
 
 [[data.accounts]]
   name = "Your Name"
