@@ -71,24 +71,27 @@ fi
 # fixture home is /nonexistent, so every stat-guarded rule is active - the
 # same shape as a fresh machine, where the leaks used to happen.
 if command -v chezmoi >/dev/null; then
-    managed_for() {  # $1 = os, $2 = kernel osrelease
+    managed_for() {  # $1 = os, $2 = kernel osrelease, $3 = output file
+        # Output goes to a file, not a pipe: the test runs under pipefail, and
+        # `printf | grep -Fxq` false-fails when grep exits early on a match
+        # while printf is still writing a long listing (SIGPIPE = write error).
         chezmoi managed --config "$tmp/chezmoi.toml" --source "$repo_root" \
-            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"$2\"},\"homeDir\":\"/nonexistent\"}}"
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"$2\"},\"homeDir\":\"/nonexistent\"}}" >"$3"
     }
-    win_managed="$(managed_for windows '')"
+    managed_for windows '' "$tmp/win-managed.txt"
     for p in '.codex/config.toml' '.config/opencode/tui.json' \
         '.local/bin/ssh-agent-relay' '.local/bin/devprofile' \
         '.tmux.conf' '.zshrc' '.aliases.zsh'; do
-        printf '%s\n' "$win_managed" | grep -Fxq "$p" && fail "windows: managed lists '$p'"
+        grep -Fxq "$p" "$tmp/win-managed.txt" && fail "windows: managed lists '$p'"
     done
-    lin_managed="$(managed_for linux '6.8.0-generic')"
+    managed_for linux '6.8.0-generic' "$tmp/lin-managed.txt"
     for p in '.codex/config.toml' '.config/opencode/tui.json' '.local/bin/devprofile.ps1'; do
-        printf '%s\n' "$lin_managed" | grep -Fxq "$p" && fail "linux: managed lists '$p'"
+        grep -Fxq "$p" "$tmp/lin-managed.txt" && fail "linux: managed lists '$p'"
     done
     # Positive controls: the fixtures must not be ignoring the world.
-    printf '%s\n' "$lin_managed" | grep -Fxq '.local/bin/ssh-agent-relay' ||
+    grep -Fxq '.local/bin/ssh-agent-relay' "$tmp/lin-managed.txt" ||
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
-    printf '%s\n' "$lin_managed" | grep -Fxq '.gitconfig' ||
+    grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
         fail "linux: .gitconfig must stay managed"
 fi
 
