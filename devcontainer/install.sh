@@ -4,8 +4,7 @@ set -e
 #===============================================================================
 # DEVCONTAINER ENTRY POINT
 # This script is called by VS Code's "Dotfiles" features.
-# It ensures Chezmoi is installed and applied, and fixes any
-# devcontainer-specific missing pieces (like zsh-z).
+# It ensures Chezmoi is installed and applied.
 #===============================================================================
 
 # Get script directory (POSIX-compatible, works with /bin/sh)

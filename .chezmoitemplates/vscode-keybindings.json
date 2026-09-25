@@ -1,7 +1,8 @@
 {{- /*
   VS Code keybindings, shared by the three per-OS modify_keybindings.json
   files (Windows AppData/Roaming, macOS Library/Application Support, Linux
-  .config - each `{{ template "vscode-keybindings.json" . }}`s this). The
+  .config - each `includeTemplate "vscode-keybindings.json" .`s this; a
+  modify-template cannot resolve `{{ template ... }}`). The
   .chezmoiignore guards apply them only where VS Code's User dir exists.
 
   Same agent chords as Windows Terminal (modify_settings.json there), scoped to
