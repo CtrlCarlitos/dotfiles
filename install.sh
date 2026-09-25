@@ -15,8 +15,8 @@ error_handler() {
 }
 # Every temp file this script creates (the gum bootstrap downloads) lives in
 # GUM_TMP and is removed by this single EXIT trap - a mid-download failure
-# under `set -e` used to leak the `mktemp -d` dir (and a fixed /tmp/gum.deb)
-# because the cleanup sat at the end of the happy path (#108, #126).
+# under `set -e` used to leak the mktemp dir (and a fixed-name gum deb
+# dropped straight into the shared temp dir) (#108, #126).
 GUM_TMP=""
 cleanup_tmp() {
     if [ -n "$GUM_TMP" ] && [ -d "$GUM_TMP" ]; then
