@@ -147,7 +147,7 @@ jobs:
               -ExcludeRule PSAvoidUsingWriteHost, PSUseBOMForUnicodeEncodedFile
             if ($findings) {
               $findings | ForEach-Object {
-                Write-Host "##[error]$f:$($_.Extent.StartLineNumber) $($_.RuleName): $($_.Message)"
+                Write-Host "##[error]${f}:$($_.Extent.StartLineNumber) $($_.RuleName): $($_.Message)"
               }
               $failed = 1
             } else {
@@ -367,7 +367,7 @@ jobs:
             ) | Out-Null
 
             if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Host "##[error]$f:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $errors | ForEach-Object { Write-Host "##[error]${f}:$($_.Extent.StartLineNumber): $($_.Message)" }
               $failed = 1
             } else {
               Write-Host "ok: $f"
