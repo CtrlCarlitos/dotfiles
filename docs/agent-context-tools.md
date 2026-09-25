@@ -115,12 +115,21 @@ a Serena upgrade converges too. Open it by hand at
 `http://localhost:24282/dashboard/` (Serena picks the next port when several
 instances run).
 
-To get the tab back on one machine, override the catalog in that machine's
-`~/.config/chezmoi/chezmoi.toml` and re-apply (config data beats catalog data):
+The interface is managed the same way: `agents.serena.dashboard_interface:
+browser`. Left empty, Serena picks the platform default, which on Windows and
+macOS is the native app mode with one tray icon per instance. Every agent
+session and every `claude -p` run spawns its own instance, and instances that
+exit leave ghost icons behind until the tray is hovered (48 were counted on
+2026-09-24 after a description-optimizer run). `browser` creates no icon.
+
+To get the tab or the tray icons back on one machine, override the catalog in
+that machine's `~/.config/chezmoi/chezmoi.toml` and re-apply (config data beats
+catalog data):
 
 ```toml
 [data.agents.serena]
 open_dashboard = true
+dashboard_interface = "tray_manager"   # one global icon for all instances; or "app"
 ```
 
 `tests/serena_dashboard_contract.sh` keeps the default, both twins and this

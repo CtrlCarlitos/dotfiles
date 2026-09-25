@@ -28,9 +28,15 @@ fail() {
     exit 1
 }
 
-# 1. The default is catalog data, under the serena key, and it is off.
+# 1. The defaults are catalog data, under the serena key: no auto-open, and
+#    the browser interface (the platform default on Windows/macOS is the
+#    native app with one tray icon PER INSTANCE; every agent session and
+#    every `claude -p` run spawns an instance, and exited ones leave ghost
+#    icons behind - 48 were counted on 2026-09-24).
 awk '/^  serena:/{on=1; next} on && /^  [^ ]/{on=0} on' "$catalog" | grep -Eq '^    open_dashboard: false$' ||
     fail ".chezmoidata/agents.yaml: agents.serena.open_dashboard must exist and default to false"
+awk '/^  serena:/{on=1; next} on && /^  [^ ]/{on=0} on' "$catalog" | grep -Eq '^    dashboard_interface: browser$' ||
+    fail ".chezmoidata/agents.yaml: agents.serena.dashboard_interface must exist and default to browser"
 
 # 2. Both twins render the flag and write Serena's key, once per serena-init site.
 for f in "$sh_installer" "$ps1_installer"; do
@@ -38,6 +44,10 @@ for f in "$sh_installer" "$ps1_installer"; do
         fail "$f: must render agents.serena.open_dashboard"
     grep -Fq 'web_dashboard_open_on_launch' "$f" ||
         fail "$f: must write web_dashboard_open_on_launch in serena_config.yml"
+    grep -Fq '{{ .agents.serena.dashboard_interface }}' "$f" ||
+        fail "$f: must render agents.serena.dashboard_interface"
+    grep -Fq 'web_dashboard_interface' "$f" ||
+        fail "$f: must write web_dashboard_interface in serena_config.yml"
     # Command shapes only (net_timeout N serena init | -Action { serena init), not comments.
     inits=$(grep -cE 'net_timeout [0-9]+ serena init|\{ serena init ' "$f" || true)
     writes=$(grep -c '{{ .agents.serena.open_dashboard }}' "$f" || true)
@@ -52,6 +62,8 @@ grep -Fq 'serena_config.yml' "$repo_root/.chezmoiignore" 2>/dev/null &&
     fail "serena_config.yml must not be a chezmoi-managed source file; the installers edit one line in place"
 
 # 4. The override is documented where Serena is.
+grep -Fq 'dashboard_interface' "$doc" ||
+    fail "docs/agent-context-tools.md: document agents.serena.dashboard_interface"
 grep -Fq '[data.agents.serena]' "$doc" ||
     fail "docs/agent-context-tools.md: document the per-machine override [data.agents.serena] open_dashboard = true"
 
