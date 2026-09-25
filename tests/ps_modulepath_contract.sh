@@ -20,7 +20,10 @@ for f in "${guarded[@]}"; do
     path="$repo_root/$f"
     [ -f "$path" ] || fail "$f missing"
     grep -Fq 'PSModulePath' "$path" || fail "$f: no PSModulePath sanitize guard"
-    grep -Fq '\\PowerShell\\[67]\\' "$path" || fail "$f: guard does not strip Core module dirs"
+    # Double-quoted form of the literal fixed string '\\PowerShell\\[67]\\'
+    # (backslashes doubled again): byte-identical grep -F pattern without the
+    # single-quote-before-backslash shape shellcheck misreads (SC1003).
+    grep -Fq "\\\\PowerShell\\\\[67]\\\\" "$path" || fail "$f: guard does not strip Core module dirs"
     grep -Fq 'PSVersionTable.PSVersion.Major -le 5' "$path" ||
         fail "$f: guard must only rewrite the path under Windows PowerShell 5.1"
 done

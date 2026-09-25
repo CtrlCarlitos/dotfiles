@@ -151,7 +151,7 @@ assert_mode() { # $1 = path, $2 = expected mode
     fi
     local m
     m="$(stat -c '%a' "$1")"
-    [ "$m" = "$2" ] && pass || fail "$1: mode $m, want $2"
+    if [ "$m" = "$2" ]; then pass; else fail "$1: mode $m, want $2"; fi
 }
 
 #=============================================================================
@@ -190,7 +190,7 @@ assert_mode "$home/.ssh/id_bob" 600          # normalized from the wrong 644 abo
 assert_mode "$home/.ssh/id_bob.pub" 644
 require "$home/.ssh/agent-identities.zsh" 'id_bob_commit'
 assert_mode "$home/.ssh/agent-identities.zsh" 600
-[ -d "$home/projects/bobcorp" ] && pass || fail "rendered script did not create the account dirs"
+if [ -d "$home/projects/bobcorp" ]; then pass; else fail "rendered script did not create the account dirs"; fi
 
 #=============================================================================
 # [2] devprofile list - accounts parse from the fixture TOML, custom signing
@@ -227,6 +227,8 @@ require "$tmp/bob.cfg" "user.signingkey=$home/.ssh/id_bob_commit.pub"
 require "$tmp/bob.cfg" 'commit.gpgsign=true'
 require "$tmp/bob.cfg" 'gpg.format=ssh'
 assert_out "use bob" "$out" "Signing"     # box shows the signing key row
+# Asserts the literal display bytes devprofile prints (tilde is display convention).
+# shellcheck disable=SC2088
 assert_out "use bob" "$out" "~/.ssh/id_bob_commit"
 
 #=============================================================================

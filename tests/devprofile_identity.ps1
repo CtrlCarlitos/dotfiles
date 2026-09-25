@@ -2,7 +2,7 @@
 <#
 Behavioral tests for dot_local/bin/devprofile.ps1 - the PowerShell twin of
 tests/devprofile_contract.sh. Scope is deliberately narrow (per #122):
-  - Get-Accounts TOML parsing (the fallback loader, no chezmoi on the box)
+  - Get-AccountList TOML parsing (the fallback loader, no chezmoi on the box)
   - Test-Identity dirs mapping (which account a repo's path belongs to)
 Everything else (hook install, key generation) needs real git/ssh-keygen and
 stays with the bash contract test. No real keys are generated; git is a
@@ -19,9 +19,9 @@ $Devprofile = Join-Path $RepoRoot 'dot_local/bin/devprofile.ps1'
 if (-not (Test-Path $Devprofile)) { Write-Error "missing $Devprofile"; exit 1 }
 
 $Source = Get-Content -Raw -LiteralPath $Devprofile
-$GetAccountsSrc = [regex]::Match($Source, '(?ms)^function Get-Accounts \{.*?^\}')
+$GetAccountsSrc = [regex]::Match($Source, '(?ms)^function Get-AccountList \{.*?^\}')
 $TestIdentitySrc = [regex]::Match($Source, '(?ms)^function Test-Identity \{.*?^\}')
-if (-not $GetAccountsSrc.Success) { Write-Error 'Get-Accounts not found in devprofile.ps1'; exit 1 }
+if (-not $GetAccountsSrc.Success) { Write-Error 'Get-AccountList not found in devprofile.ps1'; exit 1 }
 if (-not $TestIdentitySrc.Success) { Write-Error 'Test-Identity not found in devprofile.ps1'; exit 1 }
 
 # Same display helpers the script defines (the extracted functions call them).
@@ -74,7 +74,7 @@ try {
   email = "nobody@nowhere.example"
 '@ | Set-Content -Path $ChezmoiConfig -Encoding utf8
 
-    # chezmoi is shadowed with a failing function so Get-Accounts takes the
+    # chezmoi is shadowed with a failing function so Get-AccountList takes the
     # TOML fallback path - the same determinism rule the bash contract test
     # applies (a host with a real chezmoi must not answer with its own data).
     function chezmoi { $global:LASTEXITCODE = 1 }
@@ -97,14 +97,14 @@ try {
     }
 
     #=========================================================================
-    # [1] Get-Accounts parses the fixture TOML.
+    # [1] Get-AccountList parses the fixture TOML.
     #=========================================================================
     # Dot-source the extracted definition into the harness scope ONCE: each
     # [scriptblock]::Create invocation has its own scope, and Test-Identity
-    # below calls Get-Accounts - it must resolve at run time (it does, via
+    # below calls Get-AccountList - it must resolve at run time (it does, via
     # PowerShell's dynamic scoping, from this scope).
     . ([scriptblock]::Create($GetAccountsSrc.Value))
-    $accounts = Get-Accounts
+    $accounts = Get-AccountList
     if ($accounts.Count -eq 3) { } else { Fail "[1] expected 3 accounts (no-username one skipped), got $($accounts.Count)" }
     $alice = $accounts | Where-Object { $_.username -eq 'alice' }
     $bob = $accounts | Where-Object { $_.username -eq 'bob' }
@@ -113,7 +113,7 @@ try {
     if ($bob -and $bob.signingKey -eq 'id_bob_commit' -and $bob.key -eq 'id_bob') { } else { Fail '[1] bob signingKey/key parsed wrong' }
     $emptyDirs = $accounts | Where-Object { $_.username -eq 'emptydirs' }
     if ($emptyDirs -and $emptyDirs.dirs.Count -eq 0) { } else { Fail '[1] empty dirs must parse to an empty list' }
-    Write-Host '  ok: Get-Accounts TOML parsing'
+    Write-Host '  ok: Get-AccountList TOML parsing'
 
     #=========================================================================
     # [2] Test-Identity: repo under bob's dirs, signing as bob -> all clear.

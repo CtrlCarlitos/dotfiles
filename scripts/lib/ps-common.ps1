@@ -23,7 +23,8 @@
 # could not be loaded" (confirmed live on Set-Acl in generate_identities
 # during a fresh Windows install). Strip the Core module dirs under 5.1 so
 # in-box modules resolve. Idempotent; safe on pwsh 7 (no-op there).
-function Use-InBoxModules {
+# (Renamed from Use-InBoxModules: PSUseSingularNouns wants a singular noun.)
+function Repair-InBoxModulePath {
     if ($PSVersionTable.PSVersion.Major -le 5) {
         $env:PSModulePath = (($env:PSModulePath -split ';') |
             Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
@@ -32,13 +33,20 @@ function Use-InBoxModules {
 }
 
 # True when the current session is elevated. Pure .NET - no module autoload,
-# safe before Use-InBoxModules.
+# safe before Repair-InBoxModulePath.
 function Test-IsAdmin {
     return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 # Rebuild this session's PATH from the Machine + User registry state, so a
-# freshly-installed tool's shim resolves without a new terminal.
+# freshly-installed tool's shim resolves without a new terminal. Supports
+# -WhatIf/-Confirm (PSUseShouldProcessForStateChangingFunctions): the rewrite
+# only happens when ShouldProcess confirms.
 function Update-SessionPath {
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    $machineUserPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if ($PSCmdlet.ShouldProcess('$env:Path', "rebuild from Machine+User registry state")) {
+        $env:Path = $machineUserPath
+    }
 }

@@ -46,21 +46,79 @@ jobs:
           # cannot span a multi-line {{/* ... */}} comment, silently leaking its prose
           # text through as "bash code" for shellcheck to choke on - confirmed live,
           # this exact thing happened with a real multi-line comment in this repo.
-          # SC1128 (shebang must be on line 1) is excluded because every one of these
-          # OS-gated *.sh.tmpl files starts with a `{{ if eq .chezmoi.os ... -}}`
-          # wrapper line before the real shebang - stripping it still leaves a blank
-          # first line, which is a structural property of templating this file this
-          # way, not a real problem chezmoi or a shell will ever hit.
+          # Widened in #131 from `run_onchange_*.sh.tmpl install.sh
+          # devcontainer/install.sh` to every shell file git tracks: the same
+          # audit found 6 of 53 shell files linted and real findings in the
+          # rest (all fixed on the commit that introduced this loop).
+          # Per-class exclusions, kept explicit on purpose:
+          #   SC1091  "not following" every dynamic `. lib.sh` / lib/*.sh source -
+          #           the sourced files are in-repo; following them needs -x and
+          #           buys nothing for contract greps.
+          #   SC1128  every OS-gated *.sh.tmpl starts with a `{{ if }}` wrapper
+          #           line, so the stripped text has no shebang on line 1 - a
+          #           structural property of templating, not a defect.
+          #   SC2016  tests/*.sh quote literal-$ snippets OF THE CODE UNDER
+          #           TEST on purpose (that is what they assert about).
+          #   SC2148  dot_aliases.zsh is a sourced file with no shebang by
+          #           design; shellcheck has no zsh dialect, so it is parsed
+          #           as bash (-s bash) with the same alias grammar.
           FAILED=0
-          for f in run_onchange_*.sh.tmpl install.sh devcontainer/install.sh; do
-            if [[ -f "$f" ]]; then
-              echo "Checking $f..."
-              if ! perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 -; then
-                FAILED=1
-              fi
-            fi
+          for f in $(git ls-files '*.sh' '*.sh.tmpl' 'dot_local/bin/executable_*' '*.zsh'); do
+            [ -f "$f" ] || continue
+            echo "Checking $f..."
+            case "$f" in
+              *.tmpl)
+                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 - || FAILED=1
+                ;;
+              tests/*.sh)
+                shellcheck -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
+                ;;
+              *.zsh)
+                shellcheck -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
+                ;;
+              *)
+                shellcheck -s bash -e SC1091 "$f" || FAILED=1
+                ;;
+            esac
           done
           exit $FAILED
+
+      - name: PSScriptAnalyzer (all .ps1 + stripped .ps1.tmpl)
+        shell: pwsh
+        run: |
+          # The bash-side lint's PowerShell counterpart (#131: it did not run
+          # anywhere). Templates are analyzed with the same strip idiom the
+          # shellcheck loop uses. Rule exclusions, each deliberate:
+          #   PSAvoidUsingWriteHost          profiles/installers print to the
+          #                                  host on purpose (color, 5.1 quirks).
+          #   PSUseBOMForUnicodeEncodedFile  the repo charset standard is
+          #                                  UTF-8 *without* BOM (.editorconfig
+          #                                  `charset = utf-8`, enforced by the
+          #                                  init-line-endings tooling). Non-ASCII
+          #                                  glyphs are cosmetic output, never
+          #                                  parsed input.
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+          Import-Module PSScriptAnalyzer
+          $failed = 0
+          foreach ($f in (git ls-files '*.ps1' '*.ps1.tmpl')) {
+            $target = $f
+            if ($f -like '*.tmpl') {
+              $stripped = (Get-Content $f -Raw) -replace '(?s)\{\{.*?\}\}', ''
+              $target = Join-Path ([IO.Path]::GetTempPath()) (($f -replace '[\\/]', '__') + '.ps1')
+              [IO.File]::WriteAllText($target, $stripped, [Text.UTF8Encoding]::new($false))
+            }
+            $findings = Invoke-ScriptAnalyzer -Path $target -Severity Error,Warning `
+              -ExcludeRule PSAvoidUsingWriteHost, PSUseBOMForUnicodeEncodedFile
+            if ($findings) {
+              $findings | ForEach-Object {
+                Write-Host "##[error]$f:$($_.Extent.StartLineNumber) $($_.RuleName): $($_.Message)"
+              }
+              $failed = 1
+            } else {
+              Write-Host "ok: $f"
+            }
+          }
+          exit $failed
 
       # One step runs every tests/*.sh (the runner enumerates the directory, so
       # a test cannot go unwired). --strict fails on any skip: this job installs
@@ -173,7 +231,7 @@ jobs:
         shell: bash
         run: bash tests/fixtures/chezmoi/compose.sh single off --out "$(cygpath -u "$USERPROFILE")/.config/chezmoi/chezmoi.toml"
 
-      - name: Verify PowerShell script syntax
+      - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
         run: |
           # Parse what actually RUNS, not a text-stripped approximation.
           # This used to delete {{...}} with a negated character class and parse
@@ -182,28 +240,42 @@ jobs:
           # hashtable value), stripping leaves `'' = $"@()` - invalid PowerShell,
           # and a parse error that says nothing about the real script.
           # chezmoi renders the true file, so the check tests the artifact.
+          # Widened in #131 from the single install_packages template to every
+          # PowerShell file git tracks - the profiles (where the $args binding
+          # bug lived) and all scripts/*.ps1 were never parsed before.
           $chezmoi = "$env:USERPROFILE\.local\bin\chezmoi.exe"
-          $rendered = & $chezmoi execute-template `
-            --source="$env:GITHUB_WORKSPACE" `
-            --file "$env:GITHUB_WORKSPACE\run_onchange_install_packages.ps1.tmpl"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "##[error]chezmoi could not render run_onchange_install_packages.ps1.tmpl"
-            exit 1
-          }
-          $rendered | Out-File -FilePath "$env:TEMP\test.ps1" -Encoding utf8
+          $failed = 0
+          foreach ($f in (git ls-files '*.ps1' '*.ps1.tmpl')) {
+            $target = Join-Path $env:GITHUB_WORKSPACE $f
+            if ($f -like '*.tmpl') {
+              $rendered = & $chezmoi execute-template `
+                --source="$env:GITHUB_WORKSPACE" `
+                --file $target 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "##[error]chezmoi could not render $f"
+                Write-Host ($rendered | Out-String)
+                $failed = 1
+                continue
+              }
+              $target = "$env:TEMP\" + ($f -replace '[\\/]', '__') + '.rendered.ps1'
+              $rendered | Out-File -FilePath $target -Encoding utf8
+            }
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $target,
+              [ref]$null,
+              [ref]$errors
+            ) | Out-Null
 
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            "$env:TEMP\test.ps1",
-            [ref]$null,
-            [ref]$errors
-          ) | Out-Null
-
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Host "##[error]$($_.Message)" }
-            exit 1
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "##[error]$f:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $failed = 1
+            } else {
+              Write-Host "ok: $f"
+            }
           }
-          Write-Host "PowerShell syntax check passed on the RENDERED script (0 errors)"
+          if ($failed -ne 0) { exit 1 }
+          Write-Host "PowerShell syntax check passed on every .ps1 and every RENDERED template (0 errors)"
 
       - name: Test chezmoi apply (dry-run)
         run: |
@@ -249,12 +321,12 @@ jobs:
       - name: Verify devcontainer detection worked end-to-end
         run: |
           echo "=== Devcontainer placeholder account ==="
-          grep -q 'name = "Devcontainer User"' ~/.gitconfig && echo "✓ Devcontainer User account created" || exit 1
-          grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "✓ devcontainer@local email set" || exit 1
+          grep -q 'name = "Devcontainer User"' ~/.gitconfig && echo "Γ£ô Devcontainer User account created" || exit 1
+          grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "Γ£ô devcontainer@local email set" || exit 1
 
           echo "=== Package categories correctly defaulted non-interactive ==="
-          grep -q 'core = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ core defaulted false" || exit 1
-          grep -q 'dev_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ dev_desktop defaulted false" || exit 1
+          grep -q 'core = false' ~/.config/chezmoi/chezmoi.toml && echo "Γ£ô core defaulted false" || exit 1
+          grep -q 'dev_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "Γ£ô dev_desktop defaulted false" || exit 1
 
   #=============================================================================
   # TIER 1: Docker Smoke Test - Real chezmoi init/apply in fresh environment
@@ -287,11 +359,11 @@ jobs:
       - name: Verify core files exist
         run: |
           echo "=== Checking generated files ==="
-          test -f ~/.gitconfig && echo "✓ ~/.gitconfig exists" || exit 1
-          test -f ~/.zshrc && echo "✓ ~/.zshrc exists" || exit 1
-          test -f ~/.tmux.conf && echo "✓ ~/.tmux.conf exists" || exit 1
-          test -f ~/.aliases.zsh && echo "✓ ~/.aliases.zsh exists" || exit 1
-          test -d ~/.config/nvim && echo "✓ ~/.config/nvim exists" || exit 1
+          test -f ~/.gitconfig && echo "Γ£ô ~/.gitconfig exists" || exit 1
+          test -f ~/.zshrc && echo "Γ£ô ~/.zshrc exists" || exit 1
+          test -f ~/.tmux.conf && echo "Γ£ô ~/.tmux.conf exists" || exit 1
+          test -f ~/.aliases.zsh && echo "Γ£ô ~/.aliases.zsh exists" || exit 1
+          test -d ~/.config/nvim && echo "Γ£ô ~/.config/nvim exists" || exit 1
           echo "=== All core files present ==="
 
   #=============================================================================
@@ -320,11 +392,11 @@ jobs:
           echo "=== Testing .gitconfig includeIf rules ==="
 
           # Check includeIf for alice's directories
-          grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "✓ includeIf for alice/projects" || exit 1
-          grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "✓ includeIf for .dotfiles" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "Γ£ô includeIf for alice/projects" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "Γ£ô includeIf for .dotfiles" || exit 1
 
           # Check includeIf for bob's directories
-          grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "✓ includeIf for bobcorp" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "Γ£ô includeIf for bobcorp" || exit 1
 
           echo "=== includeIf rules correct ==="
 
@@ -333,12 +405,12 @@ jobs:
           echo "=== Testing .gitconfig URL shortcuts ==="
 
           # Check URL rewriting for alice
-          grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "✓ URL shortcut for alice" || exit 1
-          grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "✓ insteadOf for alice" || exit 1
+          grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "Γ£ô URL shortcut for alice" || exit 1
+          grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "Γ£ô insteadOf for alice" || exit 1
 
           # Check URL rewriting for bob
-          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bobcorp" || exit 1
-          grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "✓ insteadOf for bobcorp" || exit 1
+          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "Γ£ô URL shortcut for bobcorp" || exit 1
+          grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "Γ£ô insteadOf for bobcorp" || exit 1
 
           echo "=== URL shortcuts correct ==="
 
@@ -346,11 +418,11 @@ jobs:
         run: |
           echo "=== Testing SSH config ==="
 
-          grep -q 'Host github-alice' ~/.ssh/config && echo "✓ Host github-alice exists" || exit 1
-          grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "✓ IdentityFile for alice" || exit 1
+          grep -q 'Host github-alice' ~/.ssh/config && echo "Γ£ô Host github-alice exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "Γ£ô IdentityFile for alice" || exit 1
 
-          grep -q 'Host github-bob' ~/.ssh/config && echo "✓ Host github-bob exists" || exit 1
-          grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "✓ IdentityFile for bob" || exit 1
+          grep -q 'Host github-bob' ~/.ssh/config && echo "Γ£ô Host github-bob exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "Γ£ô IdentityFile for bob" || exit 1
 
           echo "=== SSH config correct ==="
 
@@ -359,22 +431,22 @@ jobs:
           echo "=== Checking identity generation ==="
           # The run_onchange script should have created identity files
           # Note: In CI the script may not run, but we can at least check the template output
-          ~/.local/bin/chezmoi execute-template --source="${GITHUB_WORKSPACE}" '{{ range .accounts }}{{ if hasKey . "username" }}{{ .provider | default "github" }}-{{ .username }},{{ end }}{{ end }}' | grep -q 'github-alice' && echo "✓ Template can iterate accounts" || exit 1
+          ~/.local/bin/chezmoi execute-template --source="${GITHUB_WORKSPACE}" '{{ range .accounts }}{{ if hasKey . "username" }}{{ .provider | default "github" }}-{{ .username }},{{ end }}{{ end }}' | grep -q 'github-alice' && echo "Γ£ô Template can iterate accounts" || exit 1
           echo "=== Identity generation verified ==="
 
       - name: Summary
         run: |
           echo ""
           echo "============================================"
-          echo "  ✅ All integration tests passed!"
+          echo "  Γ£à All integration tests passed!"
           echo "============================================"
           echo ""
           echo "Validated:"
-          echo "  • Multi-account config parsing"
-          echo "  • .gitconfig includeIf generation"
-          echo "  • .gitconfig URL shortcuts generation"
-          echo "  • SSH config host entries"
-          echo "  • Template iteration over accounts array"
+          echo "  ΓÇó Multi-account config parsing"
+          echo "  ΓÇó .gitconfig includeIf generation"
+          echo "  ΓÇó .gitconfig URL shortcuts generation"
+          echo "  ΓÇó SSH config host entries"
+          echo "  ΓÇó Template iteration over accounts array"
 
   #=============================================================================
   # TIER 3: Backward Compatibility - Test with minimal/legacy configs
@@ -402,20 +474,20 @@ jobs:
       - name: Verify gitconfig has user info
         run: |
           echo "=== Testing minimal config (simple mode) ==="
-          grep -q 'name = "Minimal User"' ~/.gitconfig && echo "✓ user.name set" || exit 1
-          grep -q 'email = "minimal@example.com"' ~/.gitconfig && echo "✓ user.email set" || exit 1
+          grep -q 'name = "Minimal User"' ~/.gitconfig && echo "Γ£ô user.name set" || exit 1
+          grep -q 'email = "minimal@example.com"' ~/.gitconfig && echo "Γ£ô user.email set" || exit 1
           echo "=== Minimal config works ==="
 
       - name: Summary
         run: |
           echo ""
           echo "============================================"
-          echo "  ✅ Backward compatibility test passed!"
+          echo "  Γ£à Backward compatibility test passed!"
           echo "============================================"
           echo ""
           echo "Validated:"
-          echo "  • Configs with missing key/organizations/dirs work"
-          echo "  • Simple single-identity mode works"
+          echo "  ΓÇó Configs with missing key/organizations/dirs work"
+          echo "  ΓÇó Simple single-identity mode works"
 
   # TIER 3: Windows Installer Test
   #=============================================================================

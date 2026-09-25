@@ -17,8 +17,13 @@ if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
 $script:Failed = @()
 function Fail([string]$m) { $script:Failed += $m; Write-Host "FAIL: $m" -ForegroundColor Red; exit 1 }
 
-function New-ValidConfig([string]$homeDir) {
+function New-ValidConfig {
+    # SupportsShouldProcess (PSUseShouldProcessForStateChangingFunctions); in
+    # this harness ShouldProcess always confirms, so behavior is unchanged.
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$homeDir)
     $dir = Join-Path $homeDir '.config/chezmoi'
+    if (-not $PSCmdlet.ShouldProcess($dir, 'create valid test config')) { return }
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     @'
 primaryName = "Probe User"

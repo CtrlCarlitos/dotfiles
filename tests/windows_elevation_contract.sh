@@ -31,8 +31,9 @@ first_work=$(awk '
     gate && /^\}/ { gate_done = NR }
     gate_done && NR > gate_done && (/Write-Host/ || /choco / || /npm / || /Invoke-/) { print NR; exit }
 ' "$installer")
-[ -n "$gate_line" ] && [ -n "$first_work" ] && [ "$gate_line" -lt "$first_work" ] ||
+if [ -n "$gate_line" ] && [ -n "$first_work" ] && [ "$gate_line" -lt "$first_work" ]; then :; else
     fail "installer: gate (line ${gate_line:-?}) must precede all work (first work at ${first_work:-?})"
+fi
 
 grep -Fqi 'administrator' "$docs" || fail "docs/windows.md: elevation requirement not documented"
 

@@ -30,7 +30,8 @@ foreach ($gumYaml in $gumYamlCandidates) {
         if ($gumMatch) { $gumVersion = $gumMatch.Matches[0].Groups[1].Value; break }
     }
 }
-function Bootstrap-Gum {
+# Approved verb (PSUseApprovedVerbs): renamed from Bootstrap-Gum.
+function Install-Gum {
     if (Get-Command gum -ErrorAction SilentlyContinue) { return }
 
     $gumDir = Join-Path $env:USERPROFILE '.local\bin'
@@ -114,6 +115,15 @@ if (-not $IsAdmin) {
 }
 
 try {
+    # The official Chocolatey bootstrap is eval-based by design (its installer
+    # script must run in this session to set env vars); PSSA suppression is
+    # scoped to this wrapper so the rule stays live everywhere else.
+    function Invoke-ChocoBootstrap {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingInvokeExpression', '', Justification = 'official Chocolatey bootstrap is eval-based by design')]
+        param([string]$InstallerText)
+        Invoke-Expression $InstallerText
+    }
+
     # 0.5 Install Chocolatey if missing (Required for everything else)
     if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
         Write-Info "Chocolatey not found. Installing..."
@@ -122,7 +132,7 @@ try {
         # -TimeoutSec so a stalled fetch errors out instead of hanging the run
         # (WebClient.DownloadString has no timeout of its own).
         $chocoInstall = Invoke-RestMethod -Uri 'https://community.chocolatey.org/install.ps1' -UseBasicParsing -TimeoutSec 120
-        Invoke-Expression $chocoInstall
+        Invoke-ChocoBootstrap $chocoInstall
         
         # Refresh env path logic
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -139,7 +149,7 @@ try {
     # select-packages.ps1 exits on completion and must not end this installer.
     # In devcontainers: skipped entirely (see $IsDevcontainer above).
     if (-not $IsDevcontainer) {
-        Bootstrap-Gum
+        Install-Gum
         $selectPackages = $null
         if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'scripts\select-packages.ps1'))) {
             $selectPackages = Join-Path $PSScriptRoot 'scripts\select-packages.ps1'

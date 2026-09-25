@@ -111,7 +111,7 @@ if ($InApply) {
     try {
         & chezmoi --config $config data *> $null
         if ($LASTEXITCODE -eq 0) { $configParses = $true }
-    } catch { }
+    } catch { Write-Verbose "config-parse probe failed: $($_.Exception.Message)" }
     if ($configParses) {
         Result 'ok' 'config-parse' 'chezmoi loads the config'
     } else {
@@ -154,7 +154,7 @@ if ($InApply) {
 } else {
 
 $src = ''
-try { $src = (& chezmoi source-path 2>$null | Out-String).Trim() } catch {}
+try { $src = (& chezmoi source-path 2>$null | Out-String).Trim() } catch { Write-Verbose "source-path probe failed: $($_.Exception.Message)" }
 if ($src -and (Test-Path -LiteralPath $src)) {
     $dirty = $false
     & git -C $src diff --quiet *> $null
@@ -183,7 +183,7 @@ if (Test-Path (Join-Path $repoRoot '.chezmoi-version')) {
     $pinVersion = ([IO.File]::ReadAllText((Join-Path $repoRoot '.chezmoi-version'))).Trim()
 }
 $installedVersion = ''
-try { $installedVersion = ((& chezmoi --version 2>$null | Out-String).Trim() -replace '^chezmoi version ', '') -replace ',.*$', '' } catch {}
+try { $installedVersion = ((& chezmoi --version 2>$null | Out-String).Trim() -replace '^chezmoi version ', '') -replace ',.*$', '' } catch { Write-Verbose "chezmoi --version probe failed: $($_.Exception.Message)" }
 if ($pinVersion -and $installedVersion -and ($installedVersion -match '^v?\d+\.\d+\.\d+')) {
     if ((VerNum $installedVersion) -lt (VerNum $pinVersion)) {
         Result 'warn' 'chezmoi-version' "installed $installedVersion < pinned $pinVersion - run: chezmoi upgrade"
@@ -203,7 +203,7 @@ if ($InApply) {
 } else {
 
 $guardrailPin = ''
-try { $guardrailPin = (& chezmoi execute-template --source $repoRoot '{{ .guardrail.version }}' 2>$null | Out-String).Trim() } catch {}
+try { $guardrailPin = (& chezmoi execute-template --source $repoRoot '{{ .guardrail.version }}' 2>$null | Out-String).Trim() } catch { Write-Verbose "guardrail pin probe failed: $($_.Exception.Message)" }
 if (-not $guardrailPin) {
     Result 'skip' 'guardrail-pin' 'source unreadable - run from a full checkout'
 } else {
@@ -217,7 +217,7 @@ if (-not $guardrailPin) {
         Result 'skip' 'guardrail-pin' 'guardrail not installed (opt-in via packages.guardrail)'
     } else {
         $have = ''
-        try { $have = ((& $grBin version 2>$null | Out-String).Trim() -replace '^guardrail ', '') } catch {}
+        try { $have = ((& $grBin version 2>$null | Out-String).Trim() -replace '^guardrail ', '') } catch { Write-Verbose "guardrail version probe failed: $($_.Exception.Message)" }
         if ($have -eq $guardrailPin) {
             Result 'ok' 'guardrail-pin' "guardrail $guardrailPin"
         } else {

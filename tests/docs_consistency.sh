@@ -19,7 +19,9 @@ require README.md "cloudflared only"
 require README.md "Linux/macOS/WSL"
 require README.md "select-packages.ps1"
 require README.md "Join-Path (chezmoi source-path)"
+# shellcheck disable=SC2088  # literal ~ assertion: docs must reference the tilde form
 require README.md "~/.claude/skills"
+# shellcheck disable=SC2088
 require README.md "~/.agents/skills"
 require README.md "OpenCode and Codex discover"
 require README.md "/teach"
@@ -29,13 +31,17 @@ require README.md "restart OpenCode"
 forbid README.md 'OpenCode and Codex discover `~/.agents/skills`'
 # The agent-skills detail moved out of README into the strategy doc (#139);
 # the assertions moved with it.
+# shellcheck disable=SC2088  # literal ~ assertion: docs must reference the tilde form
 require docs/skills-install-strategy.md "~/.claude/skills"
+# shellcheck disable=SC2088
 require docs/skills-install-strategy.md "~/.config/opencode/commands"
+# shellcheck disable=SC2088
 require docs/skills-install-strategy.md "~/.gemini/antigravity-cli/skills"
 require docs/skills-install-strategy.md 'Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`.'
 require docs/skills-install-strategy.md "Codex CLI:"
 require docs/skills-install-strategy.md '`/skills`, then enter `$teach <topic>`.'
 require docs/skills-install-strategy.md "restart OpenCode"
+# shellcheck disable=SC2088
 require docs/skills-install-strategy.md "~/.agents/skills"
 require docs/skills-install-strategy.md "OpenCode and Codex discover"
 require docs/skills-install-strategy.md "Only OpenCode receives generated command adapters."
@@ -76,6 +82,7 @@ require docs/backup-restore.md "dotbackup.sh"
 require docs/backup-restore.md "dotrestore.sh"
 require docs/backup-restore.md "dotbackup.ps1"
 require docs/backup-restore.md "dotrestore.ps1"
+# shellcheck disable=SC2088
 require docs/backup-restore.md "~/.dot_backups"
 require docs/backup-restore.md ".7z"
 require docs/backup-restore.md "-mhe=on"
