@@ -15,7 +15,6 @@ set -euo pipefail
 #   devprofile help         Show this help message
 #===============================================================================
 
-VERSION="2.0.0"
 SSH_DIR="${HOME}/.ssh"
 CHEZMOI_CONFIG="${HOME}/.config/chezmoi/chezmoi.toml"
 
@@ -237,6 +236,36 @@ EOF
 }
 
 #-------------------------------------------------------------------------------
+# IDENTITY BOX (single shared printer)
+#-------------------------------------------------------------------------------
+# One identity box for every printer - show_current and both use_account
+# branches used to carry three hand-rolled copies whose key-shortening and
+# .pub handling had drifted. Rows: Name, Email; plus Key and Signing when a
+# key is involved (empty $3 skips both key rows; empty $4 skips Signing).
+# Path values shorten $HOME to ~ and truncate to the 42-char cell.
+print_identity_box() {
+    local name="$1" email="$2" key="${3:-}" signkey="${4:-}"
+    local shortkey
+    printf "  ┌──────────┬────────────────────────────────────────────┐\n"
+    printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
+    printf "  ├──────────┼────────────────────────────────────────────┤\n"
+    printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
+    if [[ -n "$key" ]]; then
+        printf "  ├──────────┼────────────────────────────────────────────┤\n"
+        shortkey="${key/#$HOME/~}"
+        [[ ${#shortkey} -gt 42 ]] && shortkey="${shortkey:0:40}.."
+        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "$shortkey"
+        if [[ -n "$signkey" ]]; then
+            printf "  ├──────────┼────────────────────────────────────────────┤\n"
+            shortkey="${signkey/#$HOME/~}"
+            [[ ${#shortkey} -gt 42 ]] && shortkey="${shortkey:0:40}.."
+            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Signing" "$shortkey"
+        fi
+    fi
+    printf "  └──────────┴────────────────────────────────────────────┘\n"
+}
+
+#-------------------------------------------------------------------------------
 # SHOW CURRENT IDENTITY
 #-------------------------------------------------------------------------------
 show_current() {
@@ -267,20 +296,16 @@ show_current() {
     if [[ -n "$name" && -n "$email" ]]; then
         success "Current identity ($source):"
         echo ""
-        
-        # Boxed format with row headings
-        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
-        printf "  ├──────────┼────────────────────────────────────────────┤\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
-        if [[ -n "$signingkey" ]]; then
-            printf "  ├──────────┼────────────────────────────────────────────┤\n"
-            # Shorten key path for display
-            local shortkey="${signingkey/#$HOME/~}"
-            [[ ${#shortkey} -gt 42 ]] && shortkey="${shortkey:0:40}.."
-            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "$shortkey"
+
+        # A signing-key path displays with its .pub half - the form
+        # use_account and dot_gitconfig.tmpl actually configure
+        # user.signingkey with (a bare private-key path is accepted by
+        # git but made the box disagree with the config it described).
+        local display_key="$signingkey"
+        if [[ -n "$display_key" && "$display_key" != ssh-* && "$display_key" != *.pub ]]; then
+            display_key="${display_key}.pub"
         fi
-        printf "  └──────────┴────────────────────────────────────────────┘\n"
+        print_identity_box "$name" "$email" "$display_key" ""
         echo ""
         
         # Check if this matches a known account
@@ -367,6 +392,13 @@ list_accounts() {
                         status_text="in use"
                     fi
                 done
+                # A custom signingKey (never derivable from the auth key's
+                # name) is still in use - check the declared signing keys too.
+                for k in "${ACCOUNT_SIGNKEYS[@]}"; do
+                    if [[ -n "$k" && "$keyname" == "$k" ]]; then
+                        status_text="in use"
+                    fi
+                done
                 
                 printf "  │ %-24s │ %-10s │ %b %-12s │\n" "$keyname" "$keytype" "$status_icon" "$status_text"
             fi
@@ -435,19 +467,8 @@ use_account() {
         echo ""
         success "Configured identity for this repo: $account_name"
         echo ""
-        
-        # Boxed format with row headings
-        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
-        printf "  ├──────────┼────────────────────────────────────────────┤\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
-        if [[ -n "$key" ]]; then
-            printf "  ├──────────┼────────────────────────────────────────────┤\n"
-            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "~/.ssh/${key}"
-            printf "  ├──────────┼────────────────────────────────────────────┤\n"
-            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Signing" "~/.ssh/${signkey:-$key}"
-        fi
-        printf "  └──────────┴────────────────────────────────────────────┘\n"
+
+        print_identity_box "$name" "$email" "~/.ssh/${key}" "~/.ssh/${signkey:-$key}"
         echo ""
     else
         # Direct account name provided
@@ -477,18 +498,7 @@ use_account() {
         success "Configured identity for this repo: $account_name"
         echo ""
 
-        # Boxed format with row headings
-        printf "  ┌──────────┬────────────────────────────────────────────┐\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Name" "$name"
-        printf "  ├──────────┼────────────────────────────────────────────┤\n"
-        printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Email" "$email"
-        if [[ -n "$key" ]]; then
-            printf "  ├──────────┼────────────────────────────────────────────┤\n"
-            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Key" "~/.ssh/${key}"
-            printf "  ├──────────┼────────────────────────────────────────────┤\n"
-            printf "  │ ${CYAN}%-8s${NC} │ %-42s │\n" "Signing" "~/.ssh/${signkey:-$key}"
-        fi
-        printf "  └──────────┴────────────────────────────────────────────┘\n"
+        print_identity_box "$name" "$email" "~/.ssh/${key}" "~/.ssh/${signkey:-$key}"
         echo ""
     fi
 }
@@ -519,10 +529,15 @@ init_account() {
         shift
     done
 
-    case "${DEVPROFILE_PASSPHRASE:-}" in
-        1|true|yes) passphrase_mode="prompt" ;;
-        0|false|no) passphrase_mode="none" ;;
-    esac
+    # Explicit flags win: the env override applies only when neither flag was
+    # given, otherwise DEVPROFILE_PASSPHRASE silently overrode --passphrase
+    # and --no-passphrase on the same command line.
+    if [[ "$passphrase_mode" == "ask" ]]; then
+        case "${DEVPROFILE_PASSPHRASE:-}" in
+            1|true|yes) passphrase_mode="prompt" ;;
+            0|false|no) passphrase_mode="none" ;;
+        esac
+    fi
 
     if [[ "$passphrase_mode" == "ask" ]]; then
         if [[ -t 0 ]]; then
@@ -583,10 +598,10 @@ init_account() {
     echo ""
     echo "Public keys:"
     echo ""
-    echo "${CYAN}Authentication key${NC} (add to GitHub/GitLab as Authentication Key):"
+    printf "${CYAN}%s${NC} (add to GitHub/GitLab as Authentication Key):\n" "Authentication key"
     cat "${auth_key}.pub"
     echo ""
-    echo "${CYAN}Signing key${NC} (add to GitHub/GitLab as Signing Key):"
+    printf "${CYAN}%s${NC} (add to GitHub/GitLab as Signing Key):\n" "Signing key"
     cat "${sign_key}.pub"
     echo ""
     
@@ -769,11 +784,18 @@ verify_identity() {
 
         mkdir -p "${git_dir}/hooks"
 
+        # Where a displaced foreign pre-commit landed. The wrapper must keep
+        # firing it: it used to run only $user_hook, so a hook moved aside
+        # because that name was taken (the timestamped branch below) was
+        # silently disabled the moment the wrapper was installed.
+        local moved_hook=""
+
         if [[ -f "$hook_file" ]] && ! grep -q "devprofile-hook-wrapper" "$hook_file"; then
             if [[ -f "$user_hook" ]]; then
                 local ts
                 ts=$(date +%s)
-                mv "$hook_file" "${user_hook}.${ts}"
+                moved_hook="${user_hook}.${ts}"
+                mv "$hook_file" "$moved_hook"
                 warn "Existing pre-commit moved to ${user_hook}.${ts}"
             else
                 mv "$hook_file" "$user_hook"
@@ -799,6 +821,11 @@ echo "Committing as: \$name <\$email>"
 USER_HOOK="$user_hook"
 if [ -x "\$USER_HOOK" ]; then
     "\$USER_HOOK" "\$@"
+fi
+
+MOVED_HOOK="$moved_hook"
+if [ -n "\$MOVED_HOOK" ] && [ -x "\$MOVED_HOOK" ]; then
+    "\$MOVED_HOOK" "\$@"
 fi
 HOOK
 
