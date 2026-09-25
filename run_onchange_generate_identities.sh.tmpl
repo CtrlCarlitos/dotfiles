@@ -211,7 +211,12 @@ echo "  ✓ Wrote ~/.ssh/agent-identities.zsh"
 # for no functional reason.
 
 signers_file="$HOME/.ssh/allowed_signers"
-signers_tmp=$(mktemp)
+# Scratch file under one WORK dir removed on any exit path (#126): the bare
+# mktemp here had no trap, so a failure between it and the final mv leaked
+# the temp file into $TMPDIR on every broken run.
+WORK="$(mktemp -d)"
+trap '[ -n "${WORK:-}" ] && rm -rf "$WORK"' EXIT
+signers_tmp="$WORK/allowed_signers.tmp"
 [[ -f "$signers_file" ]] && cat "$signers_file" >> "$signers_tmp"
 
 {{- range .accounts }}
@@ -249,7 +254,6 @@ if [[ -d "$HOME/.ssh" ]]; then
 fi
 
 sort -u "$signers_tmp" > "$signers_file"
-rm -f "$signers_tmp"
 chmod 600 "$signers_file"
 echo "  ✓ Wrote ~/.ssh/allowed_signers"
 {{- end }}

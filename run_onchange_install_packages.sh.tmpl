@@ -2,6 +2,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# One scratch dir for every download this run makes, removed on any exit path
+# (#126): fixed shared /tmp names are a symlink-attack surface on multi-user
+# hosts, and under `set -e` an early failure used to leak whatever had been
+# created so far.
+WORK="$(mktemp -d)"
+trap '[ -n "${WORK:-}" ] && rm -rf "$WORK"' EXIT
+
 # Sudo helper
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -135,12 +142,48 @@ net_timeout() {
 }
 
 #-------------------------------------------------------------------------------
+# add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its
+# signing key + the package, as ONE &&-chained step with a single `|| warn` at
+# the call site (#114).
+#
+# Why chained: bash suspends errexit inside `{ ... } || warn`, so the old
+# sequences kept running after a failed key download - installing an EMPTY
+# keyring plus a repo line that then broke every later `apt update` (GitHub
+# CLI did exactly this). Each link only runs when the previous one succeeded,
+# so a failed fetch leaves no repo behind.
+#
+# The key is fetched to WORK and dearmored into place from there - never
+# `curl | sudo tee` straight into /etc, which would leave a truncated
+# root-owned keyring behind on a dropped connection.
+#
+# Callers must pass `|| warn "..."`: inside this function errexit stays off
+# (function called as the left operand of ||), and the chain's status IS the
+# function's status.
+#-------------------------------------------------------------------------------
+add_apt_repo() {
+    local name="$1" key_url="$2" deb_line="$3" pkg="$4"
+    local keyring="/etc/apt/keyrings/${name}.gpg"
+    local list="/etc/apt/sources.list.d/${name}.list"
+    local key_tmp="$WORK/${name}.key.tmp"
+    { command -v gpg &>/dev/null || $SUDO apt-get install -y gpg; } \
+        && $SUDO mkdir -p -m 755 /etc/apt/keyrings \
+        && net_timeout 60 curl -fsSL --max-time 60 -o "$key_tmp" "$key_url" \
+        && $SUDO gpg --dearmor --yes -o "$keyring" "$key_tmp" \
+        && $SUDO chmod go+r "$keyring" \
+        && printf '%s\n' "$deb_line" | $SUDO tee "$list" >/dev/null \
+        && $SUDO apt-get update -qq \
+        && $SUDO apt-get install -y "$pkg"
+}
+
+#-------------------------------------------------------------------------------
 # Detect OS and Package Manager
 #-------------------------------------------------------------------------------
 detect_package_manager() {
+    # apt and brew are the only managers this script knows how to drive;
+    # pacman/dnf were returned here but never handled by main's case (they
+    # fell through to the unsupported-manager warn) - report them as the
+    # unknown they effectively are.
     if command -v apt &>/dev/null; then echo "apt"
-    elif command -v pacman &>/dev/null; then echo "pacman"
-    elif command -v dnf &>/dev/null; then echo "dnf"
     elif command -v brew &>/dev/null; then echo "brew"
     else echo "unknown"
     fi
@@ -163,29 +206,35 @@ get_distro_info() {
 
 install_fonts() {
     local font_dir="$HOME/.local/share/fonts"
-    # Ensure wget and 7zip are available
+    # Ensure wget and 7zip are available. apt only: this function is reached
+    # solely from install_apt (detect_package_manager never dispatches here
+    # on a brew host), so the old Darwin `brew install sevenzip` arm inside
+    # it was unreachable dead code.
     command -v wget &>/dev/null || $SUDO apt install -y wget
     if ! command -v 7z &>/dev/null && ! command -v 7zz &>/dev/null; then
-         if [[ "$(uname -s)" == "Darwin" ]]; then
-             brew install sevenzip
-         else
-             $SUDO apt install -y p7zip-full
-         fi
+        $SUDO apt install -y p7zip-full
     fi
 
     # Check for Meslo Nerd Font
     if [[ ! -f "$font_dir/MesloLGMNerdFont-Regular.ttf" ]]; then
         info "Installing Meslo Nerd Font (for Starship)..."
         mkdir -p "$font_dir"
-        
-        # Determine latest Nerd Fonts release
-        local nf_version
-        nf_version=$(curl -s --max-time 30 "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
 
-        # Download from official Nerd Fonts repo
-        if ! net_timeout 300 wget -q --show-progress -O /tmp/Meslo.zip "https://github.com/ryanoasis/nerd-fonts/releases/download/${nf_version}/Meslo.zip"; then
+        # Determine latest Nerd Fonts release. `|| true` INSIDE the
+        # substitution: an unauthenticated 403 (60 req/h API limit) makes
+        # grep exit 1 and the failing assignment would abort the whole run
+        # under set -e - at the very first install step (#114).
+        local nf_version
+        nf_version=$(curl -s --max-time 30 "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")' || true)
+        if [[ -z "$nf_version" ]]; then
+            warn "Could not determine latest Nerd Fonts release - skipping"
+            return
+        fi
+
+        # Download from official Nerd Fonts repo (into WORK, never /tmp)
+        if ! net_timeout 300 wget -q --show-progress -O "$WORK/Meslo.zip" "https://github.com/ryanoasis/nerd-fonts/releases/download/${nf_version}/Meslo.zip"; then
             warn "Meslo Nerd Font download failed or timed out - skipping"
-            rm -f /tmp/Meslo.zip
+            rm -f "$WORK/Meslo.zip"
             return
         fi
 
@@ -193,9 +242,9 @@ install_fonts() {
         # 7z x -o{output_dir} {archive}
         local seven_z="7z"
         if command -v 7zz &>/dev/null; then seven_z="7zz"; fi
-        
-        "$seven_z" x -y -o"$font_dir" /tmp/Meslo.zip
-        rm /tmp/Meslo.zip
+
+        "$seven_z" x -y -o"$font_dir" "$WORK/Meslo.zip"
+        rm "$WORK/Meslo.zip"
 
         if command -v fc-cache &>/dev/null; then
             info "Updating font cache..."
@@ -208,22 +257,15 @@ install_fonts() {
 install_node() {
     if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 24 ]]; then
         info "Installing Node.js 24.x..."
-        # Ensure curl is available
+        # NodeSource's repo via the guarded helper: the old
+        # `curl setup_24.x | bash` ran an unguarded fetched script whose own
+        # trailing apt update could abort the whole run (#114). Key + list +
+        # install are now one &&-chain with a single warn, same as the other
+        # third-party repos.
         command -v curl &>/dev/null || $SUDO apt install -y curl
-        # -E (preserve environment) only makes sense as a sudo flag - when
-        # $SUDO is empty (already running as root, e.g. inside a container),
-        # `$SUDO -E bash -` expands to a bare `-E bash -`, and the shell
-        # tries to run a command literally named "-E" ("command not found").
-        # Confirmed live in a real Docker container run as root: this killed
-        # the entire install right here, before anything past Node.js ever
-        # ran - a pre-existing bug, not something introduced this session,
-        # surfaced by actually running the script instead of just reading it.
-        if [[ -n "$SUDO" ]]; then
-            net_timeout 180 bash -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | '"$SUDO"' -E bash -' || warn "NodeSource setup script failed or timed out - 'apt install nodejs' below may fail"
-        else
-            net_timeout 180 bash -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' || warn "NodeSource setup script failed or timed out - 'apt install nodejs' below may fail"
-        fi
-        $SUDO apt install -y nodejs
+        add_apt_repo nodesource "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+            nodejs || warn "Node.js install failed - continuing"
     fi
     # Upgrade npm to latest
     if command -v npm &>/dev/null; then
@@ -605,23 +647,23 @@ install_linux_desktop() {
     # 1. Google Chrome
     if ! command -v google-chrome &>/dev/null; then
         info "Installing Google Chrome..."
-        if net_timeout 300 wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; then
-            $SUDO apt install -y /tmp/chrome.deb || warn "Chrome install failed"
+        if net_timeout 300 wget -q -O "$WORK/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; then
+            $SUDO apt install -y "$WORK/chrome.deb" || warn "Chrome install failed"
         else
             warn "Chrome download failed or timed out - skipping"
         fi
-        rm -f /tmp/chrome.deb
+        rm -f "$WORK/chrome.deb"
     fi
 
     # 2. VS Code (Official Repo - MSFT)
     if ! command -v code &>/dev/null; then
         info "Installing VS Code..."
-        net_timeout 60 wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
-        $SUDO install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-        $SUDO sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
-        rm packages.microsoft.gpg
-        $SUDO apt update
-        $SUDO apt install -y code
+        # add_apt_repo (#114): the old unguarded `wget | gpg > cwd file`
+        # chain wrote a cwd-relative packages.microsoft.gpg and died mid-way
+        # under set -e on any fetch hiccup.
+        add_apt_repo vscode "https://packages.microsoft.com/keys/microsoft.asc" \
+            "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/vscode.gpg] https://packages.microsoft.com/repos/code stable main" \
+            code || warn "VS Code install failed - continuing"
     fi
 
     # 3. Docker Desktop (Official .deb + Repo)
@@ -673,7 +715,7 @@ install_linux_desktop() {
         # Generic URL for latest stable amd64
         # Verified to work for Ubuntu, Debian, and Linux Mint
         local docker_deb_url="https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
-        local docker_deb="/tmp/docker-desktop-amd64.deb"
+        local docker_deb="$WORK/docker-desktop-amd64.deb"
         
         # Ensure curl is available
         command -v curl &>/dev/null || $SUDO apt install -y curl
@@ -748,28 +790,36 @@ install_linux_desktop() {
     # needed, no version to track.
     if ! dpkg -s termius &>/dev/null && ! command -v termius &>/dev/null; then
         info "Installing Termius..."
-        if net_timeout 300 wget -q -O /tmp/termius.deb https://download.termius.com/linux/Termius.deb; then
-            $SUDO apt install -y /tmp/termius.deb || warn "Termius install failed"
+        if net_timeout 300 wget -q -O "$WORK/termius.deb" https://download.termius.com/linux/Termius.deb; then
+            $SUDO apt install -y "$WORK/termius.deb" || warn "Termius install failed"
         else
             warn "Termius download failed or timed out - skipping"
         fi
-        rm -f /tmp/termius.deb
+        rm -f "$WORK/termius.deb"
     fi
 
     # 4. ScreenRec (Official Repo - modern keyring)
     if ! command -v screenrec &>/dev/null; then
         info "Installing ScreenRec..."
         $SUDO mkdir -p /etc/apt/keyrings
-        curl -fsSL --max-time 60 https://screenrec.com/download/pub.asc | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/screenrec.gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/screenrec.gpg] https://screenrec.com/download/ubuntu stable main" | $SUDO tee /etc/apt/sources.list.d/screenrec.list > /dev/null
-        $SUDO apt update || true
-        # screenrec's .deb still hard-depends on libgdk-pixbuf2.0-0, which was renamed to
-        # libgdk-pixbuf-2.0-0 on Ubuntu 24.04+ (Linux Lite 7). Don't let it abort the run,
-        # and tear the repo back down on failure so future `apt update`s stay clean.
-        if ! $SUDO apt install -y screenrec; then
-            warn "ScreenRec install failed (stale libgdk-pixbuf2.0-0 dependency on Ubuntu 24.04+); removing its apt source."
-            $SUDO rm -f /etc/apt/sources.list.d/screenrec.list /etc/apt/keyrings/screenrec.gpg
+        # Key + repo setup guarded (#114): an unguarded `curl | gpg` aborted
+        # the whole run on a dropped connection - and could leave a truncated
+        # root-owned keyring behind.
+        if net_timeout 60 curl -fsSL https://screenrec.com/download/pub.asc \
+            | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/screenrec.gpg \
+            && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/screenrec.gpg] https://screenrec.com/download/ubuntu stable main" \
+                | $SUDO tee /etc/apt/sources.list.d/screenrec.list > /dev/null; then
             $SUDO apt update || true
+            # screenrec's .deb still hard-depends on libgdk-pixbuf2.0-0, which was renamed to
+            # libgdk-pixbuf-2.0-0 on Ubuntu 24.04+ (Linux Lite 7). Don't let it abort the run,
+            # and tear the repo back down on failure so future `apt update`s stay clean.
+            if ! $SUDO apt install -y screenrec; then
+                warn "ScreenRec install failed (stale libgdk-pixbuf2.0-0 dependency on Ubuntu 24.04+); removing its apt source."
+                $SUDO rm -f /etc/apt/sources.list.d/screenrec.list /etc/apt/keyrings/screenrec.gpg
+                $SUDO apt update || true
+            fi
+        else
+            warn "ScreenRec repo setup failed or timed out - skipping"
         fi
     fi
 
@@ -786,14 +836,14 @@ install_linux_desktop() {
     if ! dpkg -s handy &>/dev/null; then
         info "Installing Handy (Speech-to-Text)..."
         local handy_version
-        handy_version=$(curl -s --max-time 30 "https://api.github.com/repos/cjpais/Handy/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        handy_version=$(curl -s --max-time 30 "https://api.github.com/repos/cjpais/Handy/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
         if [[ -n "$handy_version" ]]; then
-            if net_timeout 300 wget -q -O /tmp/handy.deb "https://github.com/cjpais/Handy/releases/download/v${handy_version}/Handy_${handy_version}_amd64.deb"; then
-                $SUDO apt install -y /tmp/handy.deb || warn "Handy install failed"
+            if net_timeout 300 wget -q -O "$WORK/handy.deb" "https://github.com/cjpais/Handy/releases/download/v${handy_version}/Handy_${handy_version}_amd64.deb"; then
+                $SUDO apt install -y "$WORK/handy.deb" || warn "Handy install failed"
             else
                 warn "Handy download failed or timed out - skipping"
             fi
-            rm -f /tmp/handy.deb
+            rm -f "$WORK/handy.deb"
         else
             warn "Could not determine latest Handy version - skipping"
         fi
@@ -823,17 +873,13 @@ install_apt() {
     # Ubuntu/Debian release.
     if ! command -v gh &>/dev/null; then
         info "Installing GitHub CLI..."
-        {
-            $SUDO mkdir -p -m 755 /etc/apt/keyrings
-            out=$(mktemp)
-            net_timeout 60 wget -nv -O "$out" https://cli.github.com/packages/githubcli-archive-keyring.gpg
-            $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg < "$out" > /dev/null
-            $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-            rm -f "$out"
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            $SUDO apt update
-            $SUDO apt install -y gh
-        } || warn "GitHub CLI install failed - continuing"
+        # Via add_apt_repo (#114): the old `{ wget; tee keyring; tee repo;
+        # apt update; install; } || warn` group installed an empty keyring
+        # plus the repo line when the key download failed, wedging every
+        # later apt update on the unsigned repo.
+        add_apt_repo githubcli "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+            gh || warn "GitHub CLI install failed - continuing"
     fi
 
     # Node.js 24.x
@@ -843,10 +889,10 @@ install_apt() {
     if ! command -v nvim &>/dev/null; then
         info "Installing Neovim..."
         $SUDO apt install -y neovim || {
-            net_timeout 180 curl -fLO https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz \
-                && $SUDO tar -C /opt -xzf nvim-linux64.tar.gz \
+            net_timeout 180 curl -fLo "$WORK/nvim-linux64.tar.gz" https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz \
+                && $SUDO tar -C /opt -xzf "$WORK/nvim-linux64.tar.gz" \
                 && $SUDO ln -sf /opt/nvim-linux64/bin/nvim /usr/local/bin/nvim
-            rm -f nvim-linux64.tar.gz
+            rm -f "$WORK/nvim-linux64.tar.gz"
         }
     fi
 {{- else }}
@@ -867,10 +913,9 @@ install_apt() {
         info "cloudflared already installed. Skipping."
     elif command -v apt-get &>/dev/null; then
         info "Installing cloudflared..."
-        $SUDO mkdir -p --mode=0755 /usr/share/keyrings
-        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | $SUDO tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
-        $SUDO apt-get update -qq && $SUDO apt-get install -y cloudflared
+        add_apt_repo cloudflared "https://pkg.cloudflare.com/cloudflare-main.gpg" \
+            "deb [signed-by=/etc/apt/keyrings/cloudflared.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+            cloudflared || warn "cloudflared install failed - continuing"
     else
         warn "cloudflared: apt not found - manual install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
     fi
@@ -970,52 +1015,52 @@ install_apt() {
     # Lazygit
     if ! command -v lazygit &>/dev/null; then
         info "Installing lazygit..."
-        LAZYGIT_VERSION=$(curl -s --max-time 30 "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
-        if net_timeout 180 curl -fLo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"; then
-            tar xf lazygit.tar.gz lazygit && $SUDO install lazygit /usr/local/bin
+        # `|| true` inside the substitution - a rate-limited API response
+        # must warn-and-continue, not abort the run (#114).
+        LAZYGIT_VERSION=$(curl -s --max-time 30 "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
+        if [[ -n "$LAZYGIT_VERSION" ]] && net_timeout 180 curl -fLo "$WORK/lazygit.tar.gz" "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"; then
+            tar -xzf "$WORK/lazygit.tar.gz" -C "$WORK" lazygit && $SUDO install "$WORK/lazygit" /usr/local/bin
         else
-            warn "lazygit download failed or timed out - continuing"
+            warn "lazygit download failed, timed out, or version lookup failed - continuing"
         fi
-        rm -f lazygit lazygit.tar.gz
+        rm -f "$WORK/lazygit" "$WORK/lazygit.tar.gz"
     fi
 
     # Gum (Bubble Gum for shell scripts)
     if ! command -v gum &>/dev/null; then
         info "Installing gum..."
-        $SUDO mkdir -p /etc/apt/keyrings
-        curl -fsSL --max-time 60 https://repo.charm.sh/apt/gpg.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $SUDO tee /etc/apt/sources.list.d/charm.list
-        $SUDO apt update && $SUDO apt install -y gum
+        add_apt_repo charm "https://repo.charm.sh/apt/gpg.key" \
+            "deb [arch=amd64 signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" \
+            gum || warn "gum install failed - continuing"
     fi
 
     # eza
     if ! command -v eza &>/dev/null; then
         info "Installing eza..."
-        $SUDO apt install -y gpg
-        $SUDO mkdir -p /etc/apt/keyrings
-        # Ensure wget
-        command -v wget &>/dev/null || $SUDO apt install -y wget
-        net_timeout 60 wget -qO- https://raw.githubusercontent.com/eza-community/eza/main/deb.asc | $SUDO gpg --dearmor -o /etc/apt/keyrings/gierens.gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gierens.gpg] http://deb.gierens.de stable main" | $SUDO tee /etc/apt/sources.list.d/gierens.list
-        $SUDO apt update || true
-        $SUDO apt install -y eza
+        add_apt_repo gierens "https://raw.githubusercontent.com/eza-community/eza/main/deb.asc" \
+            "deb [arch=amd64 signed-by=/etc/apt/keyrings/gierens.gpg] http://deb.gierens.de stable main" \
+            eza || warn "eza install failed - continuing"
     fi
 
     # git-delta (not in apt repos, download from GitHub)
     if ! command -v delta &>/dev/null; then
         info "Installing git-delta..."
         local delta_version
-        delta_version=$(curl -s --max-time 30 "https://api.github.com/repos/dandavison/delta/releases/latest" | grep -Po '"tag_name": "\K[^"]*')
-        local delta_deb="/tmp/git-delta_${delta_version}_amd64.deb"
-        # Ensure wget
-        command -v wget &>/dev/null || $SUDO apt install -y wget
-        net_timeout 180 wget -q --show-progress -O "$delta_deb" \
-            "https://github.com/dandavison/delta/releases/download/${delta_version}/git-delta_${delta_version}_amd64.deb" || {
-            warn "Failed to download git-delta v${delta_version} (or timed out)"
-        }
-        if [[ -f "$delta_deb" ]]; then
-            $SUDO dpkg -i "$delta_deb" || $SUDO apt install -f -y
-            rm -f "$delta_deb"
+        delta_version=$(curl -s --max-time 30 "https://api.github.com/repos/dandavison/delta/releases/latest" | grep -Po '"tag_name": "\K[^"]*' || true)
+        if [[ -n "$delta_version" ]]; then
+            local delta_deb="$WORK/git-delta_${delta_version}_amd64.deb"
+            # Ensure wget
+            command -v wget &>/dev/null || $SUDO apt install -y wget
+            net_timeout 180 wget -q --show-progress -O "$delta_deb" \
+                "https://github.com/dandavison/delta/releases/download/${delta_version}/git-delta_${delta_version}_amd64.deb" || {
+                warn "Failed to download git-delta v${delta_version} (or timed out)"
+            }
+            if [[ -f "$delta_deb" ]]; then
+                $SUDO dpkg -i "$delta_deb" || $SUDO apt install -f -y
+                rm -f "$delta_deb"
+            fi
+        else
+            warn "Could not determine latest git-delta version - skipping"
         fi
     fi
 
@@ -1028,9 +1073,9 @@ install_apt() {
     if ! command -v tldr &>/dev/null; then
         info "Installing tealdeer (tldr)..."
         # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
-        net_timeout 120 curl -fLo /tmp/tldr "https://github.com/dbrgn/tealdeer/releases/latest/download/tealdeer-linux-x86_64-musl" \
-            && $SUDO install /tmp/tldr /usr/local/bin/tldr \
-            && rm -f /tmp/tldr \
+        net_timeout 120 curl -fLo "$WORK/tldr" "https://github.com/dbrgn/tealdeer/releases/latest/download/tealdeer-linux-x86_64-musl" \
+            && $SUDO install "$WORK/tldr" /usr/local/bin/tldr \
+            && rm -f "$WORK/tldr" \
             || warn "Failed to install tealdeer (or timed out)"
     fi
 
@@ -1039,15 +1084,19 @@ install_apt() {
     if ! command -v dust &>/dev/null; then
         info "Installing dust..."
         local dust_version
-        dust_version=$(curl -s --max-time 30 "https://api.github.com/repos/bootandy/dust/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
-        local dust_deb="/tmp/du-dust_${dust_version}-1_amd64.deb"
-        net_timeout 180 wget -q -O "$dust_deb" \
-            "https://github.com/bootandy/dust/releases/download/v${dust_version}/du-dust_${dust_version}-1_amd64.deb" || {
-            warn "Failed to download dust v${dust_version} (or timed out)"
-        }
-        if [[ -f "$dust_deb" ]]; then
-            $SUDO dpkg -i "$dust_deb" || $SUDO apt install -f -y
-            rm -f "$dust_deb"
+        dust_version=$(curl -s --max-time 30 "https://api.github.com/repos/bootandy/dust/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
+        if [[ -n "$dust_version" ]]; then
+            local dust_deb="$WORK/du-dust_${dust_version}-1_amd64.deb"
+            net_timeout 180 wget -q -O "$dust_deb" \
+                "https://github.com/bootandy/dust/releases/download/v${dust_version}/du-dust_${dust_version}-1_amd64.deb" || {
+                warn "Failed to download dust v${dust_version} (or timed out)"
+            }
+            if [[ -f "$dust_deb" ]]; then
+                $SUDO dpkg -i "$dust_deb" || $SUDO apt install -f -y
+                rm -f "$dust_deb"
+            fi
+        else
+            warn "Could not determine latest dust version - skipping"
         fi
     fi
 
@@ -1056,15 +1105,16 @@ install_apt() {
     if ! command -v procs &>/dev/null; then
         info "Installing procs..."
         local procs_version
-        procs_version=$(curl -s --max-time 30 "https://api.github.com/repos/dalance/procs/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        procs_version=$(curl -s --max-time 30 "https://api.github.com/repos/dalance/procs/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
         # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
-        net_timeout 180 curl -fLo /tmp/procs.zip \
-            "https://github.com/dalance/procs/releases/download/v${procs_version}/procs-v${procs_version}-x86_64-linux.zip" \
+        [[ -n "$procs_version" ]] \
+            && net_timeout 180 curl -fLo "$WORK/procs.zip" \
+                "https://github.com/dalance/procs/releases/download/v${procs_version}/procs-v${procs_version}-x86_64-linux.zip" \
             && $SUDO apt install -y unzip \
-            && unzip -o /tmp/procs.zip -d /tmp/procs-extract \
-            && $SUDO install /tmp/procs-extract/procs /usr/local/bin/procs \
-            && rm -rf /tmp/procs.zip /tmp/procs-extract \
-            || warn "Failed to install procs"
+            && unzip -o "$WORK/procs.zip" -d "$WORK/procs-extract" \
+            && $SUDO install "$WORK/procs-extract/procs" /usr/local/bin/procs \
+            || warn "Failed to install procs (or version lookup failed)"
+        rm -rf "$WORK/procs.zip" "$WORK/procs-extract"
     fi
 {{- else }}
     info "Modern CLI tools disabled in config"
@@ -1128,8 +1178,7 @@ EXTRA = json.loads(EXTRA_JSON) if EXTRA_JSON else {}
 
 # All four tiers come from .chezmoidata.yaml `vscode.settings`, the single
 # source both installer twins render (see #83). r""" so Python does not touch
-# the JSON's own escapes - files.eol is "
-" and must survive as one.
+# the JSON's own escapes - files.eol is "\n" and must survive as one.
 FORCED = json.loads(r"""{{ .vscode.settings.forced | toJson }}""")
 DEFAULTS = json.loads(r"""{{ .vscode.settings.defaults | toJson }}""")
 JUNK = json.loads(r"""{{ .vscode.settings.junk | toJson }}""")
@@ -2165,13 +2214,13 @@ PYEOF
         fi
         
         info "Downloading ScreenRec for macOS ($arch)..."
-        net_timeout 300 curl -fsSL -o /tmp/ScreenRec.dmg "$dmg_url" || {
+        net_timeout 300 curl -fsSL -o "$WORK/ScreenRec.dmg" "$dmg_url" || {
             warn "Failed to download ScreenRec (or timed out)"
         }
 
-        if [[ -f "/tmp/ScreenRec.dmg" ]]; then
+        if [[ -f "$WORK/ScreenRec.dmg" ]]; then
              # Mount and install
-             hdiutil attach /tmp/ScreenRec.dmg -quiet
+             hdiutil attach "$WORK/ScreenRec.dmg" -quiet
              # Note: Volume name might differ, checking mount
              if [[ -d "/Volumes/ScreenRec" ]]; then
                  cp -R "/Volumes/ScreenRec/ScreenRec.app" /Applications/ || warn "Failed to copy ScreenRec.app"
@@ -2181,7 +2230,7 @@ PYEOF
                  warn "Could not find mounted ScreenRec volume"
                  hdiutil detach "$(hdiutil info | grep ScreenRec | cut -f1)" -quiet || true
              fi
-             rm -f /tmp/ScreenRec.dmg
+             rm -f "$WORK/ScreenRec.dmg"
         fi
     fi
 {{- end }}
@@ -2276,9 +2325,9 @@ install_antigravity_desktop() {
                 *) warn "antigravity_desktop: unsupported macOS arch $(uname -m) - skipping"; return 0 ;;
             esac
             info "Downloading Antigravity 2.0 for macOS ($ag_arch)..."
-            if ! net_timeout 600 curl -fsSL -o /tmp/Antigravity.dmg "${ag_base}/${ag_arch}/Antigravity.dmg"; then
+            if ! net_timeout 600 curl -fsSL -o "$WORK/Antigravity.dmg" "${ag_base}/${ag_arch}/Antigravity.dmg"; then
                 warn "Antigravity 2.0 dmg download failed or timed out - skipping"
-                rm -f /tmp/Antigravity.dmg
+                rm -f "$WORK/Antigravity.dmg"
                 return 0
             fi
             # Mount and install. Runtime volume/.app discovery, not hardcoded
@@ -2290,8 +2339,8 @@ install_antigravity_desktop() {
             # contract instead). grep's no-match exit is neutralized with
             # `|| true` INSIDE the substitution so an empty result reaches
             # the -z guard below instead of tripping pipefail first.
-            mount_output=$(hdiutil attach /tmp/Antigravity.dmg -nobrowse) \
-                || { warn "Failed to mount Antigravity 2.0 DMG"; rm -f /tmp/Antigravity.dmg; return 0; }
+            mount_output=$(hdiutil attach "$WORK/Antigravity.dmg" -nobrowse) \
+                || { warn "Failed to mount Antigravity 2.0 DMG"; rm -f "$WORK/Antigravity.dmg"; return 0; }
             volume_path=$(echo "$mount_output" | grep -Eo '/Volumes/.*$' | tail -1 || true)
             if [[ -z "$volume_path" ]]; then
                 warn "Could not determine mounted volume path for Antigravity 2.0 DMG"
@@ -2311,7 +2360,7 @@ install_antigravity_desktop() {
                 fi
                 hdiutil detach "$volume_path" -quiet || warn "Failed to detach Antigravity 2.0 volume at $volume_path"
             fi
-            rm -f /tmp/Antigravity.dmg
+            rm -f "$WORK/Antigravity.dmg"
             ;;
         Linux)
             # Tarball install under ~/.local/share (the 2.0 hub channel ships
@@ -2409,13 +2458,13 @@ install_opencode_desktop() {
             # ~120MB download - net_timeout per the network-step contract
             # (docs/tool-parity.md). "latest/download" floats with upstream;
             # no pin to maintain (Windows floats via choco the same way).
-            if net_timeout 600 curl -fLo /tmp/opencode-desktop-linux-amd64.deb \
+            if net_timeout 600 curl -fLo "$WORK/opencode-desktop-linux-amd64.deb" \
                 "https://github.com/anomalyco/opencode/releases/latest/download/opencode-desktop-linux-amd64.deb"; then
-                $SUDO apt install -y /tmp/opencode-desktop-linux-amd64.deb || warn "OpenCode Desktop install failed"
+                $SUDO apt install -y "$WORK/opencode-desktop-linux-amd64.deb" || warn "OpenCode Desktop install failed"
             else
                 warn "OpenCode Desktop download failed or timed out - skipping"
             fi
-            rm -f /tmp/opencode-desktop-linux-amd64.deb
+            rm -f "$WORK/opencode-desktop-linux-amd64.deb"
             ;;
         *)
             warn "opencode_desktop: unsupported OS $(uname -s) - skipping"
