@@ -170,7 +170,10 @@ EOF
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -e' \
             'chezmoi() { if [ "${1:-}" = execute-template ]; then shift; command chezmoi execute-template --source "'"$tmp/repo"'" "$@"; else printf "%s\\n" "'"$tmp/repo"'"; fi; }'
-        awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
+        # Capture from the catalog assignment (not the npx guard): the
+        # verification below needs the catalog path, the fallback helper and
+        # the derived total, all defined before the npx branch in the source.
+        awk '/^catalog=/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
     } > "$updater_harness"
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$updater_harness")"
     if ! grep -Fqx -- '   Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
