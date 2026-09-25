@@ -24,13 +24,15 @@
 #   ssh-agent-relay start        # idempotent: per-account sockets for this host
 #   ssh-agent-relay use <alias>  # prints `export SSH_AUTH_SOCK=...` (eval it)
 #   ssh-agent-relay status       # what is running, and which keys each exposes
-#   ssh-agent-relay stop         # stop filters and the relay
+#   ssh-agent-relay stop         # stop the per-account agents and the relay
 set -uo pipefail
 
+# One state dir, one name, both sides: dot_zshrc exports SSH_AGENT_RELAY_DIR
+# before it backgrounds `start`, and this script honours it (#113) - the
+# default.sock path can never drift between the writer and the reader again.
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}"
-mkdir -p "$runtime_dir" 2>/dev/null || true
+state_dir="${SSH_AGENT_RELAY_DIR:-$runtime_dir/ssh-agent-relay}"
 upstream_sock="$runtime_dir/ssh-agent.upstream.sock"
-state_dir="$runtime_dir/ssh-agent-relay"
 mkdir -p "$state_dir" 2>/dev/null || true
 
 WINDOWS_AGENT_PIPE='//./pipe/openssh-ssh-agent'
@@ -42,7 +44,6 @@ is_wsl() {
     [ -z "${SSH_AGENT_RELAY_NATIVE:-}" ] &&
         [ -r /proc/version ] && grep -qi microsoft /proc/version
 }
-sock_alive() { [ -S "$1" ] && SSH_AUTH_SOCK="$1" ssh-add -l >/dev/null 2>&1; }
 # ssh-add -l exits 1 for "agent reachable but empty" - still a live socket.
 sock_reachable() {
     [ -S "$1" ] || return 1
@@ -50,12 +51,17 @@ sock_reachable() {
     [ $? -ne 2 ]
 }
 
-# Accounts, rendered from [[data.accounts]]. Comments follow the convention
-# devprofile uses when it creates keys: "<email>" for auth, "<email>-sign" for
-# signing. Override per account with agent_key_comments = ["..."] if your keys
-# carry different comments.
-declare -A ACCOUNT_COMMENTS=()
-declare -A ACCOUNT_KEYS=()
+# Accounts, rendered from [[data.accounts]]. Parallel indexed arrays, NOT
+# `declare -A` maps: macOS ships bash 3.2, which has no associative arrays,
+# and this file is deployed on darwin - the old maps died silently there
+# because zshrc discards the relay's output (#113). relay_field() looks up
+# one account's row. Comments follow the convention devprofile uses when it
+# creates keys: "<email>" for auth, "<email>-sign" for signing. Override per
+# account with agent_key_comments = ["..."] if your keys carry different
+# comments.
+RELAY_ALIASES=()
+RELAY_COMMENTS=()
+RELAY_KEYS=()
 {{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- $username := "" }}{{ if hasKey . "username" }}{{ $username = .username }}{{ end }}
@@ -63,45 +69,60 @@ declare -A ACCOUNT_KEYS=()
 {{- if $username }}
 {{- $alias := printf "%s-%s" $provider $username }}
 {{- if hasKey . "agent_key_comments" }}
-ACCOUNT_COMMENTS[{{ $alias | quote }}]={{ (join "|" .agent_key_comments) | quote }}
+RELAY_COMMENTS+=({{ (join "|" .agent_key_comments) | quote }})
 {{- else }}
-ACCOUNT_COMMENTS[{{ $alias | quote }}]={{ (printf "%s|%s-sign" .email .email) | quote }}
+RELAY_COMMENTS+=({{ (printf "%s|%s-sign" .email .email) | quote }})
 {{- end }}
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ end }}
 {{- if and (not $signKey) (hasKey . "signingkey") }}{{ $signKey = .signingkey }}{{ end }}
-{{- if hasKey . "key" }}
-ACCOUNT_KEYS[{{ $alias | quote }}]={{ (printf "%s%s" .key (ternary (printf "|%s" $signKey) "" (ne $signKey ""))) | quote }}
-{{- end }}
+{{- $keyRow := "" }}
+{{- if hasKey . "key" }}{{ $keyRow = printf "%s%s" .key (ternary (printf "|%s" $signKey) "" (ne $signKey "")) }}{{ end }}
+RELAY_KEYS+=({{ $keyRow | quote }})
+RELAY_ALIASES+=({{ $alias | quote }})
 {{- end }}
 {{- end }}
 {{- end }}
 
+relay_field() { # $1 = alias, $2 = "comments" or "keys"
+    local i
+    for i in "${!RELAY_ALIASES[@]}"; do
+        if [ "${RELAY_ALIASES[i]}" = "$1" ]; then
+            if [ "$2" = "comments" ]; then
+                printf '%s\n' "${RELAY_COMMENTS[i]}"
+            else
+                printf '%s\n' "${RELAY_KEYS[i]}"
+            fi
+            return 0
+        fi
+    done
+    return 1
+}
+
 start_upstream() {
     if sock_reachable "$upstream_sock"; then return 0; fi
+    if ! is_wsl; then
+        # Native Linux/macOS: there IS no upstream - every account gets its
+        # own real agent (start_own_agent), and the per-account sockets are
+        # the endpoints. (The old branch that symlinked SSH_AUTH_SOCK as the
+        # upstream was dead: cmd_start returns before this on native hosts.)
+        return 0
+    fi
     rm -f "$upstream_sock"
-    if is_wsl; then
-        command -v socat >/dev/null 2>&1 || {
-            echo "ssh-agent-relay: socat missing (apt install socat)" >&2; return 1; }
-        command -v npiperelay.exe >/dev/null 2>&1 || {
-            echo "ssh-agent-relay: npiperelay.exe missing (choco install npiperelay on Windows)" >&2; return 1; }
-        # Relay the Windows agent pipe. The keys stay on Windows; only signing
-        # requests cross.
-        setsid socat "UNIX-LISTEN:$upstream_sock,fork,unlink-early" \
-            "EXEC:npiperelay.exe -ei -s $WINDOWS_AGENT_PIPE,nofork" >/dev/null 2>&1 &
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-            sock_reachable "$upstream_sock" && return 0
-            sleep 0.2
-        done
-        echo "ssh-agent-relay: relay did not come up (is the Windows ssh-agent service running?)" >&2
-        return 1
-    fi
-    # Native Linux/macOS: the local agent IS the upstream.
-    if [ -z "${SSH_AUTH_SOCK:-}" ] || [ ! -S "${SSH_AUTH_SOCK:-}" ]; then
-        echo "ssh-agent-relay: no local ssh-agent (SSH_AUTH_SOCK unset)" >&2
-        return 1
-    fi
-    ln -sf "$SSH_AUTH_SOCK" "$upstream_sock"
+    command -v socat >/dev/null 2>&1 || {
+        echo "ssh-agent-relay: socat missing (apt install socat)" >&2; return 1; }
+    command -v npiperelay.exe >/dev/null 2>&1 || {
+        echo "ssh-agent-relay: npiperelay.exe missing (choco install npiperelay on Windows)" >&2; return 1; }
+    # Relay the Windows agent pipe. The keys stay on Windows; only signing
+    # requests cross.
+    setsid socat "UNIX-LISTEN:$upstream_sock,fork,unlink-early" \
+        "EXEC:npiperelay.exe -ei -s $WINDOWS_AGENT_PIPE,nofork" >/dev/null 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        sock_reachable "$upstream_sock" && return 0
+        sleep 0.2
+    done
+    echo "ssh-agent-relay: relay did not come up (is the Windows ssh-agent service running?)" >&2
+    return 1
 }
 
 # Native hosts (Linux, macOS): the keys are LOCAL, so isolation needs no filter -
@@ -109,17 +130,27 @@ start_upstream() {
 # stronger than filtering and drops the ssh-agent-filter dependency (which has no
 # Homebrew formula). WSL cannot do this: its keys live in the Windows agent.
 start_own_agent() { # $1 = alias
-    local alias="$1" sock record keys key path
+    local alias="$1" sock record pid_file keys key path agent_env
     sock="$runtime_dir/ssh-agent.$alias.sock"
     record="$state_dir/$alias.sock"
+    pid_file="$state_dir/$alias.pid"
     if sock_reachable "$sock"; then
         printf '%s\n' "$sock" > "$record"
         return 0
     fi
+    # Stale socket file from a dead agent: rebind. Safe because cmd_start
+    # holds the start lock - concurrent starts never race on this rm (#113).
     rm -f "$sock"
-    ssh-agent -a "$sock" >/dev/null 2>&1 || {
+    # Capture (not discard) ssh-agent's printed shell code: it carries the
+    # agent's PID, which cmd_stop kills. Discarding it is what made `stop`
+    # leak every agent while only unlinking the sockets (#113).
+    agent_env="$(ssh-agent -a "$sock" 2>/dev/null)" || {
         echo "ssh-agent-relay: could not start an agent for '$alias'" >&2; return 1; }
-    keys="${ACCOUNT_KEYS[$alias]:-}"
+    eval "$agent_env"
+    if [ -n "${SSH_AGENT_PID:-}" ]; then
+        printf '%s\n' "$SSH_AGENT_PID" > "$pid_file"
+    fi
+    keys="$(relay_field "$alias" keys)"
     local IFS_SAVE="$IFS"
     IFS='|'
     for key in $keys; do
@@ -148,7 +179,7 @@ start_filter() { # $1 = alias
         sock="$(cat "$record")"
         sock_reachable "$sock" && return 0
     fi
-    comments="${ACCOUNT_COMMENTS[$alias]:-}"
+    comments="$(relay_field "$alias" comments)"
     [ -n "$comments" ] || { echo "ssh-agent-relay: unknown account '$alias'" >&2; return 1; }
     if ! command -v ssh-agent-filter >/dev/null 2>&1; then
         # No filter available: fall back to the unfiltered upstream so things
@@ -192,27 +223,61 @@ start_filter() { # $1 = alias
 {{- end }}
 DEFAULT_ALIAS="${SSH_AGENT_RELAY_DEFAULT:-{{ $default }}}"
 
-cmd_start() {
+# Serialize starts: dot_zshrc backgrounds one per interactive shell and
+# cmd_use re-enters, so three shells can race `rm -f` + `ssh-agent -a` on the
+# same socket - two lose loudly and the loser's rm can unlink the winner's
+# fresh socket (#113). mkdir is atomic on every filesystem; a lock left behind
+# by a killed holder carries its PID and is broken by the next contender.
+acquire_lock() {
+    local n=0 holder
+    while ! mkdir "$state_dir/.lock" 2>/dev/null; do
+        holder="$(cat "$state_dir/.lock/pid" 2>/dev/null)"
+        if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+            rm -rf "$state_dir/.lock"
+            continue
+        fi
+        n=$((n + 1))
+        if [ "$n" -ge 50 ]; then return 1; fi
+        sleep 0.1
+    done
+    printf '%s\n' "$$" >"$state_dir/.lock/pid"
+}
+release_lock() { rm -rf "$state_dir/.lock" 2>/dev/null || true; }
+
+start_all() {
     local alias rc=0
     if ! is_wsl; then
         # Native host: one real agent per account, no upstream, no filter.
-        for alias in "${!ACCOUNT_COMMENTS[@]}"; do
+        for alias in "${RELAY_ALIASES[@]}"; do
             start_own_agent "$alias" || rc=1
         done
-        if [ -n "$DEFAULT_ALIAS" ] && [ -r "$state_dir/$DEFAULT_ALIAS.sock" ]; then
-            cp "$state_dir/$DEFAULT_ALIAS.sock" "$state_dir/default.sock"
-        fi
-        return $rc
+    else
+        start_upstream || return 1
+        for alias in "${RELAY_ALIASES[@]}"; do
+            start_filter "$alias" || rc=1
+        done
     fi
-    start_upstream || return 1
-    for alias in "${!ACCOUNT_COMMENTS[@]}"; do
-        start_filter "$alias" || rc=1
-    done
     # Fixed path the shell reads (dot_zshrc is not a template, so it cannot
-    # know the account names).
+    # know the account names). temp+mv, not truncate-in-place: the shell reads
+    # this file concurrently, and a partial line would export a broken
+    # SSH_AUTH_SOCK for the whole session (#113).
     if [ -n "$DEFAULT_ALIAS" ] && [ -r "$state_dir/$DEFAULT_ALIAS.sock" ]; then
-        cp "$state_dir/$DEFAULT_ALIAS.sock" "$state_dir/default.sock"
+        cp "$state_dir/$DEFAULT_ALIAS.sock" "$state_dir/default.sock.tmp" &&
+            mv "$state_dir/default.sock.tmp" "$state_dir/default.sock"
     fi
+    return $rc
+}
+
+cmd_start() {
+    if ! acquire_lock; then
+        # Another start holds the lock and is laying down the sockets; it
+        # will also refresh default.sock. Not an error for the backgrounded
+        # per-shell call.
+        return 0
+    fi
+    local rc=0
+    start_all || rc=$?
+    release_lock
     return $rc
 }
 
@@ -227,13 +292,17 @@ cmd_use() { # $1 = alias
 
 cmd_status() {
     local alias record sock keys
-    if sock_reachable "$upstream_sock"; then
-        keys="$(SSH_AUTH_SOCK="$upstream_sock" ssh-add -l 2>/dev/null | grep -c '^[0-9]' || true)"
-        printf 'upstream  %s  (%s key(s))\n' "$upstream_sock" "$keys"
-    else
-        printf 'upstream  not running%s\n' "$(is_wsl && printf ' - run: ssh-agent-relay start')"
+    if is_wsl; then
+        # Only relay mode has an upstream; native hosts would print "not
+        # running" forever for a socket that is never created.
+        if sock_reachable "$upstream_sock"; then
+            keys="$(SSH_AUTH_SOCK="$upstream_sock" ssh-add -l 2>/dev/null | grep -c '^[0-9]' || true)"
+            printf 'upstream  %s  (%s key(s))\n' "$upstream_sock" "$keys"
+        else
+            printf 'upstream  not running - run: ssh-agent-relay start\n'
+        fi
     fi
-    for alias in "${!ACCOUNT_COMMENTS[@]}"; do
+    for alias in "${RELAY_ALIASES[@]}"; do
         record="$state_dir/$alias.sock"
         if [ -r "$record" ] && sock_reachable "$(cat "$record")"; then
             sock="$(cat "$record")"
@@ -246,21 +315,29 @@ cmd_status() {
 }
 
 cmd_stop() {
-    local alias record sock
-    for alias in "${!ACCOUNT_COMMENTS[@]}"; do
+    local alias record sock pid
+    for alias in "${RELAY_ALIASES[@]}"; do
         record="$state_dir/$alias.sock"
-        [ -r "$record" ] || continue
-        sock="$(cat "$record")"
-        [ "$sock" != "$upstream_sock" ] && rm -f "$sock"
-        rm -f "$record"
+        if [ -r "$record" ]; then
+            sock="$(cat "$record")"
+            [ "$sock" != "$upstream_sock" ] && rm -f "$sock"
+            rm -f "$record"
+        fi
+        # Kill the agent this alias owns (native mode) - the PID was persisted
+        # at start. Killing the process, not just unlinking the socket file,
+        # is the actual fix for the stop leak (#113).
+        pid="$(cat "$state_dir/$alias.pid" 2>/dev/null || true)"
+        if [ -n "$pid" ]; then
+            kill "$pid" 2>/dev/null || true
+            rm -f "$state_dir/$alias.pid"
+        fi
+        rm -f "$runtime_dir/ssh-agent.$alias.sock"
     done
     pkill -f "ssh-agent-filter --name" 2>/dev/null || true
     if is_wsl; then
         pkill -f "UNIX-LISTEN:$upstream_sock" 2>/dev/null || true
-        rm -f "$upstream_sock"
-    else
-        rm -f "$upstream_sock"   # symlink to the local agent
     fi
+    rm -f "$upstream_sock"
 }
 
 case "${1:-status}" in
@@ -269,7 +346,21 @@ case "${1:-status}" in
     status) cmd_status ;;
     stop)   cmd_stop ;;
     -h|--help|help)
-        sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+        # Heredoc, not `sed -n '2,28p' "$0"`: that printed whatever lines 2-28
+        # happened to be after any edit above, ending with "set -uo pipefail".
+        cat <<'EOF'
+ssh-agent-relay - one key vault, one filtered agent per account.
+
+  ssh-agent-relay start        idempotent: per-account sockets for this host
+  ssh-agent-relay use <alias>  prints `export SSH_AUTH_SOCK=...` (eval it)
+  ssh-agent-relay status       what is running, and which keys each exposes
+  ssh-agent-relay stop         stop the per-account agents and the relay
+
+WSL relays the Windows agent service through ssh-agent-filter; native
+Linux/macOS hosts give each account its own real ssh-agent. See
+docs/ssh-agents.md. State dir: SSH_AGENT_RELAY_DIR (default
+"${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay").
+EOF
         ;;
     *) echo "usage: ssh-agent-relay {start|use <alias>|status|stop}" >&2; exit 2 ;;
 esac

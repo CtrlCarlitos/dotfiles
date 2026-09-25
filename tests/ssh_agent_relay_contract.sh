@@ -12,6 +12,9 @@ set -euo pipefail
 #   - a missing ssh-agent-filter degrades to the unfiltered agent WITH a warning
 #   - idempotent start, clear errors, no key material anywhere
 #   - the tooling it needs is actually installed by the package groups
+#   - bash 3.2-safe (macOS ships 3.2): indexed arrays only, renders for
+#     darwin, parses under `bash --posix` (#113)
+#   - stop kills what start spawned; no external pkill cleanup here (#113)
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpl="$repo_root/dot_local/bin/executable_ssh-agent-relay.tmpl"
@@ -37,6 +40,16 @@ grep -Fq 'choco: npiperelay' "$repo_root/.chezmoidata/packages.yaml" ||
 grep -Fq 'ssh-agent-relay start' "$zshrc" || fail "dot_zshrc: no ssh-agent-relay startup"
 grep -Fq 'command -v ssh-agent-relay' "$zshrc" || fail "dot_zshrc: relay startup must be guarded"
 grep -Fq 'default.sock' "$zshrc" || fail "dot_zshrc: must read the relay's fixed default socket path"
+# One shared state dir, exported by the shell and honoured by the relay (#113).
+grep -Fq 'export SSH_AGENT_RELAY_DIR=' "$zshrc" ||
+    fail "dot_zshrc: must export SSH_AGENT_RELAY_DIR (single source for the state dir)"
+grep -Fq 'SSH_AGENT_RELAY_DIR' "$tmpl" ||
+    fail "relay must honour SSH_AGENT_RELAY_DIR (single source for the state dir)"
+# The OMZ ssh-agent plugin would start a second agent that the relay's socket
+# then shadows - it must be gated off when the relay is installed (#113).
+grep -Fq 'if ! command -v ssh-agent-relay &>/dev/null && [[ ! -x "$HOME/.local/bin/ssh-agent-relay" ]]; then' "$zshrc" ||
+    fail "dot_zshrc: OMZ ssh-agent plugin must be gated on the relay being absent"
+grep -Fq 'ssh-agent-relay stop' "$doc" || fail "docs/ssh-agents.md: must document stop"
 
 # The relay may ask an agent to load a local key (native mode), but must never
 # read, copy or write key MATERIAL itself - it deals in sockets.
@@ -45,28 +58,51 @@ grep -Fq 'default.sock' "$zshrc" || fail "dot_zshrc: must read the relay's fixed
 ! grep -qE '>[[:space:]]*"?\$HOME/\.ssh/' "$tmpl" ||
     fail "relay must not write into ~/.ssh (the identity generator owns that)"
 
+# bash 3.2 has no associative arrays (the old `declare -A` maps died silently
+# on macOS, whose /usr/bin/bash is 3.2 - zshrc discards the error) (#113).
+! grep -Eq '^[[:space:]]*declare +-A' "$tmpl" ||
+    fail "relay must not use associative arrays (macOS ships bash 3.2)"
+! grep -q 'sock_alive' "$tmpl" || fail "sock_alive() had zero callers - dead code"
+
 if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     : >"$tmp/chezmoi.toml"
-    render_relay() {  # $1 = accounts JSON (lib.sh's render is the no-override default)
+    render_relay() {  # $1 = os ("linux"|"darwin"), $2 = accounts JSON
         chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
-            --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"6.8-microsoft\"}},\"accounts\":$1}" \
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"6.8-microsoft\"}},\"accounts\":$2}" \
             <"$tmpl"
     }
     two='[{"name":"A","email":"a@x.test","username":"alpha","provider":"github","key":"id_a"},
           {"name":"B","email":"b@x.test","username":"beta","provider":"github","key":"id_b","agent_key_comments":["custom-comment"]}]'
-    out=$(render_relay "$two")
+    out=$(render_relay linux "$two")
     printf '%s' "$out" >"$tmp/relay"
     bash -n "$tmp/relay" || fail "rendered relay is not valid bash"
+    # bash --posix is the closest CI-runnable proxy for macOS's bash 3.2: it
+    # rejects bash-4-isms at runtime and keeps the syntax dialect strict.
+    bash --posix -n "$tmp/relay" || fail "rendered relay does not parse under bash --posix (bash 3.2 proxy)"
     shellcheck -s bash "$tmp/relay" >/dev/null || fail "rendered relay is not shellcheck-clean"
 
-    grep -Fq 'ACCOUNT_COMMENTS["github-alpha"]="a@x.test|a@x.test-sign"' "$tmp/relay" ||
+    # Parallel-array representation (bash 3.2-safe): every account appends one
+    # aligned row to each of the three arrays.
+    grep -Fq 'RELAY_ALIASES+=("github-alpha")' "$tmp/relay" || fail "alpha missing from the alias array"
+    grep -Fq 'RELAY_COMMENTS+=("a@x.test|a@x.test-sign")' "$tmp/relay" ||
         fail "default key comments must be <email> and <email>-sign"
-    grep -Fq 'ACCOUNT_COMMENTS["github-beta"]="custom-comment"' "$tmp/relay" ||
+    grep -Fq 'RELAY_KEYS+=("id_a")' "$tmp/relay" || fail "auth key must render into the keys array"
+    grep -Fq 'RELAY_ALIASES+=("github-beta")' "$tmp/relay" || fail "beta missing from the alias array"
+    grep -Fq 'RELAY_COMMENTS+=("custom-comment")' "$tmp/relay" ||
         fail "agent_key_comments must override the default mapping"
     grep -Fq 'DEFAULT_ALIAS="${SSH_AGENT_RELAY_DEFAULT:-github-alpha}"' "$tmp/relay" ||
         fail "default account must be the first one, overridable by env"
+    # The agent PID must be captured at start - cmd_stop kills it (#113).
+    grep -Fq 'eval "$agent_env"' "$tmpl" || fail "relay must capture ssh-agent's shell code (PID) for stop"
+
+    # darwin render gate: the file ships to macOS, so it must render and parse
+    # there too - not just for the linux kernel the old test rendered (#113).
+    out_darwin=$(render_relay darwin "$two")
+    printf '%s' "$out_darwin" >"$tmp/relay-darwin"
+    bash -n "$tmp/relay-darwin" || fail "darwin render is not valid bash"
+    bash --posix -n "$tmp/relay-darwin" || fail "darwin render does not parse under bash --posix (bash 3.2 proxy)"
 
     # The WSL half is static-only here (CI is not WSL): the filter must be used
     # with the account's comments, from a native TMPDIR, and must degrade loudly.
@@ -103,8 +139,23 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
             fail "use <unknown alias> must fail"
         SSH_AGENT_RELAY_NATIVE=1 "$tmp/relay" start >/dev/null 2>&1 ||
             fail "start must be idempotent"
+        # bash --posix as a bash-3.2 proxy, for real: the status path walks the
+        # arrays (a `declare -A` regression fails right here, not silently).
+        SSH_AGENT_RELAY_NATIVE=1 bash --posix "$tmp/relay" status >/dev/null 2>&1 ||
+            fail "relay must run under bash --posix (bash 3.2 proxy)"
+
+        # stop must kill what start spawned - this file used to pkill the
+        # agents itself to work around stop's leak (#113). No more.
+        SSH_AGENT_RELAY_NATIVE=1 "$tmp/relay" stop >/dev/null 2>&1 || fail "stop must succeed"
+        [ -S "$a_sock" ] && fail "stop must remove the per-account socket"
+        if command -v pgrep >/dev/null 2>&1; then
+            pgrep -f "ssh-agent -a $XDG_RUNTIME_DIR" >/dev/null 2>&1 &&
+                fail "stop must kill the per-account agents (the #113 leak)"
+        fi
+        # And start must come back cleanly afterwards.
+        SSH_AGENT_RELAY_NATIVE=1 timeout 60 "$tmp/relay" start >/dev/null 2>&1 ||
+            fail "start must work again after stop"
         SSH_AGENT_RELAY_NATIVE=1 "$tmp/relay" stop >/dev/null 2>&1 || true
-        pkill -f "ssh-agent -a $XDG_RUNTIME_DIR" >/dev/null 2>&1 || true
     fi
 fi
 

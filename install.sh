@@ -13,7 +13,18 @@ error_handler() {
     echo "You can retry by running: chezmoi apply"
     echo "----------------------------------------------------------------"
 }
-trap 'if [ $? -ne 0 ]; then error_handler; fi' EXIT
+# Every temp file this script creates (the gum bootstrap downloads) lives in
+# GUM_TMP and is removed by this single EXIT trap - a mid-download failure
+# under `set -e` used to leak the mktemp dir (and a fixed-name gum deb
+# dropped straight into the shared temp dir) (#108, #126).
+GUM_TMP=""
+cleanup_tmp() {
+    if [ -n "$GUM_TMP" ] && [ -d "$GUM_TMP" ]; then
+        rm -rf "$GUM_TMP"
+    fi
+}
+# shellcheck disable=SC2154  # rc is assigned inside the trap body itself
+trap 'rc=$?; cleanup_tmp; if [ "$rc" -ne 0 ]; then error_handler; fi' EXIT
 
 # Wall-clock guard for the unbounded network fetches below - a stalled
 # download otherwise freezes this `set -e` bootstrap indefinitely. Uses
@@ -63,9 +74,36 @@ install_package() {
     fi
 }
 
-# Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
-# only: every failure warns and continues - without gum the menu self-skips
-# and chezmoi's native config prompts take over.
+# Bootstrap gum (pinned; the single GUM_VERSION below is the one source for
+# the version in every asset URL) for the interactive package menu. Best-
+# effort only: every failure warns and continues - without gum the menu
+# self-skips and chezmoi's native config prompts take over. Each asset is
+# verified against the release's published checksums.txt before it is
+# installed (three copy-pasted hardcoded v2.0.1 URLs before, no verification).
+GUM_VERSION="2.0.1"
+
+# Print the sha256 of a file; empty output when no SHA-256 tool exists.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+gum_checksum_ok() { # $1 = downloaded file, $2 = asset base name
+    _gum_want="$(grep -F "  $2" "$GUM_TMP/checksums.txt" | head -n 1 | cut -d' ' -f1)"
+    if [ -z "$_gum_want" ]; then
+        return 1
+    fi
+    _gum_got="$(sha256_of "$1")"
+    if [ -z "$_gum_got" ]; then
+        echo "Warning: no SHA-256 tool to verify gum - not installing it." >&2
+        return 1
+    fi
+    [ "$_gum_got" = "$_gum_want" ]
+}
+
 bootstrap_gum() {
     if command -v gum >/dev/null 2>&1; then
         return 0
@@ -73,23 +111,41 @@ bootstrap_gum() {
 
     GUM_OS="$(uname -s)"
     GUM_ARCH="$(uname -m)"
-
-    if [ "$GUM_OS" = "Darwin" ]; then
-        case "$GUM_ARCH" in
-        arm64)
-            GUM_URL="https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Darwin_arm64.tar.gz"
-            ;;
-        x86_64)
-            GUM_URL="https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Darwin_x86_64.tar.gz"
-            ;;
+    case "$GUM_OS/$GUM_ARCH" in
+        Darwin/arm64)  GUM_ASSET="gum_${GUM_VERSION}_Darwin_arm64.tar.gz" ;;
+        Darwin/x86_64) GUM_ASSET="gum_${GUM_VERSION}_Darwin_x86_64.tar.gz" ;;
+        Linux/x86_64)  GUM_ASSET="gum_${GUM_VERSION}_amd64.deb" ;;
         *)
-            echo "Warning: no gum tarball for macOS/$GUM_ARCH - menu will self-skip."
+            echo "Warning: no gum bootstrap for $GUM_OS/$GUM_ARCH - menu will self-skip."
             return 0
-        esac
+            ;;
+    esac
+
+    GUM_BASE="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}"
+    GUM_TMP="$(mktemp -d)" # removed by the EXIT trap, on failure paths too
+
+    if ! _net 120 curl -fsSL -o "$GUM_TMP/$GUM_ASSET" "$GUM_BASE/$GUM_ASSET" \
+        || ! _net 60 curl -fsSL -o "$GUM_TMP/checksums.txt" "$GUM_BASE/checksums.txt"; then
+        echo "Warning: gum download failed - menu will self-skip."
+        return 0
+    fi
+    if ! gum_checksum_ok "$GUM_TMP/$GUM_ASSET" "$GUM_ASSET"; then
+        echo "Warning: gum checksum verification failed - not installing it - menu will self-skip."
+        return 0
+    fi
+
+    if [ "${GUM_ASSET##*.}" = "deb" ]; then
+        if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+            SUDO="sudo"
+        else
+            SUDO=""
+        fi
+        if ! $SUDO apt-get install -y "$GUM_TMP/$GUM_ASSET"; then
+            echo "Warning: gum install failed - menu will self-skip."
+        fi
+    else
         mkdir -p "$HOME/.local/bin"
-        GUM_TMP="$(mktemp -d)"
-        if _net 120 curl -fsSL -o "$GUM_TMP/gum.tar.gz" "$GUM_URL"; then
-            tar -xzf "$GUM_TMP/gum.tar.gz" -C "$GUM_TMP"
+        if tar -xzf "$GUM_TMP/$GUM_ASSET" -C "$GUM_TMP"; then
             # tarball layout varies (flat vs nested dir) - locate the binary
             GUM_BIN="$(find "$GUM_TMP" -type f -name gum 2>/dev/null | head -n 1)"
             if [ -n "$GUM_BIN" ]; then
@@ -99,25 +155,8 @@ bootstrap_gum() {
                 echo "Warning: gum binary not found in tarball - menu will self-skip."
             fi
         else
-            echo "Warning: gum download failed - menu will self-skip."
+            echo "Warning: gum tarball extraction failed - menu will self-skip."
         fi
-        rm -rf "$GUM_TMP"
-    elif [ "$GUM_OS" = "Linux" ] && [ "$GUM_ARCH" = "x86_64" ]; then
-        if _net 180 curl -fsSL -o /tmp/gum.deb "https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_amd64.deb"; then
-            if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-                SUDO="sudo"
-            else
-                SUDO=""
-            fi
-            if ! $SUDO apt-get install -y /tmp/gum.deb; then
-                echo "Warning: gum install failed - menu will self-skip."
-            fi
-            rm -f /tmp/gum.deb
-        else
-            echo "Warning: gum download failed - menu will self-skip."
-        fi
-    else
-        echo "Warning: no gum bootstrap for $GUM_OS/$GUM_ARCH - menu will self-skip."
     fi
 }
 
@@ -199,28 +238,36 @@ fi
 # 2. Initialize & Apply
 echo "Applying dotfiles..."
 
+# Retry chezmoi across flaky-network first installs. `if "$@"` is the whole
+# point: under `set -e` the original `"$@"; exitCode=$?` let the first failing
+# `chezmoi init --apply` kill the script before the exit code was ever read,
+# so the retry was dead code and "Attempt N of 3" never printed (#108).
+# Plain (prefixed) globals instead of `local`: this file is #!/bin/sh (dash)
+# and `local` is not POSIX (SC3043).
 run_chezmoi_with_retry() {
-    local max_attempts=3
-    local delay=5
-    local attempt=1
-    local exitCode=0
+    _rc_max_attempts=3
+    _rc_delay="${CHEZMOI_RETRY_DELAY:-5}"
+    _rc_attempt=1
+    _rc_code=0
 
-    while [ $attempt -le $max_attempts ]; do
-        "$@"
-        exitCode=$?
-        
-        if [ $exitCode -eq 0 ]; then
+    while [ "$_rc_attempt" -le "$_rc_max_attempts" ]; do
+        # `|| _code=$?` both shields the command from `set -e` and captures
+        # its real exit status (an `if "$@"; then return 0; fi` shape would
+        # report the *if statement's* status - 0 - not the command's).
+        _rc_code=0
+        "$@" || _rc_code=$?
+        if [ "$_rc_code" -eq 0 ]; then
             return 0
         fi
-        
-        echo "chezmoi operation failed (exit code $exitCode). Attempt $attempt of $max_attempts."
-        if [ $attempt -lt $max_attempts ]; then
-            echo "Waiting $delay seconds before retrying..."
-            sleep $delay
+
+        echo "chezmoi operation failed (exit code $_rc_code). Attempt $_rc_attempt of $_rc_max_attempts."
+        if [ "$_rc_attempt" -lt "$_rc_max_attempts" ]; then
+            echo "Waiting $_rc_delay seconds before retrying..."
+            sleep "$_rc_delay"
         fi
-        attempt=$((attempt + 1))
+        _rc_attempt=$((_rc_attempt + 1))
     done
-    return $exitCode
+    return "$_rc_code"
 }
 
 if [ -d "$HOME/.local/share/chezmoi/.git" ]; then
@@ -247,7 +294,7 @@ else
 fi
 
 # 3. Post-Install Checks (Devcontainer specific)
-if [ -n "$DEVCONTAINER" ] || [ -f "/.dockerenv" ]; then
+if [ -n "$IS_DEVCONTAINER" ] || [ -f "/.dockerenv" ]; then
     echo "Running in Devcontainer/Docker..."
     # Ensure zsh is default if not set
     if [ "$SHELL" != "$(which zsh)" ] && command -v zsh >/dev/null; then
@@ -257,17 +304,22 @@ fi
 
 echo "Done!"
 
-# Try to switch to zsh immediately if it's the new default
-if [ -z "$DEVCONTAINER" ] && [ -x "$(command -v zsh)" ]; then
-    # Only if we are interactive and NOT currently in zsh
-    if [ -z "$ZSH_VERSION" ] && [ -t 1 ]; then
-        echo "ℹ️  Switching to Zsh..."
-        exec zsh -l
-    fi
-fi
 echo "----------------------------------------------------------------"
 echo "To customize your setup (add accounts, toggle features):"
 echo "1. Edit ~/.config/chezmoi/chezmoi.toml"
 echo "2. Reference examples in ~/.local/share/chezmoi/docs/"
 echo "3. Run 'chezmoi apply'"
 echo "----------------------------------------------------------------"
+
+# Try to switch to zsh immediately if it's the new default. Deliberately
+# AFTER the tips above: `exec` replaces this shell, so anything printed after
+# it never happens - the tips used to sit behind it and were unreachable in
+# the interactive non-zsh case (#108). Reuses IS_DEVCONTAINER (which already
+# folds in REMOTE_CONTAINERS) instead of checking $DEVCONTAINER alone.
+if [ -z "$IS_DEVCONTAINER" ] && [ -x "$(command -v zsh)" ]; then
+    # Only if we are interactive and NOT currently in zsh
+    if [ -z "$ZSH_VERSION" ] && [ -t 1 ]; then
+        echo "ℹ️  Switching to Zsh..."
+        exec zsh -l
+    fi
+fi
