@@ -501,8 +501,11 @@ if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
     Write-Host ""
     Write-Host "  $($skippedNotChoco.Count) package(s) above are installed outside Chocolatey and stay unmanaged" -ForegroundColor Yellow
     Write-Host "  (choco upgrade all will never cover them). To take them over (elevated, per-app confirm):" -ForegroundColor Yellow
-    $srcAdvisory = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
-    Write-Host "    pwsh -File `"$srcAdvisory\scripts\migrate-to-choco.ps1`" -ListOnly   # see candidates + risks first" -ForegroundColor Yellow
+    # CHEZMOI_SOURCE_DIR arrives with forward slashes; normalize so the printed
+    # command is one Windows path instead of C:/.../chezmoi\scripts\... (#145).
+    $srcAdvisory = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR -replace '/', '' } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
+    $migrateScript = Join-Path $srcAdvisory 'scripts\migrate-to-choco.ps1'
+    Write-Host "    pwsh -File `"$migrateScript`" -ListOnly   # see candidates + risks first" -ForegroundColor Yellow
 }
 {{- end }}
 

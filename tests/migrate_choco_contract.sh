@@ -54,6 +54,15 @@ done
 # Installer advisory: skips must funnel the user to the script.
 grep -Fq 'skippedNotChoco' "$installer" || fail "installer: skip collector missing"
 grep -Fq 'migrate-to-choco.ps1' "$installer" || fail "installer: advisory does not name the script"
+# The advisory path must be a single Windows path: CHEZMOI_SOURCE_DIR arrives
+# with forward slashes, so it is normalized and joined with Join-Path, never
+# concatenated with a backslash literal (printed "C:/.../chezmoi\scripts\...").
+grep -Fq "Join-Path \$srcAdvisory 'scripts\migrate-to-choco.ps1'" "$installer" ||
+    fail "installer: advisory must build the script path with Join-Path"
+grep -Fq "CHEZMOI_SOURCE_DIR -replace '/', '" "$installer" ||
+    fail "installer: advisory must normalize CHEZMOI_SOURCE_DIR slashes"
+! grep -Fq '$srcAdvisory\scripts' "$installer" ||
+    fail "installer: advisory must not concatenate the source dir with a backslash literal"
 
 grep -Fq -- 'bash tests/migrate_choco_contract.sh' "$ci_workflow" || {
     printf 'FAIL: ci.yml: migrate-choco contract is not a PR CI check\n' >&2
