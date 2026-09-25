@@ -36,7 +36,7 @@ if (-not (Test-IsAdmin) -and -not $ListOnly) {
 # Cross-generation PSModulePath guard: registry/Get-ItemProperty + Write-Host
 # live in the in-box modules 5.1 fails to autoload under pwsh 7's inherited
 # module path (shared implementation, issue #123).
-Use-InBoxModules
+Repair-InBoxModulePath
 
 # --- package universe: read from the catalog at runtime --------------------
 # .chezmoidata/packages.yaml is the only list (see #83). The installer renders
@@ -47,7 +47,7 @@ Use-InBoxModules
 # chezmoi is a hard prerequisite here already: this script is invoked through
 # `chezmoi source-path`.
 $__catalogJson = ''
-try { $__catalogJson = (chezmoi execute-template '{{ .catalog.packages | toJson }}' | Out-String).Trim() } catch {}
+try { $__catalogJson = (chezmoi execute-template '{{ .catalog.packages | toJson }}' | Out-String).Trim() } catch { Write-Verbose "catalog probe failed: $($_.Exception.Message)" }
 if (-not $__catalogJson) {
     Write-Host 'Could not read the package catalog from chezmoi data - is chezmoi initialised?' -ForegroundColor Red
     exit 1
@@ -77,7 +77,7 @@ $uninstallEntries = @(
 )
 
 $chocoManaged = @()
-try { $chocoManaged = @(choco list 2>$null | ForEach-Object { ($_ -split '\|')[0].Trim() }) } catch {}
+try { $chocoManaged = @(choco list 2>$null | ForEach-Object { ($_ -split '\|')[0].Trim() }) } catch { Write-Verbose "choco list failed: $($_.Exception.Message) - treating everything as unmanaged" }
 
 $candidates = @()
 foreach ($pkg in $Universe) {

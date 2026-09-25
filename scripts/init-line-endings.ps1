@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # Management/Utility, the in-box modules 5.1 fails to autoload under pwsh 7's
 # inherited module path (shared implementation, issue #123).
 . (Join-Path $PSScriptRoot 'lib\ps-common.ps1')
-Use-InBoxModules
+Repair-InBoxModulePath
 
 if (-not (Test-Path -LiteralPath $RepoDir -PathType Container)) {
     Write-Error "init-line-endings: no such directory: $RepoDir"

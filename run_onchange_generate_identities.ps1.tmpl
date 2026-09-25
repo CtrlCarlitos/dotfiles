@@ -130,6 +130,9 @@ if (-not (Test-Path $sshDirForSigners)) { New-Item -ItemType Directory -Path $ss
 # OpenSSH's own requirement that a user private key be accessible to no one
 # but its owner (not even SYSTEM/Administrators, per its docs).
 function Set-OwnerOnlyAcl {
+    # SupportsShouldProcess (PSUseShouldProcessForStateChangingFunctions): an
+    # ACL rewrite honors -WhatIf/-Confirm; default behavior unchanged.
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$Path)
     # Inheritance flags are only legal on directories - FileSystemAccessRule
     # throws ArgumentException ("No flags can be set") for file ACLs (caught
@@ -152,7 +155,9 @@ function Set-OwnerOnlyAcl {
     $prop = [System.Security.AccessControl.PropagationFlags]::None
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", $inherit, $prop, "Allow")
     $acl.AddAccessRule($rule)
-    Set-Acl -Path $Path -AclObject $acl
+    if ($PSCmdlet.ShouldProcess($Path, "restrict ACL to owner-only FullControl")) {
+        Set-Acl -Path $Path -AclObject $acl
+    }
 }
 
 # The directory itself, not just the files in it - only creating it if

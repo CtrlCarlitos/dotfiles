@@ -217,7 +217,8 @@ function Invoke-Menu([string]$homeDir, [string]$fakeMulti, [string]$fakePreset =
     }
 }
 
-function Assert-FileEquals([string]$file, [string]$expected, [string]$label) {
+# "Equal", not "Equals": PSUseSingularNouns misreads the trailing s as a plural noun.
+function Assert-FileEqual([string]$file, [string]$expected, [string]$label) {
     if (-not (Test-Path -LiteralPath $file)) { Fail $label 'file missing'; return }
     $actual = [IO.File]::ReadAllText($file)
     if ($actual -ceq $expected) {
@@ -253,7 +254,7 @@ try {
     if ($r.Exit -ne 0) { Fail 'fresh run exits 0' "exit=$($r.Exit) out=$($r.Output)" } else { Ok 'fresh run exits 0' }
     $cfg = Join-Path $H1 '.config/chezmoi/chezmoi.toml'
     if (-not (Test-Path $cfg)) { Fail 'config created' 'file missing' } else {
-        Assert-FileEquals $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 16 keys written with correct values'
+        Assert-FileEqual $cfg (ExpectedSection @('core', 'fonts', 'guardrail')) '(a) 16 keys written with correct values'
     }
     $log = @(Get-Content $GumLog)
     if ($log.Count -eq 2) { Ok 'preset prompt shown when no existing section' } else { Fail 'preset prompt shown' "gum calls: $($log.Count)" }
@@ -266,7 +267,7 @@ try {
     [IO.File]::WriteAllText($H2Cfg, $SeedNoPackages, (New-Object Text.UTF8Encoding($false)))
     $r = Invoke-Menu $H2 'core fonts guardrail'
     if ($r.Exit -ne 0) { Fail 'seeded run exits 0' "exit=$($r.Exit)" } else { Ok 'seeded run exits 0' }
-    Assert-FileEquals $H2Cfg ($SeedNoPackages + $nl + (ExpectedSection @('core', 'fonts', 'guardrail'))) '(b) accounts + other sections byte-preserved'
+    Assert-FileEqual $H2Cfg ($SeedNoPackages + $nl + (ExpectedSection @('core', 'fonts', 'guardrail'))) '(b) accounts + other sections byte-preserved'
 
     # --- (c) section in the middle of the file: in-place swap
     Write-Host '[3] re-run rewrites only the packages section (mid-file)'
@@ -279,7 +280,7 @@ try {
     [IO.File]::WriteAllText($H3Cfg, $prefix + $oldSection + $suffix, (New-Object Text.UTF8Encoding($false)))
     $r = Invoke-Menu $H3 'dev_desktop remote_access_server antigravity_desktop'
     if ($r.Exit -ne 0) { Fail 'mid-file re-run exits 0' "exit=$($r.Exit)" } else { Ok 'mid-file re-run exits 0' }
-    Assert-FileEquals $H3Cfg ($prefix + (ExpectedSection @('dev_desktop', 'remote_access_server', 'antigravity_desktop')) + $nl + $suffix) '(c) only [data.packages] swapped in place'
+    Assert-FileEqual $H3Cfg ($prefix + (ExpectedSection @('dev_desktop', 'remote_access_server', 'antigravity_desktop')) + $nl + $suffix) '(c) only [data.packages] swapped in place'
 
     # --- (d) existing keys become the --selected set; no preset on re-run
     Write-Host '[4] re-run pre-checks existing keys'
@@ -296,14 +297,14 @@ try {
     if ($log.Count -eq 2) { Ok 'preset + groups calls on fresh run' } else { Fail 'preset + groups calls' "gum calls: $($log.Count)" }
     if ($log -match '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,opencode_desktop,claude_cli,claude_desktop,chatgpt_cli,chatgpt_desktop,antigravity_cli,antigravity_desktop,dev_desktop,remote_access,guardrail ') { Ok 'full preset omits remote_access_server' } else { Fail 'full preset --selected set' ($log -join $nl) }
     $cfg = Join-Path $H4 '.config/chezmoi/chezmoi.toml'
-    Assert-FileEquals $cfg (ExpectedSection $TestGroups) 'full selection persisted'
+    Assert-FileEqual $cfg (ExpectedSection $TestGroups) 'full selection persisted'
 
     # --- gum cancel: config untouched
     Write-Host '[6] canceled menu leaves the config untouched'
     $before = [IO.File]::ReadAllText($H3Cfg)
     $r = Invoke-Menu $H3 '__FAIL__'
     if ($r.Exit -ne 0) { Fail 'cancel run exits 0' "exit=$($r.Exit)" } else { Ok 'cancel run exits 0' }
-    Assert-FileEquals $H3Cfg $before 'cancel = no write'
+    Assert-FileEqual $H3Cfg $before 'cancel = no write'
 
     # --- CI safety: redirected stdin (the GH Actions hang shape), or CI env --
     Write-Host '[7] redirected stdin, CI unset -> skipping menu'

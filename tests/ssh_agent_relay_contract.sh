@@ -126,8 +126,9 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
             fail "native start failed: $(cat "$tmp/err")"
         a_sock=$(SSH_AGENT_RELAY_NATIVE=1 "$tmp/relay" use github-alpha | sed 's/^export SSH_AUTH_SOCK=//')
         b_sock=$(SSH_AGENT_RELAY_NATIVE=1 "$tmp/relay" use github-beta | sed 's/^export SSH_AUTH_SOCK=//')
-        [ -n "$a_sock" ] && [ "$a_sock" != "$b_sock" ] ||
+        if [ -n "$a_sock" ] && [ "$a_sock" != "$b_sock" ]; then :; else
             fail "each account needs its own socket (got '$a_sock' and '$b_sock')"
+        fi
         SSH_AUTH_SOCK="$a_sock" ssh-add -l 2>/dev/null | grep -q 'a@x.test' ||
             fail "alpha's socket must hold alpha's key"
         SSH_AUTH_SOCK="$a_sock" ssh-add -l 2>/dev/null | grep -q 'b@x.test' &&

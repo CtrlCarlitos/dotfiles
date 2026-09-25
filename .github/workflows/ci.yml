@@ -14,10 +14,50 @@ on:
 permissions:
   contents: read
 
+# One run per ref (#132): a force-push or a quick PR update cancels the stale
+# run instead of racing it to completion (two runs 63s apart both ran to
+# completion on 2026-09-24, burning two full matrix passes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Path gate for the heavy jobs (#132). GitHub's own paths/paths-ignore
+  # filters are workflow-level only - a workflow-level ignore for **.md
+  # would also skip the lint job, and the docs-consistency tests living
+  # there are exactly the tests that must gate a docs change. So the gate
+  # lives in this job instead: heavy jobs (Windows runners, Docker, the
+  # apply matrix) are skipped for docs-only changes, lint always runs.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      heavy: ${{ steps.diff.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # three-dot diff needs the merge base
+
+      - id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+              echo "heavy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if git diff --name-only "origin/${BASE_REF}...HEAD" | grep -qvE '^(docs/|[^/]+\.(md|markdown)$)'; then
+              echo "heavy=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "Docs-only change - heavy jobs skipped; lint still gates it."
+          fi
+
   lint:
     name: Lint & Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -32,11 +72,7 @@ jobs:
       # while skipping the rendering assertions entirely (confirmed live: the
       # skill-wiring contract skipped 3 blocks and validated only greps).
       # Pinned to .chezmoi-version, like the other jobs.
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Lint shell scripts
         run: |
@@ -46,20 +82,139 @@ jobs:
           # cannot span a multi-line {{/* ... */}} comment, silently leaking its prose
           # text through as "bash code" for shellcheck to choke on - confirmed live,
           # this exact thing happened with a real multi-line comment in this repo.
-          # SC1128 (shebang must be on line 1) is excluded because every one of these
-          # OS-gated *.sh.tmpl files starts with a `{{ if eq .chezmoi.os ... -}}`
-          # wrapper line before the real shebang - stripping it still leaves a blank
-          # first line, which is a structural property of templating this file this
-          # way, not a real problem chezmoi or a shell will ever hit.
+          # Widened in #131 from `run_onchange_*.sh.tmpl install.sh
+          # devcontainer/install.sh` to every shell file git tracks: the same
+          # audit found 6 of 53 shell files linted and real findings in the
+          # rest (all fixed on the commit that introduced this loop).
+          # Per-class exclusions, kept explicit on purpose:
+          #   SC1091  "not following" every dynamic `. lib.sh` / lib/*.sh source -
+          #           the sourced files are in-repo; following them needs -x and
+          #           buys nothing for contract greps.
+          #   SC1128  every OS-gated *.sh.tmpl starts with a `{{ if }}` wrapper
+          #           line, so the stripped text has no shebang on line 1 - a
+          #           structural property of templating, not a defect.
+          #   SC2016  tests/*.sh quote literal-$ snippets OF THE CODE UNDER
+          #           TEST on purpose (that is what they assert about).
+          #   SC2148  dot_aliases.zsh is a sourced file with no shebang by
+          #           design; shellcheck has no zsh dialect, so it is parsed
+          #           as bash (-s bash) with the same alias grammar.
           FAILED=0
-          for f in run_onchange_*.sh.tmpl install.sh devcontainer/install.sh; do
-            if [[ -f "$f" ]]; then
-              echo "Checking $f..."
-              if ! perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 -; then
-                FAILED=1
-              fi
-            fi
+          for f in $(git ls-files '*.sh' '*.sh.tmpl' 'dot_local/bin/executable_*' '*.zsh'); do
+            [ -f "$f" ] || continue
+            echo "Checking $f..."
+            case "$f" in
+              *.tmpl)
+                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 - || FAILED=1
+                ;;
+              tests/*.sh)
+                shellcheck -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
+                ;;
+              *.zsh)
+                shellcheck -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
+                ;;
+              *)
+                shellcheck -s bash -e SC1091 "$f" || FAILED=1
+                ;;
+            esac
           done
+          exit $FAILED
+
+      - name: PSScriptAnalyzer (all .ps1 + stripped .ps1.tmpl)
+        shell: pwsh
+        run: |
+          # The bash-side lint's PowerShell counterpart (#131: it did not run
+          # anywhere). Templates are analyzed with the same strip idiom the
+          # shellcheck loop uses. Rule exclusions, each deliberate:
+          #   PSAvoidUsingWriteHost          profiles/installers print to the
+          #                                  host on purpose (color, 5.1 quirks).
+          #   PSUseBOMForUnicodeEncodedFile  the repo charset standard is
+          #                                  UTF-8 *without* BOM (.editorconfig
+          #                                  `charset = utf-8`, enforced by the
+          #                                  init-line-endings tooling). Non-ASCII
+          #                                  glyphs are cosmetic output, never
+          #                                  parsed input.
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+          Import-Module PSScriptAnalyzer
+          $failed = 0
+          foreach ($f in (git ls-files '*.ps1' '*.ps1.tmpl')) {
+            $target = $f
+            if ($f -like '*.tmpl') {
+              $stripped = (Get-Content $f -Raw) -replace '(?s)\{\{.*?\}\}', ''
+              $target = Join-Path ([IO.Path]::GetTempPath()) (($f -replace '[\\/]', '__') + '.ps1')
+              [IO.File]::WriteAllText($target, $stripped, [Text.UTF8Encoding]::new($false))
+            }
+            $findings = Invoke-ScriptAnalyzer -Path $target -Severity Error,Warning `
+              -ExcludeRule PSAvoidUsingWriteHost, PSUseBOMForUnicodeEncodedFile
+            if ($findings) {
+              $findings | ForEach-Object {
+                Write-Host "##[error]${f}:$($_.Extent.StartLineNumber) $($_.RuleName): $($_.Message)"
+              }
+              $failed = 1
+            } else {
+              Write-Host "ok: $f"
+            }
+          }
+          exit $failed
+
+      - name: actionlint (workflow lint)
+        run: |
+          # The three workflow files were validated only by execution before
+          # (#132): a typo surfaced as a red run hours later, or worse as a
+          # silently-skipped step. Version + checksum mirror the gitleaks
+          # pattern below (#133: pinned download, verified before use).
+          ACTIONLINT_VERSION=1.7.12
+          curl -fsSL -o "/tmp/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o /tmp/actionlint_checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" /tmp/actionlint_checksums.txt |
+            (cd /tmp && sha256sum -c -)
+          tar -xzf "/tmp/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -C /tmp actionlint
+          /tmp/actionlint -color
+
+      - name: Secret/PII scan (gitleaks)
+        # The tree-result.log class: debug dumps, machine paths, anything
+        # credential-shaped - caught at PR time instead of after a manual
+        # audit. The pinned binary runs directly (the gitleaks-action
+        # wrapper's SARIF upload exits 1 on clean scans; the binary is
+        # deterministic). Version comes from ONE place (.gitleaks-version,
+        # shared with the pre-commit hook rev) and the tarball is verified
+        # against the release's published checksums before it runs (#133;
+        # the three versions here used to drift: v8.18.4 / 8.24.3 / latest).
+        # --no-git scans the working tree; history scanning is a deliberate
+        # follow-up (see .gitleaks.toml).
+        run: |
+          GITLEAKS_VERSION="$(cat .gitleaks-version)"
+          curl -fsSL -o "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "/tmp/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "/tmp/gitleaks_${GITLEAKS_VERSION}_checksums.txt" |
+            (cd /tmp && sha256sum -c -)
+          tar -xzf "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact -v --no-git
+
+      - name: Validate all TOML and YAML files
+        # One loop over everything git tracks (#132): this used to validate
+        # exactly two files (.chezmoiexternal.toml, .pre-commit-config.yaml)
+        # while 5 fixture TOMLs, guardrail.toml, starship.toml, the data yaml
+        # and the workflows went unchecked, via an unpinned `pip install toml`
+        # (abandoned upstream, TOML 0.5). tomllib is stdlib on the runner's
+        # Python 3.12; PyYAML ships on the runner image (no pip at all).
+        run: |
+          FAILED=0
+          while IFS= read -r f; do
+            # chezmoi modify-templates (e.g. dot_codex/modify_config.toml)
+            # are templates first and TOML only after chezmoi merges them at
+            # apply time - the raw source is not valid TOML by design.
+            if grep -q 'chezmoi:modify-template' "$f"; then
+              echo "Skipping $f (chezmoi modify-template)"
+              continue
+            fi
+            echo "Validating $f..."
+            case "$f" in
+              *.toml) python3 -c "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))" "$f" || FAILED=1 ;;
+              *)      python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f" || FAILED=1 ;;
+            esac
+          done < <(git ls-files '*.toml' '*.yml' '*.yaml')
           exit $FAILED
 
       # One step runs every tests/*.sh (the runner enumerates the directory, so
@@ -88,30 +243,12 @@ jobs:
       - name: Test devprofile identity (pwsh twin)
         run: pwsh -NoProfile -File tests/devprofile_identity.ps1
 
-      - name: Secret/PII scan (gitleaks)
-        # The tree-result.log class: debug dumps, machine paths, anything
-        # credential-shaped - caught at PR time instead of after a manual
-        # audit. The pinned binary runs directly (the gitleaks-action
-        # wrapper's SARIF upload exits 1 on clean scans; the binary is
-        # deterministic and the version pin is the URL itself).
-        run: |
-          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
-            | tar -xzf - -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --redact -v --no-git
-
-      - name: Validate TOML files
-        run: |
-          pip install toml
-          python -c "import toml; toml.load('.chezmoiexternal.toml')"
-
-      - name: Validate YAML files
-        run: |
-          pip install pyyaml
-          python -c "import yaml; yaml.safe_load(open('.pre-commit-config.yaml'))"
-
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -120,15 +257,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Install zsh (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y zsh
+
+      # Toolchain parity with the lint job (#132): once the suite itself is
+      # macOS-portable (tests use GNU-only idioms like `stat -c '%a'` that
+      # hard-fail on BSD stat rather than skip), these two installs plus
+      # chezmoi above are everything `bash tests/run.sh --strict` needs here.
+      - name: Install shellcheck (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install shellcheck
 
       - name: Verify chezmoi version
         run: ~/.local/bin/chezmoi --version
@@ -146,21 +287,17 @@ jobs:
   test-windows:
     name: Test (Windows)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    # 20 not 15 (#132): this job seeds configs and renders templates through
+    # real installs; the one observed hang class (config prompt, tests/
+    # check_workflow_config_keys.sh:8) needs a ceiling that a docs-lint-scale
+    # job does not.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          # Create directory first
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\bin" | Out-Null
-          # Download the pinned version (matches Test (ubuntu-latest/macos-latest),
-          # which reads the same .chezmoi-version - this job used to always grab
-          # /releases/latest/..., testing a different, unpinned chezmoi version than
-          # every other job in this file, silently.
-          $chezmoiVersion = (Get-Content .chezmoi-version -Raw).Trim()
-          Invoke-WebRequest -Uri "https://github.com/twpayne/chezmoi/releases/download/$chezmoiVersion/chezmoi-windows-amd64.exe" -OutFile "$env:USERPROFILE\.local\bin\chezmoi.exe"
-          # Add to PATH
-          echo "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Verify chezmoi
         run: |
@@ -173,7 +310,27 @@ jobs:
         shell: bash
         run: bash tests/fixtures/chezmoi/compose.sh single off --out "$(cygpath -u "$USERPROFILE")/.config/chezmoi/chezmoi.toml"
 
-      - name: Verify PowerShell script syntax
+      # #132: production runs these scripts under powershell.exe (5.1 - see
+      # .chezmoi.toml.tmpl [interpreters.ps1]), yet the twins only ever ran
+      # under pwsh on Ubuntu. Each twin declares #Requires -Version 5.1 and
+      # was verified under a real 5.1 host before this step landed;
+      # select_packages.ps1 self-skips without a console stdin on Windows
+      # (its guard says so) and devprofile_identity.ps1 requires pwsh 7 -
+      # both stay wired on the Linux lint job.
+      - name: Test dotbackup/restore round-trip (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotbackup_restore.ps1
+
+      - name: Test dotfiles doctor (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotfiles_doctor.ps1
+
+      - name: Test pwsh profiles contract (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\pwsh_profiles.ps1
+
+      - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
+        shell: pwsh
         run: |
           # Parse what actually RUNS, not a text-stripped approximation.
           # This used to delete {{...}} with a negated character class and parse
@@ -182,28 +339,42 @@ jobs:
           # hashtable value), stripping leaves `'' = $"@()` - invalid PowerShell,
           # and a parse error that says nothing about the real script.
           # chezmoi renders the true file, so the check tests the artifact.
+          # Widened in #131 from the single install_packages template to every
+          # PowerShell file git tracks - the profiles (where the $args binding
+          # bug lived) and all scripts/*.ps1 were never parsed before.
           $chezmoi = "$env:USERPROFILE\.local\bin\chezmoi.exe"
-          $rendered = & $chezmoi execute-template `
-            --source="$env:GITHUB_WORKSPACE" `
-            --file "$env:GITHUB_WORKSPACE\run_onchange_install_packages.ps1.tmpl"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "##[error]chezmoi could not render run_onchange_install_packages.ps1.tmpl"
-            exit 1
-          }
-          $rendered | Out-File -FilePath "$env:TEMP\test.ps1" -Encoding utf8
+          $failed = 0
+          foreach ($f in (git ls-files '*.ps1' '*.ps1.tmpl')) {
+            $target = Join-Path $env:GITHUB_WORKSPACE $f
+            if ($f -like '*.tmpl') {
+              $rendered = & $chezmoi execute-template `
+                --source="$env:GITHUB_WORKSPACE" `
+                --file $target 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "##[error]chezmoi could not render $f"
+                Write-Host ($rendered | Out-String)
+                $failed = 1
+                continue
+              }
+              $target = "$env:TEMP\" + ($f -replace '[\\/]', '__') + '.rendered.ps1'
+              $rendered | Out-File -FilePath $target -Encoding utf8
+            }
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $target,
+              [ref]$null,
+              [ref]$errors
+            ) | Out-Null
 
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            "$env:TEMP\test.ps1",
-            [ref]$null,
-            [ref]$errors
-          ) | Out-Null
-
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Host "##[error]$($_.Message)" }
-            exit 1
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "##[error]${f}:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $failed = 1
+            } else {
+              Write-Host "ok: $f"
+            }
           }
-          Write-Host "PowerShell syntax check passed on the RENDERED script (0 errors)"
+          if ($failed -ne 0) { exit 1 }
+          Write-Host "PowerShell syntax check passed on every .ps1 and every RENDERED template (0 errors)"
 
       - name: Test chezmoi apply (dry-run)
         run: |
@@ -212,6 +383,9 @@ jobs:
   devcontainer:
     name: Test Devcontainer
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     env:
       DEVCONTAINER: "true"
     steps:
@@ -222,11 +396,7 @@ jobs:
           bash -n devcontainer/install.sh
           echo "Devcontainer script syntax OK"
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Run chezmoi apply (deliberately no pre-seeded account or packages)
         run: |
@@ -262,6 +432,9 @@ jobs:
   smoke-test:
     name: Smoke Test (Docker)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     container:
       image: ubuntu:22.04
     steps:
@@ -272,10 +445,9 @@ jobs:
           apt-get update
           apt-get install -y curl git zsh
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin -t "${CHEZMOI_VERSION}"
+      - uses: ./.github/actions/install-chezmoi
+        with:
+          bin-dir: /usr/local/bin
 
       - name: Create test config from fixtures (multi account, packages off)
         run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
@@ -300,14 +472,13 @@ jobs:
   integration-test:
     name: Integration Test (Account System)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Create test config from fixtures (multi account, packages off)
         run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
@@ -337,7 +508,7 @@ jobs:
           grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "✓ insteadOf for alice" || exit 1
 
           # Check URL rewriting for bob
-          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bobcorp" || exit 1
+          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bob" || exit 1
           grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "✓ insteadOf for bobcorp" || exit 1
 
           echo "=== URL shortcuts correct ==="
@@ -382,6 +553,9 @@ jobs:
   minimal-config-test:
     name: Minimal Config Test (Backward Compat)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -397,7 +571,7 @@ jobs:
           sh install.sh
 
           # Add local bin to path for subsequent steps
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Verify gitconfig has user info
         run: |
@@ -422,6 +596,12 @@ jobs:
   test-windows-install:
     name: Windows Installer Test
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    # 20 not 15 (#132): the installer runs Chocolatey and the whole apply.
+    # This is also the job class that hung 40+ minutes on an unanswered
+    # Read-Host before the non-interactive guard existed.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

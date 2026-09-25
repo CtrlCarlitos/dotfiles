@@ -33,7 +33,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = "2.0.0"
 $SshDir = Join-Path $env:USERPROFILE ".ssh"
 $ChezmoiConfig = Join-Path $env:USERPROFILE ".config\chezmoi\chezmoi.toml"
 
@@ -84,7 +83,8 @@ NOTES:
 #-------------------------------------------------------------------------------
 # PARSE CHEZMOI CONFIG
 #-------------------------------------------------------------------------------
-function Get-Accounts {
+# Singular noun (PSUseSingularNouns): returns the full account list.
+function Get-AccountList {
     if (Get-Command chezmoi -ErrorAction SilentlyContinue) {
         try {
             $jsonLines = & chezmoi data --format=json 2>$null
@@ -191,7 +191,7 @@ function Show-Current {
         Write-Host "  └──────────┴────────────────────────────────────────────┘"
         Write-Host ""
         
-        $accounts = Get-Accounts
+        $accounts = Get-AccountList
         $match = $accounts | Where-Object { $_.email -eq $email }
         if ($match) {
             Write-Success "Email matches a configured account"
@@ -212,7 +212,7 @@ function Show-Current {
 function Show-List {
     Write-Host ""
     
-    $accounts = Get-Accounts
+    $accounts = Get-AccountList
     
     if ($accounts.Count -eq 0) {
         Write-Warn "No accounts configured in chezmoi.toml"
@@ -294,7 +294,7 @@ function Use-Account {
         exit 1
     }
     
-    $accounts = Get-Accounts
+    $accounts = Get-AccountList
     if ($accounts.Count -eq 0) {
         Write-Err "No accounts configured"
         exit 1
@@ -536,7 +536,7 @@ function Test-Identity {
     }
     
     # Check if email matches known account
-    $accounts = Get-Accounts
+    $accounts = Get-AccountList
     if ($email) {
         $match = $accounts | Where-Object { $_.email -eq $email }
         if ($match) {

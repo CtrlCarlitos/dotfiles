@@ -27,7 +27,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         # Package name from .chezmoidata/agents.yaml, read at runtime like the
         # guardrail pin below. No literal fallback - that would be a copy.
         $codexPkg = ''
-        try { $codexPkg = (chezmoi execute-template '{{ .agents.npm.codex }}' | Out-String).Trim() } catch {}
+        try { $codexPkg = (chezmoi execute-template '{{ .agents.npm.codex }}' | Out-String).Trim() } catch { Write-Verbose "codex package probe failed: $($_.Exception.Message)" }
         if (-not $codexPkg) {
             Write-Host "  codex package name unavailable from chezmoi data - skipping" -ForegroundColor Red
         } else {
@@ -276,7 +276,7 @@ if ($guardrailEnabled) {
 }
 $guardrailVersion = ""
 if ($guardrailState) {
-    try { $guardrailVersion = (chezmoi execute-template '{{ .guardrail.version }}' | Out-String).Trim() } catch {}
+    try { $guardrailVersion = (chezmoi execute-template '{{ .guardrail.version }}' | Out-String).Trim() } catch { Write-Verbose "guardrail pin probe failed: $($_.Exception.Message)" }
 }
 if ($guardrailState -and -not $guardrailVersion) {
     Write-Host "  Warning: guardrail pin unavailable from chezmoi data - skipping guardrail steps" -ForegroundColor Red
@@ -294,7 +294,7 @@ if ($guardrailState -and -not $guardrailVersion) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri "$guardrailBase/install.ps1" -OutFile "$guardrailTmp\install.ps1" -UseBasicParsing
         Invoke-WebRequest -Uri "$guardrailBase/SHA256SUMS" -OutFile "$guardrailTmp\SHA256SUMS" -UseBasicParsing
-    } catch {}
+    } catch { Write-Verbose "guardrail installer download failed: $($_.Exception.Message)" }
     if (-not (Test-Path "$guardrailTmp\install.ps1") -or -not (Test-Path "$guardrailTmp\SHA256SUMS")) {
         Write-Host "  Warning: guardrail installer download failed - skipping" -ForegroundColor Red
         Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -311,7 +311,7 @@ if ($guardrailState -and -not $guardrailVersion) {
             $m = Select-String -Path "$guardrailTmp\SHA256SUMS" -Pattern " install\.ps1\s*$" | Select-Object -First 1
             if ($m) { $want = ($m.Line.Trim() -split '\s+')[0] }
             $got = (Get-FileHash -Algorithm SHA256 "$guardrailTmp\install.ps1").Hash
-        } catch {}
+        } catch { Write-Verbose "guardrail checksum read failed: $($_.Exception.Message)" }
         if (-not $want -or ($got.ToLower() -ne $want.ToLower())) {
             Write-Host "  Warning: guardrail installer CHECKSUM MISMATCH - not running it" -ForegroundColor Red
             Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -359,7 +359,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # storage.googleapis.com URL here vs claude.ai in the installer was
     # exactly that drift).
     $claudeInstallUrl = ''
-    try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch {}
+    try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
     if ($claudeInstallUrl) {
         & powershell -c "irm $claudeInstallUrl | iex"
     } else {

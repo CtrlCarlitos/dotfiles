@@ -118,7 +118,7 @@ make_source_home "$source_home"
 : > "$tmp/7z.log"
 run_backup "$source_home" >/dev/null
 archives=("$source_home"/.dot_backups/dotfiles-*.7z)
-[ "${#archives[@]}" = 1 ] && [ -f "${archives[0]}" ] || fail '[2] timestamped archive missing'
+if [ "${#archives[@]}" = 1 ] && [ -f "${archives[0]}" ]; then :; else fail '[2] timestamped archive missing'; fi
 grep -Fq -- '-t7z' "$tmp/7z.log" || fail '[2] archive type flag missing'
 grep -Fq -- '-mhe=on' "$tmp/7z.log" || fail '[2] header encryption flag missing'
 grep -Eq -- '(^| )-p( |$)' "$tmp/7z.log" || fail '[2] bare passphrase flag missing'

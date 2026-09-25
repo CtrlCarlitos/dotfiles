@@ -1,9 +1,17 @@
 #-------------------------------------------------------------------------------
 # Modern Tools Initialization
 #-------------------------------------------------------------------------------
+# starship/zoxide emit shell code that is designed to be eval'd - there is no
+# non-iex integration. PSSA suppression is scoped to this wrapper so the rule
+# stays live everywhere else.
+function Initialize-ModernTool {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingInvokeExpression', '', Justification = 'starship/zoxide init output is designed to be eval-ed')]
+    param([string]$InitScript)
+    Invoke-Expression $InitScript
+}
 # Starship
 if (Get-Command starship -ErrorAction SilentlyContinue) {
-    Invoke-Expression (&starship init powershell)
+    Initialize-ModernTool (&starship init powershell)
 }
 
 # Windows Terminal cwd reporting (OSC 9;9) - twin of the PowerShell 7
@@ -18,7 +26,7 @@ if ($env:WT_SESSION) {
 
 # Zoxide
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
-    Invoke-Expression (&zoxide init powershell | Out-String)
+    Initialize-ModernTool (&zoxide init powershell | Out-String)
 }
 
 # Direnv: deliberately NOT initialized on Windows. Confirmed live on a
@@ -149,9 +157,9 @@ function dp { devprofile @args }
 # (4-up) definition silently won, so `...` jumped four levels and 2-up was
 # unreachable. (`cd -` is pwsh 7-only - it is not available in 5.1.)
 function ~ { Set-Location ~ }
-function .. { cd .. }
-function ... { cd ..\.. }
-function .... { cd ..\..\.. }
+function .. { Set-Location .. }
+function ... { Set-Location ..\.. }
+function .... { Set-Location ..\..\.. }
 
 # Docker (dc family is the pwsh-native set; docker-clean/stop-all are the
 # dot_aliases.zsh pair, mirrored here for full parity)
@@ -161,8 +169,19 @@ function dcu { docker compose up -d $args }
 function dcd { docker compose down $args }
 function dcl { docker compose logs -f $args }
 function dcp { docker compose ps $args }
-function docker-clean { docker system prune -af --volumes }
-function docker-stop-all { docker stop (docker ps -aq) 2>$null }
+# docker-clean/stop-all keep their dot_aliases.zsh names verbatim - the names
+# ARE the cross-shell contract; PSSA's approved-verb rule is suppressed per
+# function for exactly these two.
+function docker-clean {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'name is alias-parity with dot_aliases.zsh')]
+    param()
+    docker system prune -af --volumes
+}
+function docker-stop-all {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'name is alias-parity with dot_aliases.zsh')]
+    param()
+    docker stop (docker ps -aq) 2>$null
+}
 
 #-------------------------------------------------------------------------------
 # Utilities
@@ -228,6 +247,6 @@ try {
             & ssh-add $__kp 2>&1 | Out-Null
         }
     }
-} catch { } finally {
+} catch { Write-Verbose "ssh-agent prewarm skipped: $($_.Exception.Message)" } finally {
     Remove-Variable __sshAgentIds,__loaded,__k,__kp,__fpSrc,__fp -ErrorAction SilentlyContinue
 }

@@ -375,7 +375,9 @@ list_accounts() {
     if ls "${SSH_DIR}"/id_* 1> /dev/null 2>&1; then
         for key in "${SSH_DIR}"/id_*; do
             if [[ "$key" != *.pub ]]; then
-                local keyname=$(basename "$key")
+                # Split declare/assign so basename's failure isn't masked (SC2155).
+                local keyname
+                keyname=$(basename "$key")
                 local keytype="auth"
                 local status_icon="${GREEN}✓${NC}"
                 local status_text="ok"
@@ -438,7 +440,7 @@ use_account() {
         done
         echo ""
         
-        read -p "Choice [1]: " choice
+        read -r -p "Choice [1]: " choice
         choice=${choice:-1}
         
         if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#ACCOUNT_USERNAMES[@]} ]]; then
@@ -468,6 +470,9 @@ use_account() {
         success "Configured identity for this repo: $account_name"
         echo ""
 
+        # Display paths: the literal '~' is the convention users see in docs and
+        # shell output (the real gitconfig uses $HOME); never meant to expand.
+        # shellcheck disable=SC2088
         print_identity_box "$name" "$email" "~/.ssh/${key}" "~/.ssh/${signkey:-$key}"
         echo ""
     else
@@ -498,6 +503,8 @@ use_account() {
         success "Configured identity for this repo: $account_name"
         echo ""
 
+        # Same literal-tilde display intent as the interactive branch above.
+        # shellcheck disable=SC2088
         print_identity_box "$name" "$email" "~/.ssh/${key}" "~/.ssh/${signkey:-$key}"
         echo ""
     fi
