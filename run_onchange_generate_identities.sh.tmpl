@@ -36,6 +36,7 @@ mkdir -p "$HOME/{{ . }}"
 {{- if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
 {{- if $username }}
 {{- $alias := printf "%s-%s" $provider $username }}
+{{- $key := "" }}{{ if hasKey . "key" }}{{ $key = .key }}{{ end }}
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ end }}
 {{- if and (not $signKey) (hasKey . "signingkey") }}{{ $signKey = .signingkey }}{{ end }}
@@ -48,8 +49,8 @@ cat > "$HOME/.gitconfig-{{ $alias }}" << 'IDENTITY_EOF'
 [user]
     name = {{ .name | quote }}
     email = {{ .email | quote }}
-{{- if and .key (not $isDevcontainer) }}
-    signingkey = ~/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ .key }}{{ end }}.pub
+{{- if and $key (not $isDevcontainer) }}
+    signingkey = ~/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ $key }}{{ end }}.pub
 
 [commit]
     gpgsign = true
@@ -58,8 +59,8 @@ cat > "$HOME/.gitconfig-{{ $alias }}" << 'IDENTITY_EOF'
     format = ssh
 
 [core]
-    sshCommand = "ssh -i ~/.ssh/{{ .key }} -o IdentitiesOnly=yes"
-{{- else if .key }}
+    sshCommand = "ssh -i ~/.ssh/{{ $key }} -o IdentitiesOnly=yes"
+{{- else if $key }}
 
 [core]
     # Devcontainer: plain ssh, so the forwarded agent's keys are used.
@@ -67,7 +68,7 @@ cat > "$HOME/.gitconfig-{{ $alias }}" << 'IDENTITY_EOF'
 {{- end }}
 IDENTITY_EOF
 echo "  ✓ Created ~/.gitconfig-{{ $alias }}"
-{{- if and .key $isDevcontainer }}
+{{- if and $key $isDevcontainer }}
 
 # Devcontainer signing: the account declares a signing key, so honor it - but a
 # container has no key FILES. `ssh-keygen -Y sign` only needs the PUBLIC half
@@ -75,14 +76,14 @@ echo "  ✓ Created ~/.gitconfig-{{ $alias }}"
 # agent and sign through it. With one agent per account (see
 # docs/devcontainer.md) the agent holds exactly one key; otherwise match it by
 # the account's email or key name. No agent key -> signing stays off, loudly.
-__sign_pub="$HOME/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ .key }}{{ end }}.pub"
+__sign_pub="$HOME/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ $key }}{{ end }}.pub"
 if [ ! -s "$__sign_pub" ] && [ -n "${SSH_AUTH_SOCK:-}" ]; then
     __agent_keys="$(ssh-add -L 2>/dev/null || true)"
     if [ "$(printf '%s\n' "$__agent_keys" | grep -c 'ssh-')" = "1" ]; then
         __match="$__agent_keys"
     else
         __match="$(printf '%s\n' "$__agent_keys" | grep -F -- {{ .email | quote }} | head -1 || true)"
-        [ -n "$__match" ] || __match="$(printf '%s\n' "$__agent_keys" | grep -F -- '{{ if $signKey }}{{ $signKey }}{{ else }}{{ .key }}{{ end }}' | head -1 || true)"
+        [ -n "$__match" ] || __match="$(printf '%s\n' "$__agent_keys" | grep -F -- '{{ if $signKey }}{{ $signKey }}{{ else }}{{ $key }}{{ end }}' | head -1 || true)"
     fi
     if [ -n "${__match:-}" ]; then
         mkdir -p "$HOME/.ssh"
@@ -94,7 +95,7 @@ if [ -s "$__sign_pub" ]; then
     cat >> "$HOME/.gitconfig-{{ $alias }}" << 'SIGN_EOF'
 
 [user]
-    signingkey = ~/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ .key }}{{ end }}.pub
+    signingkey = ~/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ $key }}{{ end }}.pub
 
 [commit]
     gpgsign = true
@@ -217,6 +218,7 @@ signers_file="$HOME/.ssh/allowed_signers"
 WORK="$(mktemp -d)"
 trap '[ -n "${WORK:-}" ] && rm -rf "$WORK"' EXIT
 signers_tmp="$WORK/allowed_signers.tmp"
+: > "$signers_tmp" # must exist even when nothing appends: sort -u below reads it unconditionally
 [[ -f "$signers_file" ]] && cat "$signers_file" >> "$signers_tmp"
 
 {{- range .accounts }}
