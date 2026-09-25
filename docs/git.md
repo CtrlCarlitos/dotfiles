@@ -111,6 +111,35 @@ Windows that's Git's bundled `ssh`, which reads key files directly. See
 accounts and organizations to the matching SSH alias. Cloning
 `https://github.com/<you>/repo` therefore uses the right key automatically.
 
+## Hooks
+
+`core.hooksPath = ~/.config/git/hooks` makes every repository run the hooks in that
+directory instead of its own `.git/hooks`. Today it holds one hook:
+
+| Hook | Does |
+|---|---|
+| `commit-msg` | Removes any `Co-Authored-By: Claude <noreply@anthropic.com>` trailer (either capitalisation), says so on stderr, then runs the repository's own `.git/hooks/commit-msg` if there is one, passing its exit status through |
+
+Why at the git layer: Claude Code only omits that trailer when its attribution
+setting is off, and that setting is per machine and per agent. On 2026-09-24 a
+commit picked it up while the setting was not yet applied, and GitHub's squash
+merge then copied it a second time. The hook does not care what any agent's
+settings were.
+
+Two consequences of `core.hooksPath`:
+
+- **Per-repo hooks run only if the shared directory chains to them.** Only
+  `commit-msg` chains today. A repository that relies on its own `pre-commit` or
+  `pre-push` needs a chaining twin added to `dot_config/git/hooks/` first.
+- **`pre-commit install` refuses** while `core.hooksPath` is set globally. In that
+  one repository, opt out with `git config core.hooksPath .git/hooks`; the shared
+  hook then no longer runs there.
+
+`git commit --no-verify` skips every hook, this one included.
+
+`tests/git_hooks_contract.sh` runs the hook against fixture messages and through a
+real `git commit` with `core.hooksPath` set.
+
 ## Aliases
 
 | Alias | Runs |

@@ -1,0 +1,43 @@
+#!/bin/sh
+# Shared commit-msg hook, run in every repository through
+# core.hooksPath = ~/.config/git/hooks (dot_gitconfig.tmpl, docs/git.md).
+#
+# 1. Remove any Claude co-author trailer. Claude Code appends
+#    "Co-Authored-By: Claude <noreply@anthropic.com>" unless its attribution
+#    setting is off, and that setting is per machine and per agent. GitHub's
+#    squash merge then copies the trailer a second time in lower case. A guard
+#    at the git layer holds no matter which agent wrote the message or what
+#    its settings were at the time.
+# 2. Chain to the repository's own commit-msg hook. core.hooksPath replaces
+#    .git/hooks entirely, so without this step every per-repo commit-msg hook
+#    would silently stop running.
+#
+# One-off bypass: git commit --no-verify (skips every hook, this one included).
+set -eu
+
+msg_file="$1"
+trailer='^[Cc]o-[Aa]uthored-[Bb]y:[[:space:]]*Claude[[:space:]]*<noreply@anthropic\.com>[[:space:]]*$'
+
+if grep -Eq "$trailer" "$msg_file"; then
+    tmp="$msg_file.strip.$$"
+    # grep -v exits 1 when nothing is left; an empty message is then git's to
+    # reject, not ours.
+    grep -Ev "$trailer" "$msg_file" > "$tmp" || :
+    mv -f "$tmp" "$msg_file"
+    printf 'commit-msg: removed the Claude co-author trailer (attribution is off in this environment)\n' >&2
+fi
+
+# The repository's own hook lives under the common git dir (correct for
+# worktrees too). Never resolve it with --git-path hooks: that honours
+# core.hooksPath and would point straight back at this file. The marker
+# guards the other way a loop could form (a repo hook that is a link to
+# this file): a second entry exits at once.
+if [ -n "${DOTFILES_COMMIT_MSG_ACTIVE:-}" ]; then
+    exit 0
+fi
+export DOTFILES_COMMIT_MSG_ACTIVE=1
+local_hook="$(git rev-parse --git-common-dir)/hooks/commit-msg"
+if [ -x "$local_hook" ]; then
+    exec "$local_hook" "$@"
+fi
+exit 0
