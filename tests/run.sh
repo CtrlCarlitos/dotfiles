@@ -57,7 +57,7 @@ for f in "$tests_dir"/*.sh; do
     if [ "$rc" -ne 0 ]; then
         failed=$((failed + 1))
         printf 'FAIL %s (exit %d)\n' "$base" "$rc"
-        printf '%s\n' "$out" | tail -25 | sed 's/^/    /'
+        printf '%s\n' "$out" | tail -200 | sed 's/^/    /'
         continue
     fi
 
