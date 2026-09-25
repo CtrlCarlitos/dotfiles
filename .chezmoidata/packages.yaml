@@ -155,10 +155,11 @@ catalog:
       choco: psmux
       note: >-
         The native Windows tmux (Rust, github.com/psmux/psmux) - official
-        Chocolatey package, ships psmux/pmux/tmux commands and reads .tmux.conf,
-        so it lands right where tmux sits on Linux/macOS. Listed right after
-        powershell-core deliberately: psmux recommends PS 7+, and the install
-        order follows this list.
+        Chocolatey package, ships psmux/pmux/tmux commands. A binary install
+        only: the dotfiles stay tmux-free on Windows (.tmux.conf and .tmux/
+        are ignored there), so no tmux config is managed for it. Listed right
+        after powershell-core deliberately: psmux recommends PS 7+, and the
+        install order follows this list.
     - id: wsl2
       group: core
       choco: wsl2
