@@ -45,6 +45,7 @@ fail() {
 }
 
 skip() {
+    _lib_cleanup
     printf 'SKIP: %s\n' "$1"
     exit 0
 }
@@ -67,10 +68,24 @@ forbid() { # $1 = file, $2 = literal
 
 render() {
     command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
-    chezmoi execute-template --config /dev/null --source "$_LIB_REPO_ROOT" "$@"
+    # The config must carry a .toml extension: chezmoi infers the config type
+    # from the filename, so --config /dev/null fails as an unsupported type.
+    # The file is empty either way - the host's config must not shape a render.
+    if [ -z "${_LIB_CONFIG:-}" ]; then
+        _LIB_CONFIG="$(mktemp "${TMPDIR:-/tmp}/lib-empty-config-XXXXXX.toml")"
+    fi
+    chezmoi execute-template --config "$_LIB_CONFIG" --source "$_LIB_REPO_ROOT" "$@"
+}
+
+_lib_cleanup() {
+    if [ -n "${_LIB_CONFIG:-}" ]; then
+        rm -f "$_LIB_CONFIG"
+        _LIB_CONFIG=""
+    fi
 }
 
 finish() {
+    _lib_cleanup
     if [ "$_tests_failed" -gt 0 ]; then
         printf 'FAIL (%d checks, %d failed)\n' "$_tests_checks" "$_tests_failed"
         exit 1
