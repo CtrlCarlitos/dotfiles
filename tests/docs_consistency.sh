@@ -22,21 +22,22 @@ require README.md "Join-Path (chezmoi source-path)"
 require README.md "~/.claude/skills"
 require README.md "~/.agents/skills"
 require README.md "OpenCode and Codex discover"
-require README.md "~/.config/opencode/commands"
-require README.md "~/.gemini/antigravity-cli/skills"
 require README.md "/teach"
 require README.md "update_ai_tools.sh"
 require README.md "update_ai_tools.ps1"
 require README.md "restart OpenCode"
-require README.md 'Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`.'
-require README.md "Codex CLI:"
-require README.md '`/skills`, then enter `$teach <topic>`.'
-require README.md "Only OpenCode receives generated command adapters."
-require README.md "Codex has no generated command files."
 forbid README.md 'OpenCode and Codex discover `~/.agents/skills`'
+# The agent-skills detail moved out of README into the strategy doc (#139);
+# the assertions moved with it.
+require docs/skills-install-strategy.md "~/.claude/skills"
+require docs/skills-install-strategy.md "~/.config/opencode/commands"
+require docs/skills-install-strategy.md "~/.gemini/antigravity-cli/skills"
+require docs/skills-install-strategy.md 'Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`.'
+require docs/skills-install-strategy.md "Codex CLI:"
+require docs/skills-install-strategy.md '`/skills`, then enter `$teach <topic>`.'
+require docs/skills-install-strategy.md "restart OpenCode"
 require docs/skills-install-strategy.md "~/.agents/skills"
 require docs/skills-install-strategy.md "OpenCode and Codex discover"
-require docs/skills-install-strategy.md "~/.gemini/antigravity-cli/skills"
 require docs/skills-install-strategy.md "Only OpenCode receives generated command adapters."
 require docs/skills-install-strategy.md "Codex has no generated command files."
 forbid docs/skills-install-strategy.md 'Codex `/teach'

@@ -17,7 +17,9 @@ about: Something didn't install or work as expected
 
 <!--
 Paste the relevant error or warning output (from the installer, chezmoi, or
-the CI run). Use code fences:
+the CI run) plus the output of `dot doctor` (or `dotfiles-doctor.sh`/`.ps1`
+directly) — it names the failing check and is the canonical first look.
+Use code fences:
 
 ```
 output here

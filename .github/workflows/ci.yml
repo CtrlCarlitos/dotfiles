@@ -83,6 +83,11 @@ jobs:
       - name: Test dotbackup/restore round-trip (pwsh twin)
         run: pwsh -NoProfile -File tests/dotbackup_restore.ps1
 
+      # Behavioral twin of tests/devprofile_contract.sh (Get-Accounts parsing,
+      # Test-Identity dirs mapping) - needs pwsh 7, which the linux runner has.
+      - name: Test devprofile identity (pwsh twin)
+        run: pwsh -NoProfile -File tests/devprofile_identity.ps1
+
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything
         # credential-shaped - caught at PR time instead of after a manual

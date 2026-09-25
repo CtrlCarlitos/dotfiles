@@ -219,5 +219,5 @@ account's directory, or a `devprofile use` run in the wrong repo.
 **Platform docs?**
 - [Windows specifics](windows.md) — PowerShell profiles, Chocolatey, the
   Windows `ssh-agent` service
-- [WSL specifics](testing-wsl.md) — WSL has its own agent, separate from
+- [WSL specifics](testing.md) — WSL has its own agent, separate from
   Windows

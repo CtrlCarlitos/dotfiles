@@ -1,5 +1,10 @@
 # Skills install strategy — findings
 
+_Status (2026-09-25): implemented and current. This is the as-built
+strategy; the original design rationale is
+[agent-skill-wiring-design.md](agent-skill-wiring-design.md), and
+`tests/agent_skill_wiring_contract.sh` enforces the wiring._
+
 Investigation (2026-08-30) into how this repo should install curated skill
 subsets across agents, prompted by wanting a few [GStack](https://github.com/garrytan/gstack)
 skills without the whole thing.
@@ -13,9 +18,8 @@ skills without the whole thing.
   OpenCode and Codex discover `~/.agents/skills`; the verified Claude Code copy supplies
   Antigravity because the Antigravity adapter has an incompatible destination.
 - The installer verifies every `<target>/<name>/SKILL.md`, then generates an
-  OpenCode-only command at `~/.config/opencode/commands/<name>.md`. Claude
-  Code, Antigravity CLI, and OpenCode use `/teach <topic>`; Codex uses
-  `/skills`, then `$teach <topic>`.
+  OpenCode-only command at `~/.config/opencode/commands/<name>.md`.
+  Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`. Codex CLI: open `/skills`, then enter `$teach <topic>`.
 - Only OpenCode receives generated command adapters.
 - Codex has no generated command files. It discovers the shared skill catalog.
 - Generated commands carry a dotfiles ownership marker. Refresh replaces or

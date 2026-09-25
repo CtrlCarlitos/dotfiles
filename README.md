@@ -8,10 +8,6 @@ One command. A menu. Your entire dev environment is set up.
 
 Cross-platform dotfiles for **Linux, macOS, Windows, WSL, and Devcontainers** — shell, editor, git identities, modern CLI tools, AI coding agents, and the wiring between them all.
 
-<!-- TODO: demo GIF goes here when VHS works on a real machine:
-![Menu demo](assets/demo-menu.gif)
--->
-
 ## 🚀 Install
 
 **Linux / macOS / WSL / Devcontainer:**
@@ -52,35 +48,13 @@ chezmoi apply
 
 ### Agent skills
 
-The curated skill catalog uses the `skills` CLI's supported destinations:
-
-- Claude Code: `~/.claude/skills`
-- OpenCode and Codex discover the shared `~/.agents/skills` catalog. Only
-  OpenCode receives generated command adapters in
-  `~/.config/opencode/commands`.
-- Antigravity CLI: `~/.gemini/antigravity-cli/skills`
-
-Claude Code, Antigravity CLI, and OpenCode use `/teach <topic>`. Codex CLI:
-open `/skills`, then enter `$teach <topic>`.
-Only OpenCode receives generated command adapters. Codex has no generated command files.
-
-Refresh curated skills explicitly after installation or whenever you want the
-latest catalog - `dot upgrade` runs the full sweep (packages + AI tools,
-session-gated); the underlying AI-tools section for a skills-only refresh:
-
-```sh
-bash "$(chezmoi source-path)/scripts/update_ai_tools.sh"
-```
-
-```powershell
-& (Join-Path (chezmoi source-path) 'scripts\update_ai_tools.ps1')
-```
-
-After installing or refreshing, restart OpenCode so it reloads updated skills
-and generated commands. Start a new Claude Code, Antigravity CLI, or Codex CLI
-session before using a refreshed skill. The updater refreshes the
-catalog-managed skill directories in `~/.agents/skills`; it does not remove
-other user-managed content there.
+Curated skills install for every agent in one pass: Claude Code reads
+`~/.claude/skills`, OpenCode and Codex discover the shared
+`~/.agents/skills` catalog, Antigravity gets a synced copy. Refresh with
+`update_ai_tools.sh` / `update_ai_tools.ps1` (or just `dot upgrade`). Full
+story — destinations, the `/teach` surface, and why you must restart OpenCode
+after a refresh — in
+[docs/skills-install-strategy.md](docs/skills-install-strategy.md).
 
 ### Prerequisites & platform notes
 
@@ -174,28 +148,9 @@ chezmoi apply
 
 ## 🗂️ Git Identity Management
 
-If you work across multiple GitHub accounts (personal, work, clients), this repo handles it automatically: **each account's identity is selected based on which folder you're in** — no manual switching.
+If you work across multiple GitHub accounts (personal, work, clients), this repo handles it automatically: **each account's identity is selected based on which folder you're in** — no manual switching. Every account gets its own SSH keys and a conditional include in `~/.gitconfig`; the `devprofile` CLI (`dp`) covers the exceptions (repos outside any mapped path, verification, new accounts).
 
-<details>
-<summary><strong>Show me how it works</strong></summary>
-
-Every account in your `chezmoi.toml` gets:
-- Its own SSH auth key + signing key
-- A conditional include in `~/.gitconfig` — the right name/email/signing key activates automatically when you `cd` into a repo under that account's `dirs`
-- A `Host <provider>-<username>` SSH alias for push/pull
-
-The `devprofile` CLI handles the exceptions (repos outside any mapped path, verifying the active identity, creating new accounts):
-
-```sh
-devprofile                                  # Which identity is active in this repo?
-devprofile list                             # All configured accounts and their keys
-devprofile use <username>                   # Override identity for this repo only
-devprofile init <name> <email> --passphrase # New account with fresh keys
-devprofile verify --install-hook            # Sanity check + pre-commit safety net
-```
-
-Full documentation: [docs/devprofile.md](docs/devprofile.md) — cross-platform.
-</details>
+Command reference and annotated output: [docs/devprofile.md](docs/devprofile.md).
 
 ---
 
@@ -214,7 +169,9 @@ New to zsh, tmux, or neovim? Start here:
 | Doc | What's in it |
 |-----|-------------|
 | [Quickstart](docs/quickstart.md) | Ten minutes from a fresh machine to a working environment |
+| [Docs index](docs/README.md) | Every doc in this repo, one line each |
 | [Invariants](docs/invariants.md) | Rules this repo learned the expensive way — read before changing templates, ignores or tests |
+| [Testing the dotfiles](docs/testing.md) | The per-platform verify/fix playbook (Linux, macOS, WSL, Windows) |
 | [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
@@ -232,6 +189,8 @@ New to zsh, tmux, or neovim? Start here:
 | [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
 | [Guardrail Install](docs/guardrail-install.md) | How the dotfiles call the agent-guardrails installer |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
+| [Agent Skill Wiring Design](docs/agent-skill-wiring-design.md) | The original design spec behind the skills wiring (implemented) |
+| [agent-browser install](docs/agent-browser-install.md) | Install requirements for the browser-automation skill's CLI |
 
 ## ❓ Troubleshooting
 
@@ -306,24 +265,30 @@ chezmoi doctor        # chezmoi's own health check
 <summary><strong>For contributors and the curious</strong></summary>
 
 ```
-install.sh / install.ps1            # Universal bootstrap (consent → gum → menu → chezmoi init)
-scripts/select-packages.{sh,ps1}    # The package-group menu (gum multi-select)
-scripts/update-versions.sh          # Weekly auto-updater (chezmoi + Antigravity 2.0 pins)
-scripts/update_ai_tools.{sh,ps1}    # AI tool upgrade commands
-run_onchange_install_packages.*     # Platform installers (16-group gated)
-run_onchange_generate_identities.*  # Git identity + SSH key generation
-dot_zshrc / dot_gitconfig.tmpl      # Shell and git configuration
-dot_config/nvim/                    # Neovim (Lazy.nvim)
-dot_config/opencode/modify_tui.json # OpenCode theme (merged into tui.json)
-dot_config/ghostty/                 # Ghostty (Mac/Linux twin of Windows Terminal)
-AppData/                            # Windows only: Terminal + VS Code keybindings (modify_ merges)
-Library/, dot_config/Code/          # macOS / Linux desktop: VS Code keybindings (same template)
-.chezmoitemplates/                  # Shared template bodies (VS Code keybindings)
-Documents/                          # Windows only: PowerShell profiles
-private_dot_ssh/                    # SSH config (templated, mode 600)
-.chezmoi.toml.tmpl                  # Config template (16 promptBoolOnce groups)
-tests/                              # CI test suite (menu, config keys, skills args) — run it: bash tests/run.sh
-docs/                               # You are here
+install.sh / install.ps1              # Universal bootstrap (consent → menu → chezmoi init --apply)
+run_onchange_install_packages.*       # Platform installers (16-group gated)
+run_onchange_generate_identities.*    # Git identity + SSH key generation
+run_onchange_sync_pwsh_profiles.ps1.tmpl   # OneDrive-redirected profile sync (Windows)
+run_after_dotfiles-doctor.*           # dot doctor health check on every apply
+run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
+.chezmoi.toml.tmpl                    # Config template (16 promptBoolOnce groups)
+.chezmoidata.yaml + .chezmoidata/     # Curated data: VS Code baseline, package catalog, agents.yaml
+.chezmoiexternal.toml                 # Oh My Zsh + tmux plugin externals (pinned archives)
+.chezmoitemplates/                    # Shared template bodies (pkg-names, keybindings, ...)
+.chezmoiignore                        # What never deploys to $HOME
+guardrail.toml                        # guardrail overlay (read from the source repo, not $HOME)
+dot_zshrc / dot_aliases.zsh           # Shell config + the dot/devprofile/dco alias layer
+dot_tmux.conf / dot_gitconfig.tmpl    # tmux bindings; gitconfig with includeIf identity routing
+dot_config/                           # nvim (Lazy.nvim), git hooks, starship, ghostty, opencode, Code keys
+dot_codex/modify_config.toml          # Codex config (merged, never clobbered)
+dot_local/bin/                        # devprofile (+ .ps1 twin), ssh-agent-relay
+private_dot_ssh/private_config.tmpl   # SSH config (templated, mode 600)
+Documents/                            # Windows only: PowerShell profiles (5.1 + 7)
+AppData/, Library/, dot_config/Code/  # Windows Terminal settings + VS Code keybindings (per-OS)
+devcontainer/install.sh               # Devcontainer bootstrap
+scripts/                              # The dot family, menu, updaters, doctors (never deployed)
+tests/                                # CI contract suite — run it: bash tests/run.sh
+docs/                                 # You are here — index: docs/README.md
 
 scripts/ and tests/ stay in the repo - they are never copied into $HOME.
 The `dot` family runs them from the source path.

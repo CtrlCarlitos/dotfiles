@@ -379,7 +379,7 @@ To make a Mac or Linux host you SSH into feel like your local tabs:
 
 1. **Install the dotfiles on the host** over SSH with the Linux/macOS one-liner in
    the [README](../README.md#-install). Read `install.sh` first; see the ground rules
-   in [testing-linux.md](testing-linux.md). Pick the **standard** preset, plus
+   in [testing.md](testing.md). Pick the **standard** preset, plus
    `chatgpt_cli` / `antigravity_cli` if you want every agent key to work there.
    Desktop groups skip themselves on a headless server.
    - **On a server you don't own (for example a customer machine):** choose only
