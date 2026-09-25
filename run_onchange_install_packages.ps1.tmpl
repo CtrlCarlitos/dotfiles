@@ -926,15 +926,21 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         # per-machine override [data.agents.serena] open_dashboard = true in
         # chezmoi.toml). serena init regenerates the file with Serena's default
         # (true), so only this one line is re-asserted; nothing else is touched.
+        # Same for the interface: empty means the platform default, which on
+        # Windows is the native app with one tray icon per instance.
         $serenaCfg = "$env:USERPROFILE\.serena\serena_config.yml"
         $serenaOpen = '{{ .agents.serena.open_dashboard }}'
+        $serenaIface = '{{ .agents.serena.dashboard_interface }}'
         if (Test-Path $serenaCfg) {
             try {
                 $serenaLines = [IO.File]::ReadAllLines($serenaCfg)
-                $serenaNew = @($serenaLines | ForEach-Object { $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)\s*$', "web_dashboard_open_on_launch: $serenaOpen" })
+                $serenaNew = @($serenaLines | ForEach-Object {
+                    $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)\s*$', "web_dashboard_open_on_launch: $serenaOpen" `
+                       -replace '^web_dashboard_interface:.*$', "web_dashboard_interface: $serenaIface"
+                })
                 if (($serenaNew -join "`n") -ne ($serenaLines -join "`n")) {
                     [IO.File]::WriteAllLines($serenaCfg, $serenaNew, (New-Object System.Text.UTF8Encoding($false)))
-                    Write-Host "  Serena dashboard auto-open set to $serenaOpen" -ForegroundColor Green
+                    Write-Host "  Serena dashboard: auto-open=$serenaOpen interface=$serenaIface" -ForegroundColor Green
                 }
             } catch {
                 Write-Host "  Warning: could not set Serena dashboard auto-open - $_" -ForegroundColor Red

@@ -37,8 +37,15 @@ agents:
   # init`. Per-machine override, in ~/.config/chezmoi/chezmoi.toml:
   #   [data.agents.serena]
   #   open_dashboard = true
+  # dashboard_interface: browser | app | tray_manager. Left empty, Serena picks
+  # the platform default, which on Windows/macOS is `app`: a native window
+  # with ONE TRAY ICON PER INSTANCE. Every agent session and every `claude -p`
+  # run spawns an instance, and exited ones leave ghost icons (48 counted on
+  # 2026-09-24). `browser` creates no icon; the dashboard stays reachable at
+  # http://localhost:24282/dashboard/. Override the same way as open_dashboard.
   serena:
     open_dashboard: false
+    dashboard_interface: browser
   npm:
     # Codex CLI. The installers install it; the updaters upgrade it to @latest.
     codex: "@openai/codex"
