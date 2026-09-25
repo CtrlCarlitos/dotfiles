@@ -1349,14 +1349,19 @@ VSEXT
             # per-machine override [data.agents.serena] open_dashboard = true in
             # chezmoi.toml). serena init regenerates the file with Serena's default
             # (true), so only this one line is re-asserted; nothing else is touched.
+            # Same for the interface: empty means the platform default, which on
+            # macOS is the native app with one tray icon per instance.
             SERENA_CFG="$HOME/.serena/serena_config.yml"
             SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
-            if [ -f "$SERENA_CFG" ] && ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG"; then
-                if sed -i.bak -E "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" "$SERENA_CFG"; then
+            SERENA_IFACE="{{ .agents.serena.dashboard_interface }}"
+            if [ -f "$SERENA_CFG" ] && { ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG" ||
+                                          ! grep -Eq "^web_dashboard_interface: ${SERENA_IFACE}[[:space:]]*\$" "$SERENA_CFG"; }; then
+                if sed -i.bak -E -e "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" \
+                                -e "s/^web_dashboard_interface:.*\$/web_dashboard_interface: ${SERENA_IFACE}/" "$SERENA_CFG"; then
                     rm -f "$SERENA_CFG.bak"
-                    info "Serena dashboard auto-open set to ${SERENA_OPEN}"
+                    info "Serena dashboard: auto-open=${SERENA_OPEN} interface=${SERENA_IFACE}"
                 else
-                    warn "could not set Serena dashboard auto-open - continuing"
+                    warn "could not set Serena dashboard settings - continuing"
                 fi
             fi
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
@@ -1835,14 +1840,19 @@ install_brew() {
             # per-machine override [data.agents.serena] open_dashboard = true in
             # chezmoi.toml). serena init regenerates the file with Serena's default
             # (true), so only this one line is re-asserted; nothing else is touched.
+            # Same for the interface: empty means the platform default, which on
+            # macOS is the native app with one tray icon per instance.
             SERENA_CFG="$HOME/.serena/serena_config.yml"
             SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
-            if [ -f "$SERENA_CFG" ] && ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG"; then
-                if sed -i.bak -E "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" "$SERENA_CFG"; then
+            SERENA_IFACE="{{ .agents.serena.dashboard_interface }}"
+            if [ -f "$SERENA_CFG" ] && { ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG" ||
+                                          ! grep -Eq "^web_dashboard_interface: ${SERENA_IFACE}[[:space:]]*\$" "$SERENA_CFG"; }; then
+                if sed -i.bak -E -e "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" \
+                                -e "s/^web_dashboard_interface:.*\$/web_dashboard_interface: ${SERENA_IFACE}/" "$SERENA_CFG"; then
                     rm -f "$SERENA_CFG.bak"
-                    info "Serena dashboard auto-open set to ${SERENA_OPEN}"
+                    info "Serena dashboard: auto-open=${SERENA_OPEN} interface=${SERENA_IFACE}"
                 else
-                    warn "could not set Serena dashboard auto-open - continuing"
+                    warn "could not set Serena dashboard settings - continuing"
                 fi
             fi
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
