@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
 # Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
 # Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
 # on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
 case "${OSTYPE:-}" in
-    msys*|cygwin*|win32) echo "SKIP: dotfiles_doctor.sh is Unix-only (the .ps1 twin covers Windows)"; exit 0 ;;
+    msys*|cygwin*|win32) skip "dotfiles_doctor.sh is Unix-only (the .ps1 twin covers Windows)" ;;
 esac
 
 # Behavioral tests for scripts/dotfiles-doctor.sh — the dotfiles-level
@@ -23,10 +25,9 @@ esac
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 doctor="$repo_root/scripts/dotfiles-doctor.sh"
 
-command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed\n'; exit 0; }
-command -v iconv >/dev/null 2>&1 || { printf 'FAIL: iconv required\n' >&2; exit 1; }
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+command -v iconv >/dev/null 2>&1 || { fail "iconv required"; exit 1; }
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 [ -x "$doctor" ] || fail "scripts/dotfiles-doctor.sh missing or not executable"
 
 TMP="$(mktemp -d)"
@@ -145,4 +146,4 @@ for f in "$run_after_sh" "$run_after_ps1"; do
 done
 echo "  ok: run_after hook stops apply on doctor errors (no auto-fix)"
 
-printf 'PASS: dotfiles-doctor.sh (8 scenarios)\n'
+finish

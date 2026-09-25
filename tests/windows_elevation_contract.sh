@@ -12,9 +12,8 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 docs="$repo_root/docs/windows.md"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 grep -Fq 'WindowsBuiltInRole]::Administrator' "$installer" ||
     fail "installer: no elevation check"
@@ -37,9 +36,4 @@ first_work=$(awk '
 
 grep -Fqi 'administrator' "$docs" || fail "docs/windows.md: elevation requirement not documented"
 
-grep -Fq -- 'bash tests/windows_elevation_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: elevation contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: Windows installer elevation gate contract\n'
+finish

@@ -17,12 +17,9 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$repo_root/dot_codex/modify_config.toml"
 want='insert_newline = ["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]'
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+. "$repo_root/tests/lib.sh"
 
-[ -f "$template" ] || fail "dot_codex/modify_config.toml missing"
+[ -f "$template" ] || { fail "dot_codex/modify_config.toml missing"; exit 1; }
 
 # 1. Static guarantees that hold without chezmoi installed.
 head -n 1 "$template" | grep -Fq 'chezmoi:modify-template' ||
@@ -42,14 +39,13 @@ grep -Fq -- 'tui.keymap.editor.insert_newline' "$template" ||
     fail "template no longer forces tui.keymap.editor.insert_newline"
 
 if ! command -v chezmoi >/dev/null 2>&1; then
-    printf 'PASS/SKIP: codex keymap contract (static checks only - requires chezmoi)\n'
-    exit 0
+    skip "codex keymap contract (static checks only - requires chezmoi)"
 fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-render() { chezmoi execute-template --with-stdin --file "$template"; }
+render_config() { chezmoi execute-template --with-stdin --file "$template"; }
 
 assert_once() {
     # $1 = file, $2 = description. Exactly one binding, one owning table.
@@ -62,7 +58,7 @@ assert_once() {
 }
 
 # 2. Empty config (a machine where Codex has never run).
-: | render > "$tmp/empty.out"
+: | render_config > "$tmp/empty.out"
 assert_once "$tmp/empty.out" "empty input"
 
 # 3. A realistic Codex-written config: the table is appended, and every
@@ -79,7 +75,7 @@ gpt-6-astra = 4
 [hooks.state.'C:\Users\me\.codex\hooks.json:stop:0:0']
 trusted_hash = "sha256:deadbeef"
 EOF
-render < "$tmp/real.toml" > "$tmp/real.out"
+render_config < "$tmp/real.toml" > "$tmp/real.out"
 assert_once "$tmp/real.out" "realistic config"
 while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -89,7 +85,7 @@ done < "$tmp/real.toml"
 
 # 4. Idempotent: applying to our own output changes nothing. (chezmoi re-runs
 #    modify templates on every apply; drift here would mean an endless diff.)
-render < "$tmp/real.out" > "$tmp/real.out2"
+render_config < "$tmp/real.out" > "$tmp/real.out2"
 diff -u "$tmp/real.out" "$tmp/real.out2" >/dev/null ||
     fail "not idempotent: a second render changes the file"
 
@@ -100,7 +96,7 @@ cat > "$tmp/conflict.toml" <<'EOF'
 insert_newline = ["ctrl-j"]
 kill_whole_line = ["ctrl-u"]
 EOF
-render < "$tmp/conflict.toml" > "$tmp/conflict.out"
+render_config < "$tmp/conflict.toml" > "$tmp/conflict.out"
 assert_once "$tmp/conflict.out" "conflicting binding"
 ! grep -Fq '["ctrl-j"]' "$tmp/conflict.out" || fail "conflicting binding: old value survived"
 grep -Fq 'kill_whole_line' "$tmp/conflict.out" ||
@@ -116,7 +112,7 @@ insert_newline = [
 ]
 kill_whole_line = ["ctrl-u"]
 EOF
-render < "$tmp/multiline.toml" > "$tmp/multiline.out"
+render_config < "$tmp/multiline.toml" > "$tmp/multiline.out"
 assert_once "$tmp/multiline.out" "multi-line array"
 # An orphan is a line that is ONLY an array element; the forced one-line value
 # legitimately contains `"ctrl-j",` inside it, so anchor the match.
@@ -132,7 +128,7 @@ cat > "$tmp/dotted.toml" <<'EOF'
 tui.keymap.editor.insert_newline = ["ctrl-j"]
 model = "gpt-5.6-sol"
 EOF
-render < "$tmp/dotted.toml" > "$tmp/dotted.out"
+render_config < "$tmp/dotted.toml" > "$tmp/dotted.out"
 grep -Fq 'tui.keymap.editor.insert_newline = ["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]' "$tmp/dotted.out" ||
     fail "dotted key: not replaced in place"
 ! grep -q '^\[tui\.keymap\.editor\]$' "$tmp/dotted.out" ||
@@ -157,4 +153,4 @@ PY
     fi
 fi
 
-printf 'PASS: codex config merge keeps machine state and forces one keymap binding\n'
+finish

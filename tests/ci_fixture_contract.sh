@@ -26,8 +26,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fx="$repo_root/tests/fixtures/chezmoi"
 ci="$repo_root/.github/workflows/ci.yml"
 full="$repo_root/.github/workflows/full-install-test.yml"
-failures=0
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
+
+. "$repo_root/tests/lib.sh"
 
 PY=""
 for c in python3 python; do
@@ -39,7 +39,6 @@ for f in accounts-single accounts-multi accounts-minimal packages-on packages-of
     [ -f "$fx/$f.toml" ] || fail "missing fixture $f.toml"
 done
 [ -f "$fx/compose.sh" ] || fail "missing compose.sh"
-[ "$failures" -eq 0 ] || { printf '\nFAIL: CI fixtures (%d problem(s))\n' "$failures" >&2; exit 1; }
 
 # ---------------------------------------------------------------- 1. fixtures
 tmp="$(mktemp -d)"
@@ -147,8 +146,4 @@ tied 'github-alice'               accounts-multi.toml   'username = "alice"'    
 tied 'IdentityFile ~/.ssh/id_bob' accounts-multi.toml   'key = "id_bob"'        "integration-test asserts on id_bob but accounts-multi no longer sets it"
 tied 'name = "Minimal User"'      accounts-minimal.toml 'name = "Minimal User"' 'minimal-config-test asserts on "Minimal User" but accounts-minimal no longer uses that name'
 
-if [ "$failures" -gt 0 ]; then
-    printf '\nFAIL: CI fixtures (%d problem(s))\n' "$failures" >&2
-    exit 1
-fi
-printf 'PASS: every CI chezmoi.toml composes from one fixture set, and each shape keeps its purpose\n'
+finish

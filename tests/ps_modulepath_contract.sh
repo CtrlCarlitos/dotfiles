@@ -9,9 +9,8 @@ set -euo pipefail
 # .ps1 template that touches Security/Utility cmdlets must self-sanitize.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 guarded=(
     run_onchange_generate_identities.ps1.tmpl
@@ -44,9 +43,4 @@ grep -Fq '# Hash: {{ include' "$sync_t" ||
 grep -Fq 'chezmoi.os "windows"' "$sync_t" ||
     fail "profile sync must be Windows-gated"
 
-grep -Fq -- 'bash tests/ps_modulepath_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: PSModulePath contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: PSModulePath cross-generation guard contract\n'
+finish

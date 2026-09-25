@@ -37,10 +37,10 @@ catalog="$repo_root/.chezmoidata/packages.yaml"
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 sh_t="$repo_root/run_onchange_install_packages.sh.tmpl"
 migrate="$repo_root/scripts/migrate-to-choco.ps1"
-failures=0
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
 
-[ -f "$catalog" ] || { printf 'FAIL: %s missing\n' "$catalog" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
+
+[ -f "$catalog" ] || { fail "$catalog missing"; exit 1; }
 for f in choco-packages pkg-names; do
     [ -f "$repo_root/.chezmoitemplates/$f" ] || fail ".chezmoitemplates/$f missing - the installers render package names through it"
 done
@@ -68,17 +68,17 @@ grep -Fq 'execute-template' "$migrate" ||
     fail "scripts/migrate-to-choco.ps1: does not read the catalog through chezmoi execute-template"
 
 # --------------------------------------- 1, 3, 4 need chezmoi to render
-command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed (static checks only)\n'; exit 0; }
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (static checks only)"
 PY=""
 for c in python3 python; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import json' 2>/dev/null; then PY="$c"; break; fi
 done
-[ -n "$PY" ] || { printf 'SKIP: no python (static checks only)\n'; exit 0; }
+[ -n "$PY" ] || skip "no python (static checks only)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-: > "$tmp/chezmoi.toml"      # empty: the HOST's config must not shape the render
-render() { chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" "$@"; }
+# render is lib.sh's: empty config (the HOST's config must not shape the
+# render - the first version read the host config and failed on CI) + repo source.
 
 grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" \
     | sed -E 's/.*"packages\.([a-z_]+)"/\1/' > "$tmp/groups.txt"
@@ -193,8 +193,4 @@ print("  catalog: %d tools, %d choco / %d brew / %d cask / %d apt names; migrate
 sys.exit(1 if bad else 0)
 PYEOF
 
-if [ "$failures" -gt 0 ]; then
-    printf '\nFAIL: package catalog (%d problem(s))\n' "$failures" >&2
-    exit 1
-fi
-printf 'PASS: package names live only in .chezmoidata/packages.yaml; both twins render exactly them, migrate-to-choco reads them\n'
+finish

@@ -17,10 +17,7 @@ sh_updater="$repo_root/scripts/update_ai_tools.sh"
 ps1_updater="$repo_root/scripts/update_ai_tools.ps1"
 version_script="$repo_root/scripts/update-versions.sh"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+. "$repo_root/tests/lib.sh"
 
 # 1. Single source of truth carries exactly one valid exact-version pin.
 [ -f "$data_file" ] || fail ".chezmoidata.yaml missing - the pin has no home"
@@ -65,4 +62,4 @@ if command -v chezmoi >/dev/null 2>&1; then
         fail "rendered installer does not carry GUARDRAIL_VERSION=\"$pin\""
 fi
 
-printf 'PASS: guardrail pin lives only in .chezmoidata.yaml (%s)\n' "$pin"
+finish

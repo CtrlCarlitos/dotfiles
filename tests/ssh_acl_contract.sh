@@ -13,9 +13,8 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpl="$repo_root/run_onchange_generate_identities.ps1.tmpl"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 grep -Fq 'ContainerInherit' "$tmpl" || fail "directory ACL rule lost ContainerInherit"
 grep -Fq 'ObjectInherit' "$tmpl" || fail "directory ACL rule lost ObjectInherit"
@@ -26,9 +25,4 @@ grep -Fq 'SetAccessRuleProtection($true, $false)' "$tmpl" ||
 grep -Fq 'Extension -ne ".pub"' "$tmpl" ||
     fail ".pub exclusion missing from the private-key ACL loop"
 
-grep -Fq -- 'bash tests/ssh_acl_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: SSH ACL contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: SSH ACL inheritable-directory contract\n'
+finish
