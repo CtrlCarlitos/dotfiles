@@ -466,14 +466,17 @@ try {
             $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
             if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
 
-            $lifecycleBody = "`$skAgents = @('claude-code', 'opencode')`n" +
-                # The updater derives its catalog path from $curatedCatalog
-                # (scripts/update_ai_tools.ps1 keeps it next to $curatedSkillTotal,
-                # both outside the extracted region): seed the fixture's catalog so
-                # the lifecycle takes its real branch, not the missing-catalog
-                # fallback that calls an undefined helper in this isolated scope.
+            # The updater derives its catalog path from $curatedCatalog
+            # (scripts/update_ai_tools.ps1 keeps it next to $curatedSkillTotal,
+            # both outside the extracted region): the prelude seeds the fixture's
+            # catalog so the lifecycle takes its real branch, not the
+            # missing-catalog fallback that calls an undefined helper in this
+            # isolated scope. The prelude is prefixed to EVERY execution of the
+            # captured region - the second, assertion-only run below included.
+            $fixturePrelude = "`$skAgents = @('claude-code', 'opencode')`n" +
                 "`$curatedCatalog = Join-Path '$catalogDir' 'curated-agent-skills.txt'`n" +
-                "`$curatedSkillTotal = 3`n" + ($match.Value -replace '(?m)^    \$catalog =', @'
+                "`$curatedSkillTotal = 3`n"
+            $lifecycleBody = $fixturePrelude + ($match.Value -replace '(?m)^    \$catalog =', @'
     function Move-Item {
         param($LiteralPath, $Destination, $ErrorAction)
         if ($LiteralPath -like '*.handoff.tmp.*' -and $Destination -eq $antigravitySkill) {
@@ -493,7 +496,7 @@ try {
             if (($output -join "`n") -notmatch 'Curated skills: Antigravity installed=0 .* failed=1') {
                 throw "Antigravity summary reported stale skill as installed: $lifecycle"
             }
-            & ([scriptblock]::Create($match.Value)) | Out-Null
+            & ([scriptblock]::Create($fixturePrelude + $match.Value)) | Out-Null
         }
     } finally {
         $env:USERPROFILE = $previousHome
