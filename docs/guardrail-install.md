@@ -156,10 +156,9 @@ Location semantics matter here: guardrail reads this overlay from the
 `guardrail.toml` copy in `$HOME` is dead weight — `guardrail doctor` run
 there reports `overlay: none` — which is why the file is on
 `.chezmoiignore`'s never-deploy list, pinned by
-`tests/home_scope_contract.sh`. If you want guardrail to treat additional
-web hosts as trusted (for example a docs site your prompt config references;
-starship.rs is the shipped entry), edit the file in the repo, and it takes
-effect on the next apply from the source path.
+`tests/home_scope_contract.sh`. The shipped entry (`starship.rs`, a docs
+site your prompt config references) is the only trusted web host; edit the
+file in the repo to change it — never a `$HOME` copy, which nothing reads.
 
 ## Caveats
 
