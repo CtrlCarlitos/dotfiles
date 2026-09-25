@@ -180,19 +180,6 @@ try {
         }
     }
 
-    # 1.6 Install Modern Tools (Chocolatey)
-    Write-Info "Installing modern tools (Starship, Zoxide, Direnv, etc)..."
-    $modernTools = @("starship", "zoxide", "direnv", "lazygit", "bat", "eza", "fd", "gsudo", "powertoys")
-    foreach ($tool in $modernTools) {
-        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-             try {
-                 choco install $tool -y --no-progress
-             } catch {
-                 Write-Error "Failed to install $tool (might be already installed or error)"
-             }
-        }
-    }
-
     # 2. Initialize & Apply
     Write-Info "Applying dotfiles..."
 
@@ -228,7 +215,20 @@ try {
         # only - local commits/edits are respected; on failure (offline,
         # diverged) warn and continue with the existing source.
         Write-Info "Updating existing dotfiles clone..."
-        git -C "$env:USERPROFILE/.local/share/chezmoi" pull --ff-only 2>$null
+        # 5.1 promotes any line a redirected native command writes to stderr
+        # into a terminating NativeCommandError under $ErrorActionPreference
+        # = Stop - and `git pull` writes its FETCH_HEAD progress to stderr
+        # exactly when there is something to fetch, so the 2>$null alone does
+        # NOT save the rerun path (same class as the extension loop in
+        # run_onchange_install_packages.ps1.tmpl). Drop EAP to Continue
+        # around the call; the exit code below is the real signal.
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            git -C "$env:USERPROFILE/.local/share/chezmoi" pull --ff-only 2>$null
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Info "  clone update failed (offline? local changes?) - continuing with existing source"
         }
