@@ -96,7 +96,9 @@ function nrb { npm run build }
 function serve { python -m http.server 8000 }
 function ff { Get-ChildItem -Recurse -File -Filter "$args" }
 function path { $env:Path -split ';' }
-function reload { . $PROFILE }
+# No `reload`: dot-sourcing $PROFILE inside a function defines everything in
+# that function's scope, which is discarded on return. After installing or
+# refreshing, restart the terminal instead.
 function prof { nvim $PROFILE }
 function get { curl.exe -sS @args }
 function post { curl.exe -sS -X POST @args }
@@ -180,7 +182,9 @@ function devprofile {
     # Fallback to local script if installed via dot_local/bin
     $ScriptPath = Join-Path $env:USERPROFILE ".local\bin\devprofile.ps1"
     if (Test-Path $ScriptPath) {
-        & "$ScriptPath" $args
+        # Splat: $args as one object[] cannot bind to devprofile.ps1's
+        # [string]$Command (every `devprofile <cmd>` failed before the splat).
+        & $ScriptPath @args
     } else {
         Write-Host "devprofile.ps1 not found at $ScriptPath" -ForegroundColor Red
     }
