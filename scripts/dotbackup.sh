@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# dotbackup.sh - encrypted portable backup of this machine's dotfiles state.
+# Packs ~/.config/chezmoi/chezmoi.toml and every regular file under ~/.ssh
+# into an AES-256 7-Zip archive at ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z.
+# Prompts for the passphrase (never echoed, never on the command line).
+# Usage: bash dotbackup.sh            (or: dot backup)
+# Full contract: docs/backup-restore.md; refusals live in the checks below.
 set -euo pipefail
 
 seven_zip="$(command -v 7zz || command -v 7z || true)"

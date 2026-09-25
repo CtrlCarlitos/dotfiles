@@ -1,3 +1,10 @@
+<#
+update_ai_tools.ps1 - refresh the AI coding tools and curated skills, no
+package-manager sweep (Windows twin of scripts/update_ai_tools.sh). Upgrades
+the AI CLIs (Claude Code, Codex, OpenCode, agy, Serena, Graft, act) and
+re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
+`dot upgrade` (which exports the defer list) or direct: .\update_ai_tools.ps1
+#>
 Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot

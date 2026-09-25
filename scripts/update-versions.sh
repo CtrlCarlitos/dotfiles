@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# update-versions.sh - refresh the version pins this repo carries: the
+# chezmoi pin in .chezmoi-version and the Antigravity 2.0 hub pin rendered
+# by the installer templates. Run by the weekly CI cron; a run with no pin
+# movement makes no change. See the per-pin comments below for the failure
+# lessons (gzip decoding, channel matching) baked into this script.
 
 set -e
 

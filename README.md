@@ -270,13 +270,35 @@ Docker Desktop needs the `kvm` group. The installer adds you automatically, but 
 
 ## 🔄 Day-to-Day Commands
 
+The `dot` family is the daily interface (zsh and PowerShell both define it):
+
+```sh
+dot up        # sync: pull the repo, apply changes. Never upgrades packages.
+dot upgrade   # upgrade ALL tooling (apt/brew/choco/winget + AI CLIs). The only thing that does.
+dot backup    # encrypted portable backup of config + SSH keys
+dot restore   # restore a backup: dot restore <archive.7z>
+dot doctor    # dotfiles health check; add --fix to repair what it can
+```
+
+`dot` with no arguments prints this list. Underneath, it is still chezmoi —
+for the raw commands:
+
 ```sh
 chezmoi apply          # apply pending changes (after editing config or pulling)
-chezmoi update         # pull the latest from this repo and apply
 chezmoi edit ~/.zshrc # edit any managed file in your $EDITOR, then chezmoi apply
 chezmoi diff          # preview what would change
-chezmoi doctor        # health check
+chezmoi doctor        # chezmoi's own health check
 ```
+
+### Environment variables the tooling reads
+
+| Variable | Set by / for | What it does |
+|---|---|---|
+| `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
+| `DOTFILES_DOCTOR_IN_APPLY` | `run_after_dotfiles-doctor.*` | Runs `dot doctor` mid-apply in a restricted, non-fatal mode (it fires on every `chezmoi apply`) |
+| `CHEZMOI_CONFIG_DIR` | `dotfiles-doctor.*` | Where the doctor looks for `chezmoi.toml` (default `~/.config/chezmoi`) |
+| `CHEZMOI_SOURCE_DIR` | `run_after_dotfiles-doctor.*` | Where the apply-time doctor finds the source repo (default `~/.local/share/chezmoi`) |
+| `DEVPROFILE_PASSPHRASE` | `devprofile init` | `1`/`0` (or `true`/`yes`/`no`/`false`) sets the passphrase default for new keys when no flag is given — see [devprofile](docs/devprofile.md) |
 
 ## 📂 Repository Structure
 

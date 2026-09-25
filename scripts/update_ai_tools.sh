@@ -1,4 +1,9 @@
 #!/bin/bash
+# update_ai_tools.sh - refresh the AI coding tools and curated skills, no
+# package-manager sweep. Upgrades the AI CLIs (Claude Code, Codex, OpenCode,
+# agy, Serena, Graft, act) and re-runs the curated-skill install, honoring
+# DOTUPGRADE_DEFER. Entry points: `dot upgrade` (which exports the defer
+# list) or direct: bash scripts/update_ai_tools.sh
 set -e
 
 echo "🤖 Updating AI Coding Tools..."

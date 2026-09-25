@@ -610,6 +610,9 @@ if [[ ! -f "$catalog" ]]; then
 else
     actual_skills=()
     while IFS= read -r skill || [[ -n "$skill" ]]; do
+        # Header/comments are legal: the installer and updater readers skip
+        #-prefixed lines, so the contract must too.
+        [[ "$skill" == \#* ]] && continue
         if [[ -z "$skill" ]]; then
             fail 'curated skill catalog must not contain empty lines'
             continue

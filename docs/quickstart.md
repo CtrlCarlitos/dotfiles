@@ -61,6 +61,7 @@ Five things, not a matrix:
 dot up          # sync: pull the repo, apply changes. Never upgrades packages.
 dot upgrade     # upgrade ALL tooling (apt/brew + AI CLIs). The only thing that does.
 dot doctor      # health check: config parses, keys present, versions match the pins
+dot doctor --fix # same check, repairing what it safely can (e.g. a mangled config encoding)
 devprofile      # which git identity is active in this folder?  (alias: dp)
 ```
 

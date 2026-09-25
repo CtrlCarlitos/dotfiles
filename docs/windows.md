@@ -24,6 +24,25 @@ Sudo-style alternatives to opening a separate elevated terminal:
   builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
+### `dot upgrade` on Windows: admin + winget
+
+`dot upgrade` is the single owner of tool upgrades (system packages + AI
+tools; `dot up` never upgrades). On Windows it is administrator-only by
+design — `scripts/dotupgrade.ps1` checks `IsInRole(Administrator)` and
+**exits without changing anything** from a normal shell, printing the
+re-run hint. The same UAC constraints as `dot up` apply: use an elevated
+terminal, Windows 11 `sudo`, or gsudo.
+
+The Windows sweep upgrades system packages with `choco upgrade all` (the
+reason elevation is required) and `winget upgrade --all
+--include-unknown` (store apps can abort on interactive source agreements —
+the script warns and continues), then the AI tools via
+`update_ai_tools.ps1`. Like its Unix twin it
+defers upgrades for tools whose directories live agent sessions are
+currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
+quiet. Inside a devcontainer, upgrades ship via image rebuild and the
+script no-ops.
+
 Windows provides the host side of the setup:
 
 - **Windows Terminal**, configured by chezmoi. Details are in [Terminal Experience](terminal.md).

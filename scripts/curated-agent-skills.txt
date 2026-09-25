@@ -1,3 +1,8 @@
+# Curated skill catalog: one skill name per line, installed for every agent
+# by install_agent_skills() (run_onchange_install_packages.*.tmpl and both
+# scripts/update_ai_tools.*). Blank lines and #-comment lines are skipped by
+# the readers, so this header is safe. Sources, counts, and the per-skill
+# install commands live in docs/skills-install-strategy.md.
 codebase-design
 domain-modeling
 grill-with-docs
