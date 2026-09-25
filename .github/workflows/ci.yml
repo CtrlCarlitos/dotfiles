@@ -118,6 +118,9 @@ jobs:
       - name: Test home scope contract
         run: bash tests/home_scope_contract.sh
 
+      - name: Test shared git hooks contract
+        run: bash tests/git_hooks_contract.sh
+
       - name: Test ssh-agent-relay contract
         run: bash tests/ssh_agent_relay_contract.sh
 
