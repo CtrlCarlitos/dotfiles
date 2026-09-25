@@ -34,6 +34,7 @@ printf 'x\n' > "$R/b.ps1"
 printf 'x = 1\n' > "$R/c.py"
 printf 'k: v\n' > "$R/d.yml"
 printf 'not-an-image\n' > "$R/img.png"   # type-marker only
+printf 'x\n' > "$R/e.ps1.tmpl"           # .gitattributes says crlf for these
 printf 'go\n' > "$R/m.go"
 printf '#!/bin/sh\r\necho crlf\r\n' > "$R/legacy.sh"
 git -C "$R" add -A
@@ -47,9 +48,14 @@ grep -Fq '*.sh text eol=lf' "$R/.gitattributes" || fail "[sh] missing sh LF rule
 grep -Fq '*.ps1 text eol=crlf' "$R/.gitattributes" || fail "[sh] missing ps1 CRLF rule"
 grep -Fq '*.png binary' "$R/.gitattributes" || fail "[sh] missing binary rule for present png"
 ! grep -Fq '*.jpg binary' "$R/.gitattributes" || fail "[sh] generated rule for absent jpg"
+grep -Fq '*.ps1.tmpl text eol=crlf' "$R/.gitattributes" || fail "[sh] missing ps1.tmpl CRLF rule"
 
 grep -Fq 'end_of_line = lf' "$R/.editorconfig" || fail "[sh] editorconfig missing lf"
 grep -Fq 'end_of_line = crlf' "$R/.editorconfig" || fail "[sh] editorconfig missing ps1 crlf"
+# EditorConfig globs match the full name: x.ps1.tmpl must fall under the
+# CRLF section, not the [*] lf default (mirrors .gitattributes *.ps1.tmpl).
+grep -Fq '[*.{ps1,ps1.tmpl}]' "$R/.editorconfig" || fail "[sh] editorconfig missing ps1/ps1.tmpl crlf pair"
+grep -Fq 'trim_trailing_whitespace = true' "$R/.editorconfig" || fail "[sh] editorconfig must trim trailing whitespace"
 grep -Fq 'indent_style = tab' "$R/.editorconfig" || fail "[sh] editorconfig missing go tab indent"
 grep -Fq 'charset = utf-8' "$R/.editorconfig" || fail "[sh] editorconfig missing charset"
 
@@ -76,6 +82,7 @@ if command -v pwsh >/dev/null 2>&1; then
     git -C "$R2" config core.autocrlf false
     printf '#!/bin/sh\necho hi\n' > "$R2/a.sh"
     printf 'x\n' > "$R2/b.ps1"
+    printf 'x\n' > "$R2/e.ps1.tmpl"
     printf '#!/bin/sh\r\necho crlf\r\n' > "$R2/legacy.sh"
     git -C "$R2" add -A
     git -C "$R2" commit -qm init
@@ -84,6 +91,7 @@ if command -v pwsh >/dev/null 2>&1; then
     grep -Fq '* text=auto eol=lf' "$R2/.gitattributes" || fail "[ps1] missing LF default rule"
     grep -Fq '*.ps1 text eol=crlf' "$R2/.gitattributes" || fail "[ps1] missing ps1 CRLF rule"
     grep -Fq 'end_of_line = lf' "$R2/.editorconfig" || fail "[ps1] editorconfig missing lf"
+    grep -Fq '[*.{ps1,ps1.tmpl}]' "$R2/.editorconfig" || fail "[ps1] editorconfig missing ps1/ps1.tmpl crlf pair"
     git -C "$R2" diff --cached --name-only | grep -Fq 'legacy.sh' ||
         fail "[ps1] CRLF-committed legacy.sh was not renormalized"
     echo "  ok: ps1 twin generates agreeing pair + renormalizes"

@@ -11,7 +11,7 @@ Behavior (mirrors the .sh twin):
   - scans tracked files (git ls-files; falls back to Get-ChildItem)
   - writes .gitattributes: `* text=auto eol=lf` default, explicit LF for
     shell types, CRLF for Windows-native scripts, `binary` for binary types
-  - writes a matching .editorconfig (utf-8, lf, CRLF for ps1/bat/cmd)
+  - writes a matching .editorconfig (utf-8, lf, trim trailing, CRLF for ps1/ps1.tmpl/bat/cmd)
   - runs `git add --renormalize .` in a git repo and reports the count
   - idempotent: existing files are NOT overwritten without -Force
 #>
@@ -89,7 +89,7 @@ if ((Test-Path $ec) -and -not $Force) {
         'charset = utf-8',
         'end_of_line = lf',
         'insert_final_newline = true',
-        'trim_trailing_whitespace = false'
+        'trim_trailing_whitespace = true'
     )
     foreach ($e in @('sh', 'bash', 'zsh', 'py', 'lua')) {
         if (Test-Ext $e) {
@@ -98,12 +98,21 @@ if ((Test-Path $ec) -and -not $Force) {
     }
     $two = @('yml', 'yaml', 'json', 'md') | Where-Object { Test-Ext $_ } | ForEach-Object { "*.$_" }
     if ($two) {
-        $lines += @('', '[' + ($two -join ',') + ']', 'indent_style = space', 'indent_size = 2')
+        # Concat outside the literal: inside @(...), pwsh splits bare
+        # `+`-chains into separate elements, which would emit the section
+        # header as three lines.
+        $twoSection = '[' + ($two -join ',') + ']'
+        $lines += @('', $twoSection, 'indent_style = space', 'indent_size = 2')
     }
     if (Test-Ext 'go') { $lines += @('', '[*.go]', 'indent_style = tab') }
-    $win = @('ps1', 'bat', 'cmd') | Where-Object { Test-Ext $_ } | ForEach-Object { "*.$_" }
+    # ps1 and its .tmpl twin share one CRLF rule: EditorConfig globs match
+    # the full name, so x.ps1.tmpl needs its own pattern (mirrors .gitattributes).
+    $win = @()
+    if (Test-Ext 'ps1') { $win += '*.{ps1,ps1.tmpl}' }
+    foreach ($e in @('bat', 'cmd')) { if (Test-Ext $e) { $win += "*.$e" } }
     if ($win) {
-        $lines += @('', '# Windows-native scripts: CRLF here and in .gitattributes.', '[' + ($win -join ',') + ']', 'end_of_line = crlf', 'indent_style = space', 'indent_size = 4')
+        $winSection = '[' + ($win -join ',') + ']'
+        $lines += @('', '# Windows-native scripts: CRLF here and in .gitattributes.', $winSection, 'end_of_line = crlf', 'indent_style = space', 'indent_size = 4')
     }
     [IO.File]::WriteAllText($ec, ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding($false)))
     Write-Host "  wrote .editorconfig"
