@@ -218,7 +218,17 @@ foreach ($rel in @('.config\chezmoi\chezmoi.toml', '.ssh\custom_signing_key', '.
 Write-Host '  ok: backup -> restore round-trip preserves the payload'
 
 # --- [3] A second restore into the populated home must be refused.
-$secondOut = & $powerShell5 -NoProfile -ExecutionPolicy Bypass -File $Restore -Archive $archive 2>&1 | Out-String
+# Drop EAP to Continue around the call: 5.1 promotes stderr lines of a native
+# command to a terminating NativeCommandError under EAP=Stop, and this child
+# DELIBERATELY writes its refusal to stderr. The exit code is the real signal
+# (same class as the git pull block in install.ps1).
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    $secondOut = & $powerShell5 -NoProfile -ExecutionPolicy Bypass -File $Restore -Archive $archive 2>&1 | Out-String
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 if ($LASTEXITCODE -eq 0) { Fail '[3] second restore into a populated home succeeded' }
 if ($secondOut -notmatch 'Refusing to overwrite') { Fail "[3] refusal not reported: $secondOut" }
 Write-Host '  ok: restore refuses to overwrite an existing payload'

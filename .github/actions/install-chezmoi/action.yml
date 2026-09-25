@@ -1,0 +1,41 @@
+name: 'Install chezmoi (pinned)'
+description: >-
+  One install path for every CI job (issue #132): bash hosts use the
+  get.chezmoi.io bootstrap pinned to .chezmoi-version via -t; Windows
+  downloads the release exe for the same pin directly. Replaces the five
+  copy-pasted install blocks that could drift apart silently.
+
+inputs:
+  bin-dir:
+    description: >-
+      Directory the chezmoi binary lands in on non-Windows hosts. Empty
+      (the default) means $HOME/.local/bin, resolved at run time.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install chezmoi (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        BIN_DIR: ${{ inputs.bin-dir }}
+      run: |
+        # Pin coherence (#133): the BINARY is pinned to the repo's
+        # .chezmoi-version so every job tests the version the installers
+        # deliberately install. The bootstrap script itself is curl|sh here -
+        # a known gap; switching to the checksum-verified release archive is
+        # tracked as a #133 follow-up.
+        bin_dir="${BIN_DIR:-$HOME/.local/bin}"
+        sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "${bin_dir}" -t "$(cat .chezmoi-version)"
+        echo "${bin_dir}" >> "$GITHUB_PATH"
+
+    - name: Install chezmoi (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\bin" | Out-Null
+        $chezmoiVersion = (Get-Content .chezmoi-version -Raw).Trim()
+        Invoke-WebRequest -Uri "https://github.com/twpayne/chezmoi/releases/download/$chezmoiVersion/chezmoi-windows-amd64.exe" -OutFile "$env:USERPROFILE\.local\bin\chezmoi.exe"
+        echo "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

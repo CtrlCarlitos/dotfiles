@@ -14,10 +14,50 @@ on:
 permissions:
   contents: read
 
+# One run per ref (#132): a force-push or a quick PR update cancels the stale
+# run instead of racing it to completion (two runs 63s apart both ran to
+# completion on 2026-09-24, burning two full matrix passes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Path gate for the heavy jobs (#132). GitHub's own paths/paths-ignore
+  # filters are workflow-level only - a workflow-level ignore for **.md
+  # would also skip the lint job, and the docs-consistency tests living
+  # there are exactly the tests that must gate a docs change. So the gate
+  # lives in this job instead: heavy jobs (Windows runners, Docker, the
+  # apply matrix) are skipped for docs-only changes, lint always runs.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      heavy: ${{ steps.diff.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # three-dot diff needs the merge base
+
+      - id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+              echo "heavy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if git diff --name-only "origin/${BASE_REF}...HEAD" | grep -qvE '^(docs/|[^/]+\.(md|markdown)$)'; then
+              echo "heavy=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "Docs-only change - heavy jobs skipped; lint still gates it."
+          fi
+
   lint:
     name: Lint & Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -32,11 +72,7 @@ jobs:
       # while skipping the rendering assertions entirely (confirmed live: the
       # skill-wiring contract skipped 3 blocks and validated only greps).
       # Pinned to .chezmoi-version, like the other jobs.
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Lint shell scripts
         run: |
@@ -120,6 +156,56 @@ jobs:
           }
           exit $failed
 
+      - name: actionlint (workflow lint)
+        run: |
+          # The three workflow files were validated only by execution before
+          # (#132): a typo surfaced as a red run hours later, or worse as a
+          # silently-skipped step. Version + checksum mirror the gitleaks
+          # pattern below (#133: pinned download, verified before use).
+          ACTIONLINT_VERSION=1.7.12
+          curl -fsSL -o /tmp/actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o /tmp/actionlint_checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" /tmp/actionlint_checksums.txt |
+            (cd /tmp && sha256sum -c -)
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -color
+
+      - name: Secret/PII scan (gitleaks)
+        # The tree-result.log class: debug dumps, machine paths, anything
+        # credential-shaped - caught at PR time instead of after a manual
+        # audit. The pinned binary runs directly (the gitleaks-action
+        # wrapper's SARIF upload exits 1 on clean scans; the binary is
+        # deterministic and the version pin is the URL itself).
+        run: |
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar -xzf - -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact -v --no-git
+
+      - name: Validate all TOML and YAML files
+        # One loop over everything git tracks (#132): this used to validate
+        # exactly two files (.chezmoiexternal.toml, .pre-commit-config.yaml)
+        # while 5 fixture TOMLs, guardrail.toml, starship.toml, the data yaml
+        # and the workflows went unchecked, via an unpinned `pip install toml`
+        # (abandoned upstream, TOML 0.5). tomllib is stdlib on the runner's
+        # Python 3.12; PyYAML ships on the runner image (no pip at all).
+        run: |
+          FAILED=0
+          while IFS= read -r f; do
+            # chezmoi modify-templates (e.g. dot_codex/modify_config.toml)
+            # are templates first and TOML only after chezmoi merges them at
+            # apply time - the raw source is not valid TOML by design.
+            if grep -q 'chezmoi:modify-template' "$f"; then
+              echo "Skipping $f (chezmoi modify-template)"
+              continue
+            fi
+            echo "Validating $f..."
+            case "$f" in
+              *.toml) python3 -c "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))" "$f" || FAILED=1 ;;
+              *)      python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f" || FAILED=1 ;;
+            esac
+          done < <(git ls-files '*.toml' '*.yml' '*.yaml')
+          exit $FAILED
+
       # One step runs every tests/*.sh (the runner enumerates the directory, so
       # a test cannot go unwired). --strict fails on any skip: this job installs
       # chezmoi, zsh and shellcheck above, so a skip here means a guard is too
@@ -146,30 +232,12 @@ jobs:
       - name: Test devprofile identity (pwsh twin)
         run: pwsh -NoProfile -File tests/devprofile_identity.ps1
 
-      - name: Secret/PII scan (gitleaks)
-        # The tree-result.log class: debug dumps, machine paths, anything
-        # credential-shaped - caught at PR time instead of after a manual
-        # audit. The pinned binary runs directly (the gitleaks-action
-        # wrapper's SARIF upload exits 1 on clean scans; the binary is
-        # deterministic and the version pin is the URL itself).
-        run: |
-          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
-            | tar -xzf - -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --redact -v --no-git
-
-      - name: Validate TOML files
-        run: |
-          pip install toml
-          python -c "import toml; toml.load('.chezmoiexternal.toml')"
-
-      - name: Validate YAML files
-        run: |
-          pip install pyyaml
-          python -c "import yaml; yaml.safe_load(open('.pre-commit-config.yaml'))"
-
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -178,15 +246,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Install zsh (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y zsh
+
+      # Toolchain parity with the lint job (#132): once the suite itself is
+      # macOS-portable (tests use GNU-only idioms like `stat -c '%a'` that
+      # hard-fail on BSD stat rather than skip), these two installs plus
+      # chezmoi above are everything `bash tests/run.sh --strict` needs here.
+      - name: Install shellcheck (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install shellcheck
 
       - name: Verify chezmoi version
         run: ~/.local/bin/chezmoi --version
@@ -204,21 +276,17 @@ jobs:
   test-windows:
     name: Test (Windows)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    # 20 not 15 (#132): this job seeds configs and renders templates through
+    # real installs; the one observed hang class (config prompt, tests/
+    # check_workflow_config_keys.sh:8) needs a ceiling that a docs-lint-scale
+    # job does not.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          # Create directory first
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\bin" | Out-Null
-          # Download the pinned version (matches Test (ubuntu-latest/macos-latest),
-          # which reads the same .chezmoi-version - this job used to always grab
-          # /releases/latest/..., testing a different, unpinned chezmoi version than
-          # every other job in this file, silently.
-          $chezmoiVersion = (Get-Content .chezmoi-version -Raw).Trim()
-          Invoke-WebRequest -Uri "https://github.com/twpayne/chezmoi/releases/download/$chezmoiVersion/chezmoi-windows-amd64.exe" -OutFile "$env:USERPROFILE\.local\bin\chezmoi.exe"
-          # Add to PATH
-          echo "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Verify chezmoi
         run: |
@@ -231,7 +299,27 @@ jobs:
         shell: bash
         run: bash tests/fixtures/chezmoi/compose.sh single off --out "$(cygpath -u "$USERPROFILE")/.config/chezmoi/chezmoi.toml"
 
+      # #132: production runs these scripts under powershell.exe (5.1 - see
+      # .chezmoi.toml.tmpl [interpreters.ps1]), yet the twins only ever ran
+      # under pwsh on Ubuntu. Each twin declares #Requires -Version 5.1 and
+      # was verified under a real 5.1 host before this step landed;
+      # select_packages.ps1 self-skips without a console stdin on Windows
+      # (its guard says so) and devprofile_identity.ps1 requires pwsh 7 -
+      # both stay wired on the Linux lint job.
+      - name: Test dotbackup/restore round-trip (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotbackup_restore.ps1
+
+      - name: Test dotfiles doctor (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotfiles_doctor.ps1
+
+      - name: Test pwsh profiles contract (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\pwsh_profiles.ps1
+
       - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
+        shell: pwsh
         run: |
           # Parse what actually RUNS, not a text-stripped approximation.
           # This used to delete {{...}} with a negated character class and parse
@@ -284,6 +372,9 @@ jobs:
   devcontainer:
     name: Test Devcontainer
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     env:
       DEVCONTAINER: "true"
     steps:
@@ -294,11 +385,7 @@ jobs:
           bash -n devcontainer/install.sh
           echo "Devcontainer script syntax OK"
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Run chezmoi apply (deliberately no pre-seeded account or packages)
         run: |
@@ -321,12 +408,12 @@ jobs:
       - name: Verify devcontainer detection worked end-to-end
         run: |
           echo "=== Devcontainer placeholder account ==="
-          grep -q 'name = "Devcontainer User"' ~/.gitconfig && echo "Γ£ô Devcontainer User account created" || exit 1
-          grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "Γ£ô devcontainer@local email set" || exit 1
+          grep -q 'name = "Devcontainer User"' ~/.gitconfig && echo "✓ Devcontainer User account created" || exit 1
+          grep -q 'email = "devcontainer@local"' ~/.gitconfig && echo "✓ devcontainer@local email set" || exit 1
 
           echo "=== Package categories correctly defaulted non-interactive ==="
-          grep -q 'core = false' ~/.config/chezmoi/chezmoi.toml && echo "Γ£ô core defaulted false" || exit 1
-          grep -q 'dev_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "Γ£ô dev_desktop defaulted false" || exit 1
+          grep -q 'core = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ core defaulted false" || exit 1
+          grep -q 'dev_desktop = false' ~/.config/chezmoi/chezmoi.toml && echo "✓ dev_desktop defaulted false" || exit 1
 
   #=============================================================================
   # TIER 1: Docker Smoke Test - Real chezmoi init/apply in fresh environment
@@ -334,6 +421,9 @@ jobs:
   smoke-test:
     name: Smoke Test (Docker)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     container:
       image: ubuntu:22.04
     steps:
@@ -344,10 +434,9 @@ jobs:
           apt-get update
           apt-get install -y curl git zsh
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin -t "${CHEZMOI_VERSION}"
+      - uses: ./.github/actions/install-chezmoi
+        with:
+          bin-dir: /usr/local/bin
 
       - name: Create test config from fixtures (multi account, packages off)
         run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
@@ -359,11 +448,11 @@ jobs:
       - name: Verify core files exist
         run: |
           echo "=== Checking generated files ==="
-          test -f ~/.gitconfig && echo "Γ£ô ~/.gitconfig exists" || exit 1
-          test -f ~/.zshrc && echo "Γ£ô ~/.zshrc exists" || exit 1
-          test -f ~/.tmux.conf && echo "Γ£ô ~/.tmux.conf exists" || exit 1
-          test -f ~/.aliases.zsh && echo "Γ£ô ~/.aliases.zsh exists" || exit 1
-          test -d ~/.config/nvim && echo "Γ£ô ~/.config/nvim exists" || exit 1
+          test -f ~/.gitconfig && echo "✓ ~/.gitconfig exists" || exit 1
+          test -f ~/.zshrc && echo "✓ ~/.zshrc exists" || exit 1
+          test -f ~/.tmux.conf && echo "✓ ~/.tmux.conf exists" || exit 1
+          test -f ~/.aliases.zsh && echo "✓ ~/.aliases.zsh exists" || exit 1
+          test -d ~/.config/nvim && echo "✓ ~/.config/nvim exists" || exit 1
           echo "=== All core files present ==="
 
   #=============================================================================
@@ -372,14 +461,13 @@ jobs:
   integration-test:
     name: Integration Test (Account System)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install chezmoi
-        run: |
-          CHEZMOI_VERSION=$(cat .chezmoi-version)
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin" -t "${CHEZMOI_VERSION}"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/install-chezmoi
 
       - name: Create test config from fixtures (multi account, packages off)
         run: bash tests/fixtures/chezmoi/compose.sh multi off --out ~/.config/chezmoi/chezmoi.toml
@@ -392,11 +480,11 @@ jobs:
           echo "=== Testing .gitconfig includeIf rules ==="
 
           # Check includeIf for alice's directories
-          grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "Γ£ô includeIf for alice/projects" || exit 1
-          grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "Γ£ô includeIf for .dotfiles" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/projects/alice/\"" ~/.gitconfig && echo "✓ includeIf for alice/projects" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/.dotfiles/\"" ~/.gitconfig && echo "✓ includeIf for .dotfiles" || exit 1
 
           # Check includeIf for bob's directories
-          grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "Γ£ô includeIf for bobcorp" || exit 1
+          grep -F "includeIf \"gitdir/i:$HOME/projects/bobcorp/\"" ~/.gitconfig && echo "✓ includeIf for bobcorp" || exit 1
 
           echo "=== includeIf rules correct ==="
 
@@ -405,12 +493,12 @@ jobs:
           echo "=== Testing .gitconfig URL shortcuts ==="
 
           # Check URL rewriting for alice
-          grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "Γ£ô URL shortcut for alice" || exit 1
-          grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "Γ£ô insteadOf for alice" || exit 1
+          grep -q 'url "git@github-alice:alice/"' ~/.gitconfig && echo "✓ URL shortcut for alice" || exit 1
+          grep -q 'insteadOf = https://github.com/alice/' ~/.gitconfig && echo "✓ insteadOf for alice" || exit 1
 
           # Check URL rewriting for bob
-          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "Γ£ô URL shortcut for bobcorp" || exit 1
-          grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "Γ£ô insteadOf for bobcorp" || exit 1
+          grep -q 'url "git@github-bob:bobcorp/"' ~/.gitconfig && echo "✓ URL shortcut for bob" || exit 1
+          grep -q 'insteadOf = https://github.com/bobcorp/' ~/.gitconfig && echo "✓ insteadOf for bobcorp" || exit 1
 
           echo "=== URL shortcuts correct ==="
 
@@ -418,11 +506,11 @@ jobs:
         run: |
           echo "=== Testing SSH config ==="
 
-          grep -q 'Host github-alice' ~/.ssh/config && echo "Γ£ô Host github-alice exists" || exit 1
-          grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "Γ£ô IdentityFile for alice" || exit 1
+          grep -q 'Host github-alice' ~/.ssh/config && echo "✓ Host github-alice exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_alice' ~/.ssh/config && echo "✓ IdentityFile for alice" || exit 1
 
-          grep -q 'Host github-bob' ~/.ssh/config && echo "Γ£ô Host github-bob exists" || exit 1
-          grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "Γ£ô IdentityFile for bob" || exit 1
+          grep -q 'Host github-bob' ~/.ssh/config && echo "✓ Host github-bob exists" || exit 1
+          grep -q 'IdentityFile ~/.ssh/id_bob' ~/.ssh/config && echo "✓ IdentityFile for bob" || exit 1
 
           echo "=== SSH config correct ==="
 
@@ -431,22 +519,22 @@ jobs:
           echo "=== Checking identity generation ==="
           # The run_onchange script should have created identity files
           # Note: In CI the script may not run, but we can at least check the template output
-          ~/.local/bin/chezmoi execute-template --source="${GITHUB_WORKSPACE}" '{{ range .accounts }}{{ if hasKey . "username" }}{{ .provider | default "github" }}-{{ .username }},{{ end }}{{ end }}' | grep -q 'github-alice' && echo "Γ£ô Template can iterate accounts" || exit 1
+          ~/.local/bin/chezmoi execute-template --source="${GITHUB_WORKSPACE}" '{{ range .accounts }}{{ if hasKey . "username" }}{{ .provider | default "github" }}-{{ .username }},{{ end }}{{ end }}' | grep -q 'github-alice' && echo "✓ Template can iterate accounts" || exit 1
           echo "=== Identity generation verified ==="
 
       - name: Summary
         run: |
           echo ""
           echo "============================================"
-          echo "  Γ£à All integration tests passed!"
+          echo "  ✅ All integration tests passed!"
           echo "============================================"
           echo ""
           echo "Validated:"
-          echo "  ΓÇó Multi-account config parsing"
-          echo "  ΓÇó .gitconfig includeIf generation"
-          echo "  ΓÇó .gitconfig URL shortcuts generation"
-          echo "  ΓÇó SSH config host entries"
-          echo "  ΓÇó Template iteration over accounts array"
+          echo "  • Multi-account config parsing"
+          echo "  • .gitconfig includeIf generation"
+          echo "  • .gitconfig URL shortcuts generation"
+          echo "  • SSH config host entries"
+          echo "  • Template iteration over accounts array"
 
   #=============================================================================
   # TIER 3: Backward Compatibility - Test with minimal/legacy configs
@@ -454,6 +542,9 @@ jobs:
   minimal-config-test:
     name: Minimal Config Test (Backward Compat)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -469,31 +560,37 @@ jobs:
           sh install.sh
 
           # Add local bin to path for subsequent steps
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Verify gitconfig has user info
         run: |
           echo "=== Testing minimal config (simple mode) ==="
-          grep -q 'name = "Minimal User"' ~/.gitconfig && echo "Γ£ô user.name set" || exit 1
-          grep -q 'email = "minimal@example.com"' ~/.gitconfig && echo "Γ£ô user.email set" || exit 1
+          grep -q 'name = "Minimal User"' ~/.gitconfig && echo "✓ user.name set" || exit 1
+          grep -q 'email = "minimal@example.com"' ~/.gitconfig && echo "✓ user.email set" || exit 1
           echo "=== Minimal config works ==="
 
       - name: Summary
         run: |
           echo ""
           echo "============================================"
-          echo "  Γ£à Backward compatibility test passed!"
+          echo "  ✅ Backward compatibility test passed!"
           echo "============================================"
           echo ""
           echo "Validated:"
-          echo "  ΓÇó Configs with missing key/organizations/dirs work"
-          echo "  ΓÇó Simple single-identity mode works"
+          echo "  • Configs with missing key/organizations/dirs work"
+          echo "  • Simple single-identity mode works"
 
   # TIER 3: Windows Installer Test
   #=============================================================================
   test-windows-install:
     name: Windows Installer Test
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    # 20 not 15 (#132): the installer runs Chocolatey and the whole apply.
+    # This is also the job class that hung 40+ minutes on an unanswered
+    # Read-Host before the non-interactive guard existed.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
