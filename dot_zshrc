@@ -48,9 +48,15 @@ if ! _in_devcontainer; then
     docker
     docker-compose
     ssh
-    ssh-agent
     ubuntu
   )
+  # The relay owns the agent when it is installed: the OMZ ssh-agent plugin
+  # would start a second agent that the relay's socket then shadows - dead
+  # weight holding a copy of every key (#113). Checked by path as well,
+  # because this runs before ~/.local/bin lands on PATH below.
+  if ! command -v ssh-agent-relay &>/dev/null && [[ ! -x "$HOME/.local/bin/ssh-agent-relay" ]]; then
+    plugins+=(ssh-agent)
+  fi
 fi
 
 # ssh-agent plugin identities - MUST be set before oh-my-zsh.sh sources the
@@ -191,10 +197,16 @@ fi
 # into a devcontainer cannot authenticate as another account. Backgrounded and
 # idempotent: a live socket is reused, so this never delays a prompt, and a
 # missing relay never blocks the shell. `ssh-agent-relay status` to inspect,
-# `eval "$(ssh-agent-relay use <alias>)"` (or direnv) to switch account.
+# `eval "$(ssh-agent-relay use <alias>)"` (or direnv) to switch account,
+# `ssh-agent-relay stop` to tear the agents down.
 if [[ -o interactive ]] && command -v ssh-agent-relay &>/dev/null; then
     (ssh-agent-relay start >/dev/null 2>&1 &) 2>/dev/null
-    _ssh_relay_default="${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay/default.sock"
+    # The one shared state dir: the relay honours SSH_AGENT_RELAY_DIR too, so
+    # writer and reader derive this path by construction, not by copy (#113).
+    # The relay writes default.sock via temp+mv, so this read never sees a
+    # partial line from a concurrent refresh.
+    export SSH_AGENT_RELAY_DIR="${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay"
+    _ssh_relay_default="$SSH_AGENT_RELAY_DIR/default.sock"
     if [[ -r "$_ssh_relay_default" ]]; then
         _ssh_relay_sock="$(<"$_ssh_relay_default")"
         [[ -S "$_ssh_relay_sock" ]] && export SSH_AUTH_SOCK="$_ssh_relay_sock"
