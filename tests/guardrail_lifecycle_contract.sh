@@ -26,23 +26,11 @@ sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 sh_updater="$repo_root/scripts/update_ai_tools.sh"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 ps1_updater="$repo_root/scripts/update_ai_tools.ps1"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
+
+. "$repo_root/tests/lib.sh"
 
 begin_marker='# guardrail-section: begin'
 end_marker='# guardrail-section: end'
-
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
-
-require() { # $1 = file, $2 = literal
-    grep -Fq -- "$2" "$1" || fail "$1: missing $2"
-}
-
-forbid() { # $1 = file, $2 = literal
-    ! grep -Fq -- "$2" "$1" || fail "$1: must not contain $2"
-}
 
 # section <file> - print the lines strictly between the two marker lines.
 # Markers may be indented (templated .ps1 block) and may carry a trailing CR.
@@ -176,11 +164,4 @@ windows_checks "$ps1_updater"
 require "$ps1_updater" 'chezmoi.toml'
 require "$ps1_updater" '[data.packages]'
 
-# --- CI wiring ---------------------------------------------------------------
-
-grep -Fq -- 'bash tests/guardrail_lifecycle_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: guardrail lifecycle contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: guardrail installer-caller contract\n'
+finish

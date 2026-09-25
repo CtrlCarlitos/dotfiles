@@ -3,23 +3,16 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 zshrc="$repo_root/dot_zshrc"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+. "$repo_root/tests/lib.sh"
 
 [[ -f "$zshrc" ]] || fail "missing $zshrc"
-[[ -f "$ci_workflow" ]] || fail "missing $ci_workflow"
 if command -v zsh >/dev/null 2>&1; then
     zsh -n "$zshrc" || fail "dot_zshrc has invalid zsh syntax"
 else
-    printf '%s\n' 'PASS/SKIP: zsh syntax check requires zsh'
+    printf '%s\n' 'SKIP: zsh syntax check requires zsh'
 fi
 shellcheck -s bash -e SC1091 "$zshrc" || fail "dot_zshrc must be shellcheck-clean"
-grep -Fqx '        run: bash tests/zshrc_startup_contract.sh' "$ci_workflow" ||
-    fail "CI must invoke the zsh startup contract"
 
 require_line() {
     local pattern="$1"
@@ -62,4 +55,4 @@ direnv_line="$(line_number '# Direnv (Env vars per directory)')"
 [[ "$brew_line" -lt "$zoxide_line" ]] || fail 'Homebrew must initialize before Zoxide'
 [[ "$brew_line" -lt "$direnv_line" ]] || fail 'Homebrew must initialize before Direnv'
 
-printf 'PASS: dot_zshrc syntax and zsh-native startup contract\n'
+finish

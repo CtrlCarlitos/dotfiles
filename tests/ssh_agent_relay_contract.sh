@@ -18,10 +18,10 @@ tmpl="$repo_root/dot_local/bin/executable_ssh-agent-relay.tmpl"
 zshrc="$repo_root/dot_zshrc"
 doc="$repo_root/docs/ssh-agents.md"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
-[ -f "$tmpl" ] || fail "ssh-agent-relay template missing"
-[ -f "$doc" ] || fail "docs/ssh-agents.md missing"
+[ -f "$tmpl" ] || { fail "ssh-agent-relay template missing"; exit 1; }
+[ -f "$doc" ] || { fail "docs/ssh-agents.md missing"; exit 1; }
 
 # The relay is useless without its tooling, and each piece has a distinct job.
 # The core apt line renders from the package catalog (#83), so the requirement
@@ -49,14 +49,14 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     : >"$tmp/chezmoi.toml"
-    render() {  # $1 = accounts JSON
+    render_relay() {  # $1 = accounts JSON (lib.sh's render is the no-override default)
         chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
             --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"6.8-microsoft\"}},\"accounts\":$1}" \
             <"$tmpl"
     }
     two='[{"name":"A","email":"a@x.test","username":"alpha","provider":"github","key":"id_a"},
           {"name":"B","email":"b@x.test","username":"beta","provider":"github","key":"id_b","agent_key_comments":["custom-comment"]}]'
-    out=$(render "$two")
+    out=$(render_relay "$two")
     printf '%s' "$out" >"$tmp/relay"
     bash -n "$tmp/relay" || fail "rendered relay is not valid bash"
     shellcheck -s bash "$tmp/relay" >/dev/null || fail "rendered relay is not shellcheck-clean"
@@ -108,5 +108,4 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
     fi
 fi
 
-printf 'PASS: ssh-agent-relay - per-account sockets, no key material in the distro
-'
+finish

@@ -16,11 +16,7 @@ ai_sh="$repo_root/scripts/update_ai_tools.sh"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 ps1_updater="$ai_ps1"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-
-forbid() { # $1 = file, $2 = literal
-    ! grep -Fq -- "$2" "$1" || fail "$1: must not contain $2"
-}
+. "$repo_root/tests/lib.sh"
 
 # 1. Every dir-recreating upgrade in the AI section is defer-aware.
 for tool in codex graft serena; do
@@ -44,4 +40,4 @@ grep -Fq 'graft upgrade' "$ai_sh" ||
 forbid "$ps1_installer" 'Add-MpPreference'
 forbid "$ps1_updater" 'Add-MpPreference'
 
-printf 'PASS: agent tool upgrade contracts\n'
+finish

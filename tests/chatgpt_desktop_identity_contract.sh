@@ -1,33 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 for file in run_onchange_install_packages.ps1.tmpl docs/package-groups.md docs/tool-parity.md; do
-    grep -Fq -- '9PLM9XGG6VKS' "$repo_root/$file" || {
-        printf 'FAIL: %s: missing current ChatGPT Work/Codex Store ID\n' "$file" >&2
-        exit 1
-    }
+    require "$repo_root/$file" '9PLM9XGG6VKS'
 done
 
-grep -Fq -- 'OpenAI.Codex' "$repo_root/run_onchange_install_packages.ps1.tmpl" || {
-    printf 'FAIL: installer: missing OpenAI.Codex package identity\n' >&2
-    exit 1
-}
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'OpenAI.Codex'
+require "$repo_root/.github/workflows/full-install-test.yml" 'OpenAI.Codex'
 
-grep -Fq -- 'OpenAI.Codex' "$repo_root/.github/workflows/full-install-test.yml" || {
-    printf 'FAIL: workflow: missing OpenAI.Codex package identity\n' >&2
-    exit 1
-}
+forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'winget install --id 9NT1R1C2HH7J'
+forbid "$repo_root/docs/tool-parity.md" 'existing ChatGPT Classic'
 
-if grep -Fq -- 'winget install --id 9NT1R1C2HH7J' "$repo_root/run_onchange_install_packages.ps1.tmpl"; then
-    printf 'FAIL: installer still targets ChatGPT Classic\n' >&2
-    exit 1
-fi
-
-if grep -Fq -- 'existing ChatGPT Classic' "$repo_root/docs/tool-parity.md"; then
-    printf 'FAIL: documentation includes a ChatGPT Classic migration note\n' >&2
-    exit 1
-fi
-
-printf 'PASS: current ChatGPT Work/Codex desktop identity\n'
+finish

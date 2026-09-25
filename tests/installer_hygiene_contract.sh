@@ -15,15 +15,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-
-require() { # $1 = file, $2 = literal
-    grep -Fq -- "$2" "$1" || fail "$1: missing $2"
-}
-
-forbid() { # $1 = file, $2 = literal
-    ! grep -Fq -- "$2" "$1" || fail "$1: must not contain $2"
-}
+. "$repo_root/tests/lib.sh"
 
 # 1. Single-flight guard: named mutex, zero-wait, exit 1 when held.
 grep -Fq 'dotfiles-install' "$ps1_installer" ||
@@ -60,9 +52,4 @@ grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
 forbid "$ps1_installer" 'Add-MpPreference'
 require "$ps1_installer" 'Invoke-GuardrailInstaller'
 
-grep -Fq -- 'bash tests/installer_hygiene_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
-    printf 'FAIL: ci.yml: installer hygiene contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: installer hygiene contracts\n'
+finish

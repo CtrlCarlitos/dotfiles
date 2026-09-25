@@ -19,13 +19,15 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+. "$repo_root/tests/lib.sh"
+
 PY_BIN=""
 for c in python3 python; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3,8) else 1)' 2>/dev/null; then
         PY_BIN="$c"; break
     fi
 done
-[ -n "$PY_BIN" ] || { printf 'SKIP: no working Python interpreter (tried python3, python)\n'; exit 0; }
+[ -n "$PY_BIN" ] || skip "no working Python interpreter (tried python3, python)"
 
 "$PY_BIN" - "$repo_root" <<'PYEOF'
 import io, os, re, sys
@@ -160,4 +162,4 @@ print("  checked %d docs: no visible TODOs, links and anchors resolve," % len(do
 print("  %d package groups agree with .chezmoi.toml.tmpl, documented settings exist" % len(canonical))
 PYEOF
 
-printf 'PASS: documentation structure\n'
+finish

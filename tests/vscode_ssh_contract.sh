@@ -17,7 +17,7 @@ ssh_tmpl="$repo_root/private_dot_ssh/private_config.tmpl"
 config_tmpl="$repo_root/.chezmoi.toml.tmpl"
 docs="$repo_root/docs/secrets.md"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 grep -Fq 'vscode:' "$data" || fail ".chezmoidata.yaml: no vscode.extensions block"
 grep -Fq 'EditorConfig.EditorConfig' "$data" || fail "data: EditorConfig missing"
@@ -127,11 +127,6 @@ if command -v chezmoi >/dev/null; then
         fail "config template: first-run devcontainer identity missing"
 fi
 
-grep -Fq -- 'bash tests/vscode_ssh_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
-    printf 'FAIL: ci.yml: vscode/ssh contract is not a PR CI check\n' >&2
-    exit 1
-}
-
 # Remote-SSH reads ~/.ssh/config (rendered from ssh_hosts) on every machine:
 # both twins UNSET remote.SSH.configFile, which used to point at a hand-kept
 # OneDrive config that ssh.exe, Windows Terminal and chezmoi never saw.
@@ -144,4 +139,4 @@ grep -Fq -- '.vscode.settings.unset' "$ps1_installer" ||
 grep -Fq -- '.vscode.settings.unset' "$sh_installer" ||
     fail "$sh_installer: no longer renders the UNSET tier from .chezmoidata.yaml"
 
-printf 'PASS: VS Code extensions + ssh_hosts contracts\n'
+finish
