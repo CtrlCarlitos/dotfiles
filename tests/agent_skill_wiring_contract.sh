@@ -157,6 +157,10 @@ EOF
     done
 
     updater_harness="$tmp/updater.sh"
+    # The updater derives its catalog from its own directory (BASH_SOURCE),
+    # not from the repo: place a copy next to the harness so its target
+    # verification runs the same branch as in a real checkout.
+    printf '%s\n' handoff > "$tmp/curated-agent-skills.txt"
     # The stub models both chezmoi calls the updater makes: `source-path`
     # (answered with the scratch repo) and, since #83, `execute-template` for
     # the agent list in .chezmoidata/agents.yaml - delegated to the real
