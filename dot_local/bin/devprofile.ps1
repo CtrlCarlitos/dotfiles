@@ -95,7 +95,7 @@ function Get-Accounts {
                     return $data.accounts
                 }
             }
-        } catch { }
+        } catch { Write-Warn "chezmoi data failed, falling back to chezmoi.toml: $($_.Exception.Message)" }
     }
 
     if (-not (Test-Path $ChezmoiConfig)) { return @() }
@@ -148,7 +148,7 @@ function Show-Current {
     try { 
         git rev-parse --git-dir 2>$null | Out-Null
         $isRepo = $LASTEXITCODE -eq 0
-    } catch { }
+    } catch { Write-Warn "git rev-parse --git-dir failed: $($_.Exception.Message)" }
     
     if ($isRepo) {
         # In a git repo - get effective identity
@@ -288,7 +288,7 @@ function Show-List {
 function Use-Account {
     param([string]$AccountName)
     
-    try { git rev-parse --git-dir 2>$null | Out-Null } catch { }
+    try { git rev-parse --git-dir 2>$null | Out-Null } catch { Write-Warn "git rev-parse --git-dir failed: $($_.Exception.Message)" }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Not in a git repository"
         exit 1
@@ -484,7 +484,7 @@ function Initialize-Account {
 function Test-Identity {
     param([switch]$InstallHookFlag)
     
-    try { git rev-parse --git-dir 2>$null | Out-Null } catch { }
+    try { git rev-parse --git-dir 2>$null | Out-Null } catch { Write-Warn "git rev-parse --git-dir failed: $($_.Exception.Message)" }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Not in a git repository"
         exit 1
@@ -558,7 +558,7 @@ function Test-Identity {
     $dirStatus = ""
     $dirIcon = "▸"
     $repoRoot = $null
-    try { $repoRoot = (git rev-parse --show-toplevel 2>$null) } catch { }
+    try { $repoRoot = (git rev-parse --show-toplevel 2>$null) } catch { Write-Warn "git rev-parse --show-toplevel failed: $($_.Exception.Message)" }
 
     if (-not $repoRoot) {
         $dirStatus = "Could not resolve repo path"
@@ -704,6 +704,8 @@ $installHookFlag = $InstallHook -or ($Arg1 -eq "--install-hook") -or ($Rest -con
 
 switch ($Command) {
     "help" { Show-Help }
+    "--help" { Show-Help }
+    "-h" { Show-Help }
     "list" { Show-List }
     "use" { Use-Account -AccountName $Arg1 }
     "init" { Initialize-Account -Name $Arg1 -Email $Arg2 -PassphraseFlag:$Passphrase -NoPassphraseFlag:$NoPassphrase -ExtraArgs $Rest }
