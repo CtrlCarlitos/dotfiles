@@ -10,7 +10,7 @@
 # the redirected copy are overwritten on the next profile change - same
 # contract as every other managed file.
 #
-# Hash: {{ include "Documents/PowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}{{ include "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}
+# Hash: {{ include "Documents/PowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}{{ include "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1" | sha256sum }}{{ include "Documents/PowerShell/powershell.config.json" | sha256sum }}
 $ErrorActionPreference = 'Stop'
 
 # Cross-generation PSModulePath guard (same class as the other Windows
@@ -32,7 +32,13 @@ if (-not $loadedRoot) {
 } else {
     foreach ($rel in @(
         'PowerShell\Microsoft.PowerShell_profile.ps1',
-        'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
+        'WindowsPowerShell\Microsoft.PowerShell_profile.ps1',
+        # pwsh 7 resolves its user config (ExecutionPolicy) through the same
+        # redirected MyDocuments path as $PROFILE - without mirroring it the
+        # synced profile stays blocked by the default policy on a redirected
+        # box. 5.1 has no powershell.config.json (that is pwsh 6+ only; 5.1
+        # reads the registry key run_once_windows_set-executionpolicy writes).
+        'PowerShell\powershell.config.json'
     )) {
         $src = Join-Path $managedRoot $rel
         $dst = Join-Path $loadedRoot $rel
