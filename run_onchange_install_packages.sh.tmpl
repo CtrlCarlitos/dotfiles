@@ -939,14 +939,16 @@ install_apt() {
 {{- end }}
 
 {{- if $modern_cli }}
-    # Modern CLI tools
-    $SUDO apt install -y bat fd-find || true
+    # Modern CLI tools. Plain-apt names render from .chezmoidata/packages.yaml
+    # (#127) like every other list; the tools needing a repo/key/.deb stay as
+    # procedures below. bat + fd share one line - the catalog's bat note says why.
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "bat" true "fd" true) "catalog" .catalog.packages) }} || true
 
     # CI and .pre-commit-config.yaml both lint shell with shellcheck; without it
     # locally a fresh machine only finds template errors in CI.
     # shfmt: built on mvdan.cc/sh, the same parser internal/engine/tokenize.go
     # uses - handy for seeing how the engine actually reads a command.
-    $SUDO apt install -y shellcheck || warn "shellcheck install failed - continuing"
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "shellcheck" true) "catalog" .catalog.packages) }} || warn "shellcheck install failed - continuing"
     if ! command -v shfmt &>/dev/null; then
         local shfmt_machine shfmt_arch="" shfmt_sha256=""
         shfmt_machine="$(uname -m)"
@@ -1021,7 +1023,7 @@ install_apt() {
     fi
 
     # Direnv
-    $SUDO apt install -y direnv || true
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "direnv" true) "catalog" .catalog.packages) }} || true
 
     # Lazygit
     if ! command -v lazygit &>/dev/null; then
@@ -1076,7 +1078,7 @@ install_apt() {
     fi
 
     # duf (df replacement) - in the apt archive since Ubuntu 22.04 (jammy)
-    $SUDO apt install -y duf || true
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "duf" true) "catalog" .catalog.packages) }} || true
 
     # tealdeer (tldr) - not in apt until Ubuntu 23.04 (lunar), so download the
     # official static binary directly for full compatibility with older/other
