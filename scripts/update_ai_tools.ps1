@@ -352,8 +352,19 @@ if ($guardrailState -and -not $guardrailVersion) {
 # 2. Claude Code (Native)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host "🧠 Updating Claude Code..." -ForegroundColor Yellow
-    # Re-run strict native installer
-    & powershell -c "irm https://storage.googleapis.com/claude-code/install.ps1 | iex"
+    # Re-run strict native installer. URL from .chezmoidata.yaml
+    # versions.claude_install_ps1 (#125) - the same key the installer template
+    # renders - read at runtime like the guardrail pin below, so `dot upgrade`
+    # can never install a different Claude than the installer did (the old
+    # storage.googleapis.com URL here vs claude.ai in the installer was
+    # exactly that drift).
+    $claudeInstallUrl = ''
+    try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch {}
+    if ($claudeInstallUrl) {
+        & powershell -c "irm $claudeInstallUrl | iex"
+    } else {
+        Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall (claude update owns in-place updates)" -ForegroundColor Red
+    }
 
     # Superpowers skills plugin
     Write-Host "✨ Updating Superpowers (Claude Code)..." -ForegroundColor Yellow

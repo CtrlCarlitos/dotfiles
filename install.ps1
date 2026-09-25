@@ -11,20 +11,36 @@ function Write-Success { param([string]$Message) Write-Host "[v] $Message" -Fore
 # host-print instead of the error record. Same output, honest name.
 function Write-Fail { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Red }
 
-# Bootstrap gum (pinned v2.0.1) for the interactive package menu. Best-effort
+# Bootstrap gum (pinned) for the interactive package menu. Best-effort
 # only: on failure warn and continue - without gum the menu self-skips and
 # chezmoi's native config prompts take over.
+#
+# The pin's single source is .chezmoidata.yaml versions.gum (#125): read it
+# when a checkout is on disk. The inline fallback only covers the one-liner
+# run, where this script was downloaded alone - scripts/update-versions.sh
+# syncs it to the yaml pin, so the two cannot drift silently.
+$gumVersion = '2.0.1'
+$gumYamlCandidates = @()
+# $PSScriptRoot is empty under the iex one-liner - guard the Join-Path.
+if ($PSScriptRoot) { $gumYamlCandidates += (Join-Path $PSScriptRoot '.chezmoidata.yaml') }
+$gumYamlCandidates += (Join-Path $env:USERPROFILE '.local\share\chezmoi\.chezmoidata.yaml')
+foreach ($gumYaml in $gumYamlCandidates) {
+    if ($gumYaml -and (Test-Path $gumYaml)) {
+        $gumMatch = Select-String -LiteralPath $gumYaml -Pattern '^\s{2}gum:\s*"?([^"]+)"?\s*$' | Select-Object -First 1
+        if ($gumMatch) { $gumVersion = $gumMatch.Matches[0].Groups[1].Value; break }
+    }
+}
 function Bootstrap-Gum {
     if (Get-Command gum -ErrorAction SilentlyContinue) { return }
 
     $gumDir = Join-Path $env:USERPROFILE '.local\bin'
-    $zipUrl = 'https://github.com/charmbracelet/gum/releases/download/v2.0.1/gum_2.0.1_Windows_x86_64.zip'
+    $zipUrl = "https://github.com/charmbracelet/gum/releases/download/v$gumVersion/gum_${gumVersion}_Windows_x86_64.zip"
     try {
         # PS 5.1 defaults can lack TLS 1.2 (same fix as the Chocolatey fetch)
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
         New-Item -ItemType Directory -Force -Path $gumDir | Out-Null
         # -TimeoutSec so a stalled download errors out instead of hanging
-        $zipPath = Join-Path $env:TEMP 'gum_2.0.1_Windows_x86_64.zip'
+        $zipPath = Join-Path $env:TEMP "gum_${gumVersion}_Windows_x86_64.zip"
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
         Expand-Archive -Path $zipPath -DestinationPath $gumDir -Force
         Remove-Item $zipPath -Force -ErrorAction SilentlyContinue

@@ -138,5 +138,25 @@ vscode:
   extensions_windows:
     - ms-vscode-remote.remote-wsl
 
+# Version pins shared across the installers and bootstraps (#125). Every value
+# is hand-reviewed (a deliberate pin, never "latest"): bumping = edit this one
+# table, then run scripts/update-versions.sh, which syncs the derived copies
+# (the catalog's brew node@NN and the bootstraps' fallback literals) - those
+# exist only where the yaml cannot be read (fresh one-liner installs).
+#   node_major       - apt repo line, version gates, brew formula; node_choco is
+#                      the full Chocolatey package version on Windows
+#   antigravity_hub  - the 2.0 hub channel pin for the macOS dmg/Linux tar.gz
+#                      (scripts/update-versions.sh re-checks it weekly)
+#   gum              - the bootstrap pin for the package menu
+#   claude_install_* - the official native-installer URLs, so `dot upgrade`
+#                      cannot install a different Claude than the installer did
+versions:
+  node_major: 24
+  node_choco: "24.19.0"
+  antigravity_hub: "2.17.0-5217732355031040"
+  gum: "2.0.1"
+  claude_install_sh: "https://claude.ai/install.sh"
+  claude_install_ps1: "https://claude.ai/install.ps1"
+
 guardrail:
   version: v0.23.2-dev

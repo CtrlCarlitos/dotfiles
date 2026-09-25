@@ -266,9 +266,11 @@ function Invoke-Quietly {
 }
 
 function Install-Node {
-    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt 24) {
-        Write-Host "  Installing Node.js 24..." -ForegroundColor Yellow
-        choco install nodejs --version=24.19.0 -y --no-progress | Out-Null
+    # The pins come from .chezmoidata.yaml versions.* (#125): the major gate
+    # and the full Chocolatey package version.
+    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt {{ .versions.node_major }}) {
+        Write-Host "  Installing Node.js {{ .versions.node_major }}..." -ForegroundColor Yellow
+        choco install nodejs --version={{ .versions.node_choco }} -y --no-progress | Out-Null
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
@@ -284,7 +286,7 @@ function Install-Node {
 # Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
 {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 
-# Node.js 24.x - a core fundamental (spec §2). The npm-dependent groups
+# Node.js (versions.node_major pin, #125) - a core fundamental (spec §2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
 # also work with core off.
 Install-Node
@@ -1346,8 +1348,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 # standalone even with core/agent_toolkit off.
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     Write-Host "  Installing Claude Code (Native)..." -ForegroundColor Yellow
-    # Official Native Install
-    Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm https://claude.ai/install.ps1 | iex" }
+    # Official Native Install - URL single-sourced from .chezmoidata.yaml
+    # versions.claude_install_ps1 (#125), the same key update_ai_tools.ps1
+    # reads at runtime, so install and update can never diverge.
+    Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm {{ .versions.claude_install_ps1 }} | iex" }
 }
 
 function Set-ClaudeAttribution {

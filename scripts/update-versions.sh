@@ -16,9 +16,10 @@ cd "$(dirname "$0")/.."
 
 echo "Starting Auto-Update Script..."
 
-# 1. Update Chezmoi Version
+# 1. Update Chezmoi Version (net_timeout: same wall-clock contract as the
+# installers - this is a network fetch like any other).
 echo "Fetching latest Chezmoi version..."
-LATEST_CHEZMOI=$(curl -s "https://api.github.com/repos/twpayne/chezmoi/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | cut -d'"' -f4)
+LATEST_CHEZMOI=$(net_timeout 60 curl -s "https://api.github.com/repos/twpayne/chezmoi/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | cut -d'"' -f4)
 if [ -n "$LATEST_CHEZMOI" ]; then
     echo "Latest Chezmoi: $LATEST_CHEZMOI"
     # Update in .chezmoi-version
@@ -43,7 +44,7 @@ echo "Fetching latest Antigravity hub version..."
 # the IDE channel's number, producing a "hub" version whose assets 404 (the
 # wrong-channel bug). Anchoring the pattern to the antigravity-hub/ path
 # means only the hub channel's version can be derived.
-LATEST=$(curl -sL --compressed https://antigravity.google/download \
+LATEST=$(net_timeout 60 curl -sL --compressed https://antigravity.google/download \
     | grep -oE 'antigravity-hub/[0-9]+\.[0-9]+\.[0-9]+-[0-9]+/' \
     | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' \
     | head -1)
@@ -77,19 +78,20 @@ if [ -n "$LATEST" ]; then
     done
 
     if [ "$URLS_OK" = true ]; then
-        # Rewrite the pin in the sh template. Windows needs nothing here: it
-        # installs Antigravity via Chocolatey, which floats to whatever the
-        # community package carries - there is no pin in the ps1 template to
-        # bump.
+        # Rewrite the pin in .chezmoidata.yaml versions.antigravity_hub (#125,
+        # the single source the installer template renders - it used to sed the
+        # template directly). Windows needs nothing here: it installs Antigravity
+        # via Chocolatey, which floats to whatever the community package
+        # carries - there is no pin in the ps1 template to bump.
         # Portable in-place edit (BSD sed has no `sed -i` without an arg):
         # write to a temp file, then mv over the original.
-        tmp_tmpl="$(mktemp)"
-        sed -E "s/ANTIGRAVITY_HUB_VERSION=\"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\"/ANTIGRAVITY_HUB_VERSION=\"$LATEST\"/" run_onchange_install_packages.sh.tmpl > "$tmp_tmpl"
-        mv "$tmp_tmpl" run_onchange_install_packages.sh.tmpl
+        tmp_data="$(mktemp)"
+        sed -E "s|^  antigravity_hub: .*|  antigravity_hub: \"$LATEST\"|" .chezmoidata.yaml > "$tmp_data"
+        mv "$tmp_data" .chezmoidata.yaml
     else
         echo "Warning: Not updating Antigravity hub version - one or more asset URLs are broken."
         echo "  This usually means Google changed the hub channel layout; the URL"
-        echo "  templates in run_onchange_install_packages.sh.tmpl need a manual look."
+        echo "  templates need a manual look."
     fi
 else
     echo "Warning: Could not derive Antigravity hub version from the download page - leaving pin unchanged."
@@ -165,9 +167,53 @@ fi
 # 4. agent-guardrails stays pinned to the reviewed release in the installer
 # templates and manual updaters. Never replace that pin with GitHub's latest.
 
-# Note: Node.js is not dynamically bumped here. It is pinned to 24.x in
-# three installers by hand - run_onchange_install_packages.ps1.tmpl (choco
-# nodejs --version), the NodeSource setup_24.x script (Linux), and brew
-# node@24 (macOS) - bump those together when moving majors.
+# 5. Sync the DERIVED copies of the .chezmoidata.yaml versions.* pins (#125):
+#    - versions.node_major -> the catalog's brew formula name (node@NN)
+#    - versions.gum        -> the bootstraps' fallback literals in install.sh
+#                             and install.ps1 (they only cover the one-liner
+#                             run where the yaml was never downloaded)
+#    No network: the canonical values are deliberate hand-reviewed pins - a
+#    bump edits .chezmoidata.yaml, this run then carries the derived copies
+#    through the same PR so they cannot drift.
+echo "Syncing derived pin copies..."
+NODE_MAJOR="$(sed -n 's/^  node_major: \([0-9][0-9]*\)$/\1/p' .chezmoidata.yaml)"
+if [ -n "$NODE_MAJOR" ]; then
+    tmp_file="$(mktemp)"
+    sed -E "s/(brew: node@)[0-9]+\$/\1${NODE_MAJOR}/" .chezmoidata/packages.yaml > "$tmp_file"
+    if ! cmp -s "$tmp_file" .chezmoidata/packages.yaml; then
+        mv "$tmp_file" .chezmoidata/packages.yaml
+        echo "  .chezmoidata/packages.yaml: node@$NODE_MAJOR"
+    else
+        rm -f "$tmp_file"
+        echo "  .chezmoidata/packages.yaml: node@ already $NODE_MAJOR"
+    fi
+else
+    echo "  Warning: versions.node_major not found in .chezmoidata.yaml - catalog sync skipped."
+fi
+
+GUM_PIN="$(sed -n 's/^  gum: "\([^"]*\)"$/\1/p' .chezmoidata.yaml)"
+if [ -n "$GUM_PIN" ]; then
+    tmp_file="$(mktemp)"
+    # Rewrite just the fallback-literal lines; cmp+mv reports/skips no-ops.
+    awk -v pin="$GUM_PIN" '/^GUM_VERSION=/{ sub(/:-[^}]*\}/, ":-" pin "}") } { print }' install.sh > "$tmp_file"
+    if cmp -s "$tmp_file" install.sh; then
+        echo "  install.sh: gum fallback already $GUM_PIN"
+        rm -f "$tmp_file"
+    else
+        mv "$tmp_file" install.sh
+        echo "  install.sh: gum fallback -> $GUM_PIN"
+    fi
+    tmp_file="$(mktemp)"
+    awk -v pin="$GUM_PIN" '/^\$gumVersion = /{ sub(/= .*/, "= \047" pin "\047") } { print }' install.ps1 > "$tmp_file"
+    if cmp -s "$tmp_file" install.ps1; then
+        echo "  install.ps1: gum fallback already $GUM_PIN"
+        rm -f "$tmp_file"
+    else
+        mv "$tmp_file" install.ps1
+        echo "  install.ps1: gum fallback -> $GUM_PIN"
+    fi
+else
+    echo "  Warning: versions.gum not found in .chezmoidata.yaml - bootstrap fallback sync skipped."
+fi
 
 echo "Version updates complete."

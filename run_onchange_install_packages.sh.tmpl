@@ -228,8 +228,9 @@ install_fonts() {
 }
 
 install_node() {
-    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 24 ]]; then
-        info "Installing Node.js 24.x..."
+    # The major comes from .chezmoidata.yaml versions.node_major (#125).
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt {{ .versions.node_major }} ]]; then
+        info "Installing Node.js {{ .versions.node_major }}.x..."
         # NodeSource's repo via the guarded helper: the old
         # `curl setup_24.x | bash` ran an unguarded fetched script whose own
         # trailing apt update could abort the whole run (#114). Key + list +
@@ -237,13 +238,13 @@ install_node() {
         # third-party repos.
         command -v curl &>/dev/null || $SUDO apt install -y curl
         add_apt_repo nodesource "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ .versions.node_major }}.x nodistro main" \
             nodejs || warn "Node.js install failed - continuing"
     fi
     # Upgrade npm to latest
     if command -v npm &>/dev/null; then
         info "Upgrading npm to latest..."
-        $SUDO npm install -g npm@latest --fund=false 2>/dev/null || true
+        $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
     fi
 }
 
@@ -633,7 +634,7 @@ install_apt() {
             gh || warn "GitHub CLI install failed - continuing"
     fi
 
-    # Node.js 24.x
+    # Node.js (the versions.node_major pin, #125)
     install_node
 
     # Neovim
@@ -1143,7 +1144,7 @@ install_claude_cli() {
 
     if ! command -v claude &>/dev/null; then
          info "Installing Claude Code (Native)..."
-         net_timeout 300 bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || warn "Claude Code installer failed or timed out - continuing"
+         net_timeout 300 bash -c 'curl -fsSL {{ .versions.claude_install_sh }} | bash' || warn "Claude Code installer failed or timed out - continuing"
     fi
 
     # configure_claude_attribution is called on macOS too (#124: the brew
@@ -1639,7 +1640,7 @@ install_brew() {
     # `timeout` in the base OS.
     # Names come from .chezmoidata/packages.yaml (see #83).
     brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
-    brew link --overwrite node@24 || true
+    brew link --overwrite node@{{ .versions.node_major }} || true
 {{- else }}
     info "Core packages disabled in config"
 {{- end }}
@@ -1733,11 +1734,12 @@ install_chatgpt_desktop() {
 # the extraction layout is logged verbatim below so the CI verify (and docs)
 # can be designed from real first-run evidence.
 install_antigravity_desktop() {
-    # Antigravity 2.0 hub release pin - single source of truth for both the
-    # macOS dmg and the Linux tar.gz below. scripts/update-versions.sh scrapes
-    # antigravity.google/download and re-checks both asset URLs before
-    # rewriting this line (Windows floats via choco, no pin needed there).
-    ANTIGRAVITY_HUB_VERSION="2.17.0-5217732355031040"
+    # Antigravity 2.0 hub release pin - single source of truth is
+    # .chezmoidata.yaml versions.antigravity_hub (#125, like guardrail.version);
+    # scripts/update-versions.sh scrapes antigravity.google/download, re-checks
+    # both asset URLs and rewrites the pin there. Windows floats via choco, no
+    # pin needed.
+    ANTIGRAVITY_HUB_VERSION="{{ .versions.antigravity_hub }}"
     local ag_base="https://storage.googleapis.com/antigravity-public/antigravity-hub/${ANTIGRAVITY_HUB_VERSION}"
 
     case "$(uname -s)" in
