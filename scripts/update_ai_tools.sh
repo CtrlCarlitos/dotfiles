@@ -52,15 +52,25 @@ fi
 # run_onchange_install_packages.sh.tmpl. --loglevel=error kills npm 12's benign
 # per-run "npm notice run ..." stderr hint; </dev/null keeps any prompt from
 # ever holding the terminal (see installer for full notes).
+# The catalog sits next to this script (both live in the source repo's
+# scripts/), and the no-npx fallback below derives its skipped count from it -
+# never a literal, which drifted every time the catalog gained a skill. Pure
+# builtins only: the count must also resolve where chezmoi/grep are absent.
+catalog="${BASH_SOURCE[0]%/*}/curated-agent-skills.txt"
+curated_total=0
+if [[ -r "$catalog" ]]; then
+    while IFS= read -r skill || [[ -n "$skill" ]]; do
+        [[ -z "$skill" || "$skill" == \#* ]] || ((curated_total += 1))
+    done < "$catalog"
+fi
 if command -v npx &>/dev/null; then
     echo "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..."
-    catalog="$(chezmoi source-path)/scripts/curated-agent-skills.txt"
-    SK=(npx --yes --loglevel=error skills@latest)
     # The CLI refreshes $HOME/.claude/skills and $HOME/.agents/skills. OpenCode
     # and Codex discover the shared directory; this is the explicit refresh path.
     # From .chezmoidata/agents.yaml, read at runtime (see CODEX_PKG above).
     read -r -a AGENTS <<<"$(chezmoi execute-template '{{ join " " .agents.skills.agents }}' 2>/dev/null || true)"
     [ "${#AGENTS[@]}" -gt 0 ] || echo "   skills agent list unavailable from chezmoi data - skill updates may fail"
+    SK=(npx --yes --loglevel=error skills@latest)
     claude_installed=0; claude_skipped=0; claude_failed=0
     opencode_installed=0; opencode_skipped=0; opencode_failed=0
     codex_installed=0; codex_skipped=0; codex_failed=0
@@ -267,10 +277,10 @@ if command -v npx &>/dev/null; then
     echo "   Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
     echo "   Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 else
-    echo "   Curated skills: Claude Code installed=0 skipped=19 failed=0"
-    echo "   Curated skills: OpenCode installed=0 skipped=19 failed=0"
-    echo "   Curated skills: Antigravity installed=0 skipped=19 failed=0"
-    echo "   Curated skills: Codex installed=0 skipped=19 failed=0"
+    echo "   Curated skills: Claude Code installed=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: OpenCode installed=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: Antigravity installed=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: Codex installed=0 skipped=$curated_total failed=0"
 fi
 
 # Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl

@@ -62,7 +62,19 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # terminating error - keep stderr empty instead (see installer for full notes).
 function Write-CuratedSkillsSkippedSummary {
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=19 failed=0"
+        Write-Host "  Curated skills: $agent installed=0 skipped=$curatedSkillTotal failed=0"
+    }
+}
+
+# The catalog sits next to this script (both live in the source repo's
+# scripts/), and the no-npx fallback above derives its count from it - never a
+# literal, which drifted every time the catalog gained a skill.
+$curatedCatalog = $null
+if ($PSScriptRoot) { $curatedCatalog = Join-Path $PSScriptRoot 'curated-agent-skills.txt' }
+$curatedSkillTotal = 0
+if (($null -ne $curatedCatalog) -and (Test-Path -LiteralPath $curatedCatalog -PathType Leaf)) {
+    foreach ($line in Get-Content -LiteralPath $curatedCatalog) {
+        if (-not [string]::IsNullOrWhiteSpace($line) -and -not $line.StartsWith('#')) { $curatedSkillTotal++ }
     }
 }
 
@@ -114,7 +126,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
 
-    $catalog = Join-Path (chezmoi source-path) 'scripts\curated-agent-skills.txt'
+    $catalog = $curatedCatalog
     if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
         Write-CuratedSkillsSkippedSummary
@@ -185,7 +197,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             foreach ($agent in $agentTargets.Keys) {
                 if ($agent -eq 'Antigravity') {
                     $skillSummary[$agent][$antigravityStatus]++
-                } elseif ($agent -ne 'Codex' -or $skAgents -contains 'codex') {
+                } else {
                     $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
                     if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
                         $skillSummary[$agent].installed++

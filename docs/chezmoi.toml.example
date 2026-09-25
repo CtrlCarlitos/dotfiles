@@ -66,7 +66,8 @@
     #                  build (installer info-skips, not a failure).
     claude_desktop = false
 
-    # chatgpt_cli — Codex CLI (@openai/codex npm). Zero wiring by design.
+    # chatgpt_cli — Codex CLI (@openai/codex npm) + the curated-skills pass
+    #                 for Codex.
     chatgpt_cli = false
 
     # chatgpt_desktop — ChatGPT Desktop app. Host only; Linux has no
