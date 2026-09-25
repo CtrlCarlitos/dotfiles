@@ -466,7 +466,14 @@ try {
             $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
             if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
 
-            $lifecycleBody = "`$skAgents = @('claude-code', 'opencode')`n" + ($match.Value -replace '(?m)^    \$catalog =', @'
+            $lifecycleBody = "`$skAgents = @('claude-code', 'opencode')`n" +
+                # The updater derives its catalog path from $curatedCatalog
+                # (scripts/update_ai_tools.ps1 keeps it next to $curatedSkillTotal,
+                # both outside the extracted region): seed the fixture's catalog so
+                # the lifecycle takes its real branch, not the missing-catalog
+                # fallback that calls an undefined helper in this isolated scope.
+                "`$curatedCatalog = Join-Path '$catalogDir' 'curated-agent-skills.txt'`n" +
+                "`$curatedSkillTotal = 3`n" + ($match.Value -replace '(?m)^    \$catalog =', @'
     function Move-Item {
         param($LiteralPath, $Destination, $ErrorAction)
         if ($LiteralPath -like '*.handoff.tmp.*' -and $Destination -eq $antigravitySkill) {
