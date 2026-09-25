@@ -1,6 +1,5 @@
 #Requires -Version 5.1
 # dot upgrade - the single owner of ALL tool upgrades.
-# Spec: docs/superpowers/specs/2026-09-20-dot-cli-design.md
 # `dot up` NEVER upgrades; this script does, with live-session guards.
 $ErrorActionPreference = 'Continue'
 

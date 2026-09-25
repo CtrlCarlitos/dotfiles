@@ -22,10 +22,10 @@ root="$stage/dotfiles-backup-v1"
 manifest="$root/manifest.json"
 config_source="$root/chezmoi/chezmoi.toml"
 ssh_source="$root/ssh"
-[ -d "$root" ] && [ ! -L "$root" ] || {
+if [ ! -d "$root" ] || [ -L "$root" ]; then
     printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
     exit 1
-}
+fi
 staged_symlink="$(find "$root" -type l -print -quit)"
 [ -z "$staged_symlink" ] || {
     printf 'ERROR: archive contains a symlink: %s\n' "$staged_symlink" >&2
@@ -46,10 +46,10 @@ for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
             ;;
     esac
 done
-[ "$manifest_entry" -eq 1 ] && [ "$chezmoi_entry" -eq 1 ] && [ "$ssh_entry" -eq 1 ] && [ -f "$config_source" ] || {
+if [ "$manifest_entry" -ne 1 ] || [ "$chezmoi_entry" -ne 1 ] || [ "$ssh_entry" -ne 1 ] || [ ! -f "$config_source" ]; then
     printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
     exit 1
-}
+fi
 
 if command -v jq >/dev/null 2>&1; then
     jq -e '.format_version == "dotfiles-backup-v1"' "$manifest" >/dev/null || {
@@ -83,10 +83,10 @@ reject_symlinked_parent() { # $1 = destination path
 
 config_destination="$HOME/.config/chezmoi/chezmoi.toml"
 reject_symlinked_parent "$config_destination"
-[ ! -e "$config_destination" ] && [ ! -L "$config_destination" ] || {
+if [ -e "$config_destination" ] || [ -L "$config_destination" ]; then
     printf 'ERROR: refusing to overwrite existing ChezMoi config: %s\n' "$config_destination" >&2
     exit 1
-}
+fi
 
 if [ -d "$ssh_source" ]; then
     reject_symlinked_parent "$HOME/.ssh/.dotrestore-parent-check"
@@ -94,10 +94,10 @@ if [ -d "$ssh_source" ]; then
         relative="${source#"$ssh_source/"}"
         destination="$HOME/.ssh/$relative"
         reject_symlinked_parent "$destination"
-        [ ! -e "$destination" ] && [ ! -L "$destination" ] || {
+        if [ -e "$destination" ] || [ -L "$destination" ]; then
             printf 'ERROR: refusing to overwrite existing SSH file: %s\n' "$destination" >&2
             exit 1
-        }
+        fi
     done < <(find "$ssh_source" -type f -print0)
 fi
 

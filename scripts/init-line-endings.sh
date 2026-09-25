@@ -22,7 +22,7 @@ REPO_DIR="$(pwd)"
 for arg in "$@"; do
     case "$arg" in
     --force) FORCE=true ;;
-    -h|--help) sed -n '3,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '3,18p' "$0"; exit 0 ;;
     *) REPO_DIR="$arg" ;;
     esac
 done
@@ -36,7 +36,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
     FILES="$(find . -type f -not -path './.git/*')"
 fi
-EXTS="$(printf '%s\n' "$FILES" | sed 's/.*\.//' | tr 'A-Z' 'a-z' | sort -u)"
+EXTS="$(printf '%s\n' "$FILES" | sed 's/.*\.//' | tr '[:upper:]' '[:lower:]' | sort -u)"
 
 has() { printf '%s\n' "$EXTS" | grep -Fxq "$1"; }
 

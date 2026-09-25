@@ -160,7 +160,7 @@ done
 
 vscode_settings_line="$(existing_vscode_settings)"
 if [ -n "$vscode_settings_line" ]; then
-    section+=$'\n  '"${vscode_settings_line#${vscode_settings_line%%[![:space:]]*}}"
+    section+=$'\n  '"${vscode_settings_line#"${vscode_settings_line%%[![:space:]]*}"}"
 fi
 
 if [ ! -f "$CONFIG_FILE" ]; then

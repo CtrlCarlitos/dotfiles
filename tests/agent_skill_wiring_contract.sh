@@ -269,7 +269,7 @@ verify_unix_claude_attribution() {
     } > "$harness"
 
     for fixture in new empty zero-byte nested malformed mode; do
-        rm -rf "$tmp/$fixture"
+        rm -rf "${tmp:?}/$fixture"
         mkdir -p "$tmp/$fixture"
         settings="$tmp/$fixture/.claude/settings.json"
         case "$fixture" in
