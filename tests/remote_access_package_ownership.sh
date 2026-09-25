@@ -56,14 +56,14 @@ render_windows "$windows_desktop" windows-desktop
 render_windows "$windows_server" windows-server
 
 contains linux-remote 'tailscale.com/install.sh' 'Linux remote_access must install Tailscale'
-contains linux-remote 'apt-get install -y cloudflared' 'Linux remote_access must install cloudflared'
+contains linux-remote 'add_apt_repo cloudflared' 'Linux remote_access must install cloudflared'
 contains mac-remote 'tailscale-app' 'macOS remote_access must install tailscale-app'
 contains mac-remote 'brew install cloudflared' 'macOS remote_access must install cloudflared'
-contains wsl-remote 'apt-get install -y cloudflared' 'WSL remote_access must install cloudflared'
+contains wsl-remote 'add_apt_repo cloudflared' 'WSL remote_access must install cloudflared'
 contains wsl-remote 'Tailscale remains on Windows' 'WSL remote_access must explicitly skip Tailscale'
 
 omits linux-desktop 'tailscale.com/install.sh' 'dev_desktop must not install Tailscale'
-omits linux-desktop 'apt-get install -y cloudflared' 'dev_desktop must not install cloudflared'
+omits linux-desktop 'add_apt_repo cloudflared' 'dev_desktop must not install cloudflared'
 
 contains linux-server 'openssh-server' 'remote_access_server must install OpenSSH Server prerequisites'
 contains linux-server 'manual' 'remote_access_server must explain manual next steps'
