@@ -62,7 +62,15 @@ zsh startup runs `ssh-agent-relay start` in the background and points
 ```sh
 ssh-agent-relay status                      # upstream + per-account sockets
 eval "$(ssh-agent-relay use github-work)"   # switch this shell to another account
+ssh-agent-relay stop                        # kill the per-account agents, remove the sockets
 ```
+
+Both the shell and the relay derive the state dir from **`SSH_AGENT_RELAY_DIR`**
+(default `${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-$(id -u)}/ssh-agent-relay`).
+Your zshrc exports it before backgrounding `ssh-agent-relay start`, and the
+relay honours it — one definition, no drifted copies of the path. It holds the
+per-account socket records, the `default.sock` the shell reads, and the agent
+PIDs `stop` kills.
 
 Per **project**, let direnv pick the account, the same way `[[data.accounts]]`
 `dirs` picks the git identity:
@@ -79,7 +87,8 @@ no filter — `ssh-agent-relay start` gives each account **its own real ssh-agen
 holding only that account's keys (from `[[data.accounts]]`). That is stronger than
 filtering a shared agent, and needs no `ssh-agent-filter` (which has no Homebrew
 formula). `SSH_AGENT_RELAY_NATIVE=1` forces this mode on WSL too, for anyone who
-deliberately keeps keys inside the distro.
+deliberately keeps keys inside the distro. `ssh-agent-relay stop` kills those
+per-account agents (their PIDs are persisted at start), so nothing leaks.
 
 Passphrase-protected keys never block a shell: macOS loads them from the keychain
 (`--apple-use-keychain`), and elsewhere the relay skips the key and prints the
