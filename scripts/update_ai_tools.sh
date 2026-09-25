@@ -85,7 +85,6 @@ if command -v npx &>/dev/null; then
     # From .chezmoidata/agents.yaml, read at runtime (see CODEX_PKG above).
     read -r -a AGENTS <<<"$(chezmoi execute-template '{{ join " " .agents.skills.agents }}' 2>/dev/null || true)"
     [ "${#AGENTS[@]}" -gt 0 ] || echo "   skills agent list unavailable from chezmoi data - skill updates may fail"
-    SK=(npx --yes --loglevel=error skills@latest)
     claude_installed=0; claude_skipped=0; claude_failed=0
     opencode_installed=0; opencode_skipped=0; opencode_failed=0
     codex_installed=0; codex_skipped=0; codex_failed=0
@@ -112,7 +111,7 @@ if command -v npx &>/dev/null; then
     else
         claude_reported="$claude_installed"; opencode_reported="$opencode_installed"; codex_reported="$codex_installed"
         claude_installed=0; opencode_installed=0; codex_installed=0
-        verify_curated_skill_targets
+        verify_curated_skill_targets "$claude_reported" "$opencode_reported" "$codex_reported"
     fi
     echo "   Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
     echo "   Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"

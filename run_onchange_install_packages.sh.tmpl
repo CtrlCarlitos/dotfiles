@@ -270,14 +270,14 @@ install_agent_skills() {
     # --loglevel=error: npm 12's npx prints a benign "npm notice run npx /
     # npm notice run 'skills' add ..." hint to stderr on every invocation -
     # pure console noise here, suppressed like the Windows side does.
-    # </dev/null on every $SK call: chezmoi run_onchange scripts inherit the
+    # The npx wrapper (SK) is defined inside the shared skills_add_all.
+    # </dev/null on every call: chezmoi run_onchange scripts inherit the
     # terminal's TTY on stdin, and a CLI that decides to prompt (or a stalled
     # fetch with no internal timeout) then blocks the whole run holding the
     # terminal - confirmed live 2026-08-30, first real run hung indefinitely
     # at the skills CLI's intro banner. With stdin at EOF the same commands
     # complete non-interactively in ~5s (verified: 8 skills + mp-code-review +
     # frontend-design). net_timeout stays as the wall-clock backstop.
-    local -a SK=(npx --yes --loglevel=error skills@latest)
     # The CLI writes $HOME/.claude/skills and $HOME/.agents/skills; OpenCode
     # and Codex discover the latter.
     # From .chezmoidata/agents.yaml (see #83).
@@ -325,8 +325,9 @@ install_agent_skills() {
     codex_installed=0
     # Target verification, the Antigravity fan-out with backup/restore and
     # the OpenCode command shims: shared verbatim in
-    # scripts/lib/agent-skills.sh (issue #123).
-    verify_curated_skill_targets
+    # scripts/lib/agent-skills.sh (issue #123). The CLI-phase tallies pass as
+    # arguments - a target only counts failed when its CLI phase ran.
+    verify_curated_skill_targets "$claude_reported" "$opencode_reported" "$codex_reported"
 
     info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
     info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
@@ -1430,7 +1431,12 @@ PYEOF
         apt)
             if ! command -v act &>/dev/null; then
                 info "Installing act (local GitHub Actions runner)..."
-                net_timeout 180 bash -c 'curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | '"'"$SUDO"'"' bash -s -- -b /usr/local/bin' || warn "act install failed or timed out"
+                # Compose the fetched script in a variable instead of splicing
+                # $SUDO in through quote-juggling (SC2027): same result - the
+                # script is single-quoted shell, with $SUDO expanded once, and
+                # an empty SUDO just leaves a harmless extra space for bash -c.
+                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${SUDO} bash -s -- -b /usr/local/bin"
+                net_timeout 180 bash -c "$act_script" || warn "act install failed or timed out"
             fi
             ;;
         brew)

@@ -114,7 +114,6 @@ fetch_and_verify() {
 # CLI (vercel-labs/skills) for Claude Code / OpenCode / Antigravity / Codex.
 #
 # Caller-provided (dynamic scope):
-#   SK      array - the npx wrapper, e.g. (npx --yes --loglevel=error skills@latest)
 #   AGENTS  array - adapters from .chezmoidata/agents.yaml skills.agents
 #   record_cli_result <status> <count> - the caller's per-agent tally
 #   info/warn - provided by this file
@@ -126,6 +125,11 @@ fetch_and_verify() {
 # wall-clock backstop.
 #-------------------------------------------------------------------------------
 skills_add_all() {
+    # The npx wrapper is identical for every consumer, so the function that
+    # uses it owns the definition (it used to sit in each consumer and drift).
+    local -a SK=(npx --yes --loglevel=error skills@latest)
+
+    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
     # Matt Pocock's engineering/productivity skills - 11 installed as-is.
     # teach + writing-for-agents live under skills/productivity/, the rest under
     # skills/engineering/; the CLI resolves by skill name, not path (grilling and
@@ -259,13 +263,16 @@ skills_add_all() {
 }
 
 #-------------------------------------------------------------------------------
-# verify_curated_skill_targets - the post-install verification pass over the
-# catalog (scripts/curated-agent-skills.txt), shared verbatim.
+# verify_curated_skill_targets <claude_reported> <opencode_reported> <codex_reported>
+# - the post-install verification pass over the catalog
+# (scripts/curated-agent-skills.txt), shared verbatim.
+#
+# Arguments: the CLI-phase tallies from the caller's skills_add_all phase -
+# a target is only counted "failed" when its CLI phase actually ran. Passed
+# explicitly rather than via dynamic scope so the data flow stays visible.
 #
 # Caller-provided (dynamic scope):
 #   catalog         - path to the curated catalog
-#   claude_reported / opencode_reported / codex_reported - CLI-phase tallies
-#                     (a target is only "failed" when its CLI phase ran)
 #   claude_installed / opencode_installed / codex_installed /
 #   antigravity_installed / antigravity_skipped / antigravity_failed - tallies
 #   info/warn - provided by this file
@@ -274,8 +281,13 @@ skills_add_all() {
 # counted installed only after its supported discovery target exists, the
 # Claude copy is fanned out to Antigravity with backup/restore, and a
 # managed-by marker guards the OpenCode command shim.
+# catalog is resolved from the caller's scope (the installer renders its
+# sourceDir; the updater derives it from BASH_SOURCE) - invisible to static
+# analysis by design, hence the whole-function suppression.
+# shellcheck disable=SC2154
 #-------------------------------------------------------------------------------
 verify_curated_skill_targets() {
+    local claude_reported="$1" opencode_reported="$2" codex_reported="$3"
     local skill source target tmp backup command_dir command_file antigravity_status
     while IFS= read -r skill || [[ -n "$skill" ]]; do
         [[ -z "$skill" || "$skill" == \#* ]] && continue

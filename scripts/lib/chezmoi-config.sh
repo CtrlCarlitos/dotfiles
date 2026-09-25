@@ -16,7 +16,8 @@
 
 # The 16 package groups, taxonomy order (docs/research/package-groups-spec.md
 # §2). This is the single vocabulary shared with the config template,
-# installers, and CI.
+# installers, and CI. Consumed by the sourcing scripts, never in this file.
+# shellcheck disable=SC2034
 PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
     claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
     antigravity_desktop dev_desktop remote_access remote_access_server guardrail)
