@@ -45,16 +45,6 @@ AGENTS.md
 graft/**
 guardrail.toml
 
-# Version pin file used only by CI (ci.yml/full-install-test.yml/auto-update.yml
-# all read it to install a consistent chezmoi version) - not a dotfile, and
-# it doesn't match any of chezmoi's naming conventions. Confirmed via
-# `chezmoi managed` that it was never applied as a target either way.
-# NOTE: ignoring it does NOT silence `chezmoi doctor`'s "suspicious-entries"
-# warning - doctor scans the source dir by name, before .chezmoiignore. The
-# warning is cosmetic and still shown; only moving the pin into
-# .chezmoidata.yaml would remove it.
-.chezmoi-version
-
 # Local scratch directory (screenshots, debug logs, config snapshots - see
 # .gitignore's temp/ entry). Confirmed live: `chezmoi doctor` flagged
 # temp/chezmoi.toml as a suspicious entry and nothing stopped apply from
@@ -83,6 +73,7 @@ AppData/**
 .zshrc
 .aliases.zsh
 .local/bin/devprofile
+.local/bin/ssh-agent-relay
 # The zsh/tmux externals too: no zsh or tmux runs on Windows (WSL has its own
 # home), so ~/.oh-my-zsh was 15 MB and ~/.tmux 153 KB of unusable plugin trees.
 .oh-my-zsh/**
@@ -109,6 +100,19 @@ Library/Application Support/Code/**
 {{- end }}
 {{- if and (eq .chezmoi.os "windows") (not (stat (joinPath .chezmoi.homeDir "AppData/Roaming/Code/User"))) }}
 AppData/Roaming/Code/**
+{{- end }}
+
+# Agent config dirs (Codex / OpenCode): their modify_ templates MERGE with an
+# existing install, and chezmoi runs a modify_ template with empty stdin when
+# the target is absent - which CREATES the file. On a machine that never
+# installed the tool, applying still manufactured a config for it. Same shape
+# as the VS Code User-dir guards above: only manage these where the tool's
+# config dir already exists, so a headless server never gets a stray one.
+{{- if not (stat (joinPath .chezmoi.homeDir ".codex")) }}
+.codex/**
+{{- end }}
+{{- if not (stat (joinPath .chezmoi.homeDir ".config/opencode")) }}
+.config/opencode/**
 {{- end }}
 
 # Ghostty config: macOS + Linux desktop only. Windows has Windows Terminal, and

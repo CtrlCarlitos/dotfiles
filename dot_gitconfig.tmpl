@@ -169,7 +169,7 @@
     diffFilter = delta --color-only
 {{- end }}
 
-{{- if .accounts }}
+{{- if and (hasKey . "accounts") .accounts }}
 #-------------------------------------------------------------------------------
 # GitHub URL Shortcuts (Auto-generated from accounts)
 #-------------------------------------------------------------------------------
@@ -274,7 +274,7 @@
     # Show all configured remotes with their URLs
     remotes = remote -v
 
-{{- if .accounts }}
+{{- if and (hasKey . "accounts") .accounts }}
 # ------------------------------------------------------------------------------
 # Conditional Includes (Auto-generated from accounts)
 # Each account's dirs list determines which directories use that identity
