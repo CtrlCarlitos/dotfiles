@@ -86,6 +86,13 @@
     # attributes apply, so the attributes file alone decides what lands on
     # disk. See .gitattributes at the repo root.
     autocrlf = false
+    # Shared hooks for every repository. commit-msg strips Claude co-author
+    # trailers and then chains to the repo's own .git/hooks/commit-msg, so
+    # per-repo hooks keep working. Two things to know: hooksPath replaces
+    # .git/hooks, so only hooks the shared directory chains to still run
+    # (today: commit-msg); and `pre-commit install` refuses while it is set.
+    # In a repo that needs pre-commit: git config core.hooksPath .git/hooks
+    hooksPath = ~/.config/git/hooks
 {{- if or $isWsl $isDevcontainer $devDesktop (lookPath "code") }}
     # Requires VS Code in PATH (code command)
     editor = code --wait
