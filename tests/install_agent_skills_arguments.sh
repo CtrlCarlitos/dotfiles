@@ -2,6 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+. "$repo_root/tests/lib.sh"
+
 template="$repo_root/run_onchange_install_packages.sh.tmpl"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -63,8 +66,7 @@ chmod +x "$tmp/bin/timeout" "$tmp/bin/git" "$tmp/bin/npx" "$tmp/bin/chezmoi"
 # rendered before its bash can be extracted. Empty config + override-data,
 # never the host's own chezmoi.toml. The fake chezmoi in $tmp/bin is only on
 # PATH for the harness run below, so this uses the real one.
-command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed (needed to render the installer)
-'; exit 0; }
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (needed to render the installer)"
 : > "$tmp/chezmoi.toml"
 groups="{$(grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" | sed -E 's/.*"packages\.([a-z_]+)"/"\1":true/' | paste -sd, -)}"
 rendered="$tmp/installer.sh"
@@ -86,7 +88,7 @@ export CHEZMOI_SOURCE_PATH="$repo_root"
 PATH="$tmp/bin:$PATH" bash "$harness"
 
 if [[ ! -f "$SKILLS_ARGUMENT_RESULTS" ]]; then
-    printf '%s\n' 'FAIL: controlled npx was never reached' >&2
+    fail 'controlled npx was never reached'
     exit 1
 fi
 
@@ -95,12 +97,12 @@ while IFS= read -r result; do
     results+=("$result")
 done < "$SKILLS_ARGUMENT_RESULTS"
 if [[ "${#results[@]}" -ne 8 ]]; then
-    printf 'FAIL: expected 8 controlled npx calls, got %s\n' "${#results[@]}" >&2
+    fail "expected 8 controlled npx calls, got ${#results[@]}"
     exit 1
 fi
 if [[ "${results[*]}" != "PASS PASS PASS PASS PASS PASS PASS PASS" ]]; then
-    printf 'FAIL: malformed npx argument vector: %s\n' "${results[*]}" >&2
+    fail "malformed npx argument vector: ${results[*]}"
     exit 1
 fi
 
-printf '%s\n' 'PASS: all skills CLI calls preserve command and agent argument boundaries'
+finish

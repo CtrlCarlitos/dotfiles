@@ -23,10 +23,10 @@ set -euo pipefail
 # So the checks below are about honesty and framing, not about excluding keys.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-failures=0
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
 
-have() { grep -Fq -- "$2" "$repo_root/$1" || fail "$1: missing '$2'"; }
+. "$repo_root/tests/lib.sh"
+
+have() { require "$repo_root/$1" "$2"; }
 
 # 1. Keys are still backed up. If someone "tidies" this away, the recovery path
 #    for a non-GitHub server key disappears with it.
@@ -69,8 +69,4 @@ have docs/backup-restore.md "When a key rotates"
 have docs/ssh-agents.md "(backup-restore.md)"
 have docs/ssh-agents.md "If the machine dies"
 
-if [ "$failures" -gt 0 ]; then
-    printf '\nFAIL: backup key handling (%d problem(s))\n' "$failures" >&2
-    exit 1
-fi
-printf 'PASS: backups keep keys for recovery, say so, and cannot provision a second machine\n'
+finish

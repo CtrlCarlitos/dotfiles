@@ -13,7 +13,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 # 1. opencode: graft added to the GLOBAL mcp block, both twins (the serena
 #    merge already proves the merge-not-clobber pattern lives there).
@@ -72,9 +72,4 @@ grep -Fq -- '-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length 
 grep -Fq -- '! -s "$AGY_GLOBAL_MCP"' "$sh_installer" ||
     fail "$sh_installer: no absent/0-byte repair of the global mcp_config.json"
 
-grep -Fq -- 'bash tests/mcp_autowire_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
-    printf 'FAIL: ci.yml: MCP autowire contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: MCP autowire contracts\n'
+finish

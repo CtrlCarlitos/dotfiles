@@ -8,8 +8,7 @@ backup="$repo_root/scripts/dotbackup.ps1"
 restore="$repo_root/scripts/dotrestore.ps1"
 docs="$repo_root/docs/backup-restore.md"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-require() { grep -Fq -- "$2" "$1" || fail "missing $2 in ${1##*/}"; }
+. "$repo_root/tests/lib.sh"
 
 [ -f "$backup" ] || fail 'scripts/dotbackup.ps1 missing'
 [ -f "$restore" ] || fail 'scripts/dotrestore.ps1 missing'
@@ -54,4 +53,4 @@ if grep -Fq -- 'pwsh -File' "$docs"; then
     fail 'Windows commands must use powershell.exe'
 fi
 
-printf 'PASS: dotbackup_restore_contract.sh\n'
+finish

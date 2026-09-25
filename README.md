@@ -300,7 +300,7 @@ Library/, dot_config/Code/          # macOS / Linux desktop: VS Code keybindings
 Documents/                          # Windows only: PowerShell profiles
 private_dot_ssh/                    # SSH config (templated, mode 600)
 .chezmoi.toml.tmpl                  # Config template (16 promptBoolOnce groups)
-tests/                              # CI test suite (menu, config keys, skills args)
+tests/                              # CI test suite (menu, config keys, skills args) — run it: bash tests/run.sh
 docs/                               # You are here
 
 scripts/ and tests/ stay in the repo - they are never copied into $HOME.

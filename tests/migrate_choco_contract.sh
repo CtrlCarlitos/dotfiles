@@ -14,9 +14,8 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo_root/scripts/migrate-to-choco.ps1"
 installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 [ -f "$script" ] || fail "scripts/migrate-to-choco.ps1 missing"
 
@@ -64,9 +63,4 @@ grep -Fq "CHEZMOI_SOURCE_DIR -replace '/', '" "$installer" ||
 ! grep -Fq '$srcAdvisory\scripts' "$installer" ||
     fail "installer: advisory must not concatenate the source dir with a backslash literal"
 
-grep -Fq -- 'bash tests/migrate_choco_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: migrate-choco contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: migrate-to-choco opt-in contract\n'
+finish

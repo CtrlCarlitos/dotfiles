@@ -4,6 +4,10 @@ set -euo pipefail
 # Rendering with each platform fixture proves that package-group ownership is
 # enforced by template gates, rather than by comments or source layout.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+. "$repo_root/tests/lib.sh"
+
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
 template="$repo_root/run_onchange_install_packages.sh.tmpl"
 windows_template="$repo_root/run_onchange_install_packages.ps1.tmpl"
 tmp="$(mktemp -d)"
@@ -11,12 +15,7 @@ trap 'rm -rf "$tmp"' EXIT
 config="$tmp/chezmoi.toml"
 : >"$config"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
-
-render() { # $1 = fixture JSON, $2 = output filename
+render_fixture() { # $1 = fixture JSON, $2 = output filename (lib.sh's render is the no-override default)
     chezmoi execute-template --config "$config" --source "$repo_root" --override-data "$1" \
         <"$template" >"$tmp/$2"
 }
@@ -46,12 +45,12 @@ windows_remote='{"chezmoi":{"os":"windows"},"packages":{"remote_access":true}}'
 windows_desktop='{"chezmoi":{"os":"windows"},"packages":{"dev_desktop":true}}'
 windows_server='{"chezmoi":{"os":"windows"},"packages":{"remote_access_server":true}}'
 
-render "$linux_remote" linux-remote
-render "$wsl_remote" wsl-remote
-render "$mac_remote" mac-remote
-render "$linux_desktop" linux-desktop
-render "$linux_server" linux-server
-render "$mac_server" mac-server
+render_fixture "$linux_remote" linux-remote
+render_fixture "$wsl_remote" wsl-remote
+render_fixture "$mac_remote" mac-remote
+render_fixture "$linux_desktop" linux-desktop
+render_fixture "$linux_server" linux-server
+render_fixture "$mac_server" mac-server
 render_windows "$windows_remote" windows-remote
 render_windows "$windows_desktop" windows-desktop
 render_windows "$windows_server" windows-server
@@ -89,4 +88,4 @@ for prohibited in 'Start-Service' 'Set-Service' 'New-NetFirewallRule' 'sshd_conf
     omits windows-server "$prohibited" "Windows server prerequisite must not contain $prohibited"
 done
 
-printf 'PASS: remote access package ownership\n'
+finish

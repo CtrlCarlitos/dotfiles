@@ -33,10 +33,10 @@ ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 sh_t="$repo_root/run_onchange_install_packages.sh.tmpl"
 up_sh="$repo_root/scripts/update_ai_tools.sh"
 up_ps="$repo_root/scripts/update_ai_tools.ps1"
-failures=0
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
 
-[ -f "$cat_file" ] || { printf 'FAIL: %s missing\n' "$cat_file" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
+
+[ -f "$cat_file" ] || { fail "$cat_file missing"; exit 1; }
 for f in ps-list mcp-servers-ps1; do
     [ -f "$repo_root/.chezmoitemplates/$f" ] || fail ".chezmoitemplates/$f missing"
 done
@@ -64,17 +64,17 @@ for f in "$up_sh" "$up_ps"; do
 done
 
 # --------------------------------------- 1, 3, 4 need chezmoi to render
-command -v chezmoi >/dev/null 2>&1 || { printf 'SKIP: chezmoi not installed (static checks only)\n'; exit 0; }
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (static checks only)"
 PY=""
 for c in python3 python; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import json' 2>/dev/null; then PY="$c"; break; fi
 done
-[ -n "$PY" ] || { printf 'SKIP: no python (static checks only)\n'; exit 0; }
+[ -n "$PY" ] || skip "no python (static checks only)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-: > "$tmp/chezmoi.toml"      # empty: the HOST's config must not shape the render
-render() { chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" "$@"; }
+# render is lib.sh's: empty config (the HOST's config must not shape the
+# render) + this repo as source.
 grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl" \
     | sed -E 's/.*"packages\.([a-z_]+)"/\1/' > "$tmp/groups.txt"
 all_on="{$(sed -E 's/.*/"&":true/' "$tmp/groups.txt" | paste -sd, -)}"
@@ -161,8 +161,4 @@ print("  rendered .sh : MCP table x4, allow-scripts x2, codex, AGENTS - all from
 sys.exit(1 if bad else 0)
 PYEOF
 
-if [ "$failures" -gt 0 ]; then
-    printf '\nFAIL: agent catalog (%d problem(s))\n' "$failures" >&2
-    exit 1
-fi
-printf 'PASS: agent data lives only in .chezmoidata/agents.yaml; both twins render it, both updaters read it\n'
+finish

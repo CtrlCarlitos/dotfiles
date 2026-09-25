@@ -62,140 +62,21 @@ jobs:
           done
           exit $FAILED
 
-      - name: Test skills CLI argument boundaries
-        run: bash tests/install_agent_skills_arguments.sh
-
-      - name: Test agent skill wiring contract
-        run: bash tests/agent_skill_wiring_contract.sh
-
-      - name: Test agent-browser provisioning contract
-        run: bash tests/agent_browser_provisioning_contract.sh
-
-      - name: Test Windows Graft installation contract
-        run: bash tests/graft_windows_install_contract.sh
-
-      - name: Test choco probe resilience contract
-        run: bash tests/choco_probe_contract.sh
-
-      - name: Test package catalog (one source for every package name)
-        run: bash tests/package_catalog_contract.sh
-
-      - name: Test agent catalog (one source for MCP, allow-scripts, CLI pins)
-        run: bash tests/agent_catalog_contract.sh
-
-      - name: Test installer hygiene contract
-        run: bash tests/installer_hygiene_contract.sh
-
-      - name: Test dot CLI contract
-        run: bash tests/dot_cli_contract.sh
-
-      - name: Test MCP autowire contract
-        run: bash tests/mcp_autowire_contract.sh
-      - name: Test Serena dashboard contract
-        run: bash tests/serena_dashboard_contract.sh
-
-      - name: Test agent tool upgrade contract
-        run: bash tests/agent_tool_upgrade_contract.sh
-
-      - name: Test devcontainer documentation contract
-        run: bash tests/devcontainer_docs_contract.sh
-
-      - name: Test package-group selection menu
-        run: bash tests/select_packages.sh
-
-      - name: Test workflow configs cover every prompted key
-        run: bash tests/check_workflow_config_keys.sh
-
-      - name: Test zsh startup contract
-        run: bash tests/zshrc_startup_contract.sh
-
-      - name: Test Windows Terminal settings contract
-        run: bash tests/windows_terminal_contract.sh
-
-      - name: Test Codex keymap merge contract
-        run: bash tests/codex_keymap_contract.sh
-
-      - name: Test home scope contract
-        run: bash tests/home_scope_contract.sh
-
-      - name: Test ssh-agent-relay contract
-        run: bash tests/ssh_agent_relay_contract.sh
-
-      - name: Test stable guardrail release updates
-        run: bash tests/update_guardrail_versions.sh
-
-      - name: Test guardrail plane lifecycle contract
-        run: bash tests/guardrail_lifecycle_contract.sh
-
-      - name: Test dotfiles doctor
-        run: bash tests/dotfiles_doctor.sh
+      # One step runs every tests/*.sh (the runner enumerates the directory, so
+      # a test cannot go unwired). --strict fails on any skip: this job installs
+      # chezmoi, zsh and shellcheck above, so a skip here means a guard is too
+      # broad or a dependency is missing. Run locally with TESTS_STRICT=0.
+      - name: Test shell suite (all tests/*.sh, strict)
+        run: bash tests/run.sh --strict
 
       - name: Test dotfiles doctor (pwsh twin)
         run: pwsh -NoProfile -File tests/dotfiles_doctor.ps1
 
-      # These six existed but were never wired into CI, so they had never run
-      # (confirmed live: `git log -S<name> -- .github/workflows/ci.yml` empty for
-      # each). They pass; the gap was the wiring, not the tests.
-      - name: Test documentation consistency
-        run: bash tests/docs_consistency.sh
-
-      - name: Test documentation structure (TODOs, links, anchors, settings)
-        run: bash tests/docs_contracts.sh
-
-      - name: Test remote access docs
-        run: bash tests/remote_access_docs.sh
-
-      - name: Test ChatGPT desktop identity contract
-        run: bash tests/chatgpt_desktop_identity_contract.sh
-
-      - name: Test CodexBar install contract
-        run: bash tests/codexbar_install_contract.sh
-
-      - name: Test backup/restore contract
-        run: bash tests/dotbackup_restore_contract.sh
-
-      - name: Test backup/restore round trip
-        run: bash tests/dotbackup_restore.sh
-
-      - name: Test backup key handling (recovery, not provisioning)
-        run: bash tests/backup_key_handling_contract.sh
-
-      # Seventh never-wired test. Its Unix twin (tests/select_packages.sh) was
-      # already here; this one had never run, and it was broken: the fake gum
-      # stub inherited the file's CRLF, so its shebang carried a trailing CR and
-      # Linux could not exec it.
+      # select_packages.ps1 was once never wired and broken: the fake gum stub
+      # inherited the file's CRLF, so its shebang carried a trailing CR and
+      # Linux could not exec it. The bash runner does not enumerate .ps1 twins.
       - name: Test select-packages.ps1 (pwsh twin)
         run: pwsh -NoProfile -File tests/select_packages.ps1
-
-      - name: Test PSModulePath guard contract
-        run: bash tests/ps_modulepath_contract.sh
-
-      - name: Test SSH ACL contract
-        run: bash tests/ssh_acl_contract.sh
-
-      - name: Test init-line-endings tool
-        run: bash tests/init_line_endings.sh
-
-      - name: Test Windows elevation gate contract
-        run: bash tests/windows_elevation_contract.sh
-
-      - name: Test migrate-to-choco contract
-        run: bash tests/migrate_choco_contract.sh
-
-      - name: Test vscode extensions + ssh_hosts contract
-        run: bash tests/vscode_ssh_contract.sh
-
-      - name: Test VS Code settings single-source (no twin duplication)
-        run: bash tests/vscode_settings_source_contract.sh
-
-      - name: Test CI fixtures (one source for every job's chezmoi.toml)
-        run: bash tests/ci_fixture_contract.sh
-
-      # Last, because it runs the whole suite again to account for every test.
-      # The individual steps above stay for per-test visibility in the UI; this
-      # one answers a question they cannot: did any of them decline to run?
-      - name: Test suite integrity (wiring, completion, no silent skips)
-        run: bash tests/suite_integrity_contract.sh
 
       - name: Secret/PII scan (gitleaks)
         # The tree-result.log class: debug dumps, machine paths, anything

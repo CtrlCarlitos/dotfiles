@@ -3,6 +3,10 @@ set -euo pipefail
 
 guide="docs/remote-access.md"
 non_goals="No Caddy, code-server, Tailscale Funnel, or public agent backends."
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+. "$repo_root/tests/lib.sh"
+
 anchors=(
   "Tailscale Serve"
   "OPENCODE_SERVER_PASSWORD"
@@ -13,11 +17,6 @@ anchors=(
   "WSL :2222"
   "http_status:404"
 )
-
-fail() {
-  printf 'FAIL: %s\n' "$1" >&2
-  exit 1
-}
 
 validate_guide() {
   local candidate=$1
@@ -58,4 +57,4 @@ done
 
 validate_guide "$guide" || fail "guide violates remote-access documentation contract"
 
-printf 'PASS: remote-access documentation contract\n'
+finish

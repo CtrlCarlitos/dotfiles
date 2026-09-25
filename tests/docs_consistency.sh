@@ -2,21 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd -- "$repo_root"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
-
-require() {
-    grep -Fq -- "$2" "$repo_root/$1" || fail "$1: missing '$2'"
-}
-
-forbid() {
-    if grep -Fq -- "$2" "$repo_root/$1"; then
-        fail "$1: must not contain '$2'"
-    fi
-}
+. "$repo_root/tests/lib.sh"
 
 forbid_regex() {
     if grep -Eqi -- "$2" "$repo_root/$1"; then
@@ -78,4 +66,4 @@ forbid_regex docs/backup-restore.md '(^|[[:space:]`])(tar|zip|unzip|compress-arc
 forbid_regex docs/backup-restore.md '(^|[^[:alnum:]])[^[:space:]`]+\.(tar|tar\.gz|tgz|zip)([^[:alnum:]]|$)'
 forbid_regex docs/backup-restore.md '(^|[[:space:]`])(cp|copy-item|scp|rsync|robocopy|xcopy)[[:space:]].*(\.ssh|\\\.ssh)'
 
-printf 'PASS: documentation package-group consistency\n'
+finish

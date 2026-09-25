@@ -17,9 +17,9 @@ tmpl="$repo_root/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/
 ignore="$repo_root/.chezmoiignore"
 config_tmpl="$repo_root/.chezmoi.toml.tmpl"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
-[ -f "$tmpl" ] || fail "Windows Terminal modify template missing"
+[ -f "$tmpl" ] || { fail "Windows Terminal modify template missing"; exit 1; }
 grep -Fq 'chezmoi:modify-template' "$tmpl" || fail "settings.json must be a modify-template (merge), not an owned file"
 grep -Fq 'AppData/**' "$ignore" || fail ".chezmoiignore: AppData/** must be excluded on non-Windows"
 grep -Fq 'os = {{ .os | quote }}' "$config_tmpl" || fail "chezmoi.toml.tmpl: ssh_hosts os field would be dropped on re-init"
@@ -161,5 +161,4 @@ if command -v chezmoi >/dev/null; then
     done
 fi
 
-printf 'PASS: windows terminal - settings merge, never own
-'
+finish

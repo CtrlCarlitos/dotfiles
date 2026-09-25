@@ -23,10 +23,7 @@ sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 doc="$repo_root/docs/agent-context-tools.md"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+. "$repo_root/tests/lib.sh"
 
 # 1. The defaults are catalog data, under the serena key: no auto-open, and
 #    the browser interface (the platform default on Windows/macOS is the
@@ -67,8 +64,4 @@ grep -Fq 'dashboard_interface' "$doc" ||
 grep -Fq '[data.agents.serena]' "$doc" ||
     fail "docs/agent-context-tools.md: document the per-machine override [data.agents.serena] open_dashboard = true"
 
-# 5. CI wiring.
-grep -Fq -- 'bash tests/serena_dashboard_contract.sh' "$repo_root/.github/workflows/ci.yml" ||
-    fail "ci.yml: serena dashboard contract is not a PR CI check"
-
-printf '%s\n' 'PASS: serena dashboard auto-open contract'
+finish

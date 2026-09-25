@@ -7,13 +7,13 @@ set -euo pipefail
 # generated pair agrees, the idempotence contract (no overwrite without
 # --force), and the renormalize path for a CRLF-committed shell script.
 
+command -v git >/dev/null 2>&1 || skip "git not installed"
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tool="$repo_root/scripts/init-line-endings.sh"
 tool_ps1="$repo_root/scripts/init-line-endings.ps1"
 
-command -v git >/dev/null 2>&1 || { printf 'SKIP: git not installed\n'; exit 0; }
-
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -91,4 +91,4 @@ else
     echo "  skip: ps1 twin (pwsh not installed)"
 fi
 
-printf 'PASS: init-line-endings (generation, agreement, idempotence, renormalize)\n'
+finish
