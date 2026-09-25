@@ -30,6 +30,15 @@ agents:
       command: npx
       args: [-y, "@nanonets/graft", mcp]
 
+  # Serena's web dashboard opens a browser tab every time a client starts the
+  # MCP server (one per agent per session). false keeps the dashboard running
+  # but stops the tab; the installers re-assert Serena's
+  # `web_dashboard_open_on_launch` line from this value after every `serena
+  # init`. Per-machine override, in ~/.config/chezmoi/chezmoi.toml:
+  #   [data.agents.serena]
+  #   open_dashboard = true
+  serena:
+    open_dashboard: false
   npm:
     # Codex CLI. The installers install it; the updaters upgrade it to @latest.
     codex: "@openai/codex"

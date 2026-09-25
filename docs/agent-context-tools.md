@@ -102,3 +102,26 @@ all come from one file: `.chezmoidata/agents.yaml`. Both installers render
 from it and `scripts/update_ai_tools.{sh,ps1}` read it at runtime, so a change
 is one edit; `tests/agent_catalog_contract.sh` fails if any value reappears as
 a literal elsewhere.
+
+## Serena dashboard auto-open
+
+Serena opens its web dashboard in a browser tab every time a client starts the
+MCP server, which with four agents means a tab per session. The dotfiles turn
+that off by default: `agents.serena.open_dashboard: false` in
+`.chezmoidata/agents.yaml`. The dashboard still runs; the installers only
+re-assert Serena's `web_dashboard_open_on_launch` line in
+`~/.serena/serena_config.yml` after every `serena init`, so a fresh machine or
+a Serena upgrade converges too. Open it by hand at
+`http://localhost:24282/dashboard/` (Serena picks the next port when several
+instances run).
+
+To get the tab back on one machine, override the catalog in that machine's
+`~/.config/chezmoi/chezmoi.toml` and re-apply (config data beats catalog data):
+
+```toml
+[data.agents.serena]
+open_dashboard = true
+```
+
+`tests/serena_dashboard_contract.sh` keeps the default, both twins and this
+section in step.
