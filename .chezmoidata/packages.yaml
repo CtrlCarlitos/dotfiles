@@ -176,9 +176,10 @@ catalog:
     # ------------------------------------------------------ modern_cli
     - id: bat
       group: modern_cli
+      apt: bat
       brew: bat
       choco: bat
-      note: "apt: one line per tool in install_apt on purpose - a multi-package apt install fails wholesale if one is unavailable on a release"
+      note: "apt: binary installs as batcat, aliased to bat; shares its apt install line with fd - a multi-package apt install fails wholesale if one name is unavailable on a release"
     - id: eza
       group: modern_cli
       brew: eza
@@ -186,8 +187,10 @@ catalog:
       note: "apt: from the gierens repo with its signing key, by procedure"
     - id: fd
       group: modern_cli
+      apt: fd-find
       brew: fd
       choco: fd
+      note: "apt: package is fd-find, binary installs as fdfind (aliased to fd) - same naming conflict as batcat"
     - id: delta
       group: modern_cli
       brew: git-delta
@@ -205,8 +208,10 @@ catalog:
       note: "apt: package where the release has it, upstream script as fallback - by procedure"
     - id: direnv
       group: modern_cli
+      apt: direnv
       brew: direnv
       choco: direnv
+      note: "hooked from .zshrc (direnv hook zsh); .envrc files are allowed per project, never by the installer"
     - id: lazygit
       group: modern_cli
       brew: lazygit
@@ -220,6 +225,7 @@ catalog:
       group: modern_cli
       brew: tealdeer
       choco: tealdeer
+      note: "apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar)"
     - id: dust
       group: modern_cli
       brew: dust
@@ -227,8 +233,10 @@ catalog:
       note: "apt: GitHub release .deb by procedure"
     - id: duf
       group: modern_cli
+      apt: duf
       brew: duf
       choco: duf
+      note: "aliased over df when present"
     - id: procs
       group: modern_cli
       brew: procs
@@ -236,12 +244,15 @@ catalog:
       note: "apt: GitHub release by procedure"
     - id: shellcheck
       group: modern_cli
+      apt: shellcheck
       brew: shellcheck
       choco: shellcheck
+      note: "CI and .pre-commit-config.yaml lint shell with it - a fresh machine needs it locally, not only in CI"
     - id: shfmt
       group: modern_cli
       brew: shfmt
       choco: shfmt
+      note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
     - id: pstop
       group: modern_cli
       choco: pstop
@@ -374,6 +385,14 @@ catalog:
       group: dev_desktop
       cask: codexbar
       note: "Windows: Win-CodexBar via winget by procedure"
+    - id: screenrec
+      group: dev_desktop
+      note: >-
+        Screen capture recorder; no package-manager name on any platform by
+        design. apt: vendor repo + signing key, then apt install, by procedure
+        - the .deb hard-depends on the removed libgdk-pixbuf2.0-0 on Ubuntu
+        24.04+, so the source is rolled back on failure. cask: none - the
+        vendor .dmg by procedure. choco: none - the vendor .exe by procedure.
 
     # --------------------------------------------------- remote_access
     - id: tailscale

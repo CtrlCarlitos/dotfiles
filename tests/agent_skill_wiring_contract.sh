@@ -64,18 +64,22 @@ require_contains() {
 }
 
 verify_unix_no_npx_summaries() {
-    local tmp harness output agent
+    local tmp harness output agent expected
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     mkdir -p "$tmp/bin"
+    # The no-npx fallback derives its skipped count from the catalog next to
+    # the script, so the fixture lays the file out the way the source repo does.
+    cp "$repo_root/scripts/curated-agent-skills.txt" "$tmp/"
+    expected="$(grep -cv -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$repo_root/scripts/curated-agent-skills.txt")"
     harness="$tmp/updater.sh"
 
-    awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' \
+    awk '/^# 1b\. Curated third-party skills/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' \
         "$repo_root/scripts/update_ai_tools.sh" > "$harness"
     output="$(PATH="$tmp/bin" "$BASH" "$harness")"
 
     for agent in 'Claude Code' OpenCode Antigravity Codex; do
-        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=19 failed=0" <<< "$output"; then
+        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=$expected failed=0" <<< "$output"; then
             fail "Unix updater must report skipped curated skills without npx for $agent"
         fi
     done
@@ -153,6 +157,10 @@ EOF
     done
 
     updater_harness="$tmp/updater.sh"
+    # The updater derives its catalog from its own directory (BASH_SOURCE),
+    # not from the repo: place a copy next to the harness so its target
+    # verification runs the same branch as in a real checkout.
+    printf '%s\n' handoff > "$tmp/curated-agent-skills.txt"
     # The stub models both chezmoi calls the updater makes: `source-path`
     # (answered with the scratch repo) and, since #83, `execute-template` for
     # the agent list in .chezmoidata/agents.yaml - delegated to the real
@@ -162,7 +170,10 @@ EOF
     {
         printf '%s\n' '#!/usr/bin/env bash' 'set -e' \
             'chezmoi() { if [ "${1:-}" = execute-template ]; then shift; command chezmoi execute-template --source "'"$tmp/repo"'" "$@"; else printf "%s\\n" "'"$tmp/repo"'"; fi; }'
-        awk '/^if command -v npx/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
+        # Capture from the catalog assignment (not the npx guard): the
+        # verification below needs the catalog path, the fallback helper and
+        # the derived total, all defined before the npx branch in the source.
+        awk '/^catalog=/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
     } > "$updater_harness"
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$updater_harness")"
     if ! grep -Fqx -- '   Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
@@ -462,7 +473,17 @@ try {
             $match = [regex]::Match($source, '(?ms)^    \$catalog =.*?^    \}\r?$(?=\r?\n\})')
             if (-not $match.Success) { throw "curated skill lifecycle not found in $lifecycle" }
 
-            $lifecycleBody = "`$skAgents = @('claude-code', 'opencode')`n" + ($match.Value -replace '(?m)^    \$catalog =', @'
+            # The updater derives its catalog path from $curatedCatalog
+            # (scripts/update_ai_tools.ps1 keeps it next to $curatedSkillTotal,
+            # both outside the extracted region): the prelude seeds the fixture's
+            # catalog so the lifecycle takes its real branch, not the
+            # missing-catalog fallback that calls an undefined helper in this
+            # isolated scope. The prelude is prefixed to EVERY execution of the
+            # captured region - the second, assertion-only run below included.
+            $fixturePrelude = "`$skAgents = @('claude-code', 'opencode')`n" +
+                "`$curatedCatalog = Join-Path '$catalogDir' 'curated-agent-skills.txt'`n" +
+                "`$curatedSkillTotal = 3`n"
+            $lifecycleBody = $fixturePrelude + ($match.Value -replace '(?m)^    \$catalog =', @'
     function Move-Item {
         param($LiteralPath, $Destination, $ErrorAction)
         if ($LiteralPath -like '*.handoff.tmp.*' -and $Destination -eq $antigravitySkill) {
@@ -482,7 +503,7 @@ try {
             if (($output -join "`n") -notmatch 'Curated skills: Antigravity installed=0 .* failed=1') {
                 throw "Antigravity summary reported stale skill as installed: $lifecycle"
             }
-            & ([scriptblock]::Create($match.Value)) | Out-Null
+            & ([scriptblock]::Create($fixturePrelude + $match.Value)) | Out-Null
         }
     } finally {
         $env:USERPROFILE = $previousHome
@@ -533,11 +554,12 @@ verify_windows_summary_fallbacks() {
         < "$repo_root/run_onchange_install_packages.ps1.tmpl" > "$rendered"
     cat > "$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
+# The fallback summaries derive their count from the catalog (or report 0 when
+# it is unavailable), so the rows are matched by shape, not by a literal count.
 $summaryRows = @(
-    'Curated skills: Claude Code installed=0 skipped=19 failed=0',
-    'Curated skills: OpenCode installed=0 skipped=19 failed=0',
-    'Curated skills: Antigravity installed=0 skipped=19 failed=0',
-    'Curated skills: Codex installed=0 skipped=19 failed=0'
+    'Claude Code', 'OpenCode', 'Antigravity', 'Codex' | ForEach-Object {
+        "Curated skills: $_ installed=0 skipped=\d+ failed=0"
+    }
 )
 
 function Invoke-Lifecycle {
@@ -582,7 +604,7 @@ function Invoke-Lifecycle {
         if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
     }
     foreach ($row in $summaryRows) {
-        if (($output -join "`n") -notmatch [regex]::Escape($row)) {
+        if (($output -join "`n") -notmatch $row) {
             throw "missing summary row '$row' for $Script ($Mode)"
         }
     }

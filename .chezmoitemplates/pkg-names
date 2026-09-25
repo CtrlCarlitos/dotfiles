@@ -7,14 +7,22 @@
   manager is the catalog field to read: apt, brew or cask. Order is catalog
   order. Emits nothing when no tool in the group has that field.
 
+  Optional "ids" (a dict of tool ids to true) restricts the output to those
+  tools - used where a group's apt names install on several separate lines
+  (modern_cli: bat + fd together, shellcheck, direnv, duf each on their own):
+
+    apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "bat" true "fd" true) "catalog" .catalog.packages) }}
+
   The final action ends with -}} so the fragment's own trailing newline is
   trimmed: includeTemplate returns the file verbatim, and an untrimmed newline
   once landed between `for pkg in ...` and `; do` on Linux - a syntax error in
   the rendered installer that a Windows render could never show.
 */ -}}
+{{- $ids := dict }}
+{{- if hasKey $ "ids" }}{{ $ids = $.ids }}{{ end }}
 {{- $first := true }}
 {{- range .catalog }}
-{{- if and (eq .group $.group) (hasKey . $.manager) }}
+{{- if and (eq .group $.group) (hasKey . $.manager) (or (not $ids) (hasKey $ids .id)) }}
 {{- if not $first }} {{ end }}{{ index . $.manager }}{{ $first = false }}
 {{- end }}
 {{- end -}}

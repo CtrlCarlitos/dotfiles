@@ -11,11 +11,12 @@ set -euo pipefail
 #
 # Now .chezmoidata/packages.yaml is the catalog, the installers render their
 # manager's names from it through .chezmoitemplates fragments, and
-# migrate-to-choco reads it at runtime. This test keeps that true four ways:
+# migrate-to-choco reads it at runtime. This test keeps that true five ways:
 #
 #   1. SHAPE     every record has an id, a group the config actually prompts
-#                for, and at least one manager; ids and per-manager names are
-#                unique; migrate metadata is well-formed.
+#                for, and at least one manager (or a note documenting its
+#                by-procedure install); ids and per-manager names are unique;
+#                migrate metadata is well-formed.
 #   2. NO COPY   no consumer carries a name of its own: the .ps1 has no
 #                `$packages += @(` literal, install_brew has no literal `brew
 #                install <names>`, migrate has no `$Universe = @(` list.
@@ -28,6 +29,9 @@ set -euo pipefail
 #                which has none.
 #   4. RUNTIME   the expression migrate-to-choco evaluates yields the catalog's
 #                choco names minus those marked migrate: false.
+#   5. NO BYPASS every literal `apt install -y <name>` in the rendered Linux
+#                installer is produced by the catalog (#127) - no hardcoded
+#                package name in install_apt.
 #
 # Bash renders, Python parses. Python never shells out to bash: on Windows the
 # first bash.exe on PATH can be System32's WSL launcher, which cannot see C:/.
@@ -121,7 +125,12 @@ for i, r in enumerate(cat):
     if r.get("group") not in groups:
         err(where + ": group %r is not a promptBoolOnce group" % r.get("group"))
     mgrs = [m for m in seen if m in r]
-    if not mgrs: err(where + ": names no manager (apt/brew/cask/choco)")
+    if not mgrs:
+        # A tool no manager names (ScreenRec: vendor repo/.dmg/.exe procedures
+        # on all three platforms) may omit manager keys, but its record must
+        # then carry the note the catalog header promises.
+        if not r.get("note"):
+            err(where + ": names no manager (apt/brew/cask/choco) and has no note")
     for m in mgrs:
         if r[m] in seen[m]: err(where + ": %s name %r already used by %s" % (m, r[m], seen[m][r[m]]))
         seen[m][r[m]] = r["id"]
@@ -181,6 +190,28 @@ else: print("  rendered .sh (os=linux, all groups): all %d apt names present" % 
 # shell continuation (the zoxide install does this), not a split.
 if re.search(r'^(for \w+ in [^\n]*|\s*brew install [^\n]*|\s*\$SUDO apt install -y [^\n]*)(?<!\\)\n\s*(; do|\|\|)', sh + read("sh-darwin.rendered"), re.M):
     err("sh render: a package list is split from its `; do` / `||` by a newline - a fragment is emitting its trailing newline")
+
+# 3d. no literal apt install bypasses the catalog (#127): every literal name
+# after `apt(-get) install -y` in the rendered Linux installer must be
+# produced by the catalog - an `apt:` value, or a tool id whose record
+# documents its by-procedure install (ghostty, neovim, screenrec, zoxide).
+# The names below are base-image prerequisites (a keyring tool, an archive
+# unpacker, the remote_access_server SSH server), not tools; they are
+# deliberately not catalogued. Anything else appearing here means someone
+# hardcoded a package name in install_apt again - add the apt: key/record to
+# .chezmoidata/packages.yaml and render the line through "pkg-names".
+PREREQ = {"gpg", "unzip", "openssh-server"}
+produced = set(apt) | set(ids)
+literal = set()
+for m in re.finditer(r'apt(?:-get)? install -y ([^|\n;"\'$]+)', sh):
+    for tok in m.group(1).split():
+        if re.fullmatch(r'[a-z0-9][a-z0-9+.\-]*', tok):
+            literal.add(tok)
+stray = sorted(literal - produced - PREREQ)
+if stray:
+    err("sh render (linux): literal apt install name(s) %s not produced by the catalog - add apt: keys/records to .chezmoidata/packages.yaml and render through pkg-names" % stray)
+else:
+    print("  rendered .sh (os=linux): every literal apt install name is catalog-produced (%d distinct)" % len(literal))
 
 # 4. migrate universe
 uni = open(tmp + "/migrate-universe.txt").read().split()

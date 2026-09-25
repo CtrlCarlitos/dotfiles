@@ -85,7 +85,7 @@
     # claude_desktop - Claude Desktop app (host only; Linux has no build)
     claude_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.claude_desktop" "Install claude_desktop (Claude Desktop app)?" false }}{{ else }}false{{ end }}
 
-    # chatgpt_cli - Codex CLI (@openai/codex); zero wiring by design
+    # chatgpt_cli - Codex CLI (@openai/codex) + the curated-skills pass for Codex
     chatgpt_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.chatgpt_cli" "Install chatgpt_cli (Codex CLI)?" false }}{{ else }}false{{ end }}
 
     # chatgpt_desktop - ChatGPT Desktop app (host only; Linux has no build)

@@ -66,6 +66,14 @@ fi
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
 {{- end -}}
 
+{{- $curatedTotal := 0 -}}
+{{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}
+{{-   range $line := splitList "\n" (include "scripts/curated-agent-skills.txt") -}}
+{{-     $t := trim $line -}}
+{{-     if and (ne $t "") (not (hasPrefix "#" $t)) -}}{{- $curatedTotal = add $curatedTotal 1 -}}{{- end -}}
+{{-   end -}}
+{{- end -}}
+
 {{/* Computed inline (not read from stored data) so this is always live/correct on
       every apply, never stale from a `chezmoi init` run on a different machine/
       environment type - see the [data] comment in .chezmoi.toml.tmpl. "isDevcontainer"
@@ -279,10 +287,13 @@ install_node() {
 install_agent_skills() {
     if ! command -v npx &>/dev/null; then
         warn "npx not found - skipping curated agent skills"
-        info "Curated skills: Claude Code installed=0 skipped=19 failed=0"
-        info "Curated skills: OpenCode installed=0 skipped=19 failed=0"
-        info "Curated skills: Antigravity installed=0 skipped=19 failed=0"
-        info "Curated skills: Codex installed=0 skipped=19 failed=0"
+        # The count renders from scripts/curated-agent-skills.txt's line count
+        # (see $curatedTotal above) - never a literal, which drifted every time
+        # the catalog gained a skill.
+        info "Curated skills: Claude Code installed=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: OpenCode installed=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: Antigravity installed=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: Codex installed=0 skipped={{ $curatedTotal }} failed=0"
         return
     fi
     local catalog
@@ -928,14 +939,16 @@ install_apt() {
 {{- end }}
 
 {{- if $modern_cli }}
-    # Modern CLI tools
-    $SUDO apt install -y bat fd-find || true
+    # Modern CLI tools. Plain-apt names render from .chezmoidata/packages.yaml
+    # (#127) like every other list; the tools needing a repo/key/.deb stay as
+    # procedures below. bat + fd share one line - the catalog's bat note says why.
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "bat" true "fd" true) "catalog" .catalog.packages) }} || true
 
     # CI and .pre-commit-config.yaml both lint shell with shellcheck; without it
     # locally a fresh machine only finds template errors in CI.
     # shfmt: built on mvdan.cc/sh, the same parser internal/engine/tokenize.go
     # uses - handy for seeing how the engine actually reads a command.
-    $SUDO apt install -y shellcheck || warn "shellcheck install failed - continuing"
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "shellcheck" true) "catalog" .catalog.packages) }} || warn "shellcheck install failed - continuing"
     if ! command -v shfmt &>/dev/null; then
         local shfmt_machine shfmt_arch="" shfmt_sha256=""
         shfmt_machine="$(uname -m)"
@@ -1010,7 +1023,7 @@ install_apt() {
     fi
 
     # Direnv
-    $SUDO apt install -y direnv || true
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "direnv" true) "catalog" .catalog.packages) }} || true
 
     # Lazygit
     if ! command -v lazygit &>/dev/null; then
@@ -1065,7 +1078,7 @@ install_apt() {
     fi
 
     # duf (df replacement) - in the apt archive since Ubuntu 22.04 (jammy)
-    $SUDO apt install -y duf || true
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "duf" true) "catalog" .catalog.packages) }} || true
 
     # tealdeer (tldr) - not in apt until Ubuntu 23.04 (lunar), so download the
     # official static binary directly for full compatibility with older/other
@@ -1683,10 +1696,11 @@ PYEOF
 {{- end }}
 
 {{- if $chatgpt_cli }}
-    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
-    # superpowers/skills have no codex surface (the skills pass stays
-    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
-    # agent-guardrails installer; only this npm install lives here).
+    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
+    # curated-skills pass below gates on this group too (chatgpt_cli sits in
+    # its cross-cutting gate, matching the .ps1 twin); superpowers' plugin for
+    # Codex is the one piece with no codex wiring (see the block below);
+    # guardrail's plane wiring is done by the agent-guardrails installer.
     install_node
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
@@ -1752,12 +1766,13 @@ PYEOF
     info "Antigravity CLI disabled in config"
 {{- end }}
 
-{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli }}
+{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
     # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
-    # via the `skills` CLI - see install_agent_skills above. Cross-cutting
-    # pass (spec §2 wiring rule): fires when ANY of its target groups
-    # (claude_cli / antigravity_cli / agent_toolkit / opencode_cli) is
+    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity /
+    # Codex, via the `skills` CLI - see install_agent_skills above.
+    # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
+    # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
+    # chatgpt_cli) is
     # enabled - the CLIs it writes to may have arrived from any of those
     # gates, and the pass is idempotent either way. npx presence is checked
     # inside the function.
@@ -2108,10 +2123,11 @@ PYEOF
 {{- end }}
 
 {{- if $chatgpt_cli }}
-    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
-    # superpowers/skills have no codex surface (the skills pass stays
-    # presence-gated on its own CLIs; guardrail's plane wiring is done by the
-    # agent-guardrails installer; only this npm install lives here).
+    # Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
+    # curated-skills pass below gates on this group too (chatgpt_cli sits in
+    # its cross-cutting gate, matching the .ps1 twin); superpowers' plugin for
+    # Codex is the one piece with no codex wiring (see the block below);
+    # guardrail's plane wiring is done by the agent-guardrails installer.
     if command -v npm &>/dev/null; then
         info "Installing Codex CLI..."
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
@@ -2163,12 +2179,13 @@ PYEOF
     info "Antigravity CLI disabled in config"
 {{- end }}
 
-{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli }}
+{{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
     # Curated third-party skills (Matt Pocock's 11 + mp-code-review +
-    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity,
-    # via the `skills` CLI - see install_agent_skills above. Cross-cutting
-    # pass (spec §2 wiring rule): fires when ANY of its target groups
-    # (claude_cli / antigravity_cli / agent_toolkit / opencode_cli) is
+    # Anthropic's frontend-design) for Claude Code / OpenCode / Antigravity /
+    # Codex, via the `skills` CLI - see install_agent_skills above.
+    # Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
+    # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
+    # chatgpt_cli) is
     # enabled - the CLIs it writes to may have arrived from any of those
     # gates, and the pass is idempotent either way. npx presence is checked
     # inside the function.
@@ -2237,7 +2254,7 @@ PYEOF
 }
 
 #-------------------------------------------------------------------------------
-# AI desktop apps (spec §2: pure installs, zero wiring - superpowers and the
+# AI desktop apps (spec §2: pure installs, no wiring - superpowers and the
 # curated-skills pass key off the CLI groups only, per the spec's placement
 # rule, and guardrail's plane wiring is done by the agent-guardrails
 # installer; nothing in these functions configures anything).

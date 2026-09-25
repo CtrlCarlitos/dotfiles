@@ -182,6 +182,14 @@ function Invoke-WithTimeout {
 {{- end }}
 {{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
 
+{{- $curatedTotal := 0 -}}
+{{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}
+{{-   range $line := splitList "\n" (include "scripts/curated-agent-skills.txt") -}}
+{{-     $t := trim $line -}}
+{{-     if and (ne $t "") (not (hasPrefix "#" $t)) -}}{{- $curatedTotal = add $curatedTotal 1 -}}{{- end -}}
+{{-   end -}}
+{{- end -}}
+
 {{- if or $hasChocolateyPackages $remote_access_server }}
 # Check Admin Status
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -1404,10 +1412,11 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 {{- end }}
 
 {{- if $chatgpt_cli }}
-# Codex CLI (the npm package named in .chezmoidata/agents.yaml). Spec §2: zero wiring by design -
-# superpowers/skills have no codex surface (the skills pass stays
-# presence-gated on its own CLIs; guardrail's plane wiring is done by the
-# agent-guardrails installer; only this npm install lives here).
+# Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
+# curated-skills pass below gates on this group too (chatgpt_cli sits in its
+# cross-cutting gate, matching the .sh twin); superpowers' plugin for Codex is
+# the one piece with no codex wiring (see the block below); guardrail's
+# plane wiring is done by the agent-guardrails installer.
 Install-Node
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
@@ -1497,8 +1506,11 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
 function Write-CuratedSkillsSkippedSummary {
+    # Rendered from scripts/curated-agent-skills.txt's line count - never a
+    # literal, which drifted every time the catalog gained a skill.
+    $curatedSkillTotal = {{ $curatedTotal }}
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=19 failed=0"
+        Write-Host "  Curated skills: $agent installed=0 skipped=$curatedSkillTotal failed=0"
     }
 }
 
@@ -1679,7 +1691,11 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             foreach ($agent in $agentTargets.Keys) {
                 if ($agent -eq 'Antigravity') {
                     $skillSummary[$agent][$antigravityStatus]++
-                } elseif ($agent -ne 'Codex' -or $skAgents -contains 'codex') {
+                } elseif ($agent -eq 'Codex' -and $skAgents -notcontains 'codex') {
+                    # Codex shares OpenCode's target dir; when this operation does
+                    # not select Codex, its summary stays at zero rather than
+                    # claiming the shared dir's contents as its own result.
+                } else {
                     $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
                     if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
                         $skillSummary[$agent].installed++
