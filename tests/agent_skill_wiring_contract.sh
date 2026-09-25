@@ -18,6 +18,9 @@ set -euo pipefail
 #   bash -c 'source /tmp/probe.sh; declare -F | grep -c verify_'   # expect 8
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+. "$repo_root/tests/lib.sh"
+
 catalog="$repo_root/scripts/curated-agent-skills.txt"
 unix_files=(
     run_onchange_install_packages.sh.tmpl
@@ -35,7 +38,6 @@ required_skills=(
     design-taste-frontend redesign-existing-projects
     code-search
 )
-failed=false
 scope="${AGENT_SKILL_WIRING_SCOPE:-all}"
 # On Windows (Git Bash) only the windows scope can hold: the unix half asserts
 # POSIX file modes and runs the .sh twins. CI runs both scopes on Linux; an
@@ -54,18 +56,11 @@ if [[ "$scope" != "all" && "$scope" != "unix" && "$scope" != "windows" ]]; then
     exit 2
 fi
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    failed=true
-}
-
 require_contains() {
     local file="$1"
     local expected="$2"
 
-    if ! grep -Fq -- "$expected" "$repo_root/$file"; then
-        fail "$file must contain $expected"
-    fi
+    require "$repo_root/$file" "$expected"
 }
 
 verify_unix_no_npx_summaries() {
@@ -713,10 +708,6 @@ if [[ "$scope" != "unix" ]]; then
     require_contains 'run_onchange_install_packages.ps1.tmpl' 'claude mcp get serena'
 fi
 
-if [[ "$failed" == true ]]; then
-    exit 1
-fi
-
 # skill-creator comes from our drop-in fork (CtrlCarlitos/skills, Windows fixes,
 # docs/skills-install-strategy.md), never from anthropics/skills, in all four
 # consumers regardless of scope: the source is a wiring fact, not an OS one.
@@ -727,4 +718,4 @@ for file in run_onchange_install_packages.sh.tmpl scripts/update_ai_tools.sh run
     fi
 done
 
-printf '%s\n' 'PASS: agent skill wiring contract'
+finish

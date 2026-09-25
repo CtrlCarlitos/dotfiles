@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
 # Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
 # Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
 # on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
 case "${OSTYPE:-}" in
-    msys*|cygwin*|win32) echo "SKIP: select_packages.sh is Unix-only"; exit 0 ;;
+    msys*|cygwin*|win32) skip "select_packages.sh is Unix-only" ;;
 esac
 
 # Tests for scripts/select-packages.sh — the gum package-group menu.
@@ -26,13 +28,7 @@ esac
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 script_under_test="$repo_root/scripts/select-packages.sh"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
-
-pass_count=0
-ok() { printf '  ok: %s\n' "$1"; pass_count=$((pass_count + 1)); }
+ok() { printf '  ok: %s\n' "$1"; }
 
 # The 16 groups in taxonomy order — the single vocabulary shared by menu,
 # config, and CI (plan Global Constraints).
@@ -212,4 +208,4 @@ out="$(timeout 30 script -qec "HOME='$H4' PATH='$EMPTYBIN' bash '$script_under_t
 case "$out" in *"skipping menu"*) ;; *) fail "no-gum run: missing skipping message: $out" ;; esac
 ok "pty but no gum: exit 0 + skipping message"
 
-printf 'PASS: select-packages.sh (%d assertions)\n' "$pass_count"
+finish

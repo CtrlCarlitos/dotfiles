@@ -17,7 +17,7 @@ ai_sh="$repo_root/scripts/update_ai_tools.sh"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 # 1. Dispatcher present in all three shell entry points.
 for f in "$ps1_profile" "$ps1_profile5"; do
@@ -91,9 +91,4 @@ for f in "$ps1_profile" "$ps1_profile5"; do
 done
 grep -Fq '.local/share/chezmoi/scripts' "$zsh_aliases" || fail "$zsh_aliases: dot must run scripts from the source repo"
 
-grep -Fq -- 'bash tests/dot_cli_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
-    printf 'FAIL: ci.yml: dot CLI contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: dot CLI contracts\n'
+finish

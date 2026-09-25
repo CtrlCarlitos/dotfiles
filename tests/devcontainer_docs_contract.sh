@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 guide="$repo_root/docs/devcontainer.md"
-ci_workflow="$repo_root/.github/workflows/ci.yml"
+
+. "$repo_root/tests/lib.sh"
 
 # Resolve a real Python: on Windows `python3` on PATH is usually the Microsoft
 # Store stub, which prints an ad and exits non-zero, so probe before using it.
@@ -113,12 +114,7 @@ if "named volumes are directories" not in persistence_text or "bind mount" not i
 
 for phrase in ("Debian/Ubuntu", "Linux x86_64", "does not affect VS Code"):
     if phrase not in flat_guide:
-        raise SystemExit(f"FAIL: guide missing {phrase!r}")
+                raise SystemExit(f"FAIL: guide missing {phrase!r}")
 PY
 
-grep -Fq -- 'bash tests/devcontainer_docs_contract.sh' "$ci_workflow" || {
-    printf 'FAIL: ci.yml: devcontainer documentation contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: devcontainer documentation contract\n'
+finish

@@ -18,8 +18,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 sh_t="$repo_root/run_onchange_install_packages.sh.tmpl"
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 data="$repo_root/.chezmoidata.yaml"
-failures=0
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
+
+. "$repo_root/tests/lib.sh"
 
 # 1. The single source exists and holds every tier.
 for key in forced defaults defaults_windows junk unset terminal_colors; do
@@ -110,8 +110,4 @@ if command -v chezmoi >/dev/null 2>&1; then
         fail 'neither twin rendered - the platform gate or the data reference is broken'
 fi
 
-if [ "$failures" -gt 0 ]; then
-    printf '\nFAIL: VS Code settings single-source (%d problem(s))\n' "$failures" >&2
-    exit 1
-fi
-printf 'PASS: VS Code settings render from one source, with no literals in either twin\n'
+finish

@@ -19,7 +19,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 # 1. Batched inventory, no per-package probes.
 grep -Fq 'choco list --limit-output' "$ps1_installer" ||
@@ -54,9 +54,4 @@ grep -Fq -- '-like "$normalizedPkg*"' "$ps1_installer" ||
 ! grep -Fq -- '-like "*$normalizedPkg*"' "$ps1_installer" ||
     fail "$ps1_installer: substring fuzzy-skip is forbidden (tree/WizTree false positive)"
 
-grep -Fq -- 'bash tests/choco_probe_contract.sh' "$repo_root/.github/workflows/ci.yml" || {
-    printf 'FAIL: ci.yml: choco probe contract is not a PR CI check\n' >&2
-    exit 1
-}
-
-printf 'PASS: choco probe resilience contracts\n'
+finish

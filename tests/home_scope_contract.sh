@@ -13,7 +13,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ignore="$repo_root/.chezmoiignore"
 
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+. "$repo_root/tests/lib.sh"
 
 # Repo-only, every OS.
 for p in 'tests/**' 'scripts/**' 'AGENTS.md' 'graft/**' 'guardrail.toml' 'devcontainer/**' 'docs/**' 'bin/**'; do
@@ -29,17 +29,17 @@ if command -v chezmoi >/dev/null; then
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     : >"$tmp/chezmoi.toml"
-    render() {  # $1 = os, $2 = kernel osrelease
+    render_ignore() {  # $1 = os, $2 = kernel osrelease (lib.sh's render is the no-override default)
         chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
             --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"$2\"},\"homeDir\":\"/nonexistent\"}}" \
             <"$ignore"
     }
-    win=$(render windows '')
+    win=$(render_ignore windows '')
     for p in 'tests/**' 'scripts/**' 'AGENTS.md' 'graft/**' 'guardrail.toml' '.oh-my-zsh/**' '.tmux/**'; do
         printf '%s\n' "$win" | grep -Fxq "$p" || fail "windows: '$p' is not excluded"
     done
     # The zsh/tmux plugin trees are the point of the externals on Unix: keep them.
-    lin=$(render linux '6.8.0-generic')
+    lin=$(render_ignore linux '6.8.0-generic')
     for p in '.oh-my-zsh/**' '.tmux/**'; do
         ! printf '%s\n' "$lin" | grep -Fxq "$p" || fail "linux: '$p' must NOT be excluded (oh-my-zsh/tmux live there)"
     done
@@ -63,5 +63,4 @@ if command -v chezmoi >/dev/null; then
         fail "devcontainer render: ~/.ssh/config must stay managed (aliases; keys come from the forwarded agent)"
 fi
 
-printf 'PASS: home scope - only intended targets are applied to $HOME
-'
+finish

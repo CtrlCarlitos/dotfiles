@@ -125,8 +125,8 @@ the thing you are asserting about.
 4 of those skip outright — and that number was reported as evidence a branch was
 ready.
 
-**Obey it.** `tests/suite_integrity_contract.sh` now fails the build on any skip
-on a platform that should run everything, and prints the accounting explicitly:
+**Obey it.** CI runs the suite through `bash tests/run.sh --strict`, which fails
+on any skip and prints the accounting explicitly:
 
 ```
 suite: 33 passed, 0 skipped, 0 failed
@@ -148,8 +148,10 @@ Note what was *not* happening: bash fails loudly on an undefined function. CI
 never tolerated that file — it never executed it. The nesting bug surfaced the
 moment the file was wired.
 
-**Obey it.** Add the test to `.github/workflows/ci.yml` in the same commit that
-adds the file. `tests/suite_integrity_contract.sh` enforces this.
+**Obey it.** Nothing to wire anymore: `tests/run.sh` executes every `tests/*.sh`
+it finds, so a file cannot sit in the directory unwired. The `.ps1` twins are
+the exception - the bash runner does not enumerate them - so they keep their
+own `ci.yml` steps; add one in the same commit that adds the file.
 
 ---
 
@@ -240,7 +242,7 @@ that avoids those literals gets past it, so the rule is yours to keep.
 ## Checking yourself
 
 ```sh
-bash tests/suite_integrity_contract.sh   # wiring, completion, no silent skips
+bash tests/run.sh --strict               # completion markers; any skip fails (TESTS_STRICT=0 tolerates)
 bash tests/docs_contracts.sh             # TODOs, links, anchors, settings
 chezmoi ignored | head                   # what will NOT be applied
 chezmoi managed | wc -l                  # what WILL be

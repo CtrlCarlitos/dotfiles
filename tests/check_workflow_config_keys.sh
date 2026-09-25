@@ -20,18 +20,15 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$repo_root/.chezmoi.toml.tmpl"
 fx="$repo_root/tests/fixtures/chezmoi"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+. "$repo_root/tests/lib.sh"
 
-[[ -f "$template" ]] || fail "missing $template"
-[[ -d "$fx" ]] || fail "missing $fx - the CI fixtures directory"
+[[ -f "$template" ]] || { fail "missing $template"; exit 1; }
+[[ -d "$fx" ]] || { fail "missing $fx - the CI fixtures directory"; exit 1; }
 
 # Every package toggle the config template can prompt for,
 # e.g. promptBoolOnce . "packages.core" -> packages.core
 mapfile -t keys < <(grep -oE 'promptBoolOnce \. "[^"]+"' "$template" | sed -E 's/promptBoolOnce \. "([^"]+)"/\1/' | sort -u)
-[[ ${#keys[@]} -gt 0 ]] || fail "no promptBoolOnce keys found in template (extractor broken?)"
+[[ ${#keys[@]} -gt 0 ]] || { fail "no promptBoolOnce keys found in template (extractor broken?)"; exit 1; }
 
 # 1. Every packages fixture seeds every prompted key, exactly once.
 shopt -s nullglob
@@ -76,4 +73,4 @@ for wf in .github/workflows/ci.yml .github/workflows/full-install-test.yml; do
     done
 done
 
-printf 'PASS: every prompted config key is seeded in every CI fixture, and every workflow composes from them\n'
+finish

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
 # Unix-behavior test: POSIX modes, gum, and the .sh twins are not available on
 # Windows (Git Bash); the PowerShell twins have their own tests and CI runs this
 # on Linux. Skip rather than fail so `bash tests/*.sh` is meaningful on Windows.
 case "${OSTYPE:-}" in
-    msys*|cygwin*|win32) echo "SKIP: dotbackup_restore.sh is Unix-only (needs POSIX symlinks)"; exit 0 ;;
+    msys*|cygwin*|win32) skip "dotbackup_restore.sh is Unix-only (needs POSIX symlinks)" ;;
 esac
 
 # Behavioral coverage for the Unix portable backup commands. The fake 7-Zip
@@ -13,8 +15,6 @@ esac
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 backup="$repo_root/scripts/dotbackup.sh"
 restore="$repo_root/scripts/dotrestore.sh"
-
-fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 [ -f "$backup" ] || fail "scripts/dotbackup.sh missing"
 [ -f "$restore" ] || fail "scripts/dotrestore.sh missing"
@@ -258,4 +258,4 @@ run_restore "$restore_home" "$valid_archive" >/dev/null
 [ "$(stat -c '%a' "$restore_home/.ssh/custom_key.pub")" = 644 ] || fail '[5] public SSH mode incorrect'
 printf '  ok: valid payload restored with SSH modes\n'
 
-printf 'PASS: dotbackup_restore.sh\n'
+finish
