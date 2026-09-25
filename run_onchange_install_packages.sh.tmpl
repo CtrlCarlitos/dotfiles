@@ -229,8 +229,11 @@ install_fonts() {
 
 install_node() {
     # The major comes from .chezmoidata.yaml versions.node_major (#125).
-    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt {{ .versions.node_major }} ]]; then
-        info "Installing Node.js {{ .versions.node_major }}.x..."
+    # Bound to a variable first: the lint strips template actions to nothing,
+    # and a bare `-lt {{ ... }}` would not parse as a test expression.
+    node_major="{{ .versions.node_major }}"
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt "$node_major" ]]; then
+        info "Installing Node.js ${node_major}.x..."
         # NodeSource's repo via the guarded helper: the old
         # `curl setup_24.x | bash` ran an unguarded fetched script whose own
         # trailing apt update could abort the whole run (#114). Key + list +

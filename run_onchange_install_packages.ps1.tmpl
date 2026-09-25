@@ -267,9 +267,12 @@ function Invoke-Quietly {
 
 function Install-Node {
     # The pins come from .chezmoidata.yaml versions.* (#125): the major gate
-    # and the full Chocolatey package version.
-    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt {{ .versions.node_major }}) {
-        Write-Host "  Installing Node.js {{ .versions.node_major }}..." -ForegroundColor Yellow
+    # and the full Chocolatey package version. The major is bound to a
+    # variable first: the lint strips template actions to nothing, and a bare
+    # -lt {{ ... }} would not parse as a comparison.
+    $nodeMajor = {{ .versions.node_major }}
+    if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt $nodeMajor) {
+        Write-Host "  Installing Node.js $nodeMajor..." -ForegroundColor Yellow
         choco install nodejs --version={{ .versions.node_choco }} -y --no-progress | Out-Null
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
