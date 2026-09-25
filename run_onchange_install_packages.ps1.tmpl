@@ -919,6 +919,24 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command serena -ErrorAction SilentlyContinue) {
         Invoke-WithTimeout -Description "serena init" -Seconds 60 -Action { serena init 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
+        # per-machine override [data.agents.serena] open_dashboard = true in
+        # chezmoi.toml). serena init regenerates the file with Serena's default
+        # (true), so only this one line is re-asserted; nothing else is touched.
+        $serenaCfg = "$env:USERPROFILE\.serena\serena_config.yml"
+        $serenaOpen = '{{ .agents.serena.open_dashboard }}'
+        if (Test-Path $serenaCfg) {
+            try {
+                $serenaLines = [IO.File]::ReadAllLines($serenaCfg)
+                $serenaNew = @($serenaLines | ForEach-Object { $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)\s*$', "web_dashboard_open_on_launch: $serenaOpen" })
+                if (($serenaNew -join "`n") -ne ($serenaLines -join "`n")) {
+                    [IO.File]::WriteAllLines($serenaCfg, $serenaNew, (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host "  Serena dashboard auto-open set to $serenaOpen" -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "  Warning: could not set Serena dashboard auto-open - $_" -ForegroundColor Red
+            }
+        }
         if (Get-Command claude -ErrorAction SilentlyContinue) {
             $claudeHasSerena = $false
             try { claude mcp get serena 2>$null; $claudeHasSerena = ($LASTEXITCODE -eq 0) } catch { }

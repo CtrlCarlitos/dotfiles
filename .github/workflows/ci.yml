@@ -91,6 +91,8 @@ jobs:
 
       - name: Test MCP autowire contract
         run: bash tests/mcp_autowire_contract.sh
+      - name: Test Serena dashboard contract
+        run: bash tests/serena_dashboard_contract.sh
 
       - name: Test agent tool upgrade contract
         run: bash tests/agent_tool_upgrade_contract.sh
