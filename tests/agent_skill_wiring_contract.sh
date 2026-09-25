@@ -292,7 +292,9 @@ verify_unix_claude_attribution() {
             'chmod() { [[ "$1" != --reference=* ]] || return 64; command chmod "$@"; }' \
             'uname() { [[ "${CLAUDE_TEST_UNAME:-}" ]] && printf "%s\\n" "$CLAUDE_TEST_UNAME" || command uname "$@"; }' \
             'stat() { if [[ "${CLAUDE_TEST_UNAME:-}" == Darwin && "$1" == -f && "$2" == %Lp ]]; then command stat -c "%a" "$3"; else command stat "$@"; fi; }'
-        awk '/^    configure_claude_attribution\(\) \{/{copy=1} copy{print} copy && /^    }$/{exit}' "$rendered"
+        # #124: configure_claude_attribution is a top-level function now (both
+        # manager branches call it), so the capture anchors changed accordingly.
+        awk '/^configure_claude_attribution\(\) \{/{copy=1} copy{print} copy && /^\}$/{exit}' "$rendered"
         printf '%s\n' 'configure_claude_attribution'
     } > "$harness"
 
