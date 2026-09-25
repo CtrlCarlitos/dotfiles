@@ -1345,6 +1345,20 @@ VSEXT
         # Upgrades: `dot upgrade` only (defer-aware there).
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
+            # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
+            # per-machine override [data.agents.serena] open_dashboard = true in
+            # chezmoi.toml). serena init regenerates the file with Serena's default
+            # (true), so only this one line is re-asserted; nothing else is touched.
+            SERENA_CFG="$HOME/.serena/serena_config.yml"
+            SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
+            if [ -f "$SERENA_CFG" ] && ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG"; then
+                if sed -i.bak -E "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" "$SERENA_CFG"; then
+                    rm -f "$SERENA_CFG.bak"
+                    info "Serena dashboard auto-open set to ${SERENA_OPEN}"
+                else
+                    warn "could not set Serena dashboard auto-open - continuing"
+                fi
+            fi
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
                 net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
             fi
@@ -1817,6 +1831,20 @@ install_brew() {
         # Upgrades: `dot upgrade` only (defer-aware there).
         if command -v serena &>/dev/null; then
             net_timeout 120 serena init || warn "serena init failed - continuing"
+            # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
+            # per-machine override [data.agents.serena] open_dashboard = true in
+            # chezmoi.toml). serena init regenerates the file with Serena's default
+            # (true), so only this one line is re-asserted; nothing else is touched.
+            SERENA_CFG="$HOME/.serena/serena_config.yml"
+            SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
+            if [ -f "$SERENA_CFG" ] && ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG"; then
+                if sed -i.bak -E "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" "$SERENA_CFG"; then
+                    rm -f "$SERENA_CFG.bak"
+                    info "Serena dashboard auto-open set to ${SERENA_OPEN}"
+                else
+                    warn "could not set Serena dashboard auto-open - continuing"
+                fi
+            fi
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
                 net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
             fi
