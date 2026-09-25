@@ -127,7 +127,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     #  failed silently on every run.)
 
     $catalog = $curatedCatalog
-    if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
+    if ((-not $catalog) -or -not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
         Write-Host "  Warning: curated skill catalog is unavailable: $catalog" -ForegroundColor Yellow
         Write-CuratedSkillsSkippedSummary
     } else {
