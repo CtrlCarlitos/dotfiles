@@ -197,6 +197,10 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             foreach ($agent in $agentTargets.Keys) {
                 if ($agent -eq 'Antigravity') {
                     $skillSummary[$agent][$antigravityStatus]++
+                } elseif ($agent -eq 'Codex' -and $skAgents -notcontains 'codex') {
+                    # Codex shares OpenCode's target dir; when this operation does
+                    # not select Codex, its summary stays at zero rather than
+                    # claiming the shared dir's contents as its own result.
                 } else {
                     $skillFile = Join-Path (Join-Path $agentTargets[$agent] $skill) 'SKILL.md'
                     if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
