@@ -107,4 +107,107 @@ require "$ai_sh" 'OpenCode installer download failed - continuing'
     fail "$ai_sh: stale Claude installer URL - the installer template uses claude.ai/install.sh (#114)"
 require "$ai_sh" '!= /usr*'
 
+# --- EXECUTED (v2, #135): the single-flight guard and the apt-repo chain -----
+#
+# 1. Single-flight: the rendered mutex block, run twice - free it must enter,
+#    held it must exit 1 without work. (Needs pwsh: the guard is a .NET mutex.)
+if command -v pwsh >/dev/null 2>&1 && command -v chezmoi >/dev/null 2>&1; then
+    htmp="$(mktemp -d)"
+    hbin="$htmp/bin"
+    mkdir -p "$hbin"
+    rendered="$htmp/installer.ps1"
+    render_to "$rendered" ps1 '{}'
+    if [ -s "$rendered" ]; then
+        mx_start="$(grep -nF '$__dotupMutex = New-Object' "$rendered" | head -1 | cut -d: -f1)"
+        mx_end="$(awk -v s="$mx_start" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
+        if [ -n "$mx_start" ] && [ -n "$mx_end" ]; then
+            fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
+            cat >"$fixture" <<'PSEOF'
+$ErrorActionPreference = 'Stop'
+$rendered, $start, $end = $args
+$lines = [IO.File]::ReadAllLines($rendered)
+function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
+Invoke-Expression (Slice $lines $start $end)
+Write-Host "MUTEX-ACQUIRED"
+PSEOF
+            holder="$htmp/holder.ps1"
+            cat >"$holder" <<'PSEOF'
+$m = New-Object System.Threading.Mutex($false, 'Global\dotfiles-install')
+if (-not $m.WaitOne(0)) { exit 2 }
+New-Item -ItemType File -Force -Path $env:HOLDER_READY | Out-Null
+$deadline = (Get-Date).AddSeconds(60)
+while (-not (Test-Path $env:HOLDER_RELEASE) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+$m.ReleaseMutex()
+PSEOF
+            # Free: the guard must enter.
+            rm -f "$htmp/ready" "$htmp/release"
+            free_log="$htmp/free.log"
+            if pwsh -NoProfile -File "$fixture" "$rendered" "$mx_start" "$mx_end" >"$free_log" 2>&1; then
+                if grep -Fq 'MUTEX-ACQUIRED' "$free_log"; then pass; else fail "single-flight: a free mutex must let the installer run: $(cat "$free_log")"; fi
+            else
+                fail "single-flight: a free mutex must not block: $(cat "$free_log")"
+            fi
+            # Held: the guard must exit 1 without work.
+            held_log="$htmp/held.log"
+            HOLDER_READY="$htmp/ready" HOLDER_RELEASE="$htmp/release" \
+                pwsh -NoProfile -File "$holder" >/dev/null 2>&1 &
+            holder_pid=$!
+            n=0
+            while [ ! -f "$htmp/ready" ] && [ "$n" -lt 100 ]; do
+                sleep 0.1
+                n=$((n + 1))
+            done
+            held_rc=0
+            pwsh -NoProfile -File "$fixture" "$rendered" "$mx_start" "$mx_end" >"$held_log" 2>&1 || held_rc=$?
+            touch "$htmp/release"
+            wait $holder_pid 2>/dev/null || true
+            if [ "$held_rc" -eq 1 ] && grep -Fq 'Another dotfiles installer instance is running' "$held_log"; then
+                pass
+            else
+                fail "single-flight: a held mutex must exit 1 with the re-run note (rc=$held_rc): $(cat "$held_log")"
+            fi
+            rm -f "$fixture"
+        else
+            fail "rendered installer: single-flight mutex block not found"
+        fi
+    fi
+fi
+
+# 2. add_apt_repo: a failed key download must abort the WHOLE chain - no
+#    keyring, no repo line, no package install (the GitHub-CLI incident).
+#    Executed on the failure path only: the happy path writes /etc/apt, which
+#    an unprivileged runner must never touch; the per-repo call-site greps
+#    above still pin that every repo goes through the helper.
+apt_tmp="$(mktemp -d)"
+trap '[ -n "${htmp:-}" ] && rm -rf "$htmp"; rm -rf "$apt_tmp"' EXIT
+apt_bin="$apt_tmp/bin"
+mkdir -p "$apt_bin"
+# curl fails the key download outright.
+printf '#!/bin/sh\nexit 7\n' >"$apt_bin/curl"
+chmod +x "$apt_bin/curl"
+# Everything downstream must never run.
+for c in apt-get gpg tee; do
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${APT_LOG:?}"\nexit 0\n' >"$apt_bin/$c"
+    chmod +x "$apt_bin/$c"
+done
+{
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '. "%s"\n' "$repo_root/scripts/lib/agent-skills.sh" # net_timeout/info/warn
+    awk '/^add_apt_repo\(\) \{/{on=1} on{print} on && /^\}$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl"
+    printf '%s\n' 'WORK="'"$apt_tmp"'" SUDO="" net_timeout 30 add_apt_repo githubcli "https://example.invalid/key.gpg" "deb https://example.invalid repo main" gh || warn "GitHub CLI install failed - continuing"'
+} >"$apt_tmp/harness.sh"
+: >"$apt_tmp/apt.log"
+apt_out="$apt_tmp/out.log"
+if HOME="$apt_tmp/home" PATH="$apt_bin:/usr/bin:/bin" APT_LOG="$apt_tmp/apt.log" \
+    bash "$apt_tmp/harness.sh" >"$apt_out" 2>&1; then
+    : # the warn makes the harness exit 0; the assertions below decide
+fi
+grep -Fq 'GitHub CLI install failed - continuing' "$apt_out" ||
+    fail "add_apt_repo: a failed key download must surface the caller's warn; got: $(cat "$apt_out")"
+if [ -s "$apt_tmp/apt.log" ]; then
+    fail "add_apt_repo: a failed key download must not run apt-get/gpg/tee; saw: $(cat "$apt_tmp/apt.log")"
+else
+    pass
+fi
+
 finish
