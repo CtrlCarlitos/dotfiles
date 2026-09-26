@@ -77,6 +77,48 @@ render() {
     chezmoi execute-template --config "$_LIB_CONFIG" --source "$_LIB_REPO_ROOT" "$@"
 }
 
+# render_to OUTFILE PLATFORM OVERRIDE_JSON
+#   Render a run_onchange installer template into OUTFILE from a scratch
+#   source that carries the repo's own data files, so the render never depends
+#   on the host's config or cwd. PLATFORM picks the template and the chezmoi
+#   OS the template gates on:
+#       sh      run_onchange_install_packages.sh.tmpl   as linux
+#       darwin  run_onchange_install_packages.sh.tmpl   as darwin
+#       ps1     run_onchange_install_packages.ps1.tmpl  as windows
+#   OVERRIDE_JSON is the "packages" document (a JSON object of group flags);
+#   the chezmoi OS/kernel part is filled in here.
+render_to() { # $1 = outfile, $2 = platform, $3 = override JSON
+    command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+    local out="$1" platform="$2" override="$3"
+    local scratch config os_json
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/render-repo-XXXXXX")"
+    config="$scratch/empty.toml"
+    mkdir -p "$scratch/repo/scripts"
+    cp "$_LIB_REPO_ROOT/.chezmoidata.yaml" "$scratch/repo/"
+    cp -r "$_LIB_REPO_ROOT/.chezmoidata" "$_LIB_REPO_ROOT/.chezmoitemplates" "$scratch/repo/"
+    if [ -d "$_LIB_REPO_ROOT/scripts/lib" ]; then
+        cp -r "$_LIB_REPO_ROOT/scripts/lib" "$scratch/repo/scripts/"
+    fi
+    if [ -f "$_LIB_REPO_ROOT/scripts/curated-agent-skills.txt" ]; then
+        cp "$_LIB_REPO_ROOT/scripts/curated-agent-skills.txt" "$scratch/repo/scripts/"
+    fi
+    : >"$config"
+    case "$platform" in
+        sh) os_json='"os": "linux", "kernel": {"osrelease": "6.8.0-generic"}' ;;
+        darwin) os_json='"os": "darwin"' ;;
+        ps1) os_json='"os": "windows"' ;;
+        *)
+            fail "render_to: unknown platform $platform"
+            return 1
+            ;;
+    esac
+    # shellcheck disable=SC2086  # the JSON is one argument
+    chezmoi execute-template --config "$config" --source "$scratch/repo" \
+        --override-data "{\"chezmoi\":{$os_json},\"packages\":$override}" \
+        <"$_LIB_REPO_ROOT/run_onchange_install_packages.$([ "$platform" = ps1 ] && echo ps1 || echo sh).tmpl" \
+        >"$out"
+}
+
 _lib_cleanup() {
     if [ -n "${_LIB_CONFIG:-}" ]; then
         rm -f "$_LIB_CONFIG"
