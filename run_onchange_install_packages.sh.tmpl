@@ -24,7 +24,7 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-{{/* 14-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
+{{/* 16-group package taxonomy (docs/package-groups.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
