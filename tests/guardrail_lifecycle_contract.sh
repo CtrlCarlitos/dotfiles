@@ -206,7 +206,7 @@ done
 [ -n "$out" ] && [ -n "$url" ] || exit 22
 case "$url" in
     */install.sh)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nif [ "${GUARDRAIL_APPROVAL_UNAVAILABLE:-0}" = 1 ]; then\n    echo "guardrail: claude: approval request failed: approval request unavailable" >&2\n    exit 1\nfi\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
         ;;
     */SHA256SUMS)
         sum="$(sha256sum "$(dirname "$out")/install.sh" | cut -d' ' -f1)"
@@ -339,6 +339,20 @@ g_assert_ran_with enabled "$gtmp/installer.log"
 gh_rc=0
 GUARDRAIL_INSTALLER_RC=5 gh_run true "$gtmp/inst-failed.log" || gh_rc=$?
 if [ "$gh_rc" -eq 5 ]; then pass; else fail "the installer contract must fail its run when the guardrail installer exits non-zero (got $gh_rc)"; fi
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Unfileable operator approval (no approval daemon reachable on an unattended
+# apply): warn with the remedy and CONTINUE - the current floor keeps
+# enforcing, so failing the whole apply buys nothing. Live class: the plane
+# re-enable after a binary update with agent sessions running.
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_APPROVAL_UNAVAILABLE=1 gh_run true "$gtmp/inst-approval.log" || gh_rc=$?
+if [ "$gh_rc" -eq 0 ]; then pass; else fail "an unfileable operator approval must warn-and-continue, not fail the apply (got $gh_rc)"; fi
+grep -Fq 'no approval daemon reachable' "$gtmp/inst-approval.log" ||
+    fail "the approval-unavailable remedy must be printed"
+grep -Fq 'guardrail setup' "$gtmp/inst-approval.log" ||
+    fail "the approval-unavailable remedy must name 'guardrail setup'"
 g_assert_ran_with enabled "$gtmp/installer.log"
 
 # checksum mismatch: warn, skip, and never run.
