@@ -5,10 +5,23 @@ set -euo pipefail
 # ADR-0029 there): installation lives in agent-guardrails. The dotfiles only
 #   - fetch the pinned release's installer + SHA256SUMS from releases/download,
 #   - verify the installer against SHA256SUMS,
-#   - run it FROM A FILE (never piped) with the pin and the desired state
+#   - run it FROM A FILE (never piped) with the pin, the desired state
 #     (packages.guardrail: enabled | disabled), output streaming.
 # Everything else (binary download, self-update, plane wiring, doctor, Defender
 # exclusions, PATH) is the installer's job, so it must not reappear here.
+#
+# Exit-code contract (v0.23.6-dev, verified against the released binary): the
+# installer's run classifies the installer exit code ONLY - never its wording
+# (the #168 message-grep tolerance is gone). 0 continue; 1 and 2 fail the
+# apply (2 is unambiguous usage/unsupported as of v0.23.7-dev); 3 warns with
+# the remedy and continues (the binary is installed and current, the existing
+# wiring keeps enforcing). The installer streams its own output - including
+# any next-steps block - and it is never parsed. The manual updaters are a
+# different surface: they warn-and-continue on ANY non-zero.
+# After ALL sections, both installer templates run the read-only
+# `guardrail next` once and print its stdout+stderr verbatim when non-empty
+# (tolerating exit 2 from binaries older than the command), ending the run
+# with an ACTION NEEDED remedy.
 #
 # Each consumer marks its guardrail code with two literal lines:
 #     # guardrail-section: begin
@@ -135,6 +148,10 @@ windows_checks() { # $1 = file
 
 common_checks "$sh_installer"
 unix_checks "$sh_installer"
+# Exit codes classify (v0.23.7-dev): setup runs unattended, so --no-setup is
+# gone, and exit 2 is unambiguous usage/unsupported - it must fail.
+# #168's message-grep tolerance is gone: exit codes classify, never wording.
+forbid "$sh_installer" 'approval request'
 # The flag still gates the block (rendered into the script).
 # shellcheck disable=SC2016  # template text matched literally, never expanded.
 require "$sh_installer" 'GUARDRAIL_ENABLED="{{ $guardrail }}"'
@@ -151,6 +168,7 @@ require "$sh_updater" '[data.packages]'
 
 common_checks "$ps1_installer"
 windows_checks "$ps1_installer"
+# Setup runs unattended (v0.23.7-dev): no -NoSetup flag anymore.
 # The flag still gates the block (templated out when false).
 # shellcheck disable=SC2016  # template text matched literally, never expanded.
 require "$ps1_installer" '{{- if $guardrail }}'
@@ -167,14 +185,18 @@ require "$ps1_updater" '[data.packages]'
 # --- Executed (v2, #135): both sh consumers run their guardrail path for real
 #
 # The section greps above pin the SHAPE of the caller (download URL, checksum,
-# run-from-a-file, both states, forbids). What they cannot say is whether the
-# wiring WORKS: the pin must flow from .chezmoidata.yaml into the installer's
-# argv, a checksum mismatch must fail closed, a non-zero installer exit must
-# fail the reconciliation in the installer but only warn in the updater. Both
-# Unix consumers are executed below against a stubbed release (curl serves a
-# marker install.sh plus a true SHA256SUMS; the marker logs its argv). The
-# Windows twins keep their grep contracts only - they need a real
-# powershell.exe to execute, which CI's Linux suite does not have.
+# run-from-a-file, both states, forbids). What they cannot say is
+# whether the wiring WORKS: the pin must flow from .chezmoidata.yaml into the
+# installer's argv, a checksum mismatch
+# must fail closed, and the exit-code contract must hold - 0 continue,
+# 1 and 2 fail the reconciliation in the installer but only warn in
+# the updater, 3 warn with the remedy in both, and the installer's streamed
+# next-steps marker must stay visible. Both Unix consumers are executed below
+# against a stubbed release (curl serves a marker install.sh plus a true
+# SHA256SUMS; the marker logs its argv and can print a next-steps marker or
+# exit per GUARDRAIL_INSTALLER_RC). The Windows twins keep their grep
+# contracts only - they need a real powershell.exe to execute, which CI's
+# Linux suite does not have.
 
 command -v timeout >/dev/null 2>&1 || skip "coreutils timeout not installed"
 command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (the runtime pin needs it)"
@@ -192,7 +214,9 @@ gpin="$(awk '/^guardrail:/{on=1} on && /version:/{gsub(/"/, "", $2); print $2; e
 [ -n "$gpin" ] || { fail "could not read guardrail.version from .chezmoidata.yaml"; finish; }
 
 # curl stub: serves the marker installer and a SHA256SUMS matching it (or a
-# wrong sum when GUARDRAIL_BAD_SUM=1).
+# wrong sum when GUARDRAIL_BAD_SUM=1). The marker logs its argv, optionally
+# prints a next-steps marker line (GUARDRAIL_INSTALLER_NEXT=1 - what the real
+# installer prints when setup is skipped), and exits per GUARDRAIL_INSTALLER_RC.
 cat >"$gbin/curl" <<'EOF'
 #!/bin/sh
 out='' want_out=0 url=''
@@ -206,7 +230,7 @@ done
 [ -n "$out" ] && [ -n "$url" ] || exit 22
 case "$url" in
     */install.sh)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nif [ "${GUARDRAIL_APPROVAL_UNAVAILABLE:-0}" = 1 ]; then\n    echo "guardrail: claude: approval request failed: approval request unavailable" >&2\n    exit 1\nfi\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nif [ "${GUARDRAIL_INSTALLER_NEXT:-0}" = 1 ]; then\n    echo "next: run guardrail setup"\nfi\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
         ;;
     */SHA256SUMS)
         sum="$(sha256sum "$(dirname "$out")/install.sh" | cut -d' ' -f1)"
@@ -239,10 +263,12 @@ g_run() { # $1 = script to run; $2 = output file (config baked into HOME)
 }
 
 g_assert_ran_with() { # $1 = expected state, $2 = log file
-    if grep -Fqx -- "--version $gpin --state $1" "$2"; then
+    local want="--version $gpin --state $1"
+    if [ -n "${3:-}" ]; then want="$want $3"; fi
+    if grep -Fqx -- "$want" "$2"; then
         pass
     else
-        fail "guardrail installer must run from the downloaded file with the data pin and --state $1; saw: $(cat "$2" 2>/dev/null || true)"
+        fail "guardrail installer must run from the downloaded file with '$want'; saw: $(cat "$2" 2>/dev/null || true)"
     fi
 }
 
@@ -341,18 +367,58 @@ GUARDRAIL_INSTALLER_RC=5 gh_run true "$gtmp/inst-failed.log" || gh_rc=$?
 if [ "$gh_rc" -eq 5 ]; then pass; else fail "the installer contract must fail its run when the guardrail installer exits non-zero (got $gh_rc)"; fi
 g_assert_ran_with enabled "$gtmp/installer.log"
 
-# Unfileable operator approval (no approval daemon reachable on an unattended
-# apply): warn with the remedy and CONTINUE - the current floor keeps
-# enforcing, so failing the whole apply buys nothing. Live class: the plane
-# re-enable after a binary update with agent sessions running.
+# Exit 1 (download/checksum/install/verify failure or a genuine setup
+# failure) fails the apply.
 : >"$gtmp/installer.log"
 gh_rc=0
-GUARDRAIL_APPROVAL_UNAVAILABLE=1 gh_run true "$gtmp/inst-approval.log" || gh_rc=$?
-if [ "$gh_rc" -eq 0 ]; then pass; else fail "an unfileable operator approval must warn-and-continue, not fail the apply (got $gh_rc)"; fi
-grep -Fq 'no approval daemon reachable' "$gtmp/inst-approval.log" ||
-    fail "the approval-unavailable remedy must be printed"
-grep -Fq 'guardrail setup' "$gtmp/inst-approval.log" ||
-    fail "the approval-unavailable remedy must name 'guardrail setup'"
+GUARDRAIL_INSTALLER_RC=1 gh_run true "$gtmp/inst-rc1.log" || gh_rc=$?
+if [ "$gh_rc" -eq 1 ]; then pass; else fail "installer exit 1 must fail the apply (got $gh_rc)"; fi
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Exit 3 (operator action pending: not enrolled, NO INTERACTIVE TERMINAL,
+# approval daemon not running, request denied/expired) warns with the remedy
+# and CONTINUES - the binary is installed and current and the existing wiring
+# keeps enforcing, so failing the whole apply buys nothing. Replaces #168's
+# message-grep tolerance.
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_INSTALLER_RC=3 gh_run true "$gtmp/inst-rc3.log" || gh_rc=$?
+if [ "$gh_rc" -eq 0 ]; then pass; else fail "installer exit 3 must warn-and-continue, not fail the apply (got $gh_rc)"; fi
+grep -Fq 'operator action' "$gtmp/inst-rc3.log" ||
+    fail "the exit-3 warning must name the pending operator action"
+grep -Fq 'no interactive terminal' "$gtmp/inst-rc3.log" ||
+    fail "the exit-3 warning must cover the no-terminal class"
+grep -Fq 'guardrail setup' "$gtmp/inst-rc3.log" ||
+    fail "the exit-3 remedy must name 'guardrail setup'"
+grep -Fq 'denied/expired' "$gtmp/inst-rc3.log" ||
+    fail "the exit-3 warning must cover the denied/expired request class"
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Exit 3 from the daemon-pending class behaves identically (same warn +
+# continue) - asserted as its own scenario so the two causes stay covered.
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_INSTALLER_RC=3 gh_run true "$gtmp/inst-rc3-daemon.log" || gh_rc=$?
+if [ "$gh_rc" -eq 0 ]; then pass; else fail "installer exit 3 (daemon-pending) must warn-and-continue (got $gh_rc)"; fi
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Exit 2 is unambiguous usage/unsupported platform as of v0.23.7-dev - it
+# must FAIL the apply (it used to be an ambiguous no-terminal refusal).
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_INSTALLER_RC=2 gh_run true "$gtmp/inst-rc2.log" || gh_rc=$?
+if [ "$gh_rc" -eq 2 ]; then pass; else fail "installer exit 2 must fail the apply (got $gh_rc)"; fi
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Exit 0 while the installer prints its own next-steps block (what it does
+# when setup is skipped): the block streams through, visible in the output,
+# never parsed - the run succeeds.
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_INSTALLER_NEXT=1 gh_run true "$gtmp/inst-next.log" || gh_rc=$?
+if [ "$gh_rc" -eq 0 ]; then pass; else fail "installer exit 0 must continue regardless of its printed next-steps (got $gh_rc)"; fi
+grep -Fq 'next: run guardrail setup' "$gtmp/inst-next.log" ||
+    fail "the installer's streamed next-steps marker must appear in the run output"
 g_assert_ran_with enabled "$gtmp/installer.log"
 
 # checksum mismatch: warn, skip, and never run.
@@ -374,5 +440,90 @@ else
 fi
 grep -Fq 'guardrail disabled in config - nothing to do' "$gtmp/inst-off.log" ||
     fail "installer template: disabled-without-binary must say so"
+
+# --- End-of-apply `guardrail next` block (v0.23.6-dev) ------------------------
+# After ALL sections the installer runs the read-only `guardrail next` once
+# and prints its stdout verbatim when non-empty, ending the run with an
+# ACTION NEEDED remedy. Old binaries have no `next` and exit 2 - tolerated
+# like a no-op. Harness: the function extracted verbatim from the template
+# (identical bytes to what renders) plus a stub `guardrail` on PATH.
+cat >"$gbin/guardrail" <<'EOF'
+#!/bin/sh
+if [ "${GUARDRAIL_NEXT_OLD:-0}" = 1 ]; then
+    exit 2
+fi
+if [ "${GUARDRAIL_NEXT_BLOCK:-0}" = 1 ]; then
+    printf 'next: run guardrail setup\nthen: re-run chezmoi apply\n'
+fi
+exit 0
+EOF
+chmod +x "$gbin/guardrail"
+
+nharness="$gtmp/next.sh"
+{
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '. "%s"\n' "$repo_root/scripts/lib/agent-skills.sh"
+    awk '/^guardrail_next_steps\(\) \{/{on=1} on{print} on && /^\}$/{exit}' "$sh_installer_tmpl"
+    printf '%s\n' 'guardrail_next_steps'
+} >"$nharness"
+grep -Fq 'guardrail_next_steps()' "$nharness" ||
+    fail "guardrail_next_steps() not found in the sh installer template - the end-of-apply block is missing"
+
+n_run() { # $1 = outfile; the stub mode is chosen via GUARDRAIL_NEXT_* by the caller
+    if ! HOME="$ghome" PATH="$gbin:/usr/bin:/bin" timeout 120 bash "$nharness" >"$1" 2>&1; then
+        fail "the end-of-apply guardrail next harness must not crash the run: $(cat "$1" 2>/dev/null || true)"
+    fi
+}
+
+# New binary with pending steps: the block verbatim, then ACTION NEEDED LAST.
+GUARDRAIL_NEXT_BLOCK=1 n_run "$gtmp/next-block.log"
+grep -Fq 'next: run guardrail setup' "$gtmp/next-block.log" ||
+    fail "the guardrail next block must be printed verbatim"
+grep -Fq 'then: re-run chezmoi apply' "$gtmp/next-block.log" ||
+    fail "the whole guardrail next block must be printed (multi-line)"
+n_last="$(tail -n 1 "$gtmp/next-block.log")"
+case "$n_last" in
+    *"ACTION NEEDED: run 'guardrail setup'"*) pass ;;
+    *) fail "the run must END with the ACTION NEEDED remedy; last line: $n_last" ;;
+esac
+
+# New binary, nothing pending (an empty block): silent, no ACTION NEEDED.
+n_run "$gtmp/next-none.log"
+if grep -Fq 'ACTION NEEDED' "$gtmp/next-none.log"; then
+    fail "nothing pending must not print ACTION NEEDED; saw: $(cat "$gtmp/next-none.log")"
+else
+    pass
+fi
+
+# Old binary (no `next` subcommand): exits 2 with no output - tolerated like
+# a no-op, no crash, no ACTION NEEDED.
+GUARDRAIL_NEXT_OLD=1 n_run "$gtmp/next-old.log"
+if [ -s "$gtmp/next-old.log" ]; then
+    fail "an old binary (guardrail next exits 2) must be a silent no-op; saw: $(cat "$gtmp/next-old.log")"
+else
+    pass
+fi
+
+# The call must sit AFTER every section in BOTH rendered templates, so the
+# ACTION NEEDED remedy is the last thing a run prints (invariant #10: both
+# twins). Rendering needs chezmoi - guaranteed present past the skip guard.
+render_to "$gtmp/next-rendered.sh" sh '{"guardrail": true}' ||
+    fail "rendering the sh installer for the end-of-apply placement check failed"
+n_line="$(grep -nF 'guardrail_next_steps' "$gtmp/next-rendered.sh" | tail -1 | cut -d: -f1)"
+d_line="$(grep -nF 'Package installation complete' "$gtmp/next-rendered.sh" | tail -1 | cut -d: -f1)"
+if [ -n "$n_line" ] && [ -n "$d_line" ] && [ "$n_line" -gt "$d_line" ]; then
+    pass
+else
+    fail "the end-of-apply guardrail_next_steps call must come after ALL sections in the rendered sh installer (call at ${n_line:-?}, complete at ${d_line:-?})"
+fi
+render_to "$gtmp/next-rendered.ps1" ps1 '{"guardrail": true}' ||
+    fail "rendering the ps1 installer for the end-of-apply placement check failed"
+n_line="$(grep -nF 'Invoke-GuardrailNextStep' "$gtmp/next-rendered.ps1" | tail -1 | cut -d: -f1)"
+d_line="$(grep -nF 'Package installation complete' "$gtmp/next-rendered.ps1" | tail -1 | cut -d: -f1)"
+if [ -n "$n_line" ] && [ -n "$d_line" ] && [ "$n_line" -gt "$d_line" ]; then
+    pass
+else
+    fail "the end-of-apply Invoke-GuardrailNextStep call must come after ALL sections in the rendered ps1 installer (call at ${n_line:-?}, complete at ${d_line:-?})"
+fi
 
 finish
