@@ -209,6 +209,19 @@ function Fail([string]$m) { Write-Host "FAIL: $m"; Remove-Item -Recurse -Force $
 # bash side laid out - resolved through PATH, same as production.
 Invoke-Expression $catalog
 
+# The extracted blocks address files under USERPROFILE with BACKSLASH
+# literals: PS cmdlets normalize those on Linux (nested dirs) while .NET IO
+# treats them as one literal name. The fixture therefore seeds and asserts
+# each spelling exactly where the block uses it, and pre-creates the literal
+# parents so the blocks' .NET writes can land.
+$ocLit     = "$fixtureHome\.config\opencode\opencode.json"
+$globalLit = "$fixtureHome\.gemini\config\mcp_config.json"
+$ocN       = Join-Path $fixtureHome '.config/opencode/opencode.json'   # block reads (PS-normalized)
+$globalN   = Join-Path $fixtureHome '.gemini/config/mcp_config.json'   # block reads (PS-normalized)
+$bundleN   = Join-Path $fixtureHome '.gemini/config/plugins/dotfiles-mcp/mcp_config.json' # block writes (Join-Path)
+[void][IO.Directory]::CreateDirectory("$fixtureHome\.config\opencode")
+[void][IO.Directory]::CreateDirectory("$fixtureHome\.gemini\config")
+
 if ($mode -eq 'fresh') {
     # Two passes, matching production: the first apply registers serena and
     # creates the mcp block as a hashtable; a graft added beside that
@@ -218,47 +231,51 @@ if ($mode -eq 'fresh') {
     Invoke-Expression $ocBlock
     Invoke-Expression $ocBlock
     Invoke-Expression $agyBlock
-    $oc = Get-Content (Join-Path $fixtureHome '.config\opencode\opencode.json') -Raw | ConvertFrom-Json
+    $oc = [IO.File]::ReadAllText($ocLit) | ConvertFrom-Json
     if ((@($oc.mcp.serena.command) -join ' ') -cne 'serena start-mcp-server --context ide-assistant') { Fail "ps1 serena command wrong: $(@($oc.mcp.serena.command) -join ' ')" }
     if ((@($oc.mcp.graft.command) -join ' ') -cne 'npx -y @nanonets/graft mcp') { Fail "ps1 graft command wrong: $(@($oc.mcp.graft.command) -join ' ')" }
     if ($oc.mcp.serena.enabled -ne $true) { Fail 'ps1 serena not enabled' }
-    $bundle = Get-Content (Join-Path $fixtureHome '.gemini\config\plugins\dotfiles-mcp\mcp_config.json') -Raw | ConvertFrom-Json
+    $bundle = Get-Content $bundleN -Raw | ConvertFrom-Json
     if ((@($bundle.mcpServers.graft.args) -join ' ') -cne '-y @nanonets/graft mcp') { Fail 'ps1 bundle graft args wrong' }
-    $global = Get-Content (Join-Path $fixtureHome '.gemini\config\mcp_config.json') -Raw
+    $global = [IO.File]::ReadAllText($globalLit)
     if ($global -notmatch '"mcpServers": \{\}') { Fail "ps1 repair did not write an empty mcpServers object: $global" }
 }
 elseif ($mode -eq 'merge') {
-    $ocDir = Join-Path $fixtureHome '.config\opencode'
-    New-Item -ItemType Directory -Force -Path $ocDir | Out-Null
+    # The block READS the existing config through PS-normalized spelling.
+    $ocDir = New-Item -ItemType Directory -Force -Path (Join-Path $fixtureHome '.config/opencode')
     [IO.File]::WriteAllText((Join-Path $ocDir 'opencode.json'), '{"plugin": ["superpowers"]}')
     Invoke-Expression $ocBlock
     Invoke-Expression $ocBlock
-    $oc = Get-Content (Join-Path $ocDir 'opencode.json') -Raw | ConvertFrom-Json
+    # ...and WRITES through the backslash literal: assert on the literal file.
+    $oc = [IO.File]::ReadAllText($ocLit) | ConvertFrom-Json
     # ConvertTo-Json may collapse a 1-element array to a scalar; @() normalizes.
     if ((@($oc.plugin) -contains 'superpowers') -and $oc.mcp.graft) {
         Write-Host '  ok: ps1 twin merged without clobbering the plugin key'
     } else {
-        Fail "ps1 twin clobbered or lost data: $(Get-Content (Join-Path $ocDir 'opencode.json') -Raw)"
+        Fail "ps1 twin clobbered or lost data: $([IO.File]::ReadAllText($ocLit))"
     }
 }
 elseif ($mode -eq 'retire') {
-    $gemini = Join-Path $fixtureHome '.gemini\config'
-    New-Item -ItemType Directory -Force -Path $gemini | Out-Null
+    # Reads are PS-normalized (seed here); writes land on the backslash
+    # literal (assert there).
+    $gemini = New-Item -ItemType Directory -Force -Path (Join-Path $fixtureHome '.gemini/config')
     $globalPath = Join-Path $gemini 'mcp_config.json'
     [IO.File]::WriteAllText($globalPath, '{"mcpServers": {"serena": {"command": "old"}, "graft": {"command": "old"}, "custom": {"command": "keep-me"}}}')
     Invoke-Expression $agyBlock
-    $after = Get-Content $globalPath -Raw | ConvertFrom-Json
+    $after = [IO.File]::ReadAllText($globalLit) | ConvertFrom-Json
     if ($after.mcpServers.serena -or $after.mcpServers.graft) { Fail 'ps1 twin: serena/graft still in the old global file' }
     if ($after.mcpServers.custom.command -cne 'keep-me') { Fail 'ps1 twin: a user server was removed' }
-    if (-not (Test-Path $globalPath)) { Fail 'ps1 twin: global file was deleted (agent-guardrails#334)' }
-    # Unparsable non-empty file is never touched.
+    if (-not (Test-Path $globalLit)) { Fail 'ps1 twin: global file was deleted (agent-guardrails#334)' }
+    # Unparsable non-empty file (in the read view) is never touched.
     [IO.File]::WriteAllText($globalPath, 'not json')
+    $before = [IO.File]::ReadAllText($globalLit)
     Invoke-Expression $agyBlock
-    if ((Get-Content $globalPath -Raw) -cne 'not json') { Fail 'ps1 twin: unparsable non-empty file was modified' }
-    # 0-byte file is repaired to the shape guardrail's coverage gate needs.
+    if ([IO.File]::ReadAllText($globalLit) -cne $before) { Fail 'ps1 twin: unparsable non-empty file was modified' }
+    # 0-byte file (in the read view) is repaired to the shape guardrail's
+    # coverage gate needs.
     [IO.File]::WriteAllText($globalPath, '')
     Invoke-Expression $agyBlock
-    $repaired = Get-Content $globalPath -Raw
+    $repaired = [IO.File]::ReadAllText($globalLit)
     if ($repaired -notmatch '"mcpServers": \{\}') { Fail "ps1 twin: 0-byte file not repaired: $repaired" }
 }
 else { Fail "unknown mode: $mode" }

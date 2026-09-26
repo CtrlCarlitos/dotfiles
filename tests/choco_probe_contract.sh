@@ -74,9 +74,17 @@ for v in "$iwt_start" "$iwt_end" "$inv_start" "$inv_end" "$loop_start" "$loop_en
 done
 
 # choco stub: inventory mode emits two id|version lines; install mode logs.
+# The log path is BAKED into the stub body (POSIX on Linux, Windows on a
+# Windows host) - env-carried path strings with a backslash split the writer
+# and the bash-side reader onto two different files there.
+choco_log="$tmp/choco.log"
+case "${OSTYPE:-}" in
+    msys*|cygwin*) choco_log_baked="$(cygpath -w "$choco_log")" ;;
+    *)             choco_log_baked="$choco_log" ;;
+esac
 cat >"$bin/choco.cmd" <<EOF
 @echo off
-echo %* >> "%CHOCO_LOG%"
+echo %* >> "$choco_log_baked"
 if /i "%1"=="list" (
     echo git^|2.40.0
     echo nodejs^|24.19.0
@@ -87,10 +95,10 @@ EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*) ;;
     *)
-        cat >"$bin/choco" <<'EOF'
+        cat >"$bin/choco" <<EOF
 #!/bin/sh
-printf '%s\n' "$*" >> "${CHOCO_LOG:?}"
-if [ "${1:-}" = list ]; then
+printf '%s\n' "\$*" >> "$choco_log"
+if [ "\${1:-}" = list ]; then
     printf 'git|2.40.0\nnodejs|24.19.0\n'
     exit 0
 fi
@@ -155,9 +163,7 @@ fixture_ok() { # $1 = fixture log, $2 = label - the fixture's FAIL lines decide
 
 run_ps() { # $1 = mode, $2 = outfile
     local mode="$1" outfile="$2"
-    local wintmp
-    wintmp="$(cygpath -w "$tmp" 2>/dev/null || printf '%s' "$tmp")"
-    PATH="$bin:/usr/bin:/bin" CHOCO_LOG="$wintmp\\choco.log" \
+    PATH="$bin:/usr/bin:/bin" \
         "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$iwt_start" "$iwt_end" "$inv_start" "$inv_end" "$loop_start" "$loop_end" "$mode" \
         >"$outfile" 2>&1
 }

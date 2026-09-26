@@ -50,21 +50,34 @@ done
 
 # --- PATH stubs -----------------------------------------------------------------
 # (graft itself is a fixture-side function below - see the note there.)
+# Log paths are BAKED into the stub bodies (POSIX on Linux, Windows on a
+# Windows host): env-carried backslash paths split the stub's write and the
+# assertion's read onto two different files on Linux.
+case "${OSTYPE:-}" in
+    msys*|cygwin*)
+        npm_log_arg="$(cygpath -w "$tmp/npm.log")"
+        winget_log_arg="$(cygpath -w "$tmp/winget.log")"
+        ;;
+    *)
+        npm_log_arg="$tmp/npm.log"
+        winget_log_arg="$tmp/winget.log"
+        ;;
+esac
 
 # npm: logs argv and the NPM_CONFIG_PYTHON it inherited.
 cat >"$bin/npm.cmd" <<EOF
 @echo off
-echo %* >> "%NPM_LOG%"
-echo NPM_CONFIG_PYTHON=%NPM_CONFIG_PYTHON%>> "%NPM_LOG%"
+echo %* >> "$npm_log_arg"
+echo NPM_CONFIG_PYTHON=%NPM_CONFIG_PYTHON% >> "$npm_log_arg"
 exit /b 0
 EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*) ;;
     *)
-        cat >"$bin/npm" <<'EOF'
+        cat >"$bin/npm" <<EOF
 #!/bin/sh
-printf '%s\n' "$*" >> "${NPM_LOG:?}"
-printf 'NPM_CONFIG_PYTHON=%s\n' "${NPM_CONFIG_PYTHON:-}" >> "${NPM_LOG:?}"
+printf '%s\n' "\$*" >> "$npm_log_arg"
+printf 'NPM_CONFIG_PYTHON=%s\n' "\${NPM_CONFIG_PYTHON:-}" >> "$npm_log_arg"
 exit 0
 EOF
         chmod +x "$bin/npm"
@@ -112,13 +125,13 @@ esac
 # winget: logs argv (only the Build-Tools path should reach it).
 cat >"$bin/winget.cmd" <<EOF
 @echo off
-echo %* >> "%WINGET_LOG%"
+echo %* >> "$winget_log_arg"
 exit /b 0
 EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*) ;;
     *)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${WINGET_LOG:?}"\nexit 0\n' >"$bin/winget"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$winget_log_arg" >"$bin/winget"
         chmod +x "$bin/winget"
         ;;
 esac
@@ -156,7 +169,7 @@ esac
 fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
 cat >"$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
-$rendered, $iwtStart, $iwtEnd, $jqcStart, $jqcEnd, $chainStart, $chainEnd, $mode = $args
+$rendered, $iwtStart, $iwtEnd, $jqcStart, $jqcEnd, $chainStart, $chainEnd, $npmLog, $wingetLog, $graftLog, $mode = $args
 $lines = [IO.File]::ReadAllLines($rendered)
 function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
 $iwt = Slice $lines $iwtStart $iwtEnd
@@ -175,7 +188,7 @@ Invoke-Expression $iwt
 $script:grafN = 0
 function graft {
     $script:grafN++
-    ($args -join ' ') | Add-Content -LiteralPath $env:GRAFT_LOG_WIN
+    ($args -join ' ') | Add-Content -LiteralPath $graftLog
     if ($script:grafN -le [int]$env:GRAFT_FAIL_FIRST) { $global:LASTEXITCODE = 1; return }
     $global:LASTEXITCODE = 0
 }
@@ -195,30 +208,30 @@ switch ($mode) {
     'full' {
         [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $env:G_VSDIR, 'Process')
         Invoke-Expression $chain
-        $npm = Get-Content $env:NPM_LOG
+        $npm = Get-Content $npmLog
         if (-not ($npm -match '@nanonets/graft')) { Fail "npm must install graft; saw: $npm" }
         if (-not ($npm -match '--allow-scripts=@nanonets/graft')) { Fail 'the native-build allowlist must ride the install' }
         if (-not ($npm -match 'NPM_CONFIG_PYTHON=.+')) { Fail 'node-gyp must be pointed at the supported Python' }
-        $glog = Get-Content $env:GRAFT_LOG_WIN
+        $glog = Get-Content $graftLog
         if (-not ($glog -match 'telemetry disable')) { Fail 'telemetry must be disabled after a successful install' }
-        if (Test-Path $env:WINGET_LOG) { Fail 'winget must not run when the toolchain is present' }
+        if (Test-Path $wingetLog) { Fail 'winget must not run when the toolchain is present' }
     }
     'nobuildtools' {
         [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $env:G_EMPTYVS, 'Process')
         Invoke-Expression $chain
-        $wlog = Get-Content $env:WINGET_LOG
+        $wlog = Get-Content $wingetLog
         if (-not ($wlog -match 'Microsoft.VisualStudio.2022.BuildTools')) { Fail "the winget Build-Tools install must fire; saw: $wlog" }
     }
     'nopython' {
         [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $env:G_EMPTYVS, 'Process')
         Invoke-Expression $chain
-        if (Test-Path $env:WINGET_LOG) { Fail 'a Python problem must skip graft BEFORE any multi-GB winget install' }
+        if (Test-Path $wingetLog) { Fail 'a Python problem must skip graft BEFORE any multi-GB winget install' }
     }
     'graftok' {
         [Environment]::SetEnvironmentVariable('ProgramFiles(x86)', $env:G_VSDIR, 'Process')
         Invoke-Expression $chain
-        if (Test-Path $env:NPM_LOG) { Fail 'a healthy graft must not be reinstalled' }
-        $glog = Get-Content $env:GRAFT_LOG_WIN
+        if (Test-Path $npmLog) { Fail 'a healthy graft must not be reinstalled' }
+        $glog = Get-Content $graftLog
         if (-not ($glog -match 'telemetry disable')) { Fail 'telemetry must be disabled for a healthy graft too' }
     }
     default { Fail "unknown mode: $mode" }
@@ -231,19 +244,27 @@ fixture_ok() { # $1 = fixture log, $2 = label - the fixture's FAIL lines decide
 
 run_ps() { # $1 = mode, $2 = outfile; stub behavior via env
     local mode="$1" outfile="$2"
-    local wintmp vsdir emptyvs
-    wintmp="$(cygpath -w "$tmp" 2>/dev/null || printf '%s' "$tmp")"
+    local vsdir emptyvs graft_log_arg py_state
     vsdir="$(cygpath -w "$tmp/vsdir" 2>/dev/null || printf '%s' "$tmp/vsdir")"
     emptyvs="$(cygpath -w "$tmp/empty-vs" 2>/dev/null || printf '%s' "$tmp/empty-vs")"
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            graft_log_arg="$(cygpath -w "$tmp/graft.log")"
+            py_state="$(cygpath -w "$tmp/py-state")"
+            ;;
+        *)
+            graft_log_arg="$tmp/graft.log"
+            py_state="$tmp/py-state"
+            ;;
+    esac
     # Scenario isolation: the stateful stubs must start cold every run, and
     # the presence-checks compare against freshly-created logs only.
     rm -f "$tmp/py-state" "$tmp/npm.log" "$tmp/winget.log" "$tmp/graft.log"
     PATH="$bin:/usr/bin:/bin" \
-        GRAFT_LOG_WIN="$wintmp\\graft.log" NPM_LOG="$wintmp\\npm.log" WINGET_LOG="$wintmp\\winget.log" \
-        PY_STATE="$wintmp\\py-state" GRAFT_FAIL_FIRST="${GRAFT_FAIL_FIRST:-0}" \
+        PY_STATE="$py_state" GRAFT_FAIL_FIRST="${GRAFT_FAIL_FIRST:-0}" \
         PY_MODE="${PY_MODE:-supported}" VSWHERE_OUT="${VSWHERE_OUT:-vs-path}" \
         G_VSDIR="$vsdir" G_EMPTYVS="$emptyvs" \
-        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$iwt_start" "$iwt_end" "$jqc_start" "$jqc_end" "$chain_start" "$chain_end" "$mode" \
+        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$iwt_start" "$iwt_end" "$jqc_start" "$jqc_end" "$chain_start" "$chain_end" "$npm_log_arg" "$winget_log_arg" "$graft_log_arg" "$mode" \
         >"$outfile" 2>&1
 }
 

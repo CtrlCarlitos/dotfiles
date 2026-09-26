@@ -51,7 +51,7 @@ end="$(awk -v s="$start" 'NR > s && $0 == "}"{print NR; exit}' "$ps1_rendered")"
 fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
 cat >"$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
-$rendered, $start, $end, $mode = $args
+$rendered, $start, $end, $logPath, $mode = $args
 $lines = [IO.File]::ReadAllLines($rendered)
 function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
 $block = Slice $lines $start $end
@@ -66,12 +66,13 @@ function Invoke-WithTimeout {
 switch ($mode) {
     'absent' {
         Invoke-Expression $block
-        $log = Get-Content $env:WINGET_LOG
+        $log = Get-Content $logPath
         if (-not ($log -match 'list --id Finesssee.Win-CodexBar --exact')) { Fail "the presence probe must be --exact on the id; saw: $log" }
         if (-not ($log -match 'install --id Finesssee.Win-CodexBar --exact --source winget')) { Fail "install must be --exact --source winget; saw: $log" }
     }
     'present' {
         Invoke-Expression $block
+        $log = Get-Content $logPath
         if ($log -match 'install --id') { Fail 'winget install ran although the list probe matched' }
     }
     'nowinget' {
@@ -81,12 +82,18 @@ switch ($mode) {
 }
 POWERSHELL
 
+# The winget stub bakes its ABSOLUTE log path in its body (per-OS spelling);
+# the fixture reads that exact literal via an argument - never env-carried
+# path strings, whose backslash spelling splits writer and reader on Linux.
+case "${OSTYPE:-}" in
+    msys*|cygwin*) wlog_arg="$(cygpath -w "$tmp/winget.log")" ;;
+    *)             wlog_arg="$tmp/winget.log" ;;
+esac
+
 run_block() { # $1 = mode, $2 = list-output, $3 = outfile
     local mode="$1" listout="$2" outfile="$3"
-    local wintmp
-    wintmp="$(cygpath -w "$tmp" 2>/dev/null || printf '%s' "$tmp")"
-    PATH="$bin:/usr/bin:/bin" WINGET_LOG="$wintmp\\winget.log" WINGET_LIST_OUT="$listout" \
-        "$(command -v pwsh)" -NoProfile -File "$fixture" "$ps1_rendered" "$start" "$end" "$mode" \
+    PATH="$bin:/usr/bin:/bin" WINGET_LIST_OUT="$listout" \
+        "$(command -v pwsh)" -NoProfile -File "$fixture" "$ps1_rendered" "$start" "$end" "$wlog_arg" "$mode" \
         >"$outfile" 2>&1
 }
 
@@ -97,7 +104,7 @@ grep -Fq 'winget not found - cannot install Win-CodexBar' "$tmp/nowinget.log" ||
 
 cat >"$bin/winget.cmd" <<EOF
 @echo off
-echo %* >> "%WINGET_LOG%"
+echo %* >> "$wlog_arg"
 if /i "%1"=="list" (
     echo %WINGET_LIST_OUT%
     exit /b 0
@@ -107,11 +114,11 @@ EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*) ;;
     *)
-        cat >"$bin/winget" <<'EOF'
+        cat >"$bin/winget" <<EOF
 #!/bin/sh
-printf '%s\n' "$*" >> "${WINGET_LOG:?}"
-if [ "${1:-}" = list ]; then
-    printf '%s\n' "${WINGET_LIST_OUT:-}"
+printf '%s\n' "\$*" >> "$wlog_arg"
+if [ "\${1:-}" = list ]; then
+    printf '%s\n' "\${WINGET_LIST_OUT:-}"
     exit 0
 fi
 exit 0
@@ -124,10 +131,12 @@ fixture_ok() { # $1 = fixture log, $2 = label - the fixture's FAIL lines decide
     if grep -q 'FAIL' "$1"; then fail "$2: $(cat "$1")"; else pass; fi
 }
 
+: >"$tmp/winget.log"
 run_block absent "no-match" "$tmp/absent.log" || fail "absent scenario failed: $(cat "$tmp/absent.log")"
 grep -Fq 'Installing Win-CodexBar (winget)...' "$tmp/absent.log" || fail "the install must be announced"
 fixture_ok "$tmp/absent.log" "absent"
 
+: >"$tmp/winget.log"
 run_block present "Finesssee.Win-CodexBar 1.2.3" "$tmp/present.log" ||
     fail "already-installed scenario failed: $(cat "$tmp/present.log")"
 grep -Fq 'Win-CodexBar already installed' "$tmp/present.log" || fail "the presence branch must say so"

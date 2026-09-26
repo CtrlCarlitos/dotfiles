@@ -47,9 +47,17 @@ end="$(awk -v s="$start" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
 
 fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
 wlog="$tmp/winget.log"
+# The stub bakes its ABSOLUTE log path in its body (per-OS spelling for the
+# binary pwsh will resolve); the fixture reads that exact baked literal as an
+# argument - env-carried paths with a stray backslash split the writer and
+# the reader onto two different files on Linux.
+case "${OSTYPE:-}" in
+    msys*|cygwin*) wlog_arg="$(cygpath -w "$wlog")" ;;
+    *)             wlog_arg="$wlog" ;;
+esac
 cat >"$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
-$rendered, $start, $end, $mode = $args
+$rendered, $start, $end, $logPath, $mode = $args
 $lines = [IO.File]::ReadAllLines($rendered)
 function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
 $block = Slice $lines $start $end
@@ -72,13 +80,13 @@ function Invoke-WithTimeout {
 switch ($mode) {
     'absent' {
         Invoke-Expression $block
-        $log = Get-Content $env:WINGET_LOG
+        $log = Get-Content $logPath
         if (-not ($log -match '--id 9PLM9XGG6VKS')) { Fail "winget argv must carry the Work/Codex store id; saw: $log" }
         if (-not ($log -match '--source msstore')) { Fail 'winget must install from the msstore source' }
     }
     'installed' {
         Invoke-Expression $block
-        if (Test-Path $env:WINGET_LOG) { Fail 'winget must not be invoked when the app is already installed' }
+        if (Test-Path $logPath) { Fail 'winget must not be invoked when the app is already installed' }
     }
     'nowinget' {
         # No stub on the restricted PATH: the block must warn, not throw.
@@ -91,16 +99,13 @@ switch ($mode) {
 }
 POWERSHELL
 
-wlog="$tmp/winget.log"
 check_log() { # $1 = fixture log, $2 = label - the fixture's FAIL lines decide
     if grep -q 'FAIL' "$1"; then fail "$2: $(cat "$1")"; else pass; fi
 }
 run_block() { # $1 = mode, $2 = outfile; WINGET_FAIL via env
     local mode="$1" outfile="$2"
-    local wintmp
-    wintmp="$(cygpath -w "$tmp" 2>/dev/null || printf '%s' "$tmp")"
-    PATH="$bin:/usr/bin:/bin" WINGET_LOG="$wintmp\\winget.log" WINGET_FAIL="${WINGET_FAIL:-}" \
-        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$start" "$end" "$mode" \
+    PATH="$bin:/usr/bin:/bin" WINGET_FAIL="${WINGET_FAIL:-}" \
+        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$start" "$end" "$wlog_arg" "$mode" \
         >"$outfile" 2>&1
 }
 
@@ -111,14 +116,14 @@ grep -Fq 'winget not found - cannot install ChatGPT Work/Codex' "$tmp/nowinget.l
 
 cat >"$bin/winget.cmd" <<EOF
 @echo off
-echo %* >> "%WINGET_LOG%"
+echo %* >> "$wlog_arg"
 if not "%WINGET_FAIL%"=="" exit /b %WINGET_FAIL%
 exit /b 0
 EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*) ;;
     *)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${WINGET_LOG:?}"\n[ -n "${WINGET_FAIL:-}" ] && exit "\$WINGET_FAIL"\nexit 0\n' >"$bin/winget"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n[ -n "${WINGET_FAIL:-}" ] && exit "\$WINGET_FAIL"\nexit 0\n' "$wlog" >"$bin/winget"
         chmod +x "$bin/winget"
         ;;
 esac
