@@ -216,11 +216,13 @@ Invoke-Expression $catalog
 # parents so the blocks' .NET writes can land.
 $ocLit     = "$fixtureHome\.config\opencode\opencode.json"
 $globalLit = "$fixtureHome\.gemini\config\mcp_config.json"
+$bundleLit = "$fixtureHome\.gemini\config\plugins\dotfiles-mcp\mcp_config.json"
 $ocN       = Join-Path $fixtureHome '.config/opencode/opencode.json'   # block reads (PS-normalized)
 $globalN   = Join-Path $fixtureHome '.gemini/config/mcp_config.json'   # block reads (PS-normalized)
 $bundleN   = Join-Path $fixtureHome '.gemini/config/plugins/dotfiles-mcp/mcp_config.json' # block writes (Join-Path)
 [void][IO.Directory]::CreateDirectory("$fixtureHome\.config\opencode")
 [void][IO.Directory]::CreateDirectory("$fixtureHome\.gemini\config")
+[void][IO.Directory]::CreateDirectory("$fixtureHome\.gemini\config\plugins\dotfiles-mcp")
 
 if ($mode -eq 'fresh') {
     # Two passes, matching production: the first apply registers serena and
@@ -228,6 +230,20 @@ if ($mode -eq 'fresh') {
     # in-memory hashtable is lost until the next apply re-reads the file as
     # JSON (the registration is idempotent, chezmoi re-fires on every apply,
     # and the pre-checks keep re-registering until '"graft"' is present).
+    # On Linux the block's .NET write lands on the backslash-literal file
+    # while its own Test-Path/Get-Content read the PS-normalized spelling -
+    # without a bridge, pass 2 cannot see pass 1's file, rebuilds from
+    # scratch, and the hashtable quirk drops graft for good. A symlink at
+    # the normalized spelling pointing at the literal makes both views one
+    # file (on Windows the two spellings already are the same path).
+    if (-not $IsWindows) {
+        $normDir = Join-Path $fixtureHome '.config/opencode'
+        New-Item -ItemType Directory -Force -Path $normDir | Out-Null
+        $normLink = Join-Path $normDir 'opencode.json'
+        if (-not (Test-Path $normLink)) {
+            New-Item -ItemType SymbolicLink -Path $normLink -Target $ocLit -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
     Invoke-Expression $ocBlock
     Invoke-Expression $ocBlock
     Invoke-Expression $agyBlock
@@ -235,7 +251,7 @@ if ($mode -eq 'fresh') {
     if ((@($oc.mcp.serena.command) -join ' ') -cne 'serena start-mcp-server --context ide-assistant') { Fail "ps1 serena command wrong: $(@($oc.mcp.serena.command) -join ' ')" }
     if ((@($oc.mcp.graft.command) -join ' ') -cne 'npx -y @nanonets/graft mcp') { Fail "ps1 graft command wrong: $(@($oc.mcp.graft.command) -join ' ')" }
     if ($oc.mcp.serena.enabled -ne $true) { Fail 'ps1 serena not enabled' }
-    $bundle = Get-Content $bundleN -Raw | ConvertFrom-Json
+    $bundle = [IO.File]::ReadAllText($bundleLit) | ConvertFrom-Json
     if ((@($bundle.mcpServers.graft.args) -join ' ') -cne '-y @nanonets/graft mcp') { Fail 'ps1 bundle graft args wrong' }
     $global = [IO.File]::ReadAllText($globalLit)
     if ($global -notmatch '"mcpServers": \{\}') { Fail "ps1 repair did not write an empty mcpServers object: $global" }
