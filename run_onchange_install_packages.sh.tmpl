@@ -391,8 +391,9 @@ install_agent_guardrails() {
     # classified afterwards. PIPESTATUS (not $?) so the pipeline's exit code
     # is the installer's, not tee's.
     local code=0 log="$tmp/output.log"
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee "$log"
-    code=${PIPESTATUS[0]}
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee "$log" || code=$?
+    # The consumers set pipefail, so $? - and thus code - is the installer's
+    # own exit status, not tee's.
     # An unattended apply cannot complete an operator approval: when the
     # installer wanted one and no approval daemon was reachable, the current
     # floor keeps enforcing, so failing the whole apply buys nothing. Warn
