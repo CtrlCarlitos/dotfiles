@@ -357,7 +357,7 @@ GUARDRAIL_ENABLED="{{ $guardrail }}"
 #   packages.guardrail false -> install.sh --version <pin> --state disabled,
 #                               only when a binary is already installed (never
 #                               a download just to disable; nothing is removed).
-# Setup runs unattended (v0.23.7-dev): with no operator enrolled it bootstraps
+# Setup runs unattended: with no operator enrolled it bootstraps
 # and exits 0; with an enrolled operator and no terminal it exits 3 with the
 # remedy on stderr, and the end-of-apply guardrail_next_steps (end of main)
 # carries the remedy.
@@ -374,7 +374,7 @@ GUARDRAIL_ENABLED="{{ $guardrail }}"
 #      the binary is installed and current and the existing wiring keeps
 #      enforcing, so failing the whole apply buys nothing
 #   2  usage/unsupported platform                            -> FAIL the apply
-#      (unambiguous as of v0.23.7-dev: unattended setup exits 3, never 2)
+#      (unambiguous since setup learns to run unattended: it exits 3, never 2)
 # Output streams straight through (never captured or silenced) so anything
 # the installer prints - including a live WebAuthn URL, should one ever
 # print - stays visible in the apply output.
