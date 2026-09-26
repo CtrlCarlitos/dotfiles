@@ -353,15 +353,32 @@ GUARDRAIL_ENABLED="{{ $guardrail }}"
 # binary, and `guardrail setup` (plane wiring, coverage). This function only
 # fetches the pinned release's install.sh + SHA256SUMS, verifies the installer
 # against SHA256SUMS, and runs it from the temp file (never piped):
-#   packages.guardrail true  -> install.sh --version <pin> --state enabled
-#   packages.guardrail false -> install.sh --version <pin> --state disabled,
+#   packages.guardrail true  -> install.sh --version <pin> --state enabled  --no-setup
+#   packages.guardrail false -> install.sh --version <pin> --state disabled --no-setup,
 #                               only when a binary is already installed (never
 #                               a download just to disable; nothing is removed).
-# `guardrail setup` prints a WebAuthn approval URL and blocks until the
-# operator responds, so the installer's output streams straight through -
-# never capture or silence it. A non-zero installer exit (denied/expired/
-# timeout/no-TTY) fails this script so chezmoi surfaces it; a failed download
-# or a missing SHA-256 tool warns and skips, like every other network step.
+# --no-setup: an unattended apply can never complete a WebAuthn approval, and
+# setup refuses with an ambiguous exit 2 when an enrolled operator has no
+# interactive terminal - so setup is never attempted here. The installer
+# prints its next-steps block itself when setup is skipped, and the
+# end-of-apply guardrail_next_steps (end of main) carries the remedy.
+#
+# Exit-code contract (verified against the released binary; the pin itself
+# lives in .chezmoidata.yaml guardrail.version) -
+# control flow uses exit codes only, never the installer's wording:
+#   0  success (also with --no-setup)                        -> continue
+#   1  download/checksum/install/verify or genuine setup
+#      failure                                               -> FAIL the apply
+#   3  operator action pending (not enrolled, approval daemon
+#      not running, request denied/expired)                  -> warn, continue
+#      the binary is installed and current and the existing wiring keeps
+#      enforcing, so failing the whole apply buys nothing
+#   2  usage/unsupported platform, or setup refused because an enrolled
+#      operator needs an interactive terminal (avoided by --no-setup) -
+#      ambiguous, so any other non-zero also fails the apply.
+# Output streams straight through (never captured or silenced) so anything
+# the installer prints - including a live WebAuthn URL, should one ever
+# print - stays visible in the apply output.
 install_agent_guardrails() {
     local dest="$HOME/.local/bin/guardrail"
     local state
@@ -383,30 +400,42 @@ install_agent_guardrails() {
         rm -rf "$tmp"; return
     fi
 
-    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); approval URL prints here if WebAuthn is required..."
+    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state} --no-setup); its output streams below..."
     # Record the exit code instead of letting set -e abort here, so the temp
-    # dir is removed on the failing path too; the non-zero return then fails
-    # the run at the (bare) call site. Output is teed to a log: the operator
-    # still sees the live stream (WebAuthn URL), and a failed run can be
-    # classified afterwards. PIPESTATUS (not $?) so the pipeline's exit code
-    # is the installer's, not tee's.
-    local code=0 log="$tmp/output.log"
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee "$log" || code=$?
-    # The consumers set pipefail, so $? - and thus code - is the installer's
-    # own exit status, not tee's.
-    # An unattended apply cannot complete an operator approval: when the
-    # installer wanted one and no approval daemon was reachable, the current
-    # floor keeps enforcing, so failing the whole apply buys nothing. Warn
-    # with the remedy and let the apply succeed; the re-wiring happens on the
-    # next interactive apply. Any other non-zero still fails the script.
-    if [ "$code" -ne 0 ] && grep -q "approval request" "$log" 2>/dev/null; then
-        warn "agent-guardrails needs an operator approval that could not be filed (no approval daemon reachable) - enforcement continues with the current floor"
-        warn "to finish the re-wiring: run 'guardrail setup' from an interactive terminal, complete the approval, then re-run chezmoi apply"
-        rm -rf "$tmp"
-        return 0
-    fi
+    # dir is removed on the failing path too; a failing exit code then fails
+    # the run at the (bare) call site. stdout+stderr stream straight to the
+    # console - never captured into a log, never silenced.
+    local code=0
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" --no-setup || code=$?
     rm -rf "$tmp"
-    return "$code"
+    case "$code" in
+        0) ;;
+        3)
+            warn "agent-guardrails needs an operator action (not enrolled, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor"
+            warn "to finish the re-wiring: run 'guardrail setup' from an interactive terminal, complete the approval, then re-run chezmoi apply"
+            ;;
+        *) return "$code" ;;
+    esac
+    return 0
+}
+
+#-------------------------------------------------------------------------------
+# guardrail_next_steps - end-of-apply surface for the exit-code contract.
+# `guardrail next` prints an ordered next-steps block for HUMANS on stdout
+# when operator action is pending, and nothing when there is none; its exit
+# is always 0 (2 only when called with arguments - i.e. always on binaries
+# that predate the command, tolerated here like a no-op). The block is
+# printed verbatim, NEVER parsed - control flow only checks emptiness.
+# Called once, after ALL sections (end of main), so the ACTION NEEDED
+# remedy is the last thing a run with pending steps prints.
+#-------------------------------------------------------------------------------
+guardrail_next_steps() {
+    command -v guardrail >/dev/null 2>&1 || return 0
+    local next_out
+    next_out="$(guardrail next 2>/dev/null || true)"
+    [ -n "$next_out" ] || return 0
+    printf '%s\n' "$next_out"
+    warn "ACTION NEEDED: run 'guardrail setup' in an interactive terminal, approve with your passkey, then re-run chezmoi apply"
 }
 # guardrail-section: end
 
@@ -2153,6 +2182,11 @@ main() {
     info "[Post-Install] SSH service activation and access configuration are manual. See docs/remote-access.md."
 {{- end }}
 {{- end }}
+
+    # agent-guardrails exit-code contract: once, after ALL sections, surface
+    # any pending operator steps (see guardrail_next_steps above) - the ACTION
+    # NEEDED remedy is deliberately the last thing this run prints.
+    guardrail_next_steps
 }
 
 main
