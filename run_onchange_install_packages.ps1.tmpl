@@ -1759,6 +1759,25 @@ $guardrailExe     = "$env:USERPROFILE\.local\bin\guardrail.exe"
 function Invoke-GuardrailInstaller {
     param([Parameter(Mandatory)][string]$State)
     # Unique per run (like agent-guardrails' own install.ps1), so a stale or
+    # A running guardrail (agents spawn it per call, plus the approval daemon)
+    # locks guardrail.exe, so the installer's replace step would fail and -
+    # deliberately - fail this whole script, over and over, whenever any agent
+    # session is live. Windows allows RENAMING an in-use executable: set the
+    # old binary aside first so the installer writes a fresh one; the running
+    # copy keeps enforcing until it exits. Stale .old binaries are swept below.
+    $grBin = Join-Path $HOME ".local\bin\guardrail.exe"
+    $grOld = ""
+    if (Test-Path $grBin) {
+        $stamp = Get-Date -Format 'yyyyMMddHHmmss'
+        try {
+            Move-Item -LiteralPath $grBin -Destination "$grBin.old-$stamp" -Force -ErrorAction Stop
+            $grOld = "$grBin.old-$stamp"
+            Write-Host "  guardrail.exe was in use - set it aside as $(Split-Path $grOld -Leaf); the running copy keeps enforcing until it exits" -ForegroundColor Yellow
+        } catch {
+            Write-Host "  Warning: guardrail.exe is in use and could not be set aside - skipping the update; the current version keeps enforcing. Remedy: quit agent sessions (the approval daemon exits after 10 idle minutes) or reboot, then re-run chezmoi apply." -ForegroundColor Yellow
+            return
+        }
+    }
     # concurrent run's files can never be picked up; every path below removes it.
     $guardrailTmp = Join-Path $env:TEMP ("guardrail-installer-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $guardrailTmp | Out-Null
@@ -1821,6 +1840,14 @@ function Invoke-GuardrailInstaller {
         throw "guardrail installer could not be started: $_"
     }
     Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
+    # If the installer failed and left no binary on disk (the rename-aside
+    # freed the path), restore the set-aside copy so the enforcing guardrail
+    # survives on disk too, then surface the failure as before.
+    if ($code -ne 0 -and $grOld -and -not (Test-Path $grBin)) {
+        Move-Item -LiteralPath $grOld -Destination $grBin -Force -ErrorAction SilentlyContinue
+    }
+    Get-ChildItem -Path (Split-Path -Parent $grBin) -Filter "guardrail.exe.old-*" -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     # Non-zero (denied/expired/timeout approval, failed install) fails this
     # script so chezmoi surfaces it and re-runs next apply - the sh twin's
     # set -e contract. The installer's own output already says why.
