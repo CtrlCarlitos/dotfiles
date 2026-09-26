@@ -164,4 +164,201 @@ windows_checks "$ps1_updater"
 require "$ps1_updater" 'chezmoi.toml'
 require "$ps1_updater" '[data.packages]'
 
+# --- Executed (v2, #135): both sh consumers run their guardrail path for real
+#
+# The section greps above pin the SHAPE of the caller (download URL, checksum,
+# run-from-a-file, both states, forbids). What they cannot say is whether the
+# wiring WORKS: the pin must flow from .chezmoidata.yaml into the installer's
+# argv, a checksum mismatch must fail closed, a non-zero installer exit must
+# fail the reconciliation in the installer but only warn in the updater. Both
+# Unix consumers are executed below against a stubbed release (curl serves a
+# marker install.sh plus a true SHA256SUMS; the marker logs its argv). The
+# Windows twins keep their grep contracts only - they need a real
+# powershell.exe to execute, which CI's Linux suite does not have.
+
+command -v timeout >/dev/null 2>&1 || skip "coreutils timeout not installed"
+command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (the runtime pin needs it)"
+
+gtmp="$(mktemp -d)"
+trap 'rm -rf "$gtmp"' EXIT
+gbin="$gtmp/bin"
+ghome="$gtmp/home"
+gscratch="$gtmp/repo"
+mkdir -p "$gbin" "$ghome" "$gscratch"
+cp "$repo_root/.chezmoidata.yaml" "$gscratch/"
+cp -r "$repo_root/.chezmoidata" "$gscratch/"
+# The pin exactly as rendered from the data (single source of truth).
+gpin="$(awk '/^guardrail:/{on=1} on && /version:/{gsub(/"/, "", $2); print $2; exit}' "$repo_root/.chezmoidata.yaml")"
+[ -n "$gpin" ] || { fail "could not read guardrail.version from .chezmoidata.yaml"; finish; }
+
+# curl stub: serves the marker installer and a SHA256SUMS matching it (or a
+# wrong sum when GUARDRAIL_BAD_SUM=1).
+cat >"$gbin/curl" <<'EOF'
+#!/bin/sh
+out='' want_out=0 url=''
+for arg in "$@"; do
+    if [ "$want_out" = 1 ]; then out="$arg"; want_out=0; continue; fi
+    case "$arg" in
+        -o|-fLo|-fo|-lo) want_out=1 ;;
+        http*) url="$arg" ;;
+    esac
+done
+[ -n "$out" ] && [ -n "$url" ] || exit 22
+case "$url" in
+    */install.sh)
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
+        ;;
+    */SHA256SUMS)
+        sum="$(sha256sum "$(dirname "$out")/install.sh" | cut -d' ' -f1)"
+        [ "${GUARDRAIL_BAD_SUM:-0}" = 1 ] && sum="0000000000000000000000000000000000000000000000000000000000000000"
+        printf '%s  install.sh\n' "$sum" >"$out"
+        ;;
+    *) exit 22 ;;
+esac
+EOF
+chmod +x "$gbin/curl"
+
+# chezmoi stub: real binary against the scratch data; GUARDRAIL_NO_PIN=1
+# simulates the 403/absent-data class by answering empty.
+real_chezmoi="$(command -v chezmoi)"
+cat >"$gbin/chezmoi" <<EOF
+#!/bin/sh
+[ "\${GUARDRAIL_NO_PIN:-0}" = 1 ] && exit 1
+[ "\${1:-}" = execute-template ] && shift
+exec "$real_chezmoi" execute-template --source "$gscratch" "\$@"
+EOF
+chmod +x "$gbin/chezmoi"
+
+g_run() { # $1 = script to run; $2 = output file (config baked into HOME)
+    local script="$1" outfile="$2"
+    # PATH is pinned to the stubs + system coreutils: with the host's real
+    # npm/npx reachable, the updater's OTHER sections do real network work
+    # (observed live: a playwright download inside a contract test).
+    HOME="$ghome" PATH="$gbin:/usr/bin:/bin" GUARDRAIL_LOG="$gtmp/installer.log" \
+        timeout 120 bash "$script" >"$outfile" 2>&1
+}
+
+g_assert_ran_with() { # $1 = expected state, $2 = log file
+    if grep -Fqx -- "--version $gpin --state $1" "$2"; then
+        pass
+    else
+        fail "guardrail installer must run from the downloaded file with the data pin and --state $1; saw: $(cat "$2" 2>/dev/null || true)"
+    fi
+}
+
+# --- Unix updater: all four states --------------------------------------------
+updater="$repo_root/scripts/update_ai_tools.sh"
+config_dir="$ghome/.config/chezmoi"
+mkdir -p "$config_dir"
+
+# enabled: downloads, verifies, runs with the pin and enabled.
+: >"$gtmp/installer.log"
+printf '[data.packages]\nguardrail = true\n' >"$config_dir/chezmoi.toml"
+g_run "$updater" "$gtmp/updater-enabled.log"
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# non-zero installer exit is a WARNING in the updater - the run continues.
+: >"$gtmp/installer.log"
+GUARDRAIL_INSTALLER_RC=5 g_run "$updater" "$gtmp/updater-failed.log"
+grep -Fq 'guardrail installer exited with code 5 - continuing' "$gtmp/updater-failed.log" ||
+    fail "a failing guardrail installer must warn-and-continue in the updater"
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# checksum mismatch fails closed: the installer is never run.
+: >"$gtmp/installer.log"
+GUARDRAIL_BAD_SUM=1 g_run "$updater" "$gtmp/updater-badsum.log"
+if [ -s "$gtmp/installer.log" ]; then
+    fail "a checksum mismatch must never run the installer"
+else
+    pass
+fi
+grep -Fq 'CHECKSUM MISMATCH' "$gtmp/updater-badsum.log" ||
+    fail "a checksum mismatch must be reported as such"
+
+# disabled with a binary present: one download to disable, state disabled.
+: >"$gtmp/installer.log"
+printf '[data.packages]\nguardrail = false\n' >"$config_dir/chezmoi.toml"
+mkdir -p "$ghome/.local/bin"
+# A copy of a known-executable: `touch`+`chmod +x` is not reliable on the
+# msys/NTFS layer, and the disabled state hinges on the binary being -x.
+cp "$(command -v sh)" "$ghome/.local/bin/guardrail"
+g_run "$updater" "$gtmp/updater-disabled.log"
+g_assert_ran_with disabled "$gtmp/installer.log"
+
+# disabled with no binary: nothing to do, no download at all.
+rm -f "$ghome/.local/bin/guardrail"
+: >"$gtmp/installer.log"
+g_run "$updater" "$gtmp/updater-off.log"
+if [ -s "$gtmp/installer.log" ]; then
+    fail "a disabled guardrail with no binary must not download anything"
+else
+    pass
+fi
+grep -Fq 'guardrail disabled in config - nothing to do' "$gtmp/updater-off.log" ||
+    fail "disabled-without-binary must say so"
+
+# pin unavailable: skip loudly, never guess a version.
+printf '[data.packages]\nguardrail = true\n' >"$config_dir/chezmoi.toml"
+: >"$gtmp/installer.log"
+GUARDRAIL_NO_PIN=1 g_run "$updater" "$gtmp/updater-nopin.log"
+if [ -s "$gtmp/installer.log" ]; then
+    fail "without the pin the installer must not run"
+else
+    pass
+fi
+grep -Fq 'pin unavailable from chezmoi data - skipping guardrail steps' "$gtmp/updater-nopin.log" ||
+    fail "an unavailable pin must be reported, not guessed"
+
+# --- Unix installer template: pin + state flow, run-from-a-file, exit contract -
+sh_installer_tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
+gharness="$gtmp/harness.sh"
+{
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '. "%s"\n' "$repo_root/scripts/lib/agent-skills.sh"
+    # install_agent_guardrails is template-free: extract verbatim from the
+    # template source (identical bytes to what renders).
+    awk '/^install_agent_guardrails\(\) \{/{on=1} on{print} on && /^\}$/{exit}' "$sh_installer_tmpl"
+    printf '%s\n' 'install_agent_guardrails'
+} >"$gharness"
+
+gh_run() { # $1 = GUARDRAIL_ENABLED value; $2 = outfile; extra env pre-set by caller
+    local enabled="$1" outfile="$2"
+    HOME="$ghome" PATH="$gbin:/usr/bin:/bin" GUARDRAIL_LOG="$gtmp/installer.log" \
+        GUARDRAIL_VERSION="$gpin" GUARDRAIL_REPO="CtrlCarlitos/agent-guardrails" \
+        GUARDRAIL_ENABLED="$enabled" \
+        timeout 120 bash "$gharness" >"$outfile" 2>&1
+}
+
+rm -f "$ghome/.local/bin/guardrail"
+: >"$gtmp/installer.log"
+gh_run true "$gtmp/inst-enabled.log"
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Non-zero installer exit FAILS the installer's run (unlike the updater).
+: >"$gtmp/installer.log"
+gh_rc=0
+GUARDRAIL_INSTALLER_RC=5 gh_run true "$gtmp/inst-failed.log" || gh_rc=$?
+if [ "$gh_rc" -eq 5 ]; then pass; else fail "the installer contract must fail its run when the guardrail installer exits non-zero (got $gh_rc)"; fi
+g_assert_ran_with enabled "$gtmp/installer.log"
+
+# checksum mismatch: warn, skip, and never run.
+: >"$gtmp/installer.log"
+GUARDRAIL_BAD_SUM=1 gh_run true "$gtmp/inst-badsum.log"
+if [ -s "$gtmp/installer.log" ]; then
+    fail "installer template: a checksum mismatch must never run the installer"
+else
+    pass
+fi
+
+# disabled without binary: nothing to do.
+: >"$gtmp/installer.log"
+gh_run false "$gtmp/inst-off.log"
+if [ -s "$gtmp/installer.log" ]; then
+    fail "installer template: disabled without a binary must not download"
+else
+    pass
+fi
+grep -Fq 'guardrail disabled in config - nothing to do' "$gtmp/inst-off.log" ||
+    fail "installer template: disabled-without-binary must say so"
+
 finish
