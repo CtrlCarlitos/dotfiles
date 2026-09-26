@@ -399,13 +399,17 @@ install_agent_guardrails() {
         rm -rf "$tmp"; return
     fi
 
-    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); its output streams below..."
+    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); its output streams below and lands in the apply log..."
     # Record the exit code instead of letting set -e abort here, so the temp
     # dir is removed on the failing path too; a failing exit code then fails
-    # the run at the (bare) call site. stdout+stderr stream straight to the
-    # console - never captured into a log, never silenced.
+    # the run at the (bare) call site. stdout+stderr stream to the console
+    # AND append to the apply log (never silenced) - the consumers set
+    # pipefail, so $? - and thus code - is the installer's own exit status,
+    # not tee's.
     local code=0
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" || code=$?
+    local log="$HOME/.local/state/guardrail/apply.log"
+    mkdir -p "$(dirname "$log")"
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" || code=$?
     rm -rf "$tmp"
     case "$code" in
         0) ;;
@@ -430,10 +434,14 @@ install_agent_guardrails() {
 #-------------------------------------------------------------------------------
 guardrail_next_steps() {
     command -v guardrail >/dev/null 2>&1 || return 0
+    local log="$HOME/.local/state/guardrail/apply.log"
+    mkdir -p "$(dirname "$log")"
+    # Read-only and repeatable: the block is teed into the apply log and
+    # printed verbatim - never parsed; emptiness is the only signal.
     local next_out
     next_out="$(guardrail next 2>&1 || true)"
     [ -n "$next_out" ] || return 0
-    printf '%s\n' "$next_out"
+    printf '%s\n' "$next_out" | tee -a "$log"
     warn "ACTION NEEDED: run 'guardrail setup' in an interactive terminal, approve with your passkey, then re-run chezmoi apply"
 }
 # guardrail-section: end

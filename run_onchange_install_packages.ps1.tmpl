@@ -1855,8 +1855,11 @@ function Invoke-GuardrailInstaller {
     # (see the note above Invoke-Quietly); the exit code is the real signal.
     $ErrorActionPreference = 'Continue'
     $code = 1
+    $guardrailApplyLog = Join-Path $env:USERPROFILE ".local\state\guardrail\apply.log"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $guardrailApplyLog) | Out-Null
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State
+        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State 2>&1 |
+            Tee-Object -FilePath $guardrailApplyLog -Append
         $code = $LASTEXITCODE
     } catch {
         # The native launch itself never started (e.g. powershell.exe not
@@ -1905,14 +1908,17 @@ function Invoke-GuardrailNextStep {
     if (-not (Get-Command guardrail -ErrorAction SilentlyContinue)) { return }
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $guardrailApplyLog = Join-Path $env:USERPROFILE ".local\state\guardrail\apply.log"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $guardrailApplyLog) | Out-Null
     $nextOut = ''
     try {
         # PS 5.1 under EAP=Stop promotes native stderr into a terminating
         # error even through 2>$null (see Invoke-Quietly) - drop to Continue
-        # for the call. stdout is the only signal, stderr is discarded, and
-        # a non-zero exit (old binary, no `next` subcommand) means "nothing
-        # to show", same as empty output.
-        $nextOut = (guardrail next 2>&1 | Out-String)
+        # for the call. stdout AND stderr are the signal (the pending message
+        # goes to stderr), both teed into the apply log; a non-zero exit
+        # (old binary, no `next` subcommand) means "nothing to show", same
+        # as empty output.
+        $nextOut = (guardrail next 2>&1 | Tee-Object -FilePath $guardrailApplyLog -Append | Out-String)
         if ($LASTEXITCODE -ne 0) { $nextOut = '' }
     } catch {
         Write-Verbose "guardrail next failed: $($_.Exception.Message)"
