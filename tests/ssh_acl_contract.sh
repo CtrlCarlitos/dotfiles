@@ -43,7 +43,7 @@ if command -v pwsh >/dev/null 2>&1 && command -v chezmoi >/dev/null 2>&1; then
             rendered="$atmp/identities.ps1"
             if chezmoi execute-template --config "$atmp/empty.toml" --source "$scratch" \
                 --override-data '{"chezmoi":{"os":"windows"},"accounts":[{"name":"Test User","email":"t@example.com","username":"test","key":"id_test"}]}' \
-                <"$tmpl" >"$rendered" 2>"$atmp/render.err" && [ -s "$rendered" ]; then
+                <"$tmpl" | tr -d '\r' >"$rendered" 2>"$atmp/render.err" && [ -s "$rendered" ]; then
                 region_start="$(grep -nF '$sshDirForSigners = Join-Path' "$rendered" | head -1 | cut -d: -f1)"
                 region_end="$(grep -nF '$signersPath = Join-Path' "$rendered" | head -1 | cut -d: -f1)"
                 region_end=$((region_end - 1))

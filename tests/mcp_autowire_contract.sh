@@ -23,6 +23,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed (the PowerShell twin blocks need it)"
 command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (rendering requires it)"
+PWSH_BIN="$(command -v pwsh)"
 # Some Windows hosts only carry the Store python3 alias stub (resolves, never
 # runs). The sh-twin heredocs need a real interpreter; the pwsh twin does not.
 PY_BIN=""
@@ -40,24 +41,12 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# --- Render both installer twins from a scratch source ------------------------
-scratch="$tmp/repo"
-mkdir -p "$scratch/scripts"
-cp "$repo_root/.chezmoidata.yaml" "$scratch/"
-cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$scratch/"
-cp -r "$repo_root/scripts/lib" "$scratch/scripts/"
-cp "$repo_root/scripts/curated-agent-skills.txt" "$scratch/scripts/"
-
+# --- Render both installer twins (render_to normalizes line endings) ----------
 sh_rendered="$tmp/installer.sh"
-: >"$tmp/empty.toml"
-chezmoi execute-template --config "$tmp/empty.toml" --source "$scratch" \
-    --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"agent_toolkit":true}}' \
-    <"$repo_root/run_onchange_install_packages.sh.tmpl" >"$sh_rendered"
+render_to "$sh_rendered" sh '{"agent_toolkit": true}'
 
 ps1_rendered="$tmp/installer.ps1"
-chezmoi execute-template --config "$tmp/empty.toml" --source "$scratch" \
-    --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
-    <"$repo_root/run_onchange_install_packages.ps1.tmpl" >"$ps1_rendered"
+render_to "$ps1_rendered" ps1 '{"agent_toolkit": true}'
 
 [ -s "$sh_rendered" ] || fail "sh installer did not render"
 [ -s "$ps1_rendered" ] || fail "ps1 installer did not render"
@@ -277,13 +266,15 @@ else { Fail "unknown mode: $mode" }
 Remove-Item -Recurse -Force $fixtureHome
 POWERSHELL
 
-pwsh -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
+# The fixtures gate on Get-Command finding the stub executables, so they need
+# the stub bin prepended explicitly (a CI runner has none of these tools).
+PATH="$bin:/usr/bin:/bin" "$PWSH_BIN" -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
     "$oc_start" "$oc_end" "$agy_start" "$agy_end" fresh ||
     fail "ps1 twin: fresh-home wiring failed"
-pwsh -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
+PATH="$bin:/usr/bin:/bin" "$PWSH_BIN" -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
     "$oc_start" "$oc_end" "$agy_start" "$agy_end" merge ||
     fail "ps1 twin: merge-not-clobber failed"
-pwsh -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
+PATH="$bin:/usr/bin:/bin" "$PWSH_BIN" -NoProfile -File "$fixture" "$ps1_rendered" "$catalog_range" "$catalog_end" \
     "$oc_start" "$oc_end" "$agy_start" "$agy_end" retire ||
     fail "ps1 twin: retirement/repair failed"
 rm -f "$fixture"

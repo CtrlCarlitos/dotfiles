@@ -113,10 +113,14 @@ render_to() { # $1 = outfile, $2 = platform, $3 = override JSON
             ;;
     esac
     # shellcheck disable=SC2086  # the JSON is one argument
+    # .gitattributes checks *.ps1.tmpl out with CRLF on EVERY host (including
+    # Linux CI), so the raw render's `}`-only lines carry a trailing CR - which
+    # breaks exact-match extraction on Linux (`}\r` != `}`; msys awk hides this
+    # on Windows hosts by stripping CR). Normalize once, here.
     chezmoi execute-template --config "$config" --source "$scratch/repo" \
         --override-data "{\"chezmoi\":{$os_json},\"packages\":$override}" \
         <"$_LIB_REPO_ROOT/run_onchange_install_packages.$([ "$platform" = ps1 ] && echo ps1 || echo sh).tmpl" \
-        >"$out"
+        | tr -d '\r' >"$out"
 }
 
 _lib_cleanup() {
