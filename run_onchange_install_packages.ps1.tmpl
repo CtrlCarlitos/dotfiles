@@ -37,12 +37,12 @@
     was silently never installed (2026-09-20, confirmed via choco
     upgrade all listing). Same contract test as 1.0.5.
     1.0.7: guardrail exit-code contract (pin bumped alongside in
-    .chezmoidata.yaml). The installer runs
-    with -NoSetup (setup needs an interactive terminal an apply never
-    has) and is classified by exit code only: 0 continue, 3 warn with
-    the remedy, anything else fails the run - replacing wording-based
-    matching. New end-of-apply Invoke-GuardrailNextStep prints the
-    binary's `guardrail next` block verbatim and ends the run with an
+    .chezmoidata.yaml). The installer is classified by exit code
+    only: 0 continue, 3 warn with the remedy (operator action
+    pending - unattended applies can never complete one), anything
+    else fails the run - replacing wording-based matching. New
+    end-of-apply Invoke-GuardrailNextStep prints the binary's
+    `guardrail next` block verbatim and ends the run with an
     ACTION NEEDED when steps are pending. Contract:
     tests/guardrail_lifecycle_contract.sh.
 #>
@@ -1754,30 +1754,28 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # wiring, coverage). This section only fetches the pinned release's
 # install.ps1 + SHA256SUMS, verifies the installer against SHA256SUMS, and
 # runs it FROM THE TEMP FILE with -File (never piped into the session):
-#   packages.guardrail true  -> install.ps1 -Version <pin> -State enabled  -NoSetup
-#   packages.guardrail false -> install.ps1 -Version <pin> -State disabled -NoSetup,
+#   packages.guardrail true  -> install.ps1 -Version <pin> -State enabled
+#   packages.guardrail false -> install.ps1 -Version <pin> -State disabled,
 #                               only when guardrail.exe is already installed
 #                               (never a download just to disable; nothing
 #                               is removed).
-# -NoSetup: an unattended apply can never complete a WebAuthn approval, and
-# setup refuses with an ambiguous exit 2 when an enrolled operator has no
-# interactive terminal - so setup is never attempted here. The installer
-# prints its next-steps block itself when setup is skipped, and the
-# end-of-apply Invoke-GuardrailNextStep (end of this script) carries the
-# remedy.
+# Setup runs unattended (v0.23.7-dev): with no operator enrolled it
+# bootstraps and exits 0; with an enrolled operator and no terminal it exits
+# 3 with the remedy on stderr, and the end-of-apply
+# Invoke-GuardrailNextStep (end of this script) carries the remedy.
 # Exit-code contract (verified against the released binary; the pin itself
 # lives in .chezmoidata.yaml guardrail.version) -
 # control flow uses exit codes only, never the installer's wording:
-#   0  success (also with -NoSetup)                          -> continue
+#   0  success                                               -> continue
 #   1  download/checksum/install/verify or genuine setup
 #      failure                                               -> FAIL the run
-#   3  operator action pending (not enrolled, approval daemon
-#      not running, request denied/expired)                  -> warn, continue
+#   3  operator action pending (not enrolled, no interactive
+#      terminal, approval daemon not running, request
+#      denied/expired)                                       -> warn, continue
 #      the binary is installed and current and the existing wiring keeps
 #      enforcing, so failing the whole run buys nothing
-#   2  usage/unsupported platform, or setup refused because an enrolled
-#      operator needs an interactive terminal (avoided by -NoSetup) -
-#      ambiguous, so any other non-zero also fails the run.
+#   2  usage/unsupported platform                            -> FAIL the run
+#      (unambiguous as of v0.23.7-dev: unattended setup exits 3, never 2)
 # Windows twin of install_agent_guardrails in the sh installer. Pin rendered
 # from .chezmoidata.yaml guardrail.version (single source of truth - same key
 # the sh template and the manual updaters use).
@@ -1848,7 +1846,7 @@ function Invoke-GuardrailInstaller {
         Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
         return
     }
-    Write-Host "  Running agent-guardrails installer $guardrailVersion (-State $State -NoSetup); its output streams below..." -ForegroundColor Yellow
+    Write-Host "  Running agent-guardrails installer $guardrailVersion (-State $State); its output streams below..." -ForegroundColor Yellow
     # In-session, NOT Invoke-WithTimeout: the installer's output must stream -
     # never captured or silenced - so anything it prints (including a live
     # WebAuthn URL, should one ever print) stays visible in the run output.
@@ -1858,7 +1856,7 @@ function Invoke-GuardrailInstaller {
     $ErrorActionPreference = 'Continue'
     $code = 1
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State -NoSetup
+        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State
         $code = $LASTEXITCODE
     } catch {
         # The native launch itself never started (e.g. powershell.exe not
@@ -1887,7 +1885,7 @@ function Invoke-GuardrailInstaller {
     # next apply - the sh twin's set -e contract. The installer's own output
     # already says why.
     if ($code -eq 3) {
-        Write-Host "  Warning: agent-guardrails needs an operator action (not enrolled, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor" -ForegroundColor Yellow
+        Write-Host "  Warning: agent-guardrails needs an operator action (not enrolled, no interactive terminal, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor" -ForegroundColor Yellow
         Write-Host "    to finish the re-wiring: run 'guardrail setup' in an interactive terminal, complete the approval, then re-run chezmoi apply" -ForegroundColor Yellow
     } elseif ($code -ne 0) {
         throw "guardrail installer exited with code $code"
@@ -1914,7 +1912,7 @@ function Invoke-GuardrailNextStep {
         # for the call. stdout is the only signal, stderr is discarded, and
         # a non-zero exit (old binary, no `next` subcommand) means "nothing
         # to show", same as empty output.
-        $nextOut = (guardrail next 2>$null | Out-String)
+        $nextOut = (guardrail next 2>&1 | Out-String)
         if ($LASTEXITCODE -ne 0) { $nextOut = '' }
     } catch {
         Write-Verbose "guardrail next failed: $($_.Exception.Message)"

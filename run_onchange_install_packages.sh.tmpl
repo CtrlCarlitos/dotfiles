@@ -353,29 +353,28 @@ GUARDRAIL_ENABLED="{{ $guardrail }}"
 # binary, and `guardrail setup` (plane wiring, coverage). This function only
 # fetches the pinned release's install.sh + SHA256SUMS, verifies the installer
 # against SHA256SUMS, and runs it from the temp file (never piped):
-#   packages.guardrail true  -> install.sh --version <pin> --state enabled  --no-setup
-#   packages.guardrail false -> install.sh --version <pin> --state disabled --no-setup,
+#   packages.guardrail true  -> install.sh --version <pin> --state enabled
+#   packages.guardrail false -> install.sh --version <pin> --state disabled,
 #                               only when a binary is already installed (never
 #                               a download just to disable; nothing is removed).
-# --no-setup: an unattended apply can never complete a WebAuthn approval, and
-# setup refuses with an ambiguous exit 2 when an enrolled operator has no
-# interactive terminal - so setup is never attempted here. The installer
-# prints its next-steps block itself when setup is skipped, and the
-# end-of-apply guardrail_next_steps (end of main) carries the remedy.
+# Setup runs unattended (v0.23.7-dev): with no operator enrolled it bootstraps
+# and exits 0; with an enrolled operator and no terminal it exits 3 with the
+# remedy on stderr, and the end-of-apply guardrail_next_steps (end of main)
+# carries the remedy.
 #
 # Exit-code contract (verified against the released binary; the pin itself
 # lives in .chezmoidata.yaml guardrail.version) -
 # control flow uses exit codes only, never the installer's wording:
-#   0  success (also with --no-setup)                        -> continue
+#   0  success                                               -> continue
 #   1  download/checksum/install/verify or genuine setup
 #      failure                                               -> FAIL the apply
-#   3  operator action pending (not enrolled, approval daemon
-#      not running, request denied/expired)                  -> warn, continue
+#   3  operator action pending (not enrolled, no interactive
+#      terminal, approval daemon not running, request
+#      denied/expired)                                       -> warn, continue
 #      the binary is installed and current and the existing wiring keeps
 #      enforcing, so failing the whole apply buys nothing
-#   2  usage/unsupported platform, or setup refused because an enrolled
-#      operator needs an interactive terminal (avoided by --no-setup) -
-#      ambiguous, so any other non-zero also fails the apply.
+#   2  usage/unsupported platform                            -> FAIL the apply
+#      (unambiguous as of v0.23.7-dev: unattended setup exits 3, never 2)
 # Output streams straight through (never captured or silenced) so anything
 # the installer prints - including a live WebAuthn URL, should one ever
 # print - stays visible in the apply output.
@@ -400,18 +399,18 @@ install_agent_guardrails() {
         rm -rf "$tmp"; return
     fi
 
-    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state} --no-setup); its output streams below..."
+    info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); its output streams below..."
     # Record the exit code instead of letting set -e abort here, so the temp
     # dir is removed on the failing path too; a failing exit code then fails
     # the run at the (bare) call site. stdout+stderr stream straight to the
     # console - never captured into a log, never silenced.
     local code=0
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" --no-setup || code=$?
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" || code=$?
     rm -rf "$tmp"
     case "$code" in
         0) ;;
         3)
-            warn "agent-guardrails needs an operator action (not enrolled, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor"
+            warn "agent-guardrails needs an operator action (not enrolled, no interactive terminal, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor"
             warn "to finish the re-wiring: run 'guardrail setup' from an interactive terminal, complete the approval, then re-run chezmoi apply"
             ;;
         *) return "$code" ;;
@@ -432,7 +431,7 @@ install_agent_guardrails() {
 guardrail_next_steps() {
     command -v guardrail >/dev/null 2>&1 || return 0
     local next_out
-    next_out="$(guardrail next 2>/dev/null || true)"
+    next_out="$(guardrail next 2>&1 || true)"
     [ -n "$next_out" ] || return 0
     printf '%s\n' "$next_out"
     warn "ACTION NEEDED: run 'guardrail setup' in an interactive terminal, approve with your passkey, then re-run chezmoi apply"
