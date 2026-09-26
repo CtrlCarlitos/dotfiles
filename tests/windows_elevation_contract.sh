@@ -37,4 +37,57 @@ fi
 
 grep -Fqi 'administrator' "$docs" || fail "docs/windows.md: elevation requirement not documented"
 
+# --- EXECUTED (v2, #135): the gate actually refuses, before any work ----------
+# The gate is Windows-only .NET ([Security.Principal.WindowsPrincipal]), so the
+# execution runs on a Windows host only (silently: the greps above remain the
+# CI's contract). The rendered preamble - elevation gate + single-flight mutex
+# - is extracted and run: a non-admin run must exit 1, say why, and never
+# acquire the single-flight mutex.
+if command -v pwsh >/dev/null 2>&1 && command -v chezmoi >/dev/null 2>&1; then
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32)
+            etmp="$(mktemp -d)"
+            trap '[ -n "${KEEP_TMP:-}" ] || rm -rf "$etmp"' EXIT
+            rendered="$etmp/installer.ps1"
+            render_to "$rendered" ps1 '{}'
+            if [ -s "$rendered" ]; then
+                gate_start="$(grep -nF 'if (-not $__isAdmin) {' "$rendered" | head -1 | cut -d: -f1)"
+                gate_end="$(grep -nF '$__dotupMutex = New-Object' "$rendered" | head -1 | cut -d: -f1)"
+                gate_end="$(awk -v s="$gate_end" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
+                if [ -n "$gate_start" ] && [ -n "$gate_end" ]; then
+                    fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
+                    cat >"$fixture" <<'PSEOF'
+$ErrorActionPreference = 'Stop'
+$rendered, $start, $end = $args
+$lines = [IO.File]::ReadAllLines($rendered)
+function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
+Invoke-Expression (Slice $lines $start $end)
+Write-Host "GATE-PASSED-AND-RAN"
+PSEOF
+                    gate_log="$etmp/run.log"
+                    rc=0
+                    pwsh -NoProfile -File "$fixture" "$rendered" "$gate_start" "$gate_end" >"$gate_log" 2>&1 || rc=$?
+                    if [ "$rc" -eq 1 ] && grep -Fq 'This installer requires an elevated PowerShell' "$gate_log"; then
+                        if grep -Fq 'Another dotfiles installer instance is running' "$gate_log"; then
+                            fail "the elevation gate must refuse BEFORE the single-flight mutex"
+                        else
+                            pass
+                        fi
+                    elif grep -Fq 'GATE-PASSED-AND-RAN' "$gate_log"; then
+                        fail "the elevation gate let a NON-admin run through - the gate is broken"
+                    else
+                        fail "elevation gate execution behaved unexpectedly (rc=$rc): $(cat "$gate_log")"
+                    fi
+                    rm -f "$fixture"
+                else
+                    fail "rendered installer: elevation gate preamble not found"
+                fi
+            fi
+            ;;
+        *)
+            : # Linux CI: the gate's types do not exist here; greps above are the contract.
+            ;;
+    esac
+fi
+
 finish

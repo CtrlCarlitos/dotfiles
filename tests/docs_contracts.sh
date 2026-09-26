@@ -19,6 +19,8 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+have() { require "$repo_root/$1" "$2"; } # $1 = repo-relative file, $2 = literal
+
 . "$repo_root/tests/lib.sh"
 
 PY_BIN=""
@@ -184,5 +186,88 @@ if [ -f "$repo_root/scripts/gen-tool-parity.sh" ]; then
 else
     fail "scripts/gen-tool-parity.sh missing - the tool-parity table has no generator"
 fi
+
+# ------------------------------------------ 6. backup/ssh-agents cross-frames
+# Moved here from tests/backup_key_handling_contract.sh (#135): these are pure
+# docs-consistency claims. The behaviour they frame (keys ARE in the archive,
+# restore refuses to overwrite) is executed there.
+have docs/backup-restore.md "## What This Is For"
+have docs/backup-restore.md "not how you set up an additional machine"
+have docs/backup-restore.md "(ssh-agents.md)"
+have docs/backup-restore.md "When a key rotates"
+have docs/ssh-agents.md "(backup-restore.md)"
+have docs/ssh-agents.md "If the machine dies"
+
+# ------------------------------------------ 7. ChatGPT Work/Codex + CodexBar rows
+# Moved here from tests/chatgpt_desktop_identity_contract.sh and
+# tests/codexbar_install_contract.sh (#135): docs-side identity claims. The
+# installer behaviour (winget argv) is executed in those tests.
+have docs/package-groups.md "9PLM9XGG6VKS"
+have docs/tool-parity.md "9PLM9XGG6VKS"
+if grep -Fq 'existing ChatGPT Classic' docs/tool-parity.md; then
+    fail "docs/tool-parity.md: 'existing ChatGPT Classic' framing must not return"
+else
+    pass
+fi
+have docs/tool-parity.md "Win-CodexBar"
+have docs/tool-parity.md "manual Linux opt-in"
+have docs/package-groups.md "CodexBar"
+
+# ------------------------------------------ 8. remote-access guide contract
+# Moved wholesale from tests/remote_access_docs.sh (#135): a docs-only
+# contract - the guide must cover its anchors, state its non-goals exactly
+# once, never recommend the banned tools outside that statement, and never
+# pair Cloudflare with OpenCode.
+guide="$repo_root/docs/remote-access.md"
+non_goals="No Caddy, code-server, Tailscale Funnel, or public agent backends."
+
+anchors=(
+  "Tailscale Serve"
+  "OPENCODE_SERVER_PASSWORD"
+  "Claude Remote Control"
+  "Codex Remote"
+  "Antigravity Remote Control"
+  "Windows :22"
+  "WSL :2222"
+  "http_status:404"
+)
+
+validate_guide() {
+  local candidate=$1
+  local anchor
+
+  for anchor in "${anchors[@]}"; do
+    grep -Fq "$anchor" "$candidate" || return 1
+  done
+
+  [[ $(grep -Fxc "$non_goals" "$candidate" || true) == 1 ]] || return 1
+
+  # Banned tools are valid only in the exact, standalone non-goals statement.
+  if grep -E 'Caddy|code-server|Funnel' "$candidate" | grep -Fvx "$non_goals" >/dev/null; then
+    return 1
+  fi
+
+  ! grep -Eqi 'Cloudflare.*OpenCode|OpenCode.*Cloudflare' "$candidate"
+}
+
+ra_tmp="$(mktemp -d)"
+write_fixture() {
+  local path=$1
+  local statement=$2
+  printf '%s\n' "${anchors[@]}" "$statement" >"$path"
+}
+
+write_fixture "$ra_tmp/allowed.md" "$non_goals"
+validate_guide "$ra_tmp/allowed.md" || fail "remote-access: valid non-goals fixture rejected"
+
+for tool in Caddy code-server Funnel; do
+  write_fixture "$ra_tmp/recommends-$tool.md" "$non_goals; use $tool later"
+  if validate_guide "$ra_tmp/recommends-$tool.md"; then
+    fail "remote-access: $tool recommendation hidden on non-goals line accepted"
+  fi
+done
+rm -rf "$ra_tmp"
+
+validate_guide "$guide" || fail "remote-access guide violates the documentation contract"
 
 finish
