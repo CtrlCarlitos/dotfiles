@@ -276,7 +276,7 @@ try {
     # Newline-separated inside @( ) - no trailing-comma hazard.
     $declaredKeys = @(
 {{- range .accounts }}
-{{- if .key }}
+{{- if and (hasKey . "key") .key }}
         '{{ .key }}'
 {{- end }}
 {{- $sk := "" }}{{ if hasKey . "signingKey" }}{{ $sk = .signingKey }}{{ else if hasKey . "signingkey" }}{{ $sk = .signingkey }}{{ end }}
@@ -285,6 +285,15 @@ try {
 {{- end }}
 {{- end }}
     ) | Where-Object { $_ } | Select-Object -Unique
+
+    # Identity -> email map for the grouped agent inventory below (the keys'
+    # comments are "<email>" and "<email>-sign", so the email groups them).
+    $identityEmails = [ordered]@{}
+{{- range .accounts }}
+{{- if and (hasKey . "username") .username }}
+    $identityEmails['{{ .provider }}-{{ .username }}'] = '{{ .email }}'
+{{- end }}
+{{- end }}
 
     # Consumed by the PowerShell profile's startup top-up.
     $agentIdsPath  = Join-Path $env:USERPROFILE ".ssh\agent-identities.ps1"
@@ -309,8 +318,23 @@ try {
             if ($fp -and ($loaded -match [regex]::Escape($fp))) { continue }
             & ssh-add $kp 2>&1 | Out-Null
         }
-        Write-Host "  Agent now holds:" -ForegroundColor Green
-        & ssh-add -l 2>$null | ForEach-Object { Write-Host "    $_" }
+        # The Windows ssh-agent is ONE shared service holding every identity's
+        # keys (unlike the WSL/Linux relay, which runs one agent per account).
+        # Group the inventory by identity so the listing says whose keys are
+        # whose: key comments are "<email>" and "<email>-sign".
+        Write-Host "  Agent now holds - Windows ssh-agent is one shared service, keys grouped by identity:" -ForegroundColor Green
+        $unclaimed = @($loaded)
+        foreach ($acct in $identityEmails.Keys) {
+            $mail = [regex]::Escape($identityEmails[$acct])
+            $acctKeys = @($unclaimed | Where-Object { $_ -match $mail })
+            $unclaimed = @($unclaimed | Where-Object { $_ -notmatch $mail })
+            Write-Host "    [$acct] $($acctKeys.Count) key(s)" -ForegroundColor Cyan
+            $acctKeys | ForEach-Object { Write-Host "      $_" }
+        }
+        if ($unclaimed.Count -gt 0) {
+            Write-Host "    [not tied to a configured identity] $($unclaimed.Count) key(s)" -ForegroundColor Yellow
+            $unclaimed | ForEach-Object { Write-Host "      $_" }
+        }
     }
 } finally {
     $ErrorActionPreference = $prevEAP
