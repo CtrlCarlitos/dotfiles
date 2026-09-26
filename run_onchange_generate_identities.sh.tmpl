@@ -186,6 +186,21 @@ zstyle :omz:plugins:ssh-agent ssh-add-args --apple-use-keychain
 ZSH_EOF
 chmod 600 "$HOME/.ssh/agent-identities.zsh"
 echo "  ✓ Wrote ~/.ssh/agent-identities.zsh"
+# Make the agent topology explicit: this platform does NOT use one big shared
+# agent - the ssh-agent relay runs one agent PER account, each holding only
+# that account's auth (+ signing) key. ssh-agent-relay status lists them.
+echo "  ssh-agent relay: one agent per account -"
+{{- $relay_agents := 0 }}
+{{- range .accounts }}
+{{- if and (hasKey . "username") .username }}
+{{- $relay_agents = add $relay_agents 1 }}
+{{- $signKey := "" }}
+{{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ else if hasKey . "signingkey" }}{{ $signKey = .signingkey }}{{ end }}
+echo "    agent {{ .provider }}-{{ .username }}: holds {{ if hasKey . "key" }}{{ .key }}{{ else }}(no key declared){{ end }}{{ if $signKey }} + {{ $signKey }} (signing){{ end }}"
+{{- end }}
+{{- end }}
+echo "    total: {{ $relay_agents }} relay agent(s) - inspect with: ssh-agent-relay status"
+echo "  ✓ Wrote ~/.ssh/agent-identities.zsh"
 
 # config: OpenSSH's *client* actually enforces this one (confirmed against
 # real docs, corrected from an earlier wrong assumption that it didn't) -
