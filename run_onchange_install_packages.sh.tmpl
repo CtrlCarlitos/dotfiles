@@ -386,9 +386,24 @@ install_agent_guardrails() {
     info "Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${state}); approval URL prints here if WebAuthn is required..."
     # Record the exit code instead of letting set -e abort here, so the temp
     # dir is removed on the failing path too; the non-zero return then fails
-    # the run at the (bare) call site.
-    local code=0
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" || code=$?
+    # the run at the (bare) call site. Output is teed to a log: the operator
+    # still sees the live stream (WebAuthn URL), and a failed run can be
+    # classified afterwards. PIPESTATUS (not $?) so the pipeline's exit code
+    # is the installer's, not tee's.
+    local code=0 log="$tmp/output.log"
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee "$log"
+    code=${PIPESTATUS[0]}
+    # An unattended apply cannot complete an operator approval: when the
+    # installer wanted one and no approval daemon was reachable, the current
+    # floor keeps enforcing, so failing the whole apply buys nothing. Warn
+    # with the remedy and let the apply succeed; the re-wiring happens on the
+    # next interactive apply. Any other non-zero still fails the script.
+    if [ "$code" -ne 0 ] && grep -q "approval request" "$log" 2>/dev/null; then
+        warn "agent-guardrails needs an operator approval that could not be filed (no approval daemon reachable) - enforcement continues with the current floor"
+        warn "to finish the re-wiring: run 'guardrail setup' from an interactive terminal, complete the approval, then re-run chezmoi apply"
+        rm -rf "$tmp"
+        return 0
+    fi
     rm -rf "$tmp"
     return "$code"
 }
