@@ -502,12 +502,12 @@ else
 fi
 render_to "$gtmp/next-rendered.ps1" ps1 '{"guardrail": true}' ||
     fail "rendering the ps1 installer for the end-of-apply placement check failed"
-n_line="$(grep -nF 'Invoke-GuardrailNextSteps' "$gtmp/next-rendered.ps1" | tail -1 | cut -d: -f1)"
+n_line="$(grep -nF 'Invoke-GuardrailNextStep' "$gtmp/next-rendered.ps1" | tail -1 | cut -d: -f1)"
 d_line="$(grep -nF 'Package installation complete' "$gtmp/next-rendered.ps1" | tail -1 | cut -d: -f1)"
 if [ -n "$n_line" ] && [ -n "$d_line" ] && [ "$n_line" -gt "$d_line" ]; then
     pass
 else
-    fail "the end-of-apply Invoke-GuardrailNextSteps call must come after ALL sections in the rendered ps1 installer (call at ${n_line:-?}, complete at ${d_line:-?})"
+    fail "the end-of-apply Invoke-GuardrailNextStep call must come after ALL sections in the rendered ps1 installer (call at ${n_line:-?}, complete at ${d_line:-?})"
 fi
 
 finish
