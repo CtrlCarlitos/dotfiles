@@ -41,7 +41,7 @@
     with -NoSetup (setup needs an interactive terminal an apply never
     has) and is classified by exit code only: 0 continue, 3 warn with
     the remedy, anything else fails the run - replacing wording-based
-    matching. New end-of-apply Invoke-GuardrailNextSteps prints the
+    matching. New end-of-apply Invoke-GuardrailNextStep prints the
     binary's `guardrail next` block verbatim and ends the run with an
     ACTION NEEDED when steps are pending. Contract:
     tests/guardrail_lifecycle_contract.sh.
@@ -1763,7 +1763,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # setup refuses with an ambiguous exit 2 when an enrolled operator has no
 # interactive terminal - so setup is never attempted here. The installer
 # prints its next-steps block itself when setup is skipped, and the
-# end-of-apply Invoke-GuardrailNextSteps (end of this script) carries the
+# end-of-apply Invoke-GuardrailNextStep (end of this script) carries the
 # remedy.
 # Exit-code contract (verified against the released binary; the pin itself
 # lives in .chezmoidata.yaml guardrail.version) -
@@ -1880,7 +1880,7 @@ function Invoke-GuardrailInstaller {
     # 3 = operator action pending (not enrolled, approval daemon not running,
     # request denied/expired) - warn with the remedy and continue: the binary
     # is installed and current and the existing wiring keeps enforcing, so
-    # failing the run buys nothing; Invoke-GuardrailNextSteps below ends the
+    # failing the run buys nothing; Invoke-GuardrailNextStep below ends the
     # run with the ACTION NEEDED block when steps are pending. Any other
     # non-zero (failed download/checksum/install/verify, genuine setup
     # failure, usage) fails this script so chezmoi surfaces it and re-runs
@@ -1903,7 +1903,7 @@ function Invoke-GuardrailInstaller {
 # control flow only checks emptiness. Called once, after ALL sections (end of
 # this script), so the ACTION NEEDED remedy is the last thing a run with
 # pending steps prints.
-function Invoke-GuardrailNextSteps {
+function Invoke-GuardrailNextStep {
     if (-not (Get-Command guardrail -ErrorAction SilentlyContinue)) { return }
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -2123,7 +2123,7 @@ Write-Host "[Post-Install] SSH service activation and access configuration are m
 {{- end }}
 
 # agent-guardrails exit-code contract: once, after ALL sections, surface any
-# pending operator steps (see Invoke-GuardrailNextSteps above) - the ACTION
+# pending operator steps (see Invoke-GuardrailNextStep above) - the ACTION
 # NEEDED remedy is deliberately the last thing this run prints.
-Invoke-GuardrailNextSteps
+Invoke-GuardrailNextStep
 {{ end -}}
