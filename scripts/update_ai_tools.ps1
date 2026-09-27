@@ -237,7 +237,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # same semantics as the installer template). Installation itself lives in
 # agent-guardrails (its install.ps1, ADR-0029 there) - binary download,
 # checksum, Mark-of-the-Web unblock, user-PATH persistence, the Defender
-# exclusion, self-update of an older binary, and `guardrail setup` (plane
+# exclusion (exact-file scoped; agent-guardrails #146), self-update of an
+# older binary, and `guardrail setup` (plane
 # wiring, coverage). This script only fetches the pinned release's
 # install.ps1 + SHA256SUMS, verifies the installer against SHA256SUMS, and
 # runs it FROM THE TEMP FILE with -File (never piped into the session):
@@ -431,6 +432,37 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
             if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
         } catch {
             Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+        }
+        # graft writes its Codex hook entries with backslash paths and no
+        # commandWindows fallback - git bash (Codex's shell here) eats the
+        # backslashes, so every hook event dies with "Cannot find module"
+        # (dotfiles #170). Forward-slash Windows paths work in every shell:
+        # normalize the spelling after each graft upgrade, idempotently.
+        $codexHooks = Join-Path $env:USERPROFILE ".codex\hooks.json"
+        if (Test-Path -LiteralPath $codexHooks) {
+            try {
+                $hooksJson = Get-Content -LiteralPath $codexHooks -Raw | ConvertFrom-Json
+                $changed = $false
+                foreach ($event in $hooksJson.hooks.PSObject.Properties) {
+                    foreach ($entry in $event.Value) {
+                        foreach ($hook in $entry.hooks) {
+                            if ($hook.command -and $hook.command -match '\\' -and -not $hook.commandWindows) {
+                                $forward = $hook.command -replace '\\', '/'
+                                if ($forward -ne $hook.command) {
+                                    $hook.command = $forward
+                                    $changed = $true
+                                }
+                            }
+                        }
+                    }
+                }
+                if ($changed) {
+                    [System.IO.File]::WriteAllText($codexHooks, ($hooksJson | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host "  Normalized Codex hook paths to forward slashes (git bash eats backslashes; dotfiles #170)" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "  Warning: could not normalize Codex hook paths: $_" -ForegroundColor Yellow
+            }
         }
     }
 }
