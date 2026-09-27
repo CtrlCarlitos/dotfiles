@@ -443,8 +443,8 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
             try {
                 $hooksJson = Get-Content -LiteralPath $codexHooks -Raw | ConvertFrom-Json
                 $changed = $false
-                foreach ($event in $hooksJson.hooks.PSObject.Properties) {
-                    foreach ($entry in $event.Value) {
+                foreach ($hookEvent in $hooksJson.hooks.PSObject.Properties) {
+                    foreach ($entry in $hookEvent.Value) {
                         foreach ($hook in $entry.hooks) {
                             if ($hook.command -and $hook.command -match '\\' -and -not $hook.commandWindows) {
                                 $forward = $hook.command -replace '\\', '/'
