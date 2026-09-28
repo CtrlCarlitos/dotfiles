@@ -1,0 +1,22 @@
+{
+  "remote_access": {
+    "enabled": true,
+    "tunnel": {
+      "id": "6ff42ae2-765d-4adf-8684-a115a1b92d95",
+      "ingress": {
+        "ssh": {
+          "hostname": "ssh.example.com",
+          "service": "ssh://127.0.0.1:22"
+        },
+        "wsl": {
+          "hostname": "wsl.example.com",
+          "service": "ssh://127.0.0.1:2222"
+        },
+        "opencode": {
+          "hostname": "opencode.example.com",
+          "service": "http://127.0.0.1:4096"
+        }
+      }
+    }
+  }
+}

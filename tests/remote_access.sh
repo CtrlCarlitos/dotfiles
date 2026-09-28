@@ -13,7 +13,13 @@ set -euo pipefail
 # every case without ever printing token-shaped material. Config reaches the
 # twin through a stub `chezmoi` on PATH whose `data --format json` cats a
 # fixture - the same harness (ra_stub/ra_run) every later remote_access task
-# reuses.
+# reuses. `tunnel render` writes the machine-local cloudflared config.yml
+# from the fixture data (tunnel id, credentials referenced by path only,
+# every declared hostname→service pair, terminal `http_status:404` always
+# appended, byte-identical re-render) to the `$HOME/.cloudflared/config.yml`
+# default, and `tunnel validate` exits 0/1 with named findings (`loopback`,
+# `http_status:404`) that never echo the file's own lines -
+# `RA_TUNNEL_CONFIG` pins the file under test where the default is not it.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -243,6 +249,110 @@ tmux_warn_lines="$(printf '%s\n' "$out" | grep -c '^○ tmux' || true)"
     fail "the tmux section must print exactly one ○ line when tmux is absent (got: $out)"
 if printf '%s' "$out" | grep -Fq '✓ tmux'; then
     fail "the tmux section must not claim success when tmux is unresolved"
+fi
+pass
+
+# ---------------------------------------------------------------------------
+# 10-14. tunnel render/validate (spec §4). render writes the machine-local
+# cloudflared config.yml from [data.remote_access.tunnel]: tunnel id,
+# credentials referenced by path only, one ingress entry per declared
+# hostname/service pair, terminal http_status:404 ALWAYS appended. validate
+# line-scans a config: every http:// origin must be 127.0.0.1 and the last
+# ingress entry must be the terminal 404; findings name the problem class
+# and never echo the config's lines. RA_TUNNEL_CONFIG overrides the output
+# path ($HOME/.cloudflared/config.yml by default) for the hand-written
+# fixtures below.
+# ---------------------------------------------------------------------------
+
+# 10. render from tunnel-full.json onto the default path: id, credentials
+#     path under .cloudflared/, every declared pair, terminal 404 last, and
+#     a second render is byte-identical.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/tunnel-full.json' ;;
+esac"
+cfg="$scratch/home/.cloudflared/config.yml"
+rc=0
+out="$(ra_run tunnel render 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "tunnel render must exit 0 (got $rc)"
+if [ -f "$cfg" ]; then
+    require "$cfg" 'tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95'
+    require "$cfg" "credentials-file: $scratch/home/.cloudflared/6ff42ae2-765d-4adf-8684-a115a1b92d95.json"
+    require "$cfg" '  - hostname: opencode.example.com'
+    require "$cfg" '    service: http://127.0.0.1:4096'
+    require "$cfg" '  - hostname: ssh.example.com'
+    require "$cfg" '    service: ssh://127.0.0.1:22'
+    require "$cfg" '  - hostname: wsl.example.com'
+    require "$cfg" '    service: ssh://127.0.0.1:2222'
+    last_service="$(grep 'service:' "$cfg" | tail -n 1 || true)"
+    [ "$last_service" = '  - service: http_status:404' ] ||
+        fail "the final ingress entry must be the terminal 404 (got: $last_service)"
+    cp "$cfg" "$cfg.first"
+    rc=0
+    out="$(ra_run tunnel render 2>&1)" || rc=$?
+    [ "$rc" -eq 0 ] || fail "the second render must exit 0 (got $rc)"
+    if cmp -s "$cfg" "$cfg.first"; then
+        :
+    else
+        fail "a second render must be byte-identical"
+    fi
+else
+    fail "tunnel render must write the default ${cfg}"
+fi
+pass
+
+# 11. validate on the rendered config: exit 0, verdict line.
+rc=0
+out="$(ra_run tunnel validate 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "tunnel validate must exit 0 on the rendered config (got $rc)"
+printf '%s' "$out" | grep -Fq 'tunnel config valid' ||
+    fail "tunnel validate must print its verdict (got: $out)"
+pass
+
+# 12. validate on a hand-written config whose http origin is 0.0.0.0:
+#     exit 1, the finding names loopback.
+printf '%s\n' \
+    'tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95' \
+    'credentials-file: /home/operator/.cloudflared/6ff42ae2-765d-4adf-8684-a115a1b92d95.json' \
+    'ingress:' \
+    '  - hostname: opencode.example.com' \
+    '    service: http://0.0.0.0:4096' \
+    '  - service: http_status:404' >"$scratch/home/.cloudflared/loopback.yml"
+rc=0
+out="$(RA_TUNNEL_CONFIG="$scratch/home/.cloudflared/loopback.yml" ra_run tunnel validate 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "tunnel validate must exit 1 on a non-loopback origin (got $rc)"
+printf '%s' "$out" | grep -Fq 'loopback' ||
+    fail "the loopback finding must be named (got: $out)"
+pass
+
+# 13. validate on the rendered config minus its terminal 404 entry:
+#     exit 1, the finding names http_status:404.
+if [ -f "$cfg" ]; then
+    grep -v 'http_status:404' "$cfg" >"$scratch/home/.cloudflared/no-final-404.yml"
+    rc=0
+    out="$(RA_TUNNEL_CONFIG="$scratch/home/.cloudflared/no-final-404.yml" ra_run tunnel validate 2>&1)" || rc=$?
+    [ "$rc" -eq 1 ] || fail "tunnel validate must exit 1 without the terminal 404 (got $rc)"
+    printf '%s' "$out" | grep -Fq 'http_status:404' ||
+        fail "the terminal-404 finding must be named (got: $out)"
+else
+    fail "test 13 needs test 10's rendered config"
+fi
+pass
+
+# 14. validate on a structurally valid config whose credentials-file line
+#     carries an inline token-shaped string: still exits 0, and the output
+#     never echoes it.
+printf '%s\n' \
+    'tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95' \
+    'credentials-file: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.inline-token-material' \
+    'ingress:' \
+    '  - hostname: opencode.example.com' \
+    '    service: http://127.0.0.1:4096' \
+    '  - service: http_status:404' >"$scratch/home/.cloudflared/inline-token.yml"
+rc=0
+out="$(RA_TUNNEL_CONFIG="$scratch/home/.cloudflared/inline-token.yml" ra_run tunnel validate 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "a token-shaped credentials-file must still validate structurally (got $rc)"
+if printf '%s' "$out" | grep -Eq 'ey[A-Za-z0-9_-]{20,}'; then
+    fail "tunnel validate output must never echo token material (got: $out)"
 fi
 pass
 

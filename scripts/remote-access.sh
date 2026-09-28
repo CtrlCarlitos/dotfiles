@@ -51,8 +51,8 @@ ra_todo() {
 cmd_setup()           { ra_todo setup; }
 cmd_fix()             { ra_todo fix; }
 cmd_harden_ssh()      { ra_todo harden-ssh; }
-cmd_tunnel_render()   { ra_todo "tunnel render"; }
-cmd_tunnel_validate() { ra_todo "tunnel validate"; }
+cmd_tunnel_render()   { ra_tunnel_render; }
+cmd_tunnel_validate() { ra_tunnel_validate; }
 
 cmd_wsl_reconcile() {
     # The :2222 portproxy rule lives on the Windows host (wsl.exe +
@@ -491,6 +491,81 @@ cmd_status() {
     ra_status_section ra_status_services
     ra_status_section ra_status_tmux
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# tunnel render/validate - the machine-local cloudflared config (spec §4).
+# render writes $RA_TUNNEL_CONFIG (default $HOME/.cloudflared/config.yml)
+# from [data.remote_access.tunnel]: one ingress entry per declared
+# hostname/service pair, terminal http_status:404 always appended,
+# credentials referenced by path only. validate line-scans an existing
+# config: every http:// origin must be 127.0.0.1 and the last ingress entry
+# must be http_status:404. Findings name the problem class only - the
+# config's own lines are never echoed (credential material lives next door
+# in ~/.cloudflared, and validate's output is not the place it leaks).
+# ---------------------------------------------------------------------------
+
+ra_tunnel_render() {
+    local cfg="${RA_TUNNEL_CONFIG:-${HOME}/.cloudflared/config.yml}"
+    local json id name hostname service ingress=""
+    json="$(ra_data_json)"
+    id="$(ra_json_str "$json" tunnel.id "")"
+    [ -n "$id" ] || ra_die "tunnel render: no tunnel id under [data.remote_access.tunnel]"
+    mkdir -p -- "${cfg%/*}"
+    # ra_cfg_keys yields the ingress names sorted (jq `keys`), so repeated
+    # renders are byte-identical for the same data.
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        hostname="$(ra_json_str "$json" "tunnel.ingress.${name}.hostname" "")"
+        service="$(ra_json_str "$json" "tunnel.ingress.${name}.service" "")"
+        [ -n "$hostname" ] || ra_die "tunnel render: ingress ${name} has no hostname"
+        [ -n "$service" ] || ra_die "tunnel render: ingress ${name} has no service"
+        ingress="${ingress}  - hostname: ${hostname}
+    service: ${service}
+"
+    done <<EOF
+$(ra_cfg_keys tunnel.ingress)
+EOF
+    cat >"$cfg" <<EOF
+tunnel: ${id}
+credentials-file: ${HOME}/.cloudflared/${id}.json
+
+ingress:
+${ingress}  - service: http_status:404
+EOF
+    printf 'tunnel config written: %s\n' "$cfg"
+}
+
+ra_tunnel_validate() {
+    local cfg="${RA_TUNNEL_CONFIG:-${HOME}/.cloudflared/config.yml}"
+    [ -f "$cfg" ] || ra_die "tunnel validate: no config at ${cfg}"
+    local line origin last="" loopback=0 terminal=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            *"service: http://"*)
+                # Origin host check: everything between http:// and the
+                # next : or / must be the loopback literal.
+                origin="${line#*"service: http://"}"
+                origin="${origin%%[:/]*}"
+                [ "$origin" = "127.0.0.1" ] || loopback=$((loopback + 1))
+                ;;
+        esac
+        case "$line" in
+            *service:*) last="$line" ;;
+        esac
+    done <"$cfg"
+    case "$last" in
+        *"service: http_status:404"*) terminal=1 ;;
+    esac
+    [ "$loopback" -eq 0 ] ||
+        ra_fail "tunnel validate: loopback - ${loopback} http:// origin(s) not on 127.0.0.1 (${cfg})"
+    [ "$terminal" -eq 1 ] ||
+        ra_fail "tunnel validate: http_status:404 - the last ingress entry must be service: http_status:404 (${cfg})"
+    if [ "$loopback" -eq 0 ] && [ "$terminal" -eq 1 ]; then
+        ra_ok "tunnel config valid (${cfg})"
+        return 0
+    fi
+    return 1
 }
 
 main() {
