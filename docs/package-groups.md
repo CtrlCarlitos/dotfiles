@@ -22,14 +22,14 @@ the persisted `[data.packages]` section is emitted in.
 | Group | Menu line | Contents |
 |---|---|---|
 | `core` | Terminal fundamentals | git, zsh, tmux/psmux, node 24, python, neovim, ripgrep, gh, jq, fzf, 7zip… |
-| `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt |
+| `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt; network diagnostics (net-tools, dnsutils, traceroute, mtr, tcpdump, nmap, whois, iperf3, telnet — #177) |
 | `fonts` | Nerd Fonts | MesloLGS NF |
 | `agent_toolkit` | Cross-vendor agent layer | Serena, Graft, act, Playwright Chromium |
 | `opencode_cli` | OpenCode CLI + Superpowers + skills + guardrail | OpenCode CLI (native installer / choco) + superpowers plugin + curated skills + guardrail opencode plane |
 | `opencode_desktop` | OpenCode Desktop app | Win choco `opencode-desktop`; mac brew cask `opencode-desktop`; Linux GitHub-release .deb (amd64) |
 | `claude_cli` | Claude Code | Claude Code CLI + superpowers plugin + curated skills + guardrail claude plane |
 | `claude_desktop` | Claude Desktop app | Win choco `claude`; mac brew cask `claude`; Linux: none exists (info line, no-op) |
-| `chatgpt_cli` | Codex CLI | `@openai/codex` npm + curated skills in shared `~/.agents/skills` (OpenCode and Codex); no generated command adapters |
+| `chatgpt_cli` | Codex CLI | `@openai/codex` npm + Superpowers via `codex plugin add superpowers@openai-curated-remote` + curated skills in shared `~/.agents/skills` (OpenCode and Codex); no generated command adapters |
 | `chatgpt_desktop` | ChatGPT desktop app | Win winget msstore `9PLM9XGG6VKS` (ChatGPT Work/Codex); mac brew cask `chatgpt`; Linux: none (no-op) |
 | `antigravity_cli` | Antigravity CLI (agy) | choco `antigravity-cli` / brew cask / official script + superpowers + skills + guardrail antigravity plane |
 | `antigravity_desktop` | Antigravity 2.0 app | Win choco `antigravity`; mac 2.0 dmg; Linux 2.0 x64/arm64 (pinned hub-channel URLs) |

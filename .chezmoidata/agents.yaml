@@ -14,21 +14,31 @@
 # agent-guardrails repo (docs/invariants.md #11).
 
 agents:
-  # MCP servers registered for OpenCode (global opencode.json, `mcp` block) and
-  # for agy (a plugin bundle under ~/.gemini/config/plugins/dotfiles-mcp, since
-  # agy defers global stdio servers until a manual /mcp but starts
-  # plugin-bundled ones eagerly). Each consumer builds its own shape from
-  # command + args:
+  # MCP servers registered for OpenCode (global opencode.json, `mcp` block)
+  # and for agy (top-level ~/.gemini/config/mcp_config.json, each server with
+  # forceAllToolsEager - #175: agy marks every server's tools lazy by default,
+  # and lazy tools are only reachable through the generic call_mcp_tool
+  # invoker, which guardrail denies by design; forceAllToolsEager promotes
+  # them to native mcp_<server>_<tool> entries guardrail's registry already
+  # classifies. A plugin bundle is not an alternative: it prefixes the server
+  # name, and guardrail does not know mcp_dotfiles-mcp_serena_*). Each
+  # consumer builds its own shape from command + args:
   #   OpenCode  {type: local, command: [command, ...args], enabled: true}
-  #   agy       {command, args}
+  #   agy       {command, args, forceAllToolsEager: true}
   # Registration is still gated on the binary being present on the machine.
   mcp:
     serena:
       command: serena
       args: [start-mcp-server, --context, ide-assistant]
     graft:
-      command: npx
-      args: [-y, "@nanonets/graft", mcp]
+      # The installed binary, NOT `npx -y @nanonets/graft mcp`: with the npx
+      # form agy exposed zero graft tools at all (a slow npx cold start is
+      # the prime suspect, #175), and every machine that registers graft's
+      # MCP also has the global npm install from the installers. `graft mcp`
+      # starts instantly and cannot resolve a different graft than the
+      # installed one.
+      command: graft
+      args: [mcp]
 
   # Serena's web dashboard opens a browser tab every time a client starts the
   # MCP server (one per agent per session). false keeps the dashboard running
