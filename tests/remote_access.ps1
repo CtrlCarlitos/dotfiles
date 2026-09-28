@@ -191,10 +191,13 @@ function Get-ItemProperty {
 
 function Invoke-WslKeysStub {
     # The append-only authorize simulation (Review Focus #2): the twin's
-    # heredoc script carries the key line between <<'RAKEY' and RAKEY; the
-    # stub greps the canned authorized_keys list (`present`, no mutation,
-    # no recorded call) or appends the line verbatim (`authorized`, call
-    # recorded). The pre-seeded lines are never rewritten.
+    # heredoc script carries the key line between <<'RAKEY' and RAKEY, and
+    # the REAL script echoes its verdict - `echo present` on the
+    # already-present path, `echo authorized` on the append path - so this
+    # stub returns exactly those strings: it greps the canned
+    # authorized_keys list (present, no mutation, no recorded call) or
+    # appends the line verbatim (authorized, call recorded). The pre-seeded
+    # lines are never rewritten.
     param([string]$ScriptBody)
     $key = $null
     if ($ScriptBody -match "<<'RAKEY'\r?\n(.+?)\r?\nRAKEY") { $key = $Matches[1] }

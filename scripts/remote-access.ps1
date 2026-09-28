@@ -791,8 +791,11 @@ function Publish-LoginKey {
     }
     # Append-only heredoc through the wsl.exe channel: umask + mkdir first
     # so a fresh authorized_keys lands 600, grep -Fxq makes the exact line
-    # idempotent, the quoted RAKEY delimiter keeps the key verbatim.
-    $sh = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -Fxq '${line}' ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys <<'RAKEY'`n${line}`nRAKEY"
+    # idempotent, the quoted RAKEY delimiter keeps the key verbatim, and
+    # BOTH branches echo their verdict (present / authorized) - the real
+    # channel's stdout IS the protocol the verdict below parses, and a
+    # silent success would be indistinguishable from a failed channel.
+    $sh = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; if grep -Fxq '${line}' ~/.ssh/authorized_keys; then echo present; else cat >> ~/.ssh/authorized_keys <<'RAKEY'`n${line}`nRAKEY`necho authorized`nfi"
     $out = (Get-RemoteQuietOutput { & wsl.exe -u root -e sh -c $sh })
     if (($LASTEXITCODE -ne 0) -or [string]::IsNullOrEmpty($out)) {
         Write-RemoteStatusWarn "login key ${Name}: wsl channel failed (manual: check WSL, then authorize ${pub} inside the distro)"
