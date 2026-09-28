@@ -23,15 +23,20 @@
 # name the manual action. Never prints secrets: probe stderr is discarded
 # and only verdicts are printed. `setup` idempotently configures the Windows
 # arm (sshd, the Tailscale-scoped firewall rules, RDP, and the WSL arm:
-# sshd inside the distro, the wsl-target login keys, the :2222 portproxy
-# reconcile with its rule, the logon reconcile task) behind the same
-# recorded-call seams the bash twin's tests pin; the remaining subcommands
-# (fix, harden-ssh, tunnel, serve) are skeleton stubs that throw with their
-# landing task (Task 11 fills them in behind the same surface the bash twin
-# implements). `wsl-reconcile` is the reconcile arm the logon task re-runs:
-# it re-syncs the managed :2222 portproxy to the current WSL IP and reports
-# PASS/WARN/FAIL lines, degrading every broken probe (wsl.exe, the WSL IP,
-# the tailscale listenaddress) to a WARN naming the manual action.
+# sshd inside the distro, the login keys, the :2222 portproxy reconcile with
+# its rule, the logon reconcile task, the serve mappings, the tunnel render)
+# behind the same recorded-call seams the bash twin's tests pin. `fix`
+# repairs deterministic machine-local state only - sshd running and
+# Automatic again, the auth-gated serve re-apply, the deterministic tunnel
+# re-render - and never turns a non-loopback target into exposure.
+# `harden-ssh` flips sshd to key-only behind its two guards (an authorized
+# key present, then -Confirmed). `tunnel render`/`tunnel validate` write and
+# line-scan the machine-local cloudflared config (terminal http_status:404
+# always, loopback origins only). `wsl-reconcile` is the reconcile arm the
+# logon task re-runs: it re-syncs the managed :2222 portproxy to the current
+# WSL IP and reports PASS/WARN/FAIL lines, degrading every broken probe
+# (wsl.exe, the WSL IP, the tailscale listenaddress) to a WARN naming the
+# manual action.
 
 param() # arguments stay in $args for the main guard's splat; the test
         # harness dot-sources this file with REMOTE_ACCESS_NO_MAIN=1 instead
@@ -520,10 +525,12 @@ function Get-RemoteStatus {
 
 # ---------------------------------------------------------------------------
 # writers - the setup-era writes, each idempotent (verify-don't-rewrite) and
-# seam-recorded in the tests. The stubs that remain throw with their landing
-# task so an arm reached too early fails loudly at the dispatcher instead of
-# silently doing nothing; Task 10 landed the WSL arm behind these seams and
-# Task 11 fills the rest in the same way.
+# seam-recorded in the tests: the service / firewall / registry / netsh /
+# scheduled-task / wsl.exe channels from Tasks 9-10, plus Task 11's serve
+# mappings, tunnel render/validate, and the windows-target login-key install
+# behind the Test-LocalAdmin and icacls seams. Every native probe goes
+# through Get-RemoteQuietOutput, so no real invocation happens in a test
+# host.
 # ---------------------------------------------------------------------------
 
 function Set-SshdServiceDesired {
@@ -746,6 +753,18 @@ function Register-WslReconcileTask {
     }
 }
 
+function Test-LocalAdmin {
+    # True when the current account is in the local Administrators group -
+    # the seam that routes Publish-LoginKey's windows target between
+    # administrators_authorized_keys (which sshd only accepts with the
+    # strict admins-only ACL) and the user's own authorized_keys. The tests
+    # override this function, so no real group lookup ever runs in a test
+    # host.
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Publish-LoginKey {
     # Publish-LoginKey -Name <key> -Target <target>: authorize the PUBLIC
     # half (~/.ssh/<name>.pub) for <target>. The private half is never
@@ -753,25 +772,27 @@ function Publish-LoginKey {
     # wsl.exe -u root channel with an append-only heredoc: grep -Fxq guards
     # the exact line, existing authorized_keys lines are never rewritten,
     # and a second run is already-authorized (Review Focus #2; the
-    # ra_authorized_keys_install twin). The windows target (the
-    # administrators_authorized_keys + admins-only ACL arm) is Task 11;
-    # anything else is the unknown-target WARN skip. No prompt anywhere: a
-    # declared-but-missing key degrades to the no-public-half WARN.
+    # ra_authorized_keys_install twin). The windows target (spec section 5.1)
+    # appends into %ProgramData%\ssh\administrators_authorized_keys for an
+    # admin account - the strict admins-only ACL sshd insists on is granted
+    # right beside the append (inheritance disabled, Administrators:F, via
+    # icacls; the group check is the Test-LocalAdmin seam) - or into the
+    # user's ~/.ssh/authorized_keys otherwise, the same append-only
+    # exact-line guard and no ACL call. Anything else is the unknown-target
+    # WARN skip. No prompt anywhere: a declared-but-missing key degrades to
+    # the no-public-half WARN.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Target
     )
-    if ($Target -eq 'windows') {
-        throw 'Publish-LoginKey: target windows: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
-    }
-    if ($Target -ne 'wsl') {
+    if (($Target -ne 'wsl') -and ($Target -ne 'windows')) {
         Write-RemoteStatusWarn "login key ${Name}: unknown target ${Target} - skipped"
         return
     }
     $pub = Join-Path (Get-RemoteHome) ".ssh/${Name}.pub"
     if (-not (Test-Path -LiteralPath $pub -PathType Leaf)) {
-        Write-RemoteStatusWarn "login key ${Name}: no public half at ${pub} - nothing to authorize into wsl"
+        Write-RemoteStatusWarn "login key ${Name}: no public half at ${pub} - nothing to authorize into ${Target}"
         return
     }
     $line = $null
@@ -780,7 +801,40 @@ function Publish-LoginKey {
         if (-not [string]::IsNullOrEmpty($trimmed)) { $line = $trimmed; break }
     }
     if ([string]::IsNullOrEmpty($line)) {
-        Write-RemoteStatusWarn "login key ${Name}: ${pub} is empty - nothing to authorize into wsl"
+        Write-RemoteStatusWarn "login key ${Name}: ${pub} is empty - nothing to authorize into ${Target}"
+        return
+    }
+    if ($Target -eq 'windows') {
+        # The Windows arm: append-only behind the same exact-line guard as
+        # the wsl arm - existing lines are never rewritten, a second run is
+        # already-authorized and records nothing (the ACL grant rides the
+        # append, so an already-correct file is verified, not rewritten).
+        $isAdmin = Test-LocalAdmin
+        $akPath = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys'
+        if (-not $isAdmin) {
+            $akPath = Join-Path (Get-RemoteHome) '.ssh/authorized_keys'
+        }
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $akPath)
+        $existing = @(Get-Content -LiteralPath $akPath -ErrorAction SilentlyContinue)
+        if (@($existing) -ccontains $line) {
+            Write-RemoteStatusOk "login key ${Name}: already authorized (windows)"
+            return
+        }
+        [IO.File]::AppendAllText($akPath, ($line + "`n"), [Text.UTF8Encoding]::new($false))
+        if ($isAdmin) {
+            # The ACL sshd requires for administrators_authorized_keys:
+            # inheritance disabled, Administrators fully granted - the
+            # %ProgramData% default ACL lets every user read the file, and
+            # sshd refuses the whole file when it is wider than
+            # admins-only. A failed grant is the manual-action WARN, never
+            # a crash.
+            $icaclsArgs = @($akPath, '/inheritance:r', '/grant', 'Administrators:F')
+            $null = Get-RemoteQuietOutput { & icacls @icaclsArgs }
+            if ($LASTEXITCODE -ne 0) {
+                Write-RemoteStatusWarn "login key ${Name}: ACL grant failed (manual: icacls `"$akPath`" /inheritance:r /grant `"Administrators:F`")"
+            }
+        }
+        Write-RemoteStatusOk "login key ${Name}: authorized (windows)"
         return
     }
     if ($line -match "'") {
@@ -808,42 +862,214 @@ function Publish-LoginKey {
     }
 }
 
-function Publish-WslLoginKeys {
+function Publish-LoginKeys {
     # Drive Publish-LoginKey for every [[data.remote_access.login_keys]]
-    # entry whose targets contain `wsl` - this arm's install (the
-    # ra_setup_login_keys twin, inverted). Key materialization is not this
-    # arm's job: a declared-but-missing key degrades to the no-public-half
-    # WARN inside Publish-LoginKey, never a prompt (Review Focus #5's
-    # non-interactive shape).
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Publish-LoginKey call per entry; kept for twin parity with ra_setup_login_keys (invariant #10)')]
+    # entry and each of its declared targets (the ra_setup_login_keys
+    # authorize half, inverted): wsl through its channel, windows into
+    # administrators_authorized_keys / the user's authorized_keys, anything
+    # else the unknown-target WARN skip inside Publish-LoginKey. Key
+    # materialization is not this arm's job: a declared-but-missing key
+    # degrades to the no-public-half WARN, never a prompt (Review Focus
+    # #5's non-interactive shape).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Publish-LoginKey call per target; kept for twin parity with ra_setup_login_keys (invariant #10)')]
     param($Config)
     $keys = Get-RemoteConfigValue $Config 'login_keys' $null
     if ($null -eq $keys) { return }
     foreach ($entry in @($keys)) {
         $name = Get-RemoteConfigValue $entry 'name' ''
         $targets = Get-RemoteConfigValue $entry 'targets' $null
-        if ((-not [string]::IsNullOrEmpty($name)) -and ($null -ne $targets) -and (@($targets) -contains 'wsl')) {
-            Publish-LoginKey -Name $name -Target 'wsl'
+        if ([string]::IsNullOrEmpty($name) -or ($null -eq $targets)) { continue }
+        foreach ($target in @($targets)) {
+            Publish-LoginKey -Name $name -Target ([string]$target)
         }
     }
 }
 
 function Invoke-SshHardening {
-    # Task 11: the key-only flip behind the -Confirmed guard + an
-    # authorized-keys presence check (the cmd_harden_ssh twin).
-    throw 'Invoke-SshHardening: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
+    # Flip sshd to key-only (spec section 4) - the cmd_harden_ssh twin. Two
+    # guards, both mandatory, checked in the twin's order: the operator's
+    # authorized_keys must hold at least one key (a way back in exists),
+    # then -Confirmed must be passed (the operator attests key login was
+    # tested from another device). A refused run is a terminating error -
+    # exit 1 through the dispatcher - and never writes sshd_config. With
+    # both guards met, the config at RA_SSHD_CONFIG (default
+    # %ProgramData%\ssh\sshd_config - the bash twin's RA_SSHD_CONFIG seam,
+    # default /etc/ssh/sshd_config) gains exactly one active
+    # `PasswordAuthentication no` and sshd restarts. The line is PREPENDED,
+    # not appended: sshd honors the first value it reads, so a trailing
+    # Match block can never re-scope the global default. Existing active
+    # and commented PasswordAuthentication lines are dropped, so a second
+    # run is byte-identical. The write goes through a temp file copied back
+    # into place - the bash twin's mktemp + cat-back: the destination file
+    # object, and with it its ACL and owner, survives the content swap
+    # (which sshd's StrictModes insists on).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'harden-ssh -Confirmed is the explicit, double-guarded intent carrier; a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param([switch]$Confirmed)
+    $ak = Join-Path (Get-RemoteHome) '.ssh/authorized_keys'
+    $keys = 0
+    if (Test-Path -LiteralPath $ak -PathType Leaf) {
+        foreach ($keyLine in (Get-Content -LiteralPath $ak)) {
+            if (-not [string]::IsNullOrWhiteSpace($keyLine)) { $keys++ }
+        }
+    }
+    if ($keys -eq 0) {
+        throw "harden-ssh: no authorized key in ${ak} - authorize at least one login key first (dot remote setup), then verify key login from another device"
+    }
+    if (-not $Confirmed) {
+        throw 'harden-ssh: needs -Confirmed - verify key login from another device first (this writes PasswordAuthentication no)'
+    }
+    $cfg = $env:RA_SSHD_CONFIG
+    if ([string]::IsNullOrEmpty($cfg)) { $cfg = Join-Path $env:ProgramData 'ssh/sshd_config' }
+    if (-not (Test-Path -LiteralPath $cfg -PathType Leaf)) {
+        throw "harden-ssh: no sshd_config at ${cfg}"
+    }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($configLine in (Get-Content -LiteralPath $cfg)) {
+        if (($configLine -like 'PasswordAuthentication*') -or ($configLine -like '#PasswordAuthentication*')) { continue }
+        $kept.Add($configLine)
+    }
+    $content = 'PasswordAuthentication no' + "`n"
+    if ($kept.Count -gt 0) { $content += (($kept -join "`n") + "`n") }
+    $tmp = "${cfg}.remote-access-tmp"
+    [IO.File]::WriteAllText($tmp, $content, [Text.UTF8Encoding]::new($false))
+    # Copy back into place: the destination's ACL and owner survive the
+    # content swap, the bash twin's `cat "$tmp" >"$cfg"`.
+    [IO.File]::Copy($tmp, $cfg, $true)
+    Remove-Item -LiteralPath $tmp -Force
+    Write-RemoteStatusOk "sshd: PasswordAuthentication no (${cfg})"
+    if ($null -eq (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        Write-RemoteStatusWarn 'sshd: restart unavailable - restart sshd manually (Restart-Service sshd)'
+    } else {
+        Restart-Service -Name sshd
+        Write-RemoteStatusOk 'sshd: restarted (key-only)'
+    }
+}
+
+function Invoke-ServeApply {
+    # One Tailscale Serve mapping per configured service with tailscale =
+    # true (the ra_serve_apply twin; spec section 6: path-scoped per instance,
+    # targets stay loopback). Idempotent: `tailscale serve status` is read
+    # first and a service whose target is already mapped is verified, not
+    # rewritten - a second apply records zero calls. A non-loopback
+    # configured host is refused with a FAIL, never served (Review Focus
+    # #4), and a port-less entry is the skip WARN. The caller gates this on
+    # an authenticated backend. No ShouldProcess: the caller's subcommand
+    # is the explicit intent carrier and a non-interactive run must never
+    # prompt.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'setup/fix are the explicit intent carriers and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $config = Get-RemoteAccessConfig
+    $services = Get-RemoteConfigValue $config 'services' $null
+    if ($null -eq $services) { return }
+    $status = (Get-RemoteQuietOutput { & tailscale serve status })
+    foreach ($entry in ($services.PSObject.Properties | Sort-Object -Property Name)) {
+        $name = $entry.Name
+        $svc = $entry.Value
+        if ((Get-RemoteConfigValue $svc 'tailscale' $false) -ne $true) { continue }
+        $svcHost = Get-RemoteConfigValue $svc 'host' '127.0.0.1'
+        $port = Get-RemoteConfigValue $svc 'port' ''
+        if ($svcHost -ne '127.0.0.1') {
+            Write-RemoteStatusFail "serve ${name}: target ${svcHost}:${port} is not loopback - refused (fix the app's bind first)"
+            continue
+        }
+        if ([string]::IsNullOrEmpty([string]$port)) {
+            Write-RemoteStatusWarn "serve ${name}: no port configured - skipped"
+            continue
+        }
+        $target = "http://${svcHost}:${port}"
+        if (($null -ne $status) -and ($status -like "*${target}*")) {
+            Write-RemoteStatusOk "serve ${name}: already mapped (${target})"
+            continue
+        }
+        $null = Get-RemoteQuietOutput { & tailscale serve --bg --set-path "/${name}" $target }
+        Write-RemoteStatusOk "serve ${name}: mapped /${name} to ${target}"
+    }
 }
 
 function Write-TunnelConfig {
-    # Task 11: render ~/.cloudflared/config.yml from
-    # [data.remote_access.tunnel]; terminal http_status:404 always appended.
-    throw 'Write-TunnelConfig: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
+    # Render the machine-local cloudflared config.yml from
+    # [data.remote_access.tunnel] - the ra_tunnel_render twin. One ingress
+    # entry per declared hostname/service pair (names sorted, so repeated
+    # renders are byte-identical for the same data), credentials referenced
+    # by path only, and the terminal http_status:404 always appended - the
+    # catch-all that keeps an unmatched hostname from reaching any origin.
+    # The output path is RA_TUNNEL_CONFIG when set (the bash twin's seam),
+    # HOME\.cloudflared\config.yml otherwise. A missing tunnel id or an
+    # ingress entry without its hostname/service is a terminating error -
+    # exit 1 through the dispatcher - naming what is missing, never a
+    # partial config. Deterministic, so a re-render over a valid config is
+    # a byte-identical local write, not a mutation.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'tunnel render is the explicit intent carrier writing a deterministic machine-local file; a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $config = Get-RemoteAccessConfig
+    $id = Get-RemoteConfigValue $config 'tunnel.id' ''
+    if ([string]::IsNullOrEmpty($id)) {
+        throw 'tunnel render: no tunnel id under [data.remote_access.tunnel]'
+    }
+    $home_ = Get-RemoteHome
+    $cfgPath = $env:RA_TUNNEL_CONFIG
+    if ([string]::IsNullOrEmpty($cfgPath)) { $cfgPath = Join-Path $home_ '.cloudflared/config.yml' }
+    $parent = Split-Path -Parent $cfgPath
+    if (-not [string]::IsNullOrEmpty($parent)) {
+        $null = New-Item -ItemType Directory -Force -Path $parent
+    }
+    $ingress = ''
+    $entries = Get-RemoteConfigValue $config 'tunnel.ingress' $null
+    if ($null -ne $entries) {
+        foreach ($entry in ($entries.PSObject.Properties | Sort-Object -Property Name)) {
+            $hostname = Get-RemoteConfigValue $entry.Value 'hostname' ''
+            $service = Get-RemoteConfigValue $entry.Value 'service' ''
+            if ([string]::IsNullOrEmpty($hostname)) {
+                throw "tunnel render: ingress $($entry.Name) has no hostname"
+            }
+            if ([string]::IsNullOrEmpty($service)) {
+                throw "tunnel render: ingress $($entry.Name) has no service"
+            }
+            $ingress += "  - hostname: ${hostname}`n    service: ${service}`n"
+        }
+    }
+    $content = "tunnel: ${id}`ncredentials-file: $(Join-Path $home_ ".cloudflared/${id}.json")`n`ningress:`n${ingress}  - service: http_status:404`n"
+    [IO.File]::WriteAllText($cfgPath, $content, [Text.UTF8Encoding]::new($false))
+    Write-Host "tunnel config written: ${cfgPath}"
 }
 
 function Test-TunnelConfig {
-    # Task 11: line-scan the local config - loopback origins + terminal 404;
-    # named findings, never echoing the config's own lines.
-    throw 'Test-TunnelConfig: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
+    # Line-scan the local cloudflared config (the ra_tunnel_validate twin):
+    # every http:// origin must be 127.0.0.1 and the last ingress entry
+    # must be the terminal http_status:404. Findings name the problem class
+    # only - loopback, http_status:404 - and never echo the config's own
+    # lines (credential material lives next door in ~/.cloudflared, and
+    # validate's output is not the place it leaks). $true and a verdict
+    # line when valid; $false with the named findings otherwise - the
+    # dispatcher exits 1 on $false (the bash twin's rc 1). A missing config
+    # is a terminating error naming the path.
+    param()
+    $cfgPath = $env:RA_TUNNEL_CONFIG
+    if ([string]::IsNullOrEmpty($cfgPath)) { $cfgPath = Join-Path (Get-RemoteHome) '.cloudflared/config.yml' }
+    if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) {
+        throw "tunnel validate: no config at ${cfgPath}"
+    }
+    $last = ''
+    $loopback = 0
+    $terminal = $false
+    foreach ($line in (Get-Content -LiteralPath $cfgPath)) {
+        if ($line -match 'service: http://([^:/]+)') {
+            if ($Matches[1] -ne '127.0.0.1') { $loopback++ }
+        }
+        if ($line -like '*service:*') { $last = $line }
+    }
+    if ($last -like '*service: http_status:404*') { $terminal = $true }
+    if ($loopback -gt 0) {
+        Write-RemoteStatusFail "tunnel validate: loopback - ${loopback} http:// origin(s) not on 127.0.0.1 (${cfgPath})"
+    }
+    if (-not $terminal) {
+        Write-RemoteStatusFail "tunnel validate: http_status:404 - the last ingress entry must be service: http_status:404 (${cfgPath})"
+    }
+    if (($loopback -eq 0) -and $terminal) {
+        Write-RemoteStatusOk "tunnel config valid (${cfgPath})"
+        return $true
+    }
+    return $false
 }
 
 # ---------------------------------------------------------------------------
@@ -855,9 +1081,11 @@ function Test-TunnelConfig {
 # state first, so an already-correct host records no mutations, and setup
 # exits non-zero only on hard failure. The WSL arm (spec section 9) runs
 # behind its [data.remote_access.wsl] gate: sshd inside the distro, the
-# wsl-target login keys, the :2222 portproxy reconcile with its rule, and
-# the logon reconcile task; serve mappings, tunnel render, and the
-# windows-target login keys land with Task 11 behind this orchestration.
+# login keys inside the distro, the :2222 portproxy reconcile with its
+# rule, and the logon reconcile task. The declared login-key targets
+# (windows + wsl), the serve mappings (behind the authenticated gate) and
+# the tunnel render complete the orchestration - all idempotent, all
+# seam-recorded.
 # ---------------------------------------------------------------------------
 
 function Invoke-RemoteSetup {
@@ -927,7 +1155,6 @@ function Invoke-RemoteSetup {
             Write-RemoteStatusWarn 'wsl: not available (manual: install WSL2, then re-run: dot remote setup)'
         } else {
             Enable-WslSsh
-            Publish-WslLoginKeys -Config $config
             if ($null -eq (Get-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -ErrorAction SilentlyContinue)) {
                 Register-WslReconcileTask
             } else {
@@ -941,9 +1168,115 @@ function Invoke-RemoteSetup {
             }
         }
     }
-    # Serve mappings, tunnel render, and the windows-target login keys land
-    # with Task 11; the dispatcher's remaining arms still throw until then.
+    # Login keys (spec section 5.1): every declared target authorizes on this
+    # host - wsl through its channel, windows into
+    # administrators_authorized_keys (admin) or the user's authorized_keys.
+    # Machine-local writes, independent of Tailscale and of the WSL gate
+    # (the bash twin's ra_setup_login_keys runs unconditionally; a failed
+    # channel degrades to the WARN inside Publish-LoginKey).
+    Publish-LoginKeys -Config $config
+    # Serve mappings (spec section 6): Tailscale-dependent like the firewall rules
+    # and RDP - held unless the backend is authenticated.
+    if ($tsState -eq 'ok') {
+        Invoke-ServeApply
+    } else {
+        Write-RemoteStatusWarn "serve: skipped while tailscale is ${tsState} (dependent paths held)"
+    }
+    # Tunnel render (machine-local, auth-independent) - only where a tunnel
+    # id is actually configured.
+    if (-not [string]::IsNullOrEmpty((Get-RemoteConfigValue $config 'tunnel.id' ''))) {
+        Write-TunnelConfig
+    }
     Write-Host 'next: verify key login from another device, then run: dot remote harden-ssh'
+}
+
+# ---------------------------------------------------------------------------
+# fix + harden-ssh (spec section 8, section 4) - the repair-only repairs and the guarded
+# key-only flip. fix touches deterministic machine-local state only: sshd
+# running again + the expected startup mode restored, the configured
+# Tailscale Serve mappings re-applied (behind the auth gate, same as setup),
+# the local tunnel config re-rendered. It never logs into Tailscale, touches
+# Cloudflare Access/ACLs, weakens SSH auth, disables a security control,
+# creates a public listener, or exposes a new service - and on an
+# already-healthy host it records no mutation at all (the same idempotency
+# discipline as setup). harden-ssh is the one place remote-access turns an
+# auth control off, so it is guarded twice and refuses loudly otherwise.
+# ---------------------------------------------------------------------------
+
+function Invoke-WindowsSshFix {
+    # The Windows arm of fix (the ra_fix_linux twin): sshd restarted when
+    # not running and the startup mode restored (Automatic) when missing,
+    # gated on windows.ssh by the caller so a host that did not declare
+    # sshd is not touched. A missing service is the capability presence
+    # verdict - fix checks prerequisites, never installs (the installers
+    # own the OpenSSH Server optional capability) - reported as the manual
+    # action. Idempotent: an already-running, Automatic sshd records no
+    # call at all. String compares, not the enums: 5.1 resolves
+    # ServiceControllerStatus (and the StartType enum) only after the REAL
+    # cmdlets have loaded their assemblies, and the tests override the
+    # cmdlets - the same string compare the doctor's Get-SshdState uses.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the fix subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($null -eq $svc) {
+        Write-RemoteStatusWarn 'ssh: sshd not installed (manual: install the OpenSSH Server optional capability)'
+        return
+    }
+    if ([string]$svc.Status -ne 'Running') {
+        Restart-Service -Name sshd
+        Write-RemoteStatusOk 'ssh: sshd restarted'
+    }
+    if ([string]$svc.StartType -ne 'Automatic') {
+        Set-Service -Name sshd -StartupType Automatic
+        Write-RemoteStatusOk 'ssh: sshd startup mode restored (Set-Service -StartupType Automatic)'
+    }
+}
+
+function Invoke-RemoteFix {
+    # The fix arm (spec section 8) - the cmd_fix twin: repair deterministic
+    # machine-local state only. sshd restarted and its startup mode
+    # restored (the Windows arm above), the configured Tailscale Serve
+    # mappings re-applied behind the authenticated gate, the local tunnel
+    # config re-rendered. A configured service whose target is not
+    # 127.0.0.1 is refused with a FAIL inside Invoke-ServeApply - fix never
+    # repairs a target into exposure (Review Focus #4). Not configured: a
+    # no-op pointing at the docs, never a crash, never a mutation. No
+    # ShouldProcess: the subcommand IS the explicit repair intent and a
+    # non-interactive run must never prompt.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the fix subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $config = Get-RemoteAccessConfig
+    if (($null -eq $config) -or ((Get-RemoteConfigValue $config 'enabled' $false) -ne $true)) {
+        Write-Host 'not configured - see docs/remote-access.md'
+        return
+    }
+    $tsState = Get-TailscaleState
+    switch ($tsState) {
+        'ok' {
+            Write-RemoteStatusOk 'tailscale: connected'
+        }
+        'unauth' {
+            Write-RemoteStatusWarn 'tailscale: not authenticated'
+        }
+        'absent' {
+            Write-RemoteStatusWarn 'tailscale: not installed (manual: install Tailscale, then run: tailscale up)'
+        }
+    }
+    if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+        Invoke-WindowsSshFix
+    }
+    # Tailscale-dependent path, gated exactly like setup: re-applying Serve
+    # mappings needs an authenticated backend.
+    if ($tsState -eq 'ok') {
+        Invoke-ServeApply
+    } else {
+        Write-RemoteStatusWarn "serve: skipped while tailscale is ${tsState} (dependent paths held)"
+    }
+    # The render is deterministic, so a re-render over a valid config is a
+    # byte-identical local write, not a mutation.
+    if (-not [string]::IsNullOrEmpty((Get-RemoteConfigValue $config 'tunnel.id' ''))) {
+        Write-TunnelConfig
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -964,10 +1297,21 @@ function Invoke-RemoteAccess {
             Get-RemoteStatus
         }
         'fix' {
-            throw 'fix: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
+            Invoke-RemoteFix
         }
         'harden-ssh' {
-            Invoke-SshHardening @Rest
+            # -Confirmed arrives as a raw argument word through the
+            # dispatcher (the bash twin's --confirmed); anything else is the
+            # unknown-argument refusal, exit 1 via the terminating error.
+            $confirmed = $false
+            foreach ($restArg in $Rest) {
+                if (($restArg -eq '-Confirmed') -or ($restArg -eq '--Confirmed') -or ($restArg -eq '--confirmed')) {
+                    $confirmed = $true
+                } else {
+                    throw "harden-ssh: unknown argument: ${restArg}"
+                }
+            }
+            Invoke-SshHardening -Confirmed:$confirmed
         }
         'wsl-reconcile' {
             Invoke-WslReconcile @Rest
@@ -977,7 +1321,7 @@ function Invoke-RemoteAccess {
             if ($Rest.Count -gt 0) { $mode = [string]$Rest[0] }
             switch ($mode) {
                 'render'   { Write-TunnelConfig }
-                'validate' { Test-TunnelConfig }
+                'validate' { if (-not (Test-TunnelConfig)) { exit 1 } }
                 default    { Write-RemoteUsage; exit 2 }
             }
         }

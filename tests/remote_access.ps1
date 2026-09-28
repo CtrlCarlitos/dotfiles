@@ -57,6 +57,29 @@
 # loud Task 11 stub); and the setup arm wires the whole WSL branch behind
 # wsl.enabled (sshd enable inside WSL, key publication, reconcile task,
 # portproxy + :2222 rule held while tailscale is unauth, broken-WSL WARN).
+# The Task 11 arms complete the twin: fix is repair-only (a stopped sshd is
+# restarted and its startup mode restored, a healthy host records zero
+# mutations, an unauthenticated backend holds serve, and a service whose
+# target is 0.0.0.0 is a FAIL with NO serve/exposure call - Review Focus
+# #4); harden-ssh is guarded in the bash twin's order (zero authorized keys
+# refuses first, then -Confirmed; a refusal is a terminating error that
+# exits 1 through the dispatcher and never writes sshd_config; with both
+# guards met the config at RA_SSHD_CONFIG gains exactly one prepended
+# `PasswordAuthentication no`, drops the active+commented lines so a second
+# run is byte-identical, and sshd restarts through the Restart-Service
+# seam); the windows-target login key installs into
+# administrators_authorized_keys append-only with the icacls grant recorded
+# (inheritance disabled, Administrators:F) behind the Test-LocalAdmin seam,
+# or into the user's authorized_keys with no icacls for a non-admin; tunnel
+# render/validate mirror the Task 3 assertions exactly (terminal
+# http_status:404 always appended, byte-identical re-render, validate exit
+# 0/1 with named findings - loopback, http_status:404 - never echoing the
+# config's own lines, RA_TUNNEL_CONFIG pinning the file under test); serve
+# apply maps one path per tailscale=true service with 127.0.0.1 targets
+# (the tailscale stub derives serve status from the recorded calls, so the
+# second apply verifies in place and records zero calls); and setup wires
+# the declared login-key targets (windows + wsl), the serve mappings and
+# the tunnel render into the orchestration idempotently.
 # Runs on pwsh 7 AND Windows PowerShell 5.1 (5.1-only syntax throughout, no
 # skip exits - the Windows CI block runs this file under powershell.exe).
 
@@ -112,6 +135,7 @@ $script:TailscaleIpOk = $true
 $script:WslAuthorizedKeys = @()
 $script:ReconcileTaskInstalled = $false
 $script:ReconcileTaskAction = $null
+$script:LocalAdmin = $true
 $script:PortproxyTable = @'
 
 Listen on ipv4:             Connect to ipv4:
@@ -148,6 +172,20 @@ function tailscale {
     $call = $args -join ' '
     if ($call -eq 'status --json') { return $script:TailscaleStatusJson }
     if ($call -eq 'serve status') { return $script:TailscaleServeStatus }
+    if ($call -like 'serve --bg*') {
+        # The serve-write seam: records the exact mapping call and appends
+        # the mapping into the stub status, so a second apply pass reads the
+        # mapped target back and verifies in place (the derive-from-log stub
+        # shape the bash suite uses for its tailscale stub).
+        $argList = @($args)
+        $setPath = '/'
+        $idx = [array]::IndexOf($argList, '--set-path')
+        if (($idx -ge 0) -and ($idx -lt ($argList.Count - 1))) { $setPath = [string]$argList[$idx + 1] }
+        $target = [string]$argList[$argList.Count - 1]
+        $script:TailscaleServeStatus = ($script:TailscaleServeStatus + "`n" + ("https://machine.example.net:443 path {0} --> {1}" -f $setPath, $target))
+        $script:Calls += ("tailscale " + $call)
+        return $null
+    }
     if ($call -eq 'ip -4') {
         # The reconcile arm's listenaddress probe: gated by TailscaleIpOk so
         # the address-unavailable WARN path is reachable.
@@ -368,6 +406,36 @@ function Start-Service {
     $script:Calls += ("Start-Service -Name {0}" -f $Name)
 }
 
+function Restart-Service {
+    # The sshd restart seam (Task 11): fix's restart repair and harden-ssh's
+    # key-only bounce both land here; records the call and moves the stub
+    # state to Running.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param([string]$Name)
+    if ($Name -eq 'sshd') { $script:SshdServiceStatus = 'Running' }
+    $script:Calls += ("Restart-Service -Name {0}" -f $Name)
+}
+
+function Test-LocalAdmin {
+    # The group-check seam (Task 11): the twin's windows-target key install
+    # asks whether the account is in the local Administrators group; the
+    # harness answers from scenario state, so no real group lookup ever runs
+    # in a test host.
+    param()
+    return $script:LocalAdmin
+}
+
+function icacls {
+    # The ACL seam (Task 11): the administrators_authorized_keys grant is
+    # recorded, never applied - a test host has no real ACL stake here, and
+    # the assertion reads the call log.
+    $global:LASTEXITCODE = 0
+    $script:Calls += ("icacls " + ($args -join ' '))
+    return $null
+}
+
 function Get-NetFirewallRule {
     # The firewall rule seam: the stub table answers presence + enabled state
     # ('True'/'False' strings, not the GpoBoolean enum - the same 5.1
@@ -556,10 +624,17 @@ $Home_ = Join-Path $Tmp 'home'
 New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
 $savedHome = $env:HOME
 $savedProfile = $env:USERPROFILE
+$savedProgramData = $env:ProgramData
 
 try {
     $env:HOME = $Home_
     $env:USERPROFILE = $Home_
+    # The windows-target key install resolves %ProgramData% for
+    # administrators_authorized_keys: repointed at the scratch dir so the
+    # arm never touches the host's real OpenSSH state.
+    $ProgramData_ = Join-Path $Tmp 'programdata'
+    New-Item -ItemType Directory -Force -Path $ProgramData_ | Out-Null
+    $env:ProgramData = $ProgramData_
 
     # 1. Unknown subcommand: usage on stderr, exit 2.
     $r = Invoke-TwinChild @('definitely-not-a-subcommand')
@@ -886,15 +961,12 @@ try {
 
     # 24. Publish-LoginKey degraded paths: no public half and an unknown
     #     target are WARNs (never a crash, never a mutation); the windows
-    #     target stays the loud Task 11 stub.
+    #     arm's own scenarios are block 28 below.
     $out = ((Publish-LoginKey -Name 'id_absent' -Target 'wsl' *>&1) -join "`n")
     Assert-OutputHas $out 'no public half' 'missing .pub: the WARN names the missing half'
     if (@($script:WslAuthorizedKeys).Count -eq 3) { Ok 'missing .pub: authorized_keys untouched' } else { Fail 'missing .pub: authorized_keys untouched' (@($script:WslAuthorizedKeys) -join ' | ') }
     $out = ((Publish-LoginKey -Name 'id_test' -Target 'tablet' *>&1) -join "`n")
     Assert-OutputHas $out 'unknown target' 'unknown target: WARN skipped'
-    $threw = $false
-    try { $null = (Publish-LoginKey -Name 'id_test' -Target 'windows' *>&1) } catch { $threw = $true }
-    if ($threw) { Ok 'windows target: still the loud Task 11 stub' } else { Fail 'windows target: still the loud Task 11 stub' 'no throw' }
 
     # 25. The setup arm on a broken WSL (Review Focus #1 at setup level):
     #     the WARN names the manual action and setup still completes.
@@ -904,9 +976,228 @@ try {
     Assert-OutputHas $out 'next: verify key login' 'broken wsl in setup: setup still completes'
     Assert-NoTokenMaterial $out 'broken wsl in setup: output carries no token material'
     $script:WslStatusOk = $true
+
+    # 26. fix (the cmd_fix twin): repair-only semantics. A stopped sshd gets
+    #     the restart + the startup-mode restore; a healthy host records
+    #     ZERO mutations; an unauthenticated backend holds serve; a service
+    #     whose target is 0.0.0.0 is a FAIL and fix records NO serve /
+    #     exposure call (Review Focus #4); an absent config is a no-op.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+    $script:SshdServiceStatus = 'Stopped'
+    $script:SshdServiceStartType = 'Manual'
+    $script:Calls = @()
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    Assert-RecordedCall 'Restart-Service -Name sshd' 'stopped sshd: fix records the restart'
+    Assert-RecordedCall 'Set-Service -Name sshd -StartupType Automatic' 'stopped sshd: fix restores the startup mode'
+    Assert-OutputHas $out 'sshd restarted' 'stopped sshd: fix reports the restart'
+    $script:Calls = @()
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    if ($script:Calls.Count -eq 0) { Ok 'healthy host: fix records zero mutations' } else { Fail 'healthy host: fix records zero mutations' ($script:Calls -join '; ') }
+    Assert-OutputHas $out 'tunnel config written' 'healthy host: fix re-renders the tunnel config (deterministic write)'
+    $script:TailscaleStatusJson = '{"BackendState": "NeedsLogin"}'
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    Assert-OutputHas $out 'serve: skipped while tailscale is unauth' 'unauth tailscale: fix holds the serve path'
+    Assert-NoRecordedCall 'tailscale serve*' 'unauth tailscale: fix records no serve call'
+    $script:TailscaleStatusJson = '{"BackendState": "Running", "CurrentTailnet": {"Name": "example.net"}, "Self": {"TailscaleIPs": ["100.64.0.1"]}}'
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/nonloopback-service.json'
+    $script:Calls = @()
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    Assert-OutputHas $out ($MarkFail + ' serve opencode_linux: target 0.0.0.0:4098 is not loopback - refused') '0.0.0.0 target: fix prints the FAIL naming the refusal'
+    Assert-NoRecordedCall 'tailscale serve*' '0.0.0.0 target: fix records no serve/exposure call (Review Focus #4)'
+    if ($script:Calls.Count -eq 0) { Ok '0.0.0.0 target: fix records no exposure mutation' } else { Fail '0.0.0.0 target: fix records no exposure mutation' ($script:Calls -join '; ') }
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/off.json'
+    $script:Calls = @()
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    Assert-OutputHas $out 'not configured - see docs/remote-access.md' 'absent config: fix is the pointing no-op'
+    if ($script:Calls.Count -eq 0) { Ok 'absent config: fix records zero calls' } else { Fail 'absent config: fix records zero calls' ($script:Calls -join '; ') }
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+
+    # 27. harden-ssh (spec section 4): the guards fire in the bash twin's order -
+    #     zero authorized keys first, then -Confirmed - a refusal is a
+    #     terminating error and never writes sshd_config; with both guards
+    #     met, exactly one prepended `PasswordAuthentication no` replaces
+    #     every active+commented line (Match block intact), sshd restarts,
+    #     and a second run is byte-identical.
+    $ak = Join-Path $Home_ '.ssh/authorized_keys'
+    $akLine = 'ssh-ed25519 AAAAharden-key0 operator@device'
+    [IO.File]::WriteAllText($ak, ($akLine + "`n"))
+    $sshdCfg = Join-Path $Tmp 'sshd_config'
+    $sshdOriginal = '# sample sshd_config' + "`n" + '#PasswordAuthentication yes' + "`n" + 'PasswordAuthentication yes' + "`n" + 'PermitRootLogin no' + "`n" + 'Match User bot' + "`n" + '    PasswordAuthentication yes' + "`n"
+    [IO.File]::WriteAllText($sshdCfg, $sshdOriginal)
+    $env:RA_SSHD_CONFIG = $sshdCfg
+    $script:Calls = @()
+    $threw = $false
+    try { $null = (Invoke-SshHardening *>&1) } catch { $threw = $true }
+    if ($threw) { Ok 'no -Confirmed: harden-ssh refuses' } else { Fail 'no -Confirmed: harden-ssh refuses' 'no throw' }
+    if ((Get-Content -Raw -LiteralPath $sshdCfg) -ceq $sshdOriginal) { Ok 'no -Confirmed: sshd_config untouched' } else { Fail 'no -Confirmed: sshd_config untouched' (Get-Content -Raw -LiteralPath $sshdCfg) }
+    Assert-NoRecordedCall 'Restart-Service*' 'no -Confirmed: no sshd restart'
+    Remove-Item -LiteralPath $ak -Force
+    $threw = $false
+    $refusal = ''
+    try { $null = (Invoke-SshHardening -Confirmed *>&1) } catch { $threw = $true; $refusal = "$($_.Exception.Message)" }
+    if ($threw -and $refusal -like '*no authorized key*') { Ok 'zero keys: harden-ssh refuses naming the key guard' } else { Fail 'zero keys: harden-ssh refuses naming the key guard' $refusal }
+    $threw = $false
+    $refusal = ''
+    try { $null = (Invoke-SshHardening *>&1) } catch { $threw = $true; $refusal = "$($_.Exception.Message)" }
+    if ($threw -and $refusal -like '*no authorized key*' -and $refusal -notlike '*Confirmed*') { Ok 'guard order: zero keys refuses before the -Confirmed guard' } else { Fail 'guard order: zero keys refuses before the -Confirmed guard' $refusal }
+    [IO.File]::WriteAllText($ak, ($akLine + "`n"))
+    $script:Calls = @()
+    $out = ((Invoke-SshHardening -Confirmed *>&1) -join "`n")
+    $hardened = (Get-Content -LiteralPath $sshdCfg) -join "`n"
+    $hardenedLines = @($hardened -split "`n")
+    if ($hardenedLines[0] -ceq 'PasswordAuthentication no') { Ok 'harden-ssh: the no line is prepended (first)' } else { Fail 'harden-ssh: the no line is prepended (first)' ($hardenedLines -join ' | ') }
+    if (@($hardenedLines | Where-Object { $_ -like '*PasswordAuthentication*' }).Count -eq 2) { Ok 'harden-ssh: the global active+commented lines are dropped' } else { Fail 'harden-ssh: the global active+commented lines are dropped' ($hardenedLines -join ' | ') }
+    if (@($hardenedLines | Where-Object { $_ -ceq '    PasswordAuthentication yes' }).Count -eq 1) { Ok 'harden-ssh: the Match-scoped indented line survives (bash-twin parity: only unindented lines are dropped)' } else { Fail 'harden-ssh: the Match-scoped indented line survives (bash-twin parity: only unindented lines are dropped)' ($hardenedLines -join ' | ') }
+    if (($hardened -like '*PermitRootLogin no*') -and ($hardened -like '*Match User bot*')) { Ok 'harden-ssh: the rest of sshd_config is untouched' } else { Fail 'harden-ssh: the rest of sshd_config is untouched' $hardened }
+    Assert-RecordedCall 'Restart-Service -Name sshd' 'harden-ssh: sshd restarts (key-only)'
+    Assert-OutputHas $out 'PasswordAuthentication no' 'harden-ssh: the verdict names the write'
+    $script:Calls = @()
+    $null = (Invoke-SshHardening -Confirmed *>&1)
+    if ((Get-Content -Raw -LiteralPath $sshdCfg) -ceq ($hardened + "`n")) { Ok 'second harden-ssh: byte-identical' } else { Fail 'second harden-ssh: byte-identical' (Get-Content -Raw -LiteralPath $sshdCfg) }
+    Remove-Item -LiteralPath $ak -Force
+    Remove-Item Env:RA_SSHD_CONFIG
+    $r = Invoke-TwinChild @('harden-ssh', '--wat')
+    if ($r.Exit -eq 1) { Ok 'unknown harden-ssh argument exits 1 through the dispatcher' } else { Fail 'unknown harden-ssh argument exits 1 through the dispatcher' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'unknown argument' 'the unknown-argument refusal names the argument'
+    $r = Invoke-TwinChild @('harden-ssh')
+    if ($r.Exit -eq 1) { Ok 'zero-keys harden-ssh exits 1 through the dispatcher' } else { Fail 'zero-keys harden-ssh exits 1 through the dispatcher' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'no authorized key' 'the zero-keys refusal names the key guard'
+
+    # 28. Publish-LoginKey -Target windows (spec section 5.1): an admin account
+    #     gets administrators_authorized_keys append-only plus the strict
+    #     admins-only ACL grant recorded (inheritance disabled,
+    #     Administrators:F); the second call is already-authorized and
+    #     records nothing; a non-admin lands in the user's authorized_keys
+    #     with no icacls anywhere.
+    $script:LocalAdmin = $true
+    $winLine = 'ssh-ed25519 AAAAwindows-key0 carlitos@task11-device'
+    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_win.pub'), ($winLine + "`n"))
+    $aaPath = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys'
+    $script:Calls = @()
+    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
+    if ((Get-Content -Raw -LiteralPath $aaPath) -ceq ($winLine + "`n")) { Ok 'windows key: the appended line is the .pub content (file created)' } else { Fail 'windows key: the appended line is the .pub content (file created)' (Get-Content -Raw -LiteralPath $aaPath) }
+    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'windows key: the ACL grant is recorded (inheritance disabled, Administrators:F)'
+    Assert-OutputHas $out 'authorized (windows)' 'windows key: first call reports authorized'
+    Assert-NoTokenMaterial $out 'windows key: output carries no token material'
+    $script:Calls = @()
+    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
+    if ((@(Get-Content -LiteralPath $aaPath).Count -eq 1) -and (@($script:Calls).Count -eq 0)) { Ok 'windows key: second call is already-authorized, zero calls' } else { Fail 'windows key: second call is already-authorized, zero calls' (($script:Calls -join '; ') + ' | ' + (Get-Content -Raw -LiteralPath $aaPath)) }
+    Assert-OutputHas $out 'already authorized (windows)' 'windows key: second call reports already authorized'
+    $winLine2 = 'ssh-ed25519 AAAAwindows-key1 other@device'
+    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_win2.pub'), ($winLine2 + "`n"))
+    $script:Calls = @()
+    $null = (Publish-LoginKey -Name 'id_win2' -Target 'windows' *>&1)
+    $aaLines = @(Get-Content -LiteralPath $aaPath)
+    if (($aaLines.Count -eq 2) -and ($aaLines[0] -ceq $winLine) -and ($aaLines[1] -ceq $winLine2)) { Ok 'windows key: a second key appends, the first line intact' } else { Fail 'windows key: a second key appends, the first line intact' ($aaLines -join ' | ') }
+    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'windows key: the append-riding ACL grant recorded again'
+    $script:LocalAdmin = $false
+    Remove-Item -LiteralPath (Join-Path $Home_ '.ssh/authorized_keys') -Force -ErrorAction SilentlyContinue
+    $script:Calls = @()
+    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
+    if ((Get-Content -Raw -LiteralPath $ak) -ceq ($winLine + "`n")) { Ok 'non-admin key: the user authorized_keys gets the line' } else { Fail 'non-admin key: the user authorized_keys gets the line' (Get-Content -Raw -LiteralPath $ak) }
+    Assert-NoRecordedCall 'icacls*' 'non-admin key: no icacls anywhere'
+    Assert-OutputHas $out 'authorized (windows)' 'non-admin key: reports authorized'
+    $script:LocalAdmin = $true
+
+    # 29. setup drives the declared login-key targets (keys-win-targets.json):
+    #     windows into administrators_authorized_keys with its ACL grant,
+    #     wsl through its channel, and the second pass records zero calls.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-win-targets.json'
+    $script:LocalAdmin = $true
+    $script:WslAuthorizedKeys = @()
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'setup keys: the windows target gets the ACL grant'
+    Assert-OutputHas $out 'authorized (windows)' 'setup keys: the windows target authorizes'
+    Assert-RecordedCall 'wsl.exe -u root authorize login key (inside WSL)' 'setup keys: the wsl target authorizes through its channel'
+    Assert-OutputHas $out 'authorized (wsl)' 'setup keys: the wsl target authorizes'
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    if ($script:Calls.Count -eq 0) { Ok 'setup keys: second pass records zero calls' } else { Fail 'setup keys: second pass records zero calls' ($script:Calls -join '; ') }
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+
+    # 30. tunnel render/validate (the Task 3 assertions, mirrored): the
+    #     render carries the id, credentials by path, every declared
+    #     hostname/service pair and the terminal http_status:404 ALWAYS, is
+    #     byte-identical on a re-render, and validate exits 0/1 with named
+    #     findings (loopback, http_status:404) that never echo the config's
+    #     own lines; RA_TUNNEL_CONFIG pins the file under test.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/tunnel-full.json'
+    $tunnelCfg = Join-Path $Tmp 'tunnel-alt/config.yml'
+    $env:RA_TUNNEL_CONFIG = $tunnelCfg
+    $out = ((Write-TunnelConfig *>&1) -join "`n")
+    $rendered = Get-Content -Raw -LiteralPath $tunnelCfg
+    foreach ($fragment in @('tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95', 'credentials-file: ', '  - hostname: ssh.example.com', '  - hostname: wsl.example.com', '  - hostname: opencode.example.com', '    service: ssh://127.0.0.1:22', '    service: ssh://127.0.0.1:2222', '    service: http://127.0.0.1:4096')) {
+        Assert-OutputHas $rendered $fragment "tunnel render carries: $fragment"
+    }
+    Assert-OutputHas $out 'tunnel config written' 'tunnel render: the verdict names the written path'
+    $renderedLines = @($rendered -split "`r?`n")
+    if ($renderedLines[$renderedLines.Count - 2] -ceq '  - service: http_status:404') { Ok 'tunnel render: the terminal http_status:404 is last' } else { Fail 'tunnel render: the terminal http_status:404 is last' ($renderedLines -join ' | ') }
+    $iOpen = [array]::IndexOf($renderedLines, '  - hostname: opencode.example.com')
+    $iSsh = [array]::IndexOf($renderedLines, '  - hostname: ssh.example.com')
+    $iWsl = [array]::IndexOf($renderedLines, '  - hostname: wsl.example.com')
+    if (($iOpen -lt $iSsh) -and ($iSsh -lt $iWsl) -and ($iOpen -ge 0)) { Ok 'tunnel render: ingress entries are sorted (byte-identical reruns)' } else { Fail 'tunnel render: ingress entries are sorted (byte-identical reruns)' ($renderedLines -join ' | ') }
+    $bytes1 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($tunnelCfg))
+    $null = (Write-TunnelConfig *>&1)
+    $bytes2 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($tunnelCfg))
+    if ($bytes1 -ceq $bytes2) { Ok 'tunnel render: a re-render is byte-identical' } else { Fail 'tunnel render: a re-render is byte-identical' 'bytes differ' }
+    $r = Invoke-TwinChild @('tunnel', 'validate')
+    if ($r.Exit -eq 0) { Ok 'tunnel validate: exits 0 on the rendered config' } else { Fail 'tunnel validate: exits 0 on the rendered config' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'tunnel config valid' 'tunnel validate: prints its verdict'
+    $loopbackCfg = Join-Path $Tmp 'tunnel-loopback.yml'
+    [IO.File]::WriteAllText($loopbackCfg, "tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95`n`ningress:`n  - hostname: bad.example.com`n    service: http://10.0.0.5:8080`n  - service: http_status:404`n")
+    $env:RA_TUNNEL_CONFIG = $loopbackCfg
+    $r = Invoke-TwinChild @('tunnel', 'validate')
+    if ($r.Exit -eq 1) { Ok 'tunnel validate: exits 1 on a non-loopback origin' } else { Fail 'tunnel validate: exits 1 on a non-loopback origin' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'loopback' 'tunnel validate: the finding is named loopback'
+    if ($r.Output -notlike '*10.0.0.5*' -and $r.Output -notlike '*bad.example.com*') { Ok 'tunnel validate: the config lines are never echoed' } else { Fail 'tunnel validate: the config lines are never echoed' $r.Output }
+    $noTerminal = Join-Path $Tmp 'tunnel-no-terminal.yml'
+    [IO.File]::WriteAllText($noTerminal, (($rendered -split "`r?`n") | Where-Object { $_ -ne '  - service: http_status:404' }) -join "`n")
+    $env:RA_TUNNEL_CONFIG = $noTerminal
+    $r = Invoke-TwinChild @('tunnel', 'validate')
+    if ($r.Exit -eq 1) { Ok 'tunnel validate: exits 1 without the terminal 404' } else { Fail 'tunnel validate: exits 1 without the terminal 404' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'http_status:404' 'tunnel validate: the finding is named http_status:404'
+    $tokenCfg = Join-Path $Tmp 'tunnel-token.yml'
+    [IO.File]::WriteAllText($tokenCfg, "tunnel: 6ff42ae2-765d-4adf-8684-a115a1b92d95`n# token eyAAABcGFzc3dvcmQmaterial1234567890`ningress:`n  - service: http://127.0.0.1:9999`n")
+    $env:RA_TUNNEL_CONFIG = $tokenCfg
+    $r = Invoke-TwinChild @('tunnel', 'validate')
+    Assert-NoTokenMaterial $r.Output 'tunnel validate: output never echoes token material'
+    $env:RA_TUNNEL_CONFIG = Join-Path $Tmp 'tunnel-absent.yml'
+    $threw = $false
+    try { $null = (Test-TunnelConfig *>&1) } catch { $threw = $true }
+    if ($threw) { Ok 'tunnel validate: a missing config is a loud error' } else { Fail 'tunnel validate: a missing config is a loud error' 'no throw' }
+    Remove-Item Env:RA_TUNNEL_CONFIG
+    $null = (Write-TunnelConfig *>&1)
+    if (Test-Path -LiteralPath (Join-Path $Home_ '.cloudflared/config.yml') -PathType Leaf) { Ok 'tunnel render: the default path is HOME/.cloudflared/config.yml' } else { Fail 'tunnel render: the default path is HOME/.cloudflared/config.yml' 'no file' }
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+
+    # 31. Invoke-ServeApply (the ra_serve_apply twin): two tailscale=true
+    #     services map as two path-scoped serve calls with 127.0.0.1
+    #     targets; the second apply verifies in place and records ZERO
+    #     calls.
+    $twoSvc = Join-Path $Tmp 'two-services.json'
+    [IO.File]::WriteAllText($twoSvc, (Get-Content -Raw -LiteralPath $script:ConfigFixture).Replace('"services": {', '"services": { "opencode_two": { "enabled": true, "environment": "windows", "port": 4097, "tailscale": true, "cloudflare": true },'))
+    $script:ConfigFixture = $twoSvc
+    $script:TailscaleServeStatus = ''
+    $script:Calls = @()
+    $out = ((Invoke-ServeApply *>&1) -join "`n")
+    Assert-RecordedCall 'tailscale serve --bg --set-path /opencode_windows http://127.0.0.1:4096' 'serve: the first service maps path-scoped with a 127.0.0.1 target'
+    Assert-RecordedCall 'tailscale serve --bg --set-path /opencode_two http://127.0.0.1:4097' 'serve: the second service maps path-scoped with a 127.0.0.1 target'
+    $serveCalls = @($script:Calls | Where-Object { $_ -like 'tailscale serve --bg*' })
+    if ($serveCalls.Count -eq 2) { Ok 'serve: exactly two mappings applied' } else { Fail 'serve: exactly two mappings applied' ($script:Calls -join '; ') }
+    Assert-OutputHas $out 'mapped /opencode_windows to http://127.0.0.1:4096' 'serve: the verdict names the mapping'
+    $script:Calls = @()
+    $null = (Invoke-ServeApply *>&1)
+    $serveCalls = @($script:Calls | Where-Object { $_ -like 'tailscale serve --bg*' })
+    if ($serveCalls.Count -eq 0) { Ok 'serve: the second apply verifies in place, zero calls' } else { Fail 'serve: the second apply verifies in place, zero calls' ($script:Calls -join '; ') }
+    $script:TailscaleServeStatus = 'https://machine.example.net:443 path / --> http://127.0.0.1:4096'
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
 } finally {
     $env:HOME = $savedHome
     $env:USERPROFILE = $savedProfile
+    $env:ProgramData = $savedProgramData
+    Remove-Item Env:RA_SSHD_CONFIG -ErrorAction SilentlyContinue
+    Remove-Item Env:RA_TUNNEL_CONFIG -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 }
 
