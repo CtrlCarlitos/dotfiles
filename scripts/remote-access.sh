@@ -132,16 +132,19 @@ else:
 main() {
     local cmd="${1:-}"
     [ $# -gt 0 ] && shift
+    # ${1+"$@"}, not "$@": under set -u, bash 3.2 (macOS /bin/bash, which the
+    # header claims to run on) raises "unbound variable" for an empty "$@" -
+    # i.e. every argless path (bare invocation, a handler after shift).
     case "$cmd" in
-        setup)         cmd_setup "$@" ;;
-        status)        cmd_status "$@" ;;
-        fix)           cmd_fix "$@" ;;
-        harden-ssh)    cmd_harden_ssh "$@" ;;
-        wsl-reconcile) cmd_wsl_reconcile "$@" ;;
+        setup)         cmd_setup ${1+"$@"} ;;
+        status)        cmd_status ${1+"$@"} ;;
+        fix)           cmd_fix ${1+"$@"} ;;
+        harden-ssh)    cmd_harden_ssh ${1+"$@"} ;;
+        wsl-reconcile) cmd_wsl_reconcile ${1+"$@"} ;;
         tunnel)
             case "${1:-}" in
-                render)  shift; cmd_tunnel_render "$@" ;;
-                validate) shift; cmd_tunnel_validate "$@" ;;
+                render)  shift; cmd_tunnel_render ${1+"$@"} ;;
+                validate) shift; cmd_tunnel_validate ${1+"$@"} ;;
                 *) ra_usage >&2; exit 2 ;;
             esac
             ;;
@@ -149,4 +152,4 @@ main() {
     esac
 }
 
-main "$@"
+main ${1+"$@"}

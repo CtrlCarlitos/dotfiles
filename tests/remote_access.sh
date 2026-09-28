@@ -63,11 +63,23 @@ printf '%s' "$out" | grep -Fq 'not applicable on this platform - run on the Wind
 pass
 
 # 3. status with [data.remote_access] absent (off.json): not configured, exit 0.
+#    After the dispatcher's shift this is an argless handler call - the
+#    empty-argv path that bash 3.2's set -u mishandles as plain "$@".
 rc=0
 out="$(ra_run status 2>&1)" || rc=$?
 [ "$rc" -eq 0 ] || fail "status must exit 0 when not configured (got $rc)"
 printf '%s' "$out" | grep -Fq 'not configured' ||
     fail "status must print 'not configured' (got: $out)"
+pass
+
+# 4. Bare invocation (zero args): usage, exit 2 - exercised directly, since
+#    ra_run always passes at least one argument.
+rc=0
+out="$(PATH="$scratch/bin:$PATH" HOME="$scratch/home" \
+    bash "$repo_root/scripts/remote-access.sh" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "bare invocation must exit 2 (got $rc)"
+printf '%s' "$out" | grep -Fq 'usage:' ||
+    fail "bare invocation must print usage (got: $out)"
 pass
 
 finish
