@@ -145,6 +145,7 @@ function dot {
         'backup'    { & (Join-Path $repoScripts 'dotbackup.ps1') @rest }
         'restore'   { & (Join-Path $repoScripts 'dotrestore.ps1') @rest }
         'doctor'    { & (Join-Path $repoScripts 'dotfiles-doctor.ps1') @rest }
+        'remote' { & (Join-Path $repoScripts 'remote-access.ps1') @rest }
         default {
             Write-Host "dot - dotfiles command family"
             Write-Host "  dot up        sync state (pull + apply + config re-init; never upgrades)"
@@ -152,6 +153,7 @@ function dot {
             Write-Host "  dot backup    encrypted portable backup"
             Write-Host "  dot restore   restore a backup"
             Write-Host "  dot doctor    dotfiles health check"
+            Write-Host "  dot remote    remote-access setup/status/fix"
         }
     }
 }
