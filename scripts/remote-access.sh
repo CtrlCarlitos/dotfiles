@@ -60,19 +60,6 @@ cmd_wsl_reconcile() {
     printf 'not applicable on this platform - run on the Windows host\n'
 }
 
-cmd_status() {
-    # Read-only doctor; the full sections land with the status task. Until
-    # the host declares [data.remote_access] with enabled=true there is
-    # nothing to doctor.
-    local enabled
-    enabled="$(ra_cfg enabled false)"
-    if [ "$enabled" != "true" ]; then
-        printf 'not configured\n'
-        return 0
-    fi
-    printf 'remote access: enabled\n'
-}
-
 ra_data_json() {
     # The [data.remote_access] object from `chezmoi data`, as compact JSON;
     # an empty object when the key is absent. jq first, python3 fallback
@@ -106,7 +93,9 @@ ra_cfg() {
         dotted="${dotted#*.}"
     done
     if command -v jq >/dev/null 2>&1; then
-        printf '%s' "$json" | jq -r --arg default "$default" "${jqpath} // \$default"
+        # The leading dot matters: without it jq reads ["a"]["b"] as array
+        # construction, not indexing, and every lookup returns the path.
+        printf '%s' "$json" | jq -r --arg default "$default" ".${jqpath} // \$default"
     elif command -v python3 >/dev/null 2>&1; then
         printf '%s' "$json" | python3 -c '
 import json, sys
@@ -127,6 +116,381 @@ else:
     else
         ra_die "need jq or python3 to read chezmoi data"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# status - the read-only doctor (spec §7). One section per area, ✓ verified /
+# ○ absent-or-manual-action / ✗ FAIL lines, exit 0 always. FAIL lines name
+# what `fix` would repair; WARN lines name the manual action. Never prints
+# secrets: probes that could echo configuration (cloudflared validate) run
+# quietly and only the verdict is printed.
+# ---------------------------------------------------------------------------
+
+# The doctor's markers: ✓ verified, ○ absent / skipped / WARN (the line names
+# the manual action), ✗ FAIL.
+ra_ok()   { printf '✓ %s\n' "$1"; }
+ra_warn() { printf '○ %s\n' "$1"; }
+ra_fail() { printf '✗ %s\n' "$1"; }
+
+# ra_json_str RAWJSON DOTTED.PATH DEFAULT: scalar lookup inside an arbitrary
+# JSON document, DEFAULT when the path is absent, null/false, or a non-scalar
+# (a dict/array is never repr'd). Numeric segments index arrays
+# (Self.TailscaleIPs.0). jq first, python3 fallback - the same split
+# ra_data_json and ra_cfg use.
+ra_json_str() {
+    local json="$1" dotted="$2" default="$3" orig="$2" seg jqpath="" out=""
+    [ -n "$json" ] || { printf '%s' "$default"; return 0; }
+    while [ -n "$dotted" ]; do
+        seg="${dotted%%.*}"
+        case "$seg" in
+            *[!0-9]*) jqpath="${jqpath}[\"${seg}\"]" ;;
+            *)        jqpath="${jqpath}[${seg}]" ;;
+        esac
+        [ "$dotted" = "$seg" ] && break
+        dotted="${dotted#*.}"
+    done
+    if command -v jq >/dev/null 2>&1; then
+        # Leading dot: see the note in ra_cfg.
+        out="$(printf '%s' "$json" | jq -r --arg default "$default" ".${jqpath} // \$default" 2>/dev/null)" || out=""
+        [ -n "$out" ] || out="$default"
+    elif command -v python3 >/dev/null 2>&1; then
+        out="$(printf '%s' "$json" | python3 -c '
+import json, sys
+cur = json.load(sys.stdin)
+for seg in sys.argv[1].split("."):
+    if isinstance(cur, dict) and seg in cur:
+        cur = cur[seg]
+    elif isinstance(cur, list) and seg.isdigit() and int(seg) < len(cur):
+        cur = cur[int(seg)]
+    else:
+        cur = None
+        break
+if cur is None or cur is False or isinstance(cur, (dict, list)):
+    print(sys.argv[2])
+elif cur is True:
+    print("true")
+else:
+    print(cur)
+' "$orig" "$default" 2>/dev/null)" || out=""
+        [ -n "$out" ] || out="$default"
+    else
+        ra_die "need jq or python3 to read chezmoi data"
+    fi
+    printf '%s' "$out"
+}
+
+# ra_cfg_keys DOTTED.PATH: child keys of the object at
+# [data.remote_access.PATH], one per line; empty when absent or not an
+# object. Same jq/python3 split as ra_cfg.
+ra_cfg_keys() {
+    local dotted="$1" json seg jqpath=""
+    json="$(ra_data_json)"
+    while [ -n "$dotted" ]; do
+        seg="${dotted%%.*}"
+        jqpath="${jqpath}[\"${seg}\"]"
+        [ "$dotted" = "$seg" ] && break
+        dotted="${dotted#*.}"
+    done
+    if command -v jq >/dev/null 2>&1; then
+        # Leading dot: see the note in ra_cfg.
+        printf '%s' "$json" | jq -r ".${jqpath} // {} | keys[]?" 2>/dev/null || true
+    elif command -v python3 >/dev/null 2>&1; then
+        printf '%s' "$json" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+for seg in sys.argv[1].split("."):
+    if not isinstance(doc, dict) or seg not in doc:
+        doc = None
+        break
+    doc = doc[seg]
+if isinstance(doc, dict):
+    for key in doc:
+        print(key)
+' "$1" 2>/dev/null || true
+    else
+        ra_die "need jq or python3 to read chezmoi data"
+    fi
+}
+
+# ra_os: the running platform (uname -s), cached per process.
+ra_os() {
+    [ -n "${_RA_OS:-}" ] || _RA_OS="$(uname -s)"
+    printf '%s\n' "$_RA_OS"
+}
+
+# ra_in_wsl: true when this shell runs inside WSL. RA_PROC_VERSION overrides
+# the /proc/version content so tests pin either side of the branch on any
+# host (the same seam ra_desktop_detected will use for setup).
+ra_in_wsl() {
+    local pv="${RA_PROC_VERSION:-}"
+    if [ -z "$pv" ] && [ -r /proc/version ]; then
+        pv="$(cat /proc/version)"
+    fi
+    case "$pv" in
+        *microsoft* | *Microsoft*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ra_tcp_probe HOST PORT: best-effort TCP connect through bash /dev/tcp,
+# 1s timeout when `timeout` exists. rc 0 = something accepted the connect.
+ra_tcp_probe() {
+    local host="$1" port="$2"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 1 bash -c ": <'/dev/tcp/${host}/${port}'" 2>/dev/null
+    else
+        bash -c ": <'/dev/tcp/${host}/${port}'" 2>/dev/null
+    fi
+}
+
+# ra_tailscale_state: resolves the tailscale CLI into RA_TS_STATE =
+# absent | unauth | ok, with the status JSON in RA_TS_JSON for the ok detail
+# lines. Globals on purpose: callers must not run this inside a command
+# substitution - the subshell would drop both. unauth covers everything
+# short of a Running backend; the doctor renders it as the authenticate
+# WARN, never a crash.
+ra_tailscale_state() {
+    RA_TS_STATE="absent"
+    RA_TS_JSON=""
+    command -v tailscale >/dev/null 2>&1 || return 0
+    RA_TS_JSON="$(tailscale status --json 2>/dev/null)" || RA_TS_JSON=""
+    if [ -z "$RA_TS_JSON" ]; then
+        RA_TS_STATE="unauth"
+        return 0
+    fi
+    case "$(ra_json_str "$RA_TS_JSON" BackendState unknown)" in
+        Running) RA_TS_STATE="ok" ;;
+        *)       RA_TS_STATE="unauth" ;;
+    esac
+    return 0
+}
+
+ra_status_tailscale() {
+    printf 'Tailscale:\n'
+    local name address
+    ra_tailscale_state
+    case "$RA_TS_STATE" in
+        absent)
+            ra_warn 'tailscale: not installed (manual: install Tailscale, then: sudo tailscale up)'
+            ;;
+        unauth)
+            ra_warn 'tailscale: not authenticated - manual action required: authenticate (run: sudo tailscale up, then log in)'
+            ;;
+        ok)
+            name="$(ra_json_str "$RA_TS_JSON" CurrentTailnet.Name 'unknown tailnet')"
+            address="$(ra_json_str "$RA_TS_JSON" Self.TailscaleIPs.0 'none')"
+            ra_ok "tailscale: connected (tailnet: ${name}, address: ${address})"
+            ;;
+    esac
+    return 0
+}
+
+ra_status_ssh() {
+    printf 'SSH:\n'
+    local out
+    case "$(ra_os)" in
+        Darwin)
+            if [ "$(ra_cfg macos.ssh false)" != "true" ]; then
+                ra_warn 'ssh: not configured for this host (macos.ssh)'
+                return 0
+            fi
+            # Check-only: enabling Remote Login stays a manual step.
+            out="$(systemsetup -getremotelogin 2>/dev/null)" || out=""
+            case "$out" in
+                *"Remote Login: On"*)  ra_ok 'ssh: Remote Login on' ;;
+                *"Remote Login: Off"*) ra_fail 'ssh: Remote Login off (manual: System Settings > General > Sharing > Remote Login)' ;;
+                *)                     ra_warn 'ssh: Remote Login state unavailable (check manually: systemsetup -getremotelogin)' ;;
+            esac
+            ;;
+        *)
+            if [ "$(ra_cfg linux.ssh false)" != "true" ]; then
+                ra_warn 'ssh: not configured for this host (linux.ssh)'
+                return 0
+            fi
+            if ! command -v systemctl >/dev/null 2>&1; then
+                ra_warn 'ssh: systemctl unavailable - sshd state unknown'
+                return 0
+            fi
+            if [ "$(systemctl is-active ssh 2>/dev/null || true)" = "active" ]; then
+                ra_ok 'ssh: sshd active'
+            else
+                ra_fail 'ssh: sshd not active (fix: systemctl enable --now ssh)'
+            fi
+            ;;
+    esac
+    return 0
+}
+
+ra_status_rdp() {
+    printf 'RDP:\n'
+    case "$(ra_os)" in
+        Darwin)
+            if [ "$(ra_cfg macos.screen_sharing false)" != "true" ]; then
+                ra_warn 'rdp: not configured for this host (macos.screen_sharing)'
+                return 0
+            fi
+            if ra_tcp_probe 127.0.0.1 5900; then
+                ra_ok 'rdp: Screen Sharing listening on :5900 (recovery path)'
+            else
+                ra_warn 'rdp: Screen Sharing not active (manual: System Settings > General > Sharing > Screen Sharing)'
+            fi
+            ;;
+        *)
+            if [ "$(ra_cfg linux.rdp false)" != "true" ]; then
+                ra_warn 'rdp: not configured for this host (linux.rdp)'
+                return 0
+            fi
+            if ra_in_wsl; then
+                ra_warn 'rdp: not applicable inside WSL'
+                return 0
+            fi
+            local state=""
+            if command -v systemctl >/dev/null 2>&1; then
+                state="$(systemctl is-active xrdp 2>/dev/null || true)"
+            fi
+            case "$state" in
+                active)   ra_ok 'rdp: xrdp active' ;;
+                inactive) ra_fail 'rdp: xrdp not active (fix: systemctl enable --now xrdp)' ;;
+                *)        ra_warn 'rdp: xrdp not resolved yet (desktop environment detection runs during setup)' ;;
+            esac
+            ;;
+    esac
+    return 0
+}
+
+ra_status_serve() {
+    printf 'Tailscale Serve:\n'
+    local out
+    ra_tailscale_state
+    case "$RA_TS_STATE" in
+        absent)
+            ra_warn 'serve: skipped (tailscale not installed)'
+            return 0
+            ;;
+        unauth)
+            ra_warn 'serve: skipped (tailscale not authenticated)'
+            return 0
+            ;;
+    esac
+    if ! out="$(tailscale serve status 2>/dev/null)"; then
+        ra_warn 'serve: status unavailable'
+        return 0
+    fi
+    case "$out" in
+        "" | *"No serve configuration"*)
+            ra_warn 'serve: none active (dot remote setup re-applies the configured mappings)'
+            ;;
+        *)
+            ra_ok 'serve: active mappings'
+            printf '%s\n' "$out" | sed 's/^/  /'
+            ;;
+    esac
+    return 0
+}
+
+ra_status_cloudflare() {
+    printf 'Cloudflare:\n'
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        ra_warn 'cloudflared: not installed'
+        return 0
+    fi
+    local cfg="${HOME}/.cloudflared/config.yml"
+    if [ ! -f "$cfg" ]; then
+        ra_warn "cloudflared: no local tunnel config at ${cfg} (dot remote tunnel render writes it)"
+        return 0
+    fi
+    # Validate quietly: cloudflared's errors can echo config lines, and the
+    # doctor never prints configuration content.
+    if cloudflared tunnel ingress validate --config "$cfg" >/dev/null 2>&1; then
+        ra_ok "cloudflared: tunnel config valid (${cfg})"
+    else
+        ra_fail "cloudflared: tunnel config invalid (${cfg}) (fix: dot remote tunnel render)"
+    fi
+    return 0
+}
+
+ra_status_services() {
+    printf 'Applications:\n'
+    local names name host port svc_env
+    names="$(ra_cfg_keys services)"
+    if [ -z "$names" ]; then
+        ra_warn 'applications: none configured'
+        return 0
+    fi
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        if [ "$(ra_cfg "services.${name}.enabled" false)" != "true" ]; then
+            ra_warn "${name}: disabled"
+            continue
+        fi
+        host="$(ra_cfg "services.${name}.host" "127.0.0.1")"
+        port="$(ra_cfg "services.${name}.port" "")"
+        svc_env="$(ra_cfg "services.${name}.environment" "unknown")"
+        if [ "$host" != "127.0.0.1" ]; then
+            ra_fail "${name}: target ${host}:${port} is not loopback (fix: bind the app to 127.0.0.1)"
+            continue
+        fi
+        if [ -z "$port" ]; then
+            ra_warn "${name}: no port configured (${svc_env})"
+            continue
+        fi
+        if ! command -v timeout >/dev/null 2>&1; then
+            ra_warn "${name}: port check skipped, timeout unavailable (127.0.0.1:${port}, ${svc_env})"
+            continue
+        fi
+        if ra_tcp_probe "$host" "$port"; then
+            ra_ok "${name}: listening on 127.0.0.1:${port} (${svc_env})"
+        else
+            ra_fail "${name}: not listening on 127.0.0.1:${port} (${svc_env}; start the app or fix its bind)"
+        fi
+    done <<EOF
+$names
+EOF
+    return 0
+}
+
+ra_status_tmux() {
+    printf 'tmux:\n'
+    # RA_TMUX_BIN overrides the resolved binary: a host-installed tmux
+    # cannot be un-installed, so tests pin the absent branch through an
+    # unresolvable name instead of PATH games.
+    local tmux_bin="${RA_TMUX_BIN:-tmux}" out
+    if ! command -v "$tmux_bin" >/dev/null 2>&1; then
+        ra_warn 'tmux: not installed (session persistence unavailable here)'
+        return 0
+    fi
+    if ! out="$("$tmux_bin" ls 2>/dev/null)"; then
+        ra_warn 'tmux: no active sessions'
+        return 0
+    fi
+    ra_ok 'tmux: active sessions'
+    printf '%s\n' "$out" | sed 's/^/  /'
+    return 0
+}
+
+# Sections run best-effort: a probe failing inside one section degrades that
+# section, never the doctor (exit 0 always).
+ra_status_section() {
+    "$@" || ra_fail "section probe failed: ${1#ra_status_}"
+}
+
+cmd_status() {
+    # Read-only doctor; with [data.remote_access] absent or disabled there
+    # is nothing to doctor.
+    local enabled
+    enabled="$(ra_cfg enabled false)"
+    if [ "$enabled" != "true" ]; then
+        printf 'not configured\n'
+        return 0
+    fi
+    ra_status_section ra_status_tailscale
+    ra_status_section ra_status_ssh
+    ra_status_section ra_status_rdp
+    ra_status_section ra_status_serve
+    ra_status_section ra_status_cloudflare
+    ra_status_section ra_status_services
+    ra_status_section ra_status_tmux
+    return 0
 }
 
 main() {

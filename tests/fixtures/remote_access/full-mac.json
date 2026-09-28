@@ -1,0 +1,38 @@
+{
+  "remote_access": {
+    "enabled": true,
+    "macos": {
+      "ssh": true,
+      "screen_sharing": true
+    },
+    "login_keys": [
+      {
+        "name": "id_newcmelgar",
+        "targets": ["macos"],
+        "generate": true
+      }
+    ],
+    "services": {
+      "opencode_macos": {
+        "enabled": true,
+        "environment": "macos",
+        "port": 4099,
+        "tailscale": true,
+        "cloudflare": true
+      }
+    },
+    "tunnel": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "ingress": {
+        "ssh": {
+          "hostname": "ssh.example.com",
+          "service": "ssh://127.0.0.1:22"
+        },
+        "opencode": {
+          "hostname": "opencode.example.com",
+          "service": "http://127.0.0.1:4099"
+        }
+      }
+    }
+  }
+}
