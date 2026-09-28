@@ -1429,9 +1429,11 @@ PYEOF
     # other plugins (superpowers) are never touched.
     AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
     if [ -d "$AGY_PLUGIN_DIR" ]; then
-        rm -rf "$AGY_PLUGIN_DIR" \
-            && info "Retired the dotfiles-mcp plugin bundle (the global mcp_config.json is the only MCP source now)" \
-            || warn "could not remove the dotfiles-mcp plugin bundle - continuing"
+        if rm -rf "$AGY_PLUGIN_DIR"; then
+            info "Retired the dotfiles-mcp plugin bundle (the global mcp_config.json is the only MCP source now)"
+        else
+            warn "could not remove the dotfiles-mcp plugin bundle - continuing"
+        fi
     fi
     # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
     # object (guardrail's coverage gate cannot read either state,
