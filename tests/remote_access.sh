@@ -41,6 +41,8 @@ EOF
 # ra_run ARGS...: execute the twin with the stub bin first on PATH and a
 # scratch HOME - no host chezmoi, no host config can leak in.
 ra_run() (
+    # shellcheck disable=SC2030  # the subshell is the isolation: HOST PATH
+    # and HOME must not leak back into the test process
     export PATH="$scratch/bin:$PATH"
     export HOME="$scratch/home"
     exec bash "$repo_root/scripts/remote-access.sh" "$@"
@@ -90,6 +92,8 @@ pass
 # 4. Bare invocation (zero args): usage, exit 2 - exercised directly, since
 #    ra_run always passes at least one argument.
 rc=0
+# shellcheck disable=SC2031  # same isolation as ra_run: the env-prefix is
+# the point, nothing is meant to leak out of the command substitution
 out="$(PATH="$scratch/bin:$PATH" HOME="$scratch/home" \
     bash "$repo_root/scripts/remote-access.sh" 2>&1)" || rc=$?
 [ "$rc" -eq 2 ] || fail "bare invocation must exit 2 (got $rc)"
