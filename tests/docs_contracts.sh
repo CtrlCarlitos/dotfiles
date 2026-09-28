@@ -214,10 +214,13 @@ have docs/tool-parity.md "manual Linux opt-in"
 have docs/package-groups.md "CodexBar"
 
 # ------------------------------------------ 8. remote-access guide contract
-# Moved wholesale from tests/remote_access_docs.sh (#135): a docs-only
-# contract - the guide must cover its anchors, state its non-goals exactly
-# once, never recommend the banned tools outside that statement, and never
-# pair Cloudflare with OpenCode.
+# Rewritten for `dot remote` (#165): the guide must cover its anchors, state
+# its non-goals exactly once, never recommend the banned tools outside that
+# statement, and - replacing the old blanket Cloudflare/OpenCode ban - never
+# describe the optional browser path without its auth gate: any line pairing
+# OpenCode with Cloudflare or a tunnel must carry "Cloudflare Access" on that
+# same line. Fixtures cover both directions: a pairing with Access is
+# accepted, the same pairing without it is rejected.
 guide="$repo_root/docs/remote-access.md"
 non_goals="No Caddy, code-server, Tailscale Funnel, or public agent backends."
 
@@ -230,11 +233,12 @@ anchors=(
   "Windows :22"
   "WSL :2222"
   "http_status:404"
+  "Cloudflare Access"
 )
 
 validate_guide() {
   local candidate=$1
-  local anchor
+  local anchor line
 
   for anchor in "${anchors[@]}"; do
     grep -Fq "$anchor" "$candidate" || return 1
@@ -247,23 +251,39 @@ validate_guide() {
     return 1
   fi
 
-  ! grep -Eqi 'Cloudflare.*OpenCode|OpenCode.*Cloudflare' "$candidate"
+  # Co-occurrence rule (#165): a line that pairs OpenCode with Cloudflare or
+  # a tunnel (case-insensitive, so cloudflared counts) must carry
+  # "Cloudflare Access" on that same line - the browser path is never
+  # described without its auth gate.
+  while IFS= read -r line; do
+    grep -Fq 'Cloudflare Access' <<<"$line" || return 1
+  done < <(grep -F 'OpenCode' "$candidate" | grep -Ei 'Cloudflare|tunnel' || true)
 }
 
 ra_tmp="$(mktemp -d)"
 write_fixture() {
   local path=$1
-  local statement=$2
-  printf '%s\n' "${anchors[@]}" "$statement" >"$path"
+  shift
+  printf '%s\n' "${anchors[@]}" "$non_goals" "$@" >"$path"
 }
 
-write_fixture "$ra_tmp/allowed.md" "$non_goals"
-validate_guide "$ra_tmp/allowed.md" || fail "remote-access: valid non-goals fixture rejected"
+# Accepted direction: the pairing carries its auth gate.
+write_fixture "$ra_tmp/allowed.md" \
+  "OpenCode may ride a Cloudflare tunnel only behind Cloudflare Access."
+validate_guide "$ra_tmp/allowed.md" || fail "remote-access: OpenCode+Cloudflare fixture with Cloudflare Access rejected"
 
+# Rejected direction: the same pairing without the gate.
+write_fixture "$ra_tmp/no-access.md" \
+  "OpenCode may ride a Cloudflare tunnel without any auth gate."
+if validate_guide "$ra_tmp/no-access.md"; then
+  fail "remote-access: OpenCode+Cloudflare line without Cloudflare Access accepted"
+fi
+
+# Banned tools stay valid only inside the standalone non-goals statement.
 for tool in Caddy code-server Funnel; do
-  write_fixture "$ra_tmp/recommends-$tool.md" "$non_goals; use $tool later"
+  write_fixture "$ra_tmp/recommends-$tool.md" "later switch to $tool"
   if validate_guide "$ra_tmp/recommends-$tool.md"; then
-    fail "remote-access: $tool recommendation hidden on non-goals line accepted"
+    fail "remote-access: $tool recommendation outside the non-goals line accepted"
   fi
 done
 rm -rf "$ra_tmp"

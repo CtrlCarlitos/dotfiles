@@ -12,6 +12,7 @@ intentionally tracked; real host names, aliases, and credentials are not.
 |---|---|
 | Git accounts (name/email/keys/dirs) | `[[data.accounts]]` in chezmoi.toml |
 | SSH host aliases (bastions, servers) | `[[data.ssh_hosts]]` in chezmoi.toml |
+| Remote-access login keys (names + targets only) | `[[data.remote_access.login_keys]]` in chezmoi.toml |
 | Genuine secret file payloads (keys, tokens) | chezmoi `encrypted_` prefix with age/gpg — future; overkill for aliases |
 
 Nothing in this table is ever committed. If you can `git grep` it, it is in
@@ -54,6 +55,27 @@ the alias.
 Terminal `SSH: <name>` profiles all read the same file. Hosts from a hand-kept
 config (the old OneDrive `Documents\_ssh\config`) go into `[[data.ssh_hosts]]`
 by hand.
+
+## Remote-access login keys (`[[data.remote_access.login_keys]]`)
+
+`dot remote` owns a separate namespace of SSH login keys for reaching your own
+machines — distinct from the Git identities `[[data.accounts]]` and
+`run_onchange_generate_identities` generate. Never one key for both purposes.
+The config records names and targets only, never key material:
+
+```toml
+# ~/.config/chezmoi/chezmoi.toml (machine-local, never committed)
+[[data.remote_access.login_keys]]
+  name = "id_<machine-local-key-name>"   # ~/.ssh/<name>(.pub)
+  targets = ["windows", "wsl"]           # which server arms authorize the .pub
+  generate = true                        # false = public half dropped here from another device
+```
+
+`generate = true` has `dot remote setup` offer to create the pair on this
+machine; `generate = false` expects the public half dropped into
+`~/.ssh/<name>.pub` from the owning device. Private halves stay on the owning
+device and are never committed. See [Remote Access](remote-access.md) for the
+full schema and the scripted authorization flow.
 
 ## Why not `encrypted_`?
 

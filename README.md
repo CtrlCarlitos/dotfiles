@@ -186,7 +186,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Windows Setup](docs/windows.md) | Windows specifics: elevation, PowerShell profile, Git for Windows, SSH agent, troubleshooting |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
-| [Remote Access](docs/remote-access.md) | Private agent access and approved external-app sharing |
+| [Remote Access](docs/remote-access.md) | `dot remote` setup/status/fix: private SSH/RDP/tmux access and the optional Cloudflare Access browser path |
 | [Guardrail Install](docs/guardrail-install.md) | How the dotfiles call the agent-guardrails installer |
 | [Skills Install Strategy](docs/skills-install-strategy.md) | How Superpowers + curated skills get wired |
 | [Agent Skill Wiring Design](docs/agent-skill-wiring-design.md) | The original design spec behind the skills wiring (implemented) |

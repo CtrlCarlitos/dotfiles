@@ -37,7 +37,7 @@ are reference.
 - [Tool Parity](tool-parity.md) — the full per-program table across all 5 platforms
 - [VS Code](vscode.md) — managed extensions, settings tiers, per-machine overrides
 - [Devcontainer Setup](devcontainer.md) — using the dotfiles in VS Code devcontainers
-- [Remote Access](remote-access.md) — private mesh access and approved app tunneling
+- [Remote Access](remote-access.md) — `dot remote`: scripted SSH/RDP/tmux plumbing and the optional Cloudflare Access browser path
 - [Testing the dotfiles](testing.md) — the per-platform verify/fix playbook (Linux, macOS, WSL, Windows)
 - [Config Example](chezmoi.toml.example) — complete annotated `chezmoi.toml`
 - [Invariants](invariants.md) — the expensive lessons; read before changing templates, ignores or tests

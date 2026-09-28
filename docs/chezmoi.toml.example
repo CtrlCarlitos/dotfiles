@@ -215,3 +215,85 @@
 #
 # 5. Test:
 #    cd ~/projects && git config user.email
+
+# ==============================================================================
+# REMOTE ACCESS (`dot remote`)
+# ==============================================================================
+# Machine-local intent for `dot remote` (scripts/remote-access.sh /
+# remote-access.ps1). Real values stay in ~/.config/chezmoi/chezmoi.toml and
+# are never committed; provider credentials (tunnel credentials, Access
+# policies, private keys) never enter this file at all. Guide:
+# docs/remote-access.md. Uncomment and customize:
+#
+# [data.remote_access]
+#   enabled = true
+#
+#   # Windows host: sshd + Remote Desktop, both Tailscale-scoped.
+#   [data.remote_access.windows]
+#     ssh = true
+#     rdp = true
+#
+#   # Linux: own sshd; xrdp honored only when a desktop environment is
+#   # detected.
+#   [data.remote_access.linux]
+#     ssh = true
+#     rdp = true
+#
+#   # macOS: Remote Login (setup verifies; enabling stays a manual step) and
+#   # Screen Sharing (VNC :5900 recovery path, status-check only).
+#   [data.remote_access.macos]
+#     ssh = true
+#     screen_sharing = true
+#
+#   # WSL never joins the tailnet; its sshd is reached through the Windows
+#   # :2222 portproxy.
+#   [data.remote_access.wsl]
+#     enabled = true
+#     ssh_port = 2222
+#
+#   # Remote-LOGIN keys - a separate namespace from Git identities. Names
+#   # only, never key material. generate=true: setup offers to create the key
+#   # on this machine (Pattern A). generate=false: the key was generated on
+#   # another device; drop its public half into ~/.ssh/<name>.pub (Pattern B).
+#   [[data.remote_access.login_keys]]
+#     name = "id_<machine-local-key-name>"
+#     targets = ["windows", "wsl"]
+#     generate = true
+#
+#   # Loopback web services exposed privately. environment = where the
+#   # listener lives; ports must not collide across environments.
+#   [data.remote_access.services.opencode_windows]
+#     enabled = true
+#     environment = "windows"
+#     port = 4096
+#     tailscale = true
+#     cloudflare = true
+#
+#   [data.remote_access.services.opencode_wsl]
+#     enabled = true
+#     environment = "wsl"
+#     port = 4097
+#     tailscale = true
+#     cloudflare = false
+#
+#   # cloudflared ingress, rendered by `dot remote tunnel render` into the
+#   # machine-local config.yml (terminal http_status:404 appended
+#   # automatically). The tunnel id is a UUID, not a secret.
+#   [data.remote_access.tunnel]
+#     id = "<machine-local tunnel id>"
+#
+#   [data.remote_access.tunnel.ingress.ssh]
+#     hostname = "<machine-local hostname>"
+#     service = "ssh://127.0.0.1:22"
+#
+#   [data.remote_access.tunnel.ingress.wsl]
+#     hostname = "<machine-local hostname>"
+#     service = "ssh://127.0.0.1:2222"
+#
+#   [data.remote_access.tunnel.ingress.rdp]
+#     hostname = "<machine-local hostname>"
+#     service = "rdp://127.0.0.1:3389"
+#
+#   [data.remote_access.tunnel.ingress.opencode]
+#     hostname = "<machine-local hostname>"
+#     service = "http://127.0.0.1:4096"
