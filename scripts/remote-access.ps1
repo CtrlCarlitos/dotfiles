@@ -22,10 +22,16 @@
 # FAIL lines name what `fix` would repair; WARN lines
 # name the manual action. Never prints secrets: probe stderr is discarded
 # and only verdicts are printed. `setup` idempotently configures the Windows
-# arm (sshd, the Tailscale-scoped firewall rules, RDP) behind the same
+# arm (sshd, the Tailscale-scoped firewall rules, RDP, and the WSL arm:
+# sshd inside the distro, the wsl-target login keys, the :2222 portproxy
+# reconcile with its rule, the logon reconcile task) behind the same
 # recorded-call seams the bash twin's tests pin; the remaining subcommands
-# are skeleton stubs that throw with their landing task (Tasks 10-11 fill
-# them in behind the same surface the bash twin implements).
+# (fix, harden-ssh, tunnel, serve) are skeleton stubs that throw with their
+# landing task (Task 11 fills them in behind the same surface the bash twin
+# implements). `wsl-reconcile` is the reconcile arm the logon task re-runs:
+# it re-syncs the managed :2222 portproxy to the current WSL IP and reports
+# PASS/WARN/FAIL lines, degrading every broken probe (wsl.exe, the WSL IP,
+# the tailscale listenaddress) to a WARN naming the manual action.
 
 param() # arguments stay in $args for the main guard's splat; the test
         # harness dot-sources this file with REMOTE_ACCESS_NO_MAIN=1 instead
@@ -159,6 +165,19 @@ function Get-TailscaleState {
     return 'unauth'
 }
 
+function Get-TailscaleIpv4 {
+    # The first IPv4 of `tailscale ip -4` - the portproxy listenaddress, so
+    # the :2222 mapping listens on the Windows tailscale address only and
+    # never internet-wide (spec section 9). $null when the CLI answers
+    # nothing IPv4-shaped; the reconcile arm degrades that to the
+    # manual-action WARN instead of writing a blind rule.
+    $raw = (Get-RemoteQuietOutput { & tailscale ip -4 })
+    if ([string]::IsNullOrEmpty($raw)) { return $null }
+    $first = (($raw -split "`r?`n")[0] -split '\s+')[0]
+    if ($first -match '^\d{1,3}(\.\d{1,3}){3}$') { return $first }
+    return $null
+}
+
 function Get-SshdState {
     # Windows sshd state: absent (no service), stopped, running - the
     # ra_sshd_state twin for the Windows column. Read-only: nothing here
@@ -192,19 +211,35 @@ function Get-WslIp {
     return $null
 }
 
-function Get-PortproxyConnectAddress {
-    # The connectaddress of the listenport <Port> row in the v4tov4
-    # portproxy table, $null when netsh fails or no row matches - the
-    # :2222 -> WSL :22 mapping the reconcile arm owns.
+function Get-PortproxyRow {
+    # The full v4tov4 row listening on <Port> - the managed :2222 rule is
+    # identified by its listenport in the `netsh interface portproxy show
+    # v4tov4` table - as a ListenAddress/ListenPort/ConnectAddress/
+    # ConnectPort object, $null when netsh fails or no row matches. The
+    # delete half of a stale repair needs the row's own listenaddress, so
+    # the doctor's connect-only read sits on top of this
+    # (Get-PortproxyConnectAddress).
     param([Parameter(Position = 0)][int]$Port)
     $table = (Get-RemoteQuietOutput { & netsh interface portproxy show v4tov4 })
     if ([string]::IsNullOrEmpty($table)) { return $null }
     foreach ($line in ($table -split "`r?`n")) {
         if ($line -match '^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+(\d+)\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d+)\s*$') {
-            if ([int]$Matches[2] -eq $Port) { return $Matches[3] }
+            if ([int]$Matches[2] -eq $Port) {
+                return New-Object -TypeName PSObject -Property @{ ListenAddress = $Matches[1]; ListenPort = [int]$Matches[2]; ConnectAddress = $Matches[3]; ConnectPort = [int]$Matches[4] }
+            }
         }
     }
     return $null
+}
+
+function Get-PortproxyConnectAddress {
+    # The connectaddress of the listenport <Port> row in the v4tov4
+    # portproxy table, $null when netsh fails or no row matches - the
+    # :2222 -> WSL :22 mapping the reconcile arm owns.
+    param([Parameter(Position = 0)][int]$Port)
+    $row = Get-PortproxyRow -Port $Port
+    if ($null -eq $row) { return $null }
+    return $row.ConnectAddress
 }
 
 function Test-RemoteTcpPort {
@@ -487,8 +522,8 @@ function Get-RemoteStatus {
 # writers - the setup-era writes, each idempotent (verify-don't-rewrite) and
 # seam-recorded in the tests. The stubs that remain throw with their landing
 # task so an arm reached too early fails loudly at the dispatcher instead of
-# silently doing nothing; Tasks 10-11 replace them behind the same seams the
-# bash twin's tests pin.
+# silently doing nothing; Task 10 landed the WSL arm behind these seams and
+# Task 11 fills the rest in the same way.
 # ---------------------------------------------------------------------------
 
 function Set-SshdServiceDesired {
@@ -589,22 +624,205 @@ function Set-RdpEnabled {
     Ensure-TailscaleFirewallRule -Name 'RemoteDesktop-Tailscale' -Port 3389
 }
 
+function Add-PortproxyRow {
+    # netsh interface portproxy add for the managed mapping. The listener is
+    # the Windows tailscale address (never 0.0.0.0 - tailnet side only,
+    # spec section 9); netsh output is discarded and the caller verifies
+    # through a fresh read, so a failed add surfaces as the verify FAIL.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the wsl-reconcile subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param(
+        [Parameter(Mandatory = $true)][string]$ListenAddress,
+        [Parameter(Mandatory = $true)][int]$ListenPort,
+        [Parameter(Mandatory = $true)][string]$ConnectAddress,
+        [Parameter(Mandatory = $true)][int]$ConnectPort
+    )
+    $netshArgs = @('interface', 'portproxy', 'add', 'v4tov4', "listenaddress=$ListenAddress", "listenport=$ListenPort", "connectaddress=$ConnectAddress", "connectport=$ConnectPort")
+    $null = Get-RemoteQuietOutput { & netsh @netshArgs }
+}
+
+function Remove-PortproxyRow {
+    # netsh interface portproxy delete for exactly one row, addressed by its
+    # own listenaddress + listenport - a stale repair never touches other
+    # rows.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the wsl-reconcile subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param(
+        [Parameter(Mandatory = $true)][string]$ListenAddress,
+        [Parameter(Mandatory = $true)][int]$ListenPort
+    )
+    $netshArgs = @('interface', 'portproxy', 'delete', 'v4tov4', "listenaddress=$ListenAddress", "listenport=$ListenPort")
+    $null = Get-RemoteQuietOutput { & netsh @netshArgs }
+}
+
+function Enable-WslSsh {
+    # Best-effort sshd enable inside WSL through the wsl.exe -u root channel
+    # (systemd first, the SysV script as fallback, non-fatal inside the
+    # distro). Spec section 9 keeps the sshd configuration manual; setup
+    # only issues the enable. A failed channel is the manual-action WARN,
+    # never a crash.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $enable = 'systemctl enable --now ssh >/dev/null 2>&1 || service ssh start >/dev/null 2>&1 || true; echo wsl-ssh-enabled'
+    $out = (Get-RemoteQuietOutput { & wsl.exe -u root -e sh -c $enable })
+    if (($LASTEXITCODE -eq 0) -and ($out -eq 'wsl-ssh-enabled')) {
+        Write-RemoteStatusOk 'wsl: sshd enable issued inside WSL (best-effort)'
+    } else {
+        Write-RemoteStatusWarn 'wsl: sshd enable inside WSL failed (manual: wsl.exe -u root -e sh -c "systemctl enable --now ssh")'
+    }
+}
+
 function Invoke-WslReconcile {
-    # Task 10: query the current WSL IPv4, compare the managed :2222
-    # portproxy, replace only the managed rule, report PASS/WARN/FAIL.
-    throw 'Invoke-WslReconcile: not implemented until Task 10 (wsl arm, portproxy reconcile, scheduled task)'
+    # The wsl-reconcile arm (spec section 9): re-sync the managed :2222
+    # portproxy to the current WSL IP (first token of `wsl.exe hostname -I`,
+    # never cached - the address changes on every WSL reboot). The managed
+    # row is the v4tov4 row whose listenport is the configured ssh port;
+    # the listenaddress comes from `tailscale ip -4` and a missing address
+    # blocks the repair with the manual-action WARN instead of writing a
+    # blind rule. Output is PASS/WARN/FAIL lines: a missing or stale row
+    # prints its FAIL, repairs with exactly one delete (the stale row's own
+    # listenaddress) plus one add, verifies with a fresh read and only then
+    # prints PASS; a matching row prints PASS with zero netsh mutations.
+    # Every degraded probe - wsl.exe, the WSL IP, the tailscale address -
+    # is a WARN naming the manual action, never a crash (plan Review Focus
+    # #1). No ShouldProcess: the subcommand IS the explicit repair intent
+    # and a non-interactive run must never prompt.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the wsl-reconcile subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $config = Get-RemoteAccessConfig
+    $port = [int](Get-RemoteConfigValue $config 'wsl.ssh_port' 2222)
+    if (-not (Test-WslAvailable)) {
+        Write-Host 'WARN wsl: not available (manual: install WSL2, then re-run: dot remote wsl-reconcile)'
+        return
+    }
+    $wslIp = Get-WslIp
+    if ([string]::IsNullOrEmpty($wslIp)) {
+        Write-Host 'WARN wsl: current WSL IP unavailable (manual: check wsl.exe hostname -I, then re-run: dot remote wsl-reconcile)'
+        return
+    }
+    $row = Get-PortproxyRow -Port $port
+    if (($null -ne $row) -and ($row.ConnectAddress -eq $wslIp)) {
+        Write-Host "PASS wsl: portproxy :${port} -> ${wslIp}:22 in sync"
+        return
+    }
+    if ($null -eq $row) {
+        Write-Host "FAIL wsl: no :${port} portproxy (repairing: add ${wslIp}:22)"
+    } else {
+        Write-Host "FAIL wsl: portproxy :${port} -> $($row.ConnectAddress):22 is stale, WSL is now ${wslIp} (repairing: delete + add)"
+    }
+    $tsIp = Get-TailscaleIpv4
+    if ([string]::IsNullOrEmpty($tsIp)) {
+        Write-Host "WARN wsl: tailscale address unavailable (manual: tailscale ip -4, then: netsh interface portproxy add v4tov4 listenaddress=<tailscale-ip> listenport=${port} connectaddress=${wslIp} connectport=22)"
+        return
+    }
+    if ($null -ne $row) {
+        Remove-PortproxyRow -ListenAddress $row.ListenAddress -ListenPort $port
+    }
+    Add-PortproxyRow -ListenAddress $tsIp -ListenPort $port -ConnectAddress $wslIp -ConnectPort 22
+    $check = Get-PortproxyRow -Port $port
+    if (($null -ne $check) -and ($check.ConnectAddress -eq $wslIp)) {
+        Write-Host "PASS wsl: portproxy :${port} -> ${wslIp}:22 in sync"
+    } else {
+        Write-Host "FAIL wsl: portproxy :${port} repair did not verify (check manually: netsh interface portproxy show v4tov4)"
+    }
 }
 
 function Register-WslReconcileTask {
-    # Task 10: the dotfiles-wsl-reconcile logon Scheduled Task, idempotent.
-    throw 'Register-WslReconcileTask: not implemented until Task 10 (wsl arm, portproxy reconcile, scheduled task)'
+    # The dotfiles-wsl-reconcile logon Scheduled Task: at logon, highest run
+    # level (the netsh portproxy writes need it), re-running this script's
+    # wsl-reconcile arm. Idempotent: a present task is refreshed through
+    # Set-ScheduledTask (the update path), never registered twice. Seams:
+    # Get-ScheduledTask / New-ScheduledTaskAction / New-ScheduledTaskTrigger
+    # / Register-ScheduledTask / Set-ScheduledTask - the tests override all
+    # five, so none of them ever runs for real in a test host.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" wsl-reconcile")
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    if ($null -eq (Get-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -ErrorAction SilentlyContinue)) {
+        Register-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -Action $action -Trigger $trigger -RunLevel Highest | Out-Null
+        Write-RemoteStatusOk 'wsl: reconcile task installed (dotfiles-wsl-reconcile, logon trigger, RunLevel Highest)'
+    } else {
+        Set-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -Action $action -Trigger $trigger | Out-Null
+        Write-RemoteStatusOk 'wsl: reconcile task refreshed (dotfiles-wsl-reconcile)'
+    }
 }
 
 function Publish-LoginKey {
-    # Task 10: materialize + authorize per [[data.remote_access.login_keys]]
-    # entry; the wsl target rides the wsl.exe channel, windows lands in
-    # administrators_authorized_keys with the admins-only ACL (Task 11).
-    throw 'Publish-LoginKey: not implemented until Task 10 (login keys, windows/wsl targets)'
+    # Publish-LoginKey -Name <key> -Target <target>: authorize the PUBLIC
+    # half (~/.ssh/<name>.pub) for <target>. The private half is never
+    # read, never moved, never printed. The wsl target rides the
+    # wsl.exe -u root channel with an append-only heredoc: grep -Fxq guards
+    # the exact line, existing authorized_keys lines are never rewritten,
+    # and a second run is already-authorized (Review Focus #2; the
+    # ra_authorized_keys_install twin). The windows target (the
+    # administrators_authorized_keys + admins-only ACL arm) is Task 11;
+    # anything else is the unknown-target WARN skip. No prompt anywhere: a
+    # declared-but-missing key degrades to the no-public-half WARN.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+    if ($Target -eq 'windows') {
+        throw 'Publish-LoginKey: target windows: not implemented until Task 11 (ps1 fix/harden-ssh/keys/tunnel/serve)'
+    }
+    if ($Target -ne 'wsl') {
+        Write-RemoteStatusWarn "login key ${Name}: unknown target ${Target} - skipped"
+        return
+    }
+    $pub = Join-Path (Get-RemoteHome) ".ssh/${Name}.pub"
+    if (-not (Test-Path -LiteralPath $pub -PathType Leaf)) {
+        Write-RemoteStatusWarn "login key ${Name}: no public half at ${pub} - nothing to authorize into wsl"
+        return
+    }
+    $line = $null
+    foreach ($candidate in ((Get-Content -Raw -LiteralPath $pub) -split "`r?`n")) {
+        $trimmed = $candidate.Trim()
+        if (-not [string]::IsNullOrEmpty($trimmed)) { $line = $trimmed; break }
+    }
+    if ([string]::IsNullOrEmpty($line)) {
+        Write-RemoteStatusWarn "login key ${Name}: ${pub} is empty - nothing to authorize into wsl"
+        return
+    }
+    if ($line -match "'") {
+        # A single quote would break the sh single-quoted guard: refuse the
+        # publish instead of writing a mangled authorized_keys line.
+        Write-RemoteStatusWarn "login key ${Name}: unexpected character in the public half - skipped (verify ${pub})"
+        return
+    }
+    # Append-only heredoc through the wsl.exe channel: umask + mkdir first
+    # so a fresh authorized_keys lands 600, grep -Fxq makes the exact line
+    # idempotent, the quoted RAKEY delimiter keeps the key verbatim.
+    $sh = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -Fxq '${line}' ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys <<'RAKEY'`n${line}`nRAKEY"
+    $out = (Get-RemoteQuietOutput { & wsl.exe -u root -e sh -c $sh })
+    if (($LASTEXITCODE -ne 0) -or [string]::IsNullOrEmpty($out)) {
+        Write-RemoteStatusWarn "login key ${Name}: wsl channel failed (manual: check WSL, then authorize ${pub} inside the distro)"
+        return
+    }
+    if ($out -eq 'present') {
+        Write-RemoteStatusOk "login key ${Name}: already authorized (wsl)"
+    } else {
+        Write-RemoteStatusOk "login key ${Name}: authorized (wsl)"
+    }
+}
+
+function Publish-WslLoginKeys {
+    # Drive Publish-LoginKey for every [[data.remote_access.login_keys]]
+    # entry whose targets contain `wsl` - this arm's install (the
+    # ra_setup_login_keys twin, inverted). Key materialization is not this
+    # arm's job: a declared-but-missing key degrades to the no-public-half
+    # WARN inside Publish-LoginKey, never a prompt (Review Focus #5's
+    # non-interactive shape).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Publish-LoginKey call per entry; kept for twin parity with ra_setup_login_keys (invariant #10)')]
+    param($Config)
+    $keys = Get-RemoteConfigValue $Config 'login_keys' $null
+    if ($null -eq $keys) { return }
+    foreach ($entry in @($keys)) {
+        $name = Get-RemoteConfigValue $entry 'name' ''
+        $targets = Get-RemoteConfigValue $entry 'targets' $null
+        if ((-not [string]::IsNullOrEmpty($name)) -and ($null -ne $targets) -and (@($targets) -contains 'wsl')) {
+            Publish-LoginKey -Name $name -Target 'wsl'
+        }
+    }
 }
 
 function Invoke-SshHardening {
@@ -632,8 +850,11 @@ function Test-TunnelConfig {
 # stops only the Tailscale-dependent paths (the tailnet-scoped firewall rules
 # and RDP, whose rule half is one of them); every write verifies current
 # state first, so an already-correct host records no mutations, and setup
-# exits non-zero only on hard failure. The WSL arm, serve mappings, tunnel
-# render, and login keys land with Tasks 10-11 behind this orchestration.
+# exits non-zero only on hard failure. The WSL arm (spec section 9) runs
+# behind its [data.remote_access.wsl] gate: sshd inside the distro, the
+# wsl-target login keys, the :2222 portproxy reconcile with its rule, and
+# the logon reconcile task; serve mappings, tunnel render, and the
+# windows-target login keys land with Task 11 behind this orchestration.
 # ---------------------------------------------------------------------------
 
 function Invoke-RemoteSetup {
@@ -688,9 +909,37 @@ function Invoke-RemoteSetup {
             Write-RemoteStatusWarn "rdp: held while tailscale is ${tsState} (dependent paths held)"
         }
     }
-    # The WSL arm, serve mappings, tunnel render, and login keys land with
-    # Tasks 10-11 and are called from here then; the dispatcher's remaining
-    # arms still throw until then.
+    # WSL arm (spec section 9), gated on [data.remote_access.wsl] enabled =
+    # true. A broken WSL degrades to the availability WARN naming the manual
+    # action - never a crash (plan Review Focus #1). The sshd enable, the
+    # login-key publication, and the reconcile task are machine-local writes
+    # independent of Tailscale; the portproxy + its :2222 rule are
+    # Tailscale-dependent (the listenaddress IS the Windows tailscale
+    # address) and stay held behind the same authenticated gate as the
+    # Windows rules. The task install sits behind its own presence check so
+    # an already-correct host records no calls (Register-WslReconcileTask's
+    # refresh path stays reachable for direct calls).
+    if ((Get-RemoteConfigValue $config 'wsl.enabled' $false) -eq $true) {
+        if (-not (Test-WslAvailable)) {
+            Write-RemoteStatusWarn 'wsl: not available (manual: install WSL2, then re-run: dot remote setup)'
+        } else {
+            Enable-WslSsh
+            Publish-WslLoginKeys -Config $config
+            if ($null -eq (Get-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -ErrorAction SilentlyContinue)) {
+                Register-WslReconcileTask
+            } else {
+                Write-RemoteStatusOk 'wsl: reconcile task already installed (dotfiles-wsl-reconcile)'
+            }
+            if ($tsState -eq 'ok') {
+                Invoke-WslReconcile
+                Ensure-TailscaleFirewallRule -Name 'WSL-SSH-Tailscale' -Port ([int](Get-RemoteConfigValue $config 'wsl.ssh_port' 2222))
+            } else {
+                Write-RemoteStatusWarn "wsl: portproxy held while tailscale is ${tsState} (dependent paths held)"
+            }
+        }
+    }
+    # Serve mappings, tunnel render, and the windows-target login keys land
+    # with Task 11; the dispatcher's remaining arms still throw until then.
     Write-Host 'next: verify key login from another device, then run: dot remote harden-ssh'
 }
 
