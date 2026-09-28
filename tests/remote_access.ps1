@@ -21,9 +21,22 @@
 # a live loopback listener answering on the configured service port); an
 # unauthenticated tailscale is a WARN naming `authenticate`; a service whose
 # target is not 127.0.0.1 FAILs naming `loopback`; and no captured output
-# anywhere matches token-shaped material. Runs on pwsh 7 AND Windows
-# PowerShell 5.1 (5.1-only syntax throughout, no skip exits - the Windows
-# CI block runs this file under powershell.exe).
+# anywhere matches token-shaped material. The Task 9 setup arm adds the
+# call-log seams: Set-Service / Start-Service / Get-NetFirewallRule /
+# New-NetFirewallRule / Set-NetFirewallRule / Set-ItemProperty recording
+# overrides (every mutating call lands in a scenario call log, and the stub
+# state moves with it, so a second setup pass is provably call-free);
+# asserted: Set-SshdServiceDesired records startup+start for a stopped+manual
+# service and nothing for an already Automatic+Running one,
+# Ensure-TailscaleFirewallRule records the exact Tailscale-scoped
+# New-NetFirewallRule arguments, constrains a present generic
+# OpenSSH-Server-In-TCP rule with a warning line, and rewrites nothing when
+# the rule exists; Set-RdpEnabled records the registry write + the :3389 rule
+# call only when windows.rdp=true; Invoke-RemoteSetup prints `not configured`
+# for an absent config, the verbatim ACTION REQUIRED block on unauthenticated
+# tailscale while only the dependent paths stay held, and runs idempotently.
+# Runs on pwsh 7 AND Windows PowerShell 5.1 (5.1-only syntax throughout, no
+# skip exits - the Windows CI block runs this file under powershell.exe).
 
 $ErrorActionPreference = 'Stop'
 
@@ -61,7 +74,13 @@ $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/off.js
 $script:TailscaleStatusJson = '{"BackendState": "Running", "CurrentTailnet": {"Name": "example.net"}, "Self": {"TailscaleIPs": ["100.64.0.1"]}}'
 $script:TailscaleServeStatus = 'https://machine.example.net:443 path / --> http://127.0.0.1:4096'
 $script:SshdServiceStatus = 'Running'
+$script:SshdServiceStartType = 'Automatic'
 $script:RdpDenyTSConnections = 0
+# The setup call log: every mutating seam override appends one line per call
+# (the bash suite's $scratch/calls twin), and the stub state moves with the
+# write, so a second pass sees the already-correct state and records nothing.
+$script:FirewallRules = @{}
+$script:Calls = @()
 $script:WslStatusOk = $true
 $script:WslSshProbe = 'active'
 $script:WslIpLine = '172.28.120.45'
@@ -107,13 +126,16 @@ function tailscale {
 
 function Get-Service {
     # The sshd seam: the twin asks Get-Service about sshd; the harness
-    # answers with canned state so the real cmdlet never runs.
+    # answers with canned state (Status for the doctor, StartType for the
+    # setup writer) so the real cmdlet never runs. String values, not the
+    # enums: 5.1 cannot resolve ServiceControllerStatus when the real
+    # Get-Service never loaded (the twin compares strings for that reason).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
     [CmdletBinding()]
     param([string]$Name)
     if ($Name -eq 'sshd') {
         if ([string]::IsNullOrEmpty($script:SshdServiceStatus)) { return $null }
-        return New-Object -TypeName PSObject -Property @{ Name = 'sshd'; Status = $script:SshdServiceStatus }
+        return New-Object -TypeName PSObject -Property @{ Name = 'sshd'; Status = $script:SshdServiceStatus; StartType = $script:SshdServiceStartType }
     }
     return $null
 }
@@ -182,6 +204,88 @@ function tmux {
     return $null
 }
 
+function Set-Service {
+    # The sshd startup-mode seam: records the call and moves the stub state,
+    # so a second setup pass sees the already-correct service (the bash
+    # suite's derive-from-log stub shape).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param([string]$Name, [string]$StartupType)
+    if ($Name -eq 'sshd') { $script:SshdServiceStartType = $StartupType }
+    $script:Calls += ("Set-Service -Name {0} -StartupType {1}" -f $Name, $StartupType)
+}
+
+function Start-Service {
+    # The sshd start seam: records the call and moves the stub state to
+    # Running.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param([string]$Name)
+    if ($Name -eq 'sshd') { $script:SshdServiceStatus = 'Running' }
+    $script:Calls += ("Start-Service -Name {0}" -f $Name)
+}
+
+function Get-NetFirewallRule {
+    # The firewall rule seam: the stub table answers presence + enabled state
+    # ('True'/'False' strings, not the GpoBoolean enum - the same 5.1
+    # enum-loading constraint as the service seam).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [CmdletBinding()]
+    param([string]$Name)
+    if ($script:FirewallRules.ContainsKey($Name)) {
+        return New-Object -TypeName PSObject -Property @{ Name = $Name; Enabled = $script:FirewallRules[$Name] }
+    }
+    return $null
+}
+
+function New-NetFirewallRule {
+    # The firewall write seam: records the exact bound arguments (the brief
+    # asserts the literal rule name/port plus the Tailscale interface and
+    # tailnet address space) and materializes the rule in the stub table.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param(
+        [string]$Name,
+        [string]$DisplayName,
+        [string]$Direction,
+        [string]$Protocol,
+        [int]$LocalPort,
+        [string]$Action,
+        [string]$InterfaceAlias,
+        [string[]]$RemoteAddress
+    )
+    $script:FirewallRules[$Name] = 'True'
+    $script:Calls += ("New-NetFirewallRule -Name {0} -LocalPort {1} -InterfaceAlias {2} -RemoteAddress {3} -Direction {4} -Protocol {5} -Action {6} -DisplayName {7}" -f `
+            $Name, $LocalPort, $InterfaceAlias, ($RemoteAddress -join ','), $Direction, $Protocol, $Action, $DisplayName)
+}
+
+function Set-NetFirewallRule {
+    # The firewall constraint seam: records the constraint call and flips the
+    # stub rule's enabled state (a second pass sees it already constrained).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param([string]$Name, $Enabled)
+    $script:FirewallRules[$Name] = [string]$Enabled
+    $script:Calls += ("Set-NetFirewallRule -Name {0} -Enabled {1}" -f $Name, [string]$Enabled)
+}
+
+function Set-ItemProperty {
+    # The RDP registry write seam: records the call and flips the stub value
+    # (a second pass sees fDenyTSConnections already 0).
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
+    [CmdletBinding()]
+    param([string]$Path, [string]$Name, $Value)
+    if ($Path -like '*Terminal Server' -and $Name -eq 'fDenyTSConnections') {
+        $script:RdpDenyTSConnections = $Value
+    }
+    $script:Calls += ("Set-ItemProperty -Path {0} -Name {1} -Value {2}" -f $Path, $Name, $Value)
+}
+
 # --- capture + assertion helpers ---------------------------------------------
 
 function Get-StatusOutput {
@@ -217,6 +321,26 @@ function Assert-OutputHas([string]$output, [string]$expected, [string]$label) {
 
 function Assert-NoTokenMaterial([string]$output, [string]$label) {
     if ($output -match 'ey[A-Za-z0-9_-]{20,}') { Fail $label $output } else { Ok $label }
+}
+
+function Get-SetupOutput {
+    # Function-level capture of the setup arm (same mechanism as the
+    # doctor's capture above: Write-Host lands on the information stream).
+    return ((Invoke-RemoteSetup *>&1) -join "`n")
+}
+
+function Assert-RecordedCall([string]$pattern, [string]$label) {
+    # A recorded mutating call matching PATTERN (-like wildcards): the seam
+    # assertions read the call log, never real host state.
+    $hit = $false
+    foreach ($c in $script:Calls) { if ($c -like $pattern) { $hit = $true; break } }
+    if ($hit) { Ok $label } else { Fail $label ("expected call like: $pattern`n---calls---`n" + ($script:Calls -join "`n")) }
+}
+
+function Assert-NoRecordedCall([string]$pattern, [string]$label) {
+    $hit = $false
+    foreach ($c in $script:Calls) { if ($c -like $pattern) { $hit = $true; break } }
+    if (-not $hit) { Ok $label } else { Fail $label ("unexpected call like: $pattern`n---calls---`n" + ($script:Calls -join "`n")) }
 }
 
 function Get-SectionLine([string]$text, [string]$header) {
@@ -349,6 +473,112 @@ try {
     $out = Get-StatusOutput
     Assert-OutputHas $out ($MarkWarn + ' wsl: not available') 'a broken wsl.exe prints the availability WARN'
     $script:WslStatusOk = $true
+
+    # 10. setup with [data.remote_access] absent: a `not configured` no-op -
+    #     zero recorded calls, no crash (the bash cmd_setup parity).
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/off.json'
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Assert-OutputHas $out 'not configured' 'setup with an absent config prints not configured'
+    if ($script:Calls.Count -eq 0) { Ok 'setup with an absent config records zero calls' } else { Fail 'setup with an absent config records zero calls' ($script:Calls -join '; ') }
+    Assert-NoTokenMaterial $out 'setup absent-config output carries no token material'
+
+    # 11. setup with unauthenticated Tailscale: the verbatim ACTION REQUIRED
+    #     block; the Tailscale-independent path (sshd) still runs; the
+    #     Tailscale-dependent paths (firewall rules, RDP) record nothing.
+    #     Exit behavior is no-crash - an auth gate is not a hard failure.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+    $script:TailscaleStatusJson = '{"BackendState": "NeedsLogin"}'
+    $script:SshdServiceStatus = 'Stopped'
+    $script:SshdServiceStartType = 'Manual'
+    $script:FirewallRules = @{}
+    $script:RdpDenyTSConnections = 1
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Assert-OutputHas $out 'ACTION REQUIRED:' 'setup prints the ACTION REQUIRED block verbatim'
+    Assert-OutputHas $out 'Authenticate this host with Tailscale, then rerun:' 'the ACTION REQUIRED block names the authenticate action'
+    Assert-OutputHas $out '    dot remote setup' 'the ACTION REQUIRED block ends with the 4-space rerun line'
+    Assert-RecordedCall 'Set-Service -Name sshd -StartupType Automatic' 'unauth setup still runs the independent sshd path (startup)'
+    Assert-RecordedCall 'Start-Service -Name sshd' 'unauth setup still runs the independent sshd path (start)'
+    Assert-NoRecordedCall 'New-NetFirewallRule*' 'unauth setup holds the firewall rules (dependent path)'
+    Assert-NoRecordedCall 'Set-ItemProperty*' 'unauth setup holds the RDP write (dependent path)'
+    Assert-NoTokenMaterial $out 'unauth setup output carries no token material'
+    $script:TailscaleStatusJson = '{"BackendState": "Running", "CurrentTailnet": {"Name": "example.net"}, "Self": {"TailscaleIPs": ["100.64.0.1"]}}'
+
+    # 12. setup first pass on a wrong-state host (tailscale ok): every
+    #     mutation recorded with its exact seam arguments - sshd startup +
+    #     start, the :22 rule created with the Tailscale interface + tailnet
+    #     address space, the generic internet-wide rule constrained + a
+    #     warning line naming it, the RDP registry write, the :3389 rule.
+    $script:SshdServiceStatus = 'Stopped'
+    $script:SshdServiceStartType = 'Manual'
+    $script:FirewallRules = @{ 'OpenSSH-Server-In-TCP' = 'True' }
+    $script:RdpDenyTSConnections = 1
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Assert-RecordedCall 'Set-Service -Name sshd -StartupType Automatic' 'setup drives sshd startup to Automatic'
+    Assert-RecordedCall 'Start-Service -Name sshd' 'setup starts sshd'
+    Assert-RecordedCall 'New-NetFirewallRule -Name OpenSSH-Tailscale -LocalPort 22 -InterfaceAlias Tailscale -RemoteAddress 100.64.0.0/10*' 'the :22 rule is created Tailscale-scoped (interface + tailnet space)'
+    Assert-RecordedCall 'Set-NetFirewallRule -Name OpenSSH-Server-In-TCP -Enabled False' 'the generic internet-wide rule is constrained'
+    Assert-OutputHas $out 'OpenSSH-Server-In-TCP' 'the constraint prints a warning line naming the generic rule'
+    Assert-RecordedCall 'Set-ItemProperty*fDenyTSConnections*Value 0*' 'RDP enable writes fDenyTSConnections 0'
+    Assert-RecordedCall 'New-NetFirewallRule -Name RemoteDesktop-Tailscale -LocalPort 3389*' 'the :3389 rule is created for RDP'
+    Assert-NoTokenMaterial $out 'setup output carries no token material'
+
+    # 13. setup second pass against the now-correct stub state: ZERO mutating
+    #     calls - idempotency, executed (verify-don't-rewrite).
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    if ($script:Calls.Count -eq 0) { Ok 'setup second pass records zero calls' } else { Fail 'setup second pass records zero calls' ($script:Calls -join '; ') }
+    Assert-NoTokenMaterial $out 'second-pass setup output carries no token material'
+
+    # 14. Set-SshdServiceDesired at unit level - the brief's two pinned cases.
+    $script:SshdServiceStatus = 'Stopped'
+    $script:SshdServiceStartType = 'Manual'
+    $script:Calls = @()
+    $null = (Set-SshdServiceDesired *>&1)
+    Assert-RecordedCall 'Set-Service -Name sshd -StartupType Automatic' 'stopped+manual service gets the startup call'
+    Assert-RecordedCall 'Start-Service -Name sshd' 'stopped+manual service gets the start call'
+    $script:SshdServiceStatus = 'Running'
+    $script:SshdServiceStartType = 'Automatic'
+    $script:Calls = @()
+    $null = (Set-SshdServiceDesired *>&1)
+    if ($script:Calls.Count -eq 0) { Ok 'already Automatic+Running service gets zero calls' } else { Fail 'already Automatic+Running service gets zero calls' ($script:Calls -join '; ') }
+
+    # 15. Ensure-TailscaleFirewallRule at unit level - the brief's three
+    #     cases: missing rule, present rule, generic rule present.
+    $script:FirewallRules = @{}
+    $script:Calls = @()
+    $null = (Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22 *>&1)
+    Assert-RecordedCall 'New-NetFirewallRule -Name OpenSSH-Tailscale -LocalPort 22 -InterfaceAlias Tailscale -RemoteAddress 100.64.0.0/10*' 'missing rule gets the exact Tailscale-scoped New call'
+    $script:FirewallRules = @{ 'OpenSSH-Tailscale' = 'True' }
+    $script:Calls = @()
+    $null = (Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22 *>&1)
+    if ($script:Calls.Count -eq 0) { Ok 'present rule gets zero calls' } else { Fail 'present rule gets zero calls' ($script:Calls -join '; ') }
+    $script:FirewallRules = @{ 'OpenSSH-Server-In-TCP' = 'True' }
+    $script:Calls = @()
+    $out = ((Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22 *>&1) -join "`n")
+    Assert-RecordedCall 'Set-NetFirewallRule -Name OpenSSH-Server-In-TCP -Enabled False' 'generic rule presence gets the constraint call'
+    Assert-OutputHas $out 'constrained' 'the constraint prints the warning line'
+
+    # 16. Set-RdpEnabled at unit level: the registry write + the :3389 rule
+    #     call when windows.rdp=true; nothing at all when it is false.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+    $cfg = Get-RemoteAccessConfig
+    $script:RdpDenyTSConnections = 1
+    $script:FirewallRules = @{}
+    $script:Calls = @()
+    $null = (Set-RdpEnabled -Config $cfg *>&1)
+    Assert-RecordedCall 'Set-ItemProperty*fDenyTSConnections*Value 0*' 'rdp=true records the registry write'
+    Assert-RecordedCall 'New-NetFirewallRule -Name RemoteDesktop-Tailscale -LocalPort 3389*' 'rdp=true records the :3389 rule call'
+    $rdpOff = Join-Path $Tmp 'rdp-off.json'
+    [IO.File]::WriteAllText($rdpOff, (Get-Content -Raw -LiteralPath $script:ConfigFixture).Replace('"rdp": true', '"rdp": false'))
+    $script:ConfigFixture = $rdpOff
+    $cfg = Get-RemoteAccessConfig
+    $script:Calls = @()
+    $null = (Set-RdpEnabled -Config $cfg *>&1)
+    if ($script:Calls.Count -eq 0) { Ok 'rdp=false records zero calls' } else { Fail 'rdp=false records zero calls' ($script:Calls -join '; ') }
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
 } finally {
     $env:HOME = $savedHome
     $env:USERPROFILE = $savedProfile

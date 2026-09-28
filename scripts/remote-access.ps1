@@ -21,9 +21,11 @@
 # Applications, tmux - with check / warn / fail marker lines, exit 0 always.
 # FAIL lines name what `fix` would repair; WARN lines
 # name the manual action. Never prints secrets: probe stderr is discarded
-# and only verdicts are printed. The remaining subcommands are skeleton
-# stubs that throw with their landing task (Tasks 9-11 fill them in behind
-# the same surface the bash twin implements).
+# and only verdicts are printed. `setup` idempotently configures the Windows
+# arm (sshd, the Tailscale-scoped firewall rules, RDP) behind the same
+# recorded-call seams the bash twin's tests pin; the remaining subcommands
+# are skeleton stubs that throw with their landing task (Tasks 10-11 fill
+# them in behind the same surface the bash twin implements).
 
 param() # arguments stay in $args for the main guard's splat; the test
         # harness dot-sources this file with REMOTE_ACCESS_NO_MAIN=1 instead
@@ -482,28 +484,109 @@ function Get-RemoteStatus {
 }
 
 # ---------------------------------------------------------------------------
-# writers - the arms the skeleton does not own yet. Each stub throws with
-# its landing task so an arm reached too early fails loudly at the
-# dispatcher instead of silently doing nothing; Tasks 9-11 replace them
-# behind the same seams the bash twin's tests pin.
+# writers - the setup-era writes, each idempotent (verify-don't-rewrite) and
+# seam-recorded in the tests. The stubs that remain throw with their landing
+# task so an arm reached too early fails loudly at the dispatcher instead of
+# silently doing nothing; Tasks 10-11 replace them behind the same seams the
+# bash twin's tests pin.
 # ---------------------------------------------------------------------------
 
 function Set-SshdServiceDesired {
-    # Task 9: sshd -> StartupType Automatic + running, idempotent. Skeleton
-    # stub: whether the real arm wraps its write in ShouldProcess is Task 9's
-    # call, behind its recorded-call seams - hence the name-based rule is
-    # suppressed here rather than half-answered.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'skeleton stub that only throws; the Task 9 implementation owns the ShouldProcess decision')]
+    # sshd -> StartupType Automatic + running, idempotent: each half is
+    # written only when the read state differs, so an already-correct host
+    # records no service calls at all. A missing service is the capability
+    # presence verdict - setup checks prerequisites, never installs (the
+    # installers own the OpenSSH Server optional capability) - reported as
+    # the manual action, never a crash. No ShouldProcess on purpose: the
+    # setup subcommand is the operator's explicit intent and a
+    # non-interactive run must never prompt (the bash twin's sshd enable
+    # carries no confirm gate either). The tests pin the writes through
+    # Get-Service / Set-Service / Start-Service overrides.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt; the bash twin carries no confirm gate either (twin parity, invariant #10)')]
     param()
-    throw 'Set-SshdServiceDesired: not implemented until Task 9 (windows sshd/firewall/rdp setup)'
+    $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($null -eq $svc) {
+        Write-RemoteStatusWarn 'ssh: sshd not installed (manual: install the OpenSSH Server optional capability)'
+        return
+    }
+    # String compares, not the enums: 5.1 resolves ServiceControllerStatus
+    # (and the StartType enum) only after the REAL cmdlets have loaded their
+    # assemblies, and the tests override the cmdlets - the same string
+    # compare the doctor's Get-SshdState uses.
+    $changed = $false
+    if ([string]$svc.StartType -ne 'Automatic') {
+        Set-Service -Name sshd -StartupType Automatic
+        $changed = $true
+    }
+    if ([string]$svc.Status -ne 'Running') {
+        Start-Service -Name sshd
+        $changed = $true
+    }
+    if ($changed) {
+        Write-RemoteStatusOk 'ssh: sshd enabled and started (StartupType Automatic)'
+    } else {
+        Write-RemoteStatusOk 'ssh: sshd already active (Automatic + running)'
+    }
 }
 
 function Ensure-TailscaleFirewallRule {
-    # Task 9: the Tailscale-scoped rules (:22 OpenSSH-Tailscale,
-    # :2222 WSL-SSH-Tailscale, :3389 RemoteDesktop-Tailscale).
+    # Ensure-TailscaleFirewallRule -Name <rule> -Port <port>: the generic
+    # writer behind the three Tailscale-scoped rules (:22 OpenSSH-Tailscale,
+    # :2222 WSL-SSH-Tailscale, :3389 RemoteDesktop-Tailscale). Inbound TCP on
+    # the Tailscale interface only, remote address the CGNAT tailnet address
+    # space - never internet-wide. An already-present rule is verified, not
+    # rewritten (zero calls); a generic internet-wide OpenSSH rule (what the
+    # Windows capability creates) is constrained - a restriction, so allowed
+    # in setup (spec section 6) - and the constraint is said so, once: a rule
+    # already disabled records no call at all. Seams:
+    # Get-NetFirewallRule / New-NetFirewallRule / Set-NetFirewallRule (the
+    # tests override all three).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Ensure- is the plan-mandated surface name; kept for twin parity (invariant #10)')]
-    param()
-    throw 'Ensure-TailscaleFirewallRule: not implemented until Task 9 (windows sshd/firewall/rdp setup)'
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$Port
+    )
+    $rule = Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $rule) {
+        New-NetFirewallRule -Name $Name -DisplayName $Name -Direction Inbound -Protocol TCP `
+            -LocalPort $Port -Action Allow -InterfaceAlias 'Tailscale' -RemoteAddress '100.64.0.0/10' | Out-Null
+        Write-RemoteStatusOk ("firewall: rule ${Name} created (TCP :${Port}, Tailscale-scoped)")
+    } else {
+        Write-RemoteStatusOk ("firewall: rule ${Name} already present (TCP :${Port}, Tailscale-scoped)")
+    }
+    # The generic internet-wide OpenSSH rule: constrain it in favor of the
+    # scoped rule. Verify-first: already disabled means already constrained -
+    # no call, no repeat warning (idempotency, executed on reruns).
+    $generic = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
+    if (($null -ne $generic) -and ([string]$generic.Enabled -eq 'True')) {
+        Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Enabled False
+        Write-RemoteStatusWarn ("firewall: generic OpenSSH-Server-In-TCP rule constrained (disabled) in favor of ${Name} - the Tailscale-scoped rule replaces it")
+    }
+}
+
+function Set-RdpEnabled {
+    # RDP on, only when windows.rdp = true - the config owns the intent, this
+    # function owns the two writes: the fDenyTSConnections registry flip
+    # (0 = allow Terminal Services connections; verify-first, so an already-0
+    # value records no write) and the Tailscale-scoped :3389 rule through the
+    # generic firewall writer. The registry write goes through the
+    # Set-ItemProperty seam. No ShouldProcess for the same reason as
+    # Set-SshdServiceDesired above.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt; the bash twin carries no confirm gate either (twin parity, invariant #10)')]
+    param($Config)
+    if ((Get-RemoteConfigValue $Config 'windows.rdp' $false) -ne $true) { return }
+    $deny = $null
+    $props = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+        -Name fDenyTSConnections -ErrorAction SilentlyContinue
+    if ($null -ne $props) { $deny = $props.fDenyTSConnections }
+    if ($deny -ne 0) {
+        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+            -Name fDenyTSConnections -Value 0
+        Write-RemoteStatusOk 'rdp: Remote Desktop enabled (fDenyTSConnections 0)'
+    } else {
+        Write-RemoteStatusOk 'rdp: Remote Desktop already enabled'
+    }
+    Ensure-TailscaleFirewallRule -Name 'RemoteDesktop-Tailscale' -Port 3389
 }
 
 function Invoke-WslReconcile {
@@ -543,6 +626,75 @@ function Test-TunnelConfig {
 }
 
 # ---------------------------------------------------------------------------
+# setup - the Windows arm of `dot remote setup` (spec section 6). Prerequisites
+# are checked, never installed (the installer groups own installation); an
+# unauthenticated Tailscale prints the issue's ACTION REQUIRED block and
+# stops only the Tailscale-dependent paths (the tailnet-scoped firewall rules
+# and RDP, whose rule half is one of them); every write verifies current
+# state first, so an already-correct host records no mutations, and setup
+# exits non-zero only on hard failure. The WSL arm, serve mappings, tunnel
+# render, and login keys land with Tasks 10-11 behind this orchestration.
+# ---------------------------------------------------------------------------
+
+function Invoke-RemoteSetup {
+    # Not configured: a no-op, never a crash, never a mutation (the bash
+    # cmd_setup parity).
+    $config = Get-RemoteAccessConfig
+    if (($null -eq $config) -or ((Get-RemoteConfigValue $config 'enabled' $false) -ne $true)) {
+        Write-Host 'not configured'
+        return
+    }
+    # Gate first: the state every Tailscale-dependent path below branches on.
+    $tsState = Get-TailscaleState
+    switch ($tsState) {
+        'ok' {
+            Write-RemoteStatusOk 'tailscale: connected'
+        }
+        'unauth' {
+            Write-RemoteStatusWarn 'tailscale: not authenticated'
+            Write-Host 'ACTION REQUIRED:'
+            Write-Host 'Authenticate this host with Tailscale, then rerun:'
+            Write-Host '    dot remote setup'
+        }
+        'absent' {
+            Write-RemoteStatusWarn 'tailscale: not installed (manual: install Tailscale, then run: tailscale up)'
+        }
+    }
+    # Prerequisites: presence checks only (spec section 6). cloudflared's
+    # service registration stays a printed elevated manual step.
+    if (Get-Command cloudflared -ErrorAction SilentlyContinue) {
+        Write-RemoteStatusOk 'cloudflared: present (service registration stays manual: cloudflared service install)'
+    } else {
+        Write-RemoteStatusWarn 'cloudflared: not installed (manual: install cloudflared before using the browser path)'
+    }
+    # Windows transport write independent of Tailscale: sshd (the
+    # missing-service case inside is the capability presence check - never an
+    # install from here).
+    if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+        Set-SshdServiceDesired
+    }
+    # Tailscale-dependent paths: the tailnet-scoped firewall rules and RDP
+    # (whose rule half is one of them - Set-RdpEnabled is one atomic unit per
+    # the plan's surface table) run only behind the authenticated gate - the
+    # bash twin's cmd_setup shape, where only `ok` proceeds.
+    if ($tsState -eq 'ok') {
+        if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+            Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22
+        }
+        Set-RdpEnabled -Config $config
+    } else {
+        Write-RemoteStatusWarn "firewall: held while tailscale is ${tsState} (dependent paths held)"
+        if ((Get-RemoteConfigValue $config 'windows.rdp' $false) -eq $true) {
+            Write-RemoteStatusWarn "rdp: held while tailscale is ${tsState} (dependent paths held)"
+        }
+    }
+    # The WSL arm, serve mappings, tunnel render, and login keys land with
+    # Tasks 10-11 and are called from here then; the dispatcher's remaining
+    # arms still throw until then.
+    Write-Host 'next: verify key login from another device, then run: dot remote harden-ssh'
+}
+
+# ---------------------------------------------------------------------------
 # dispatch - the same subcommand surface the bash twin's main() resolves.
 # An unknown (or missing) subcommand prints usage on stderr and exits 2.
 # ---------------------------------------------------------------------------
@@ -554,7 +706,7 @@ function Invoke-RemoteAccess {
     )
     switch ($Sub) {
         'setup' {
-            throw 'setup: not implemented until Task 9 (windows sshd/firewall/rdp setup)'
+            Invoke-RemoteSetup
         }
         'status' {
             Get-RemoteStatus
