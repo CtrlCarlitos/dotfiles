@@ -243,6 +243,12 @@ jobs:
       - name: Test devprofile identity (pwsh twin)
         run: pwsh -NoProfile -File tests/devprofile_identity.ps1
 
+      # `dot remote` (tests/remote_access.sh's Windows twin): dot-source
+      # harness with REMOTE_ACCESS_NO_MAIN=1 and function-override seams -
+      # the same scenarios, no native invocations, on this job's pwsh.
+      - name: Test dot remote (pwsh twin)
+        run: pwsh -NoProfile -File tests/remote_access.ps1
+
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -328,6 +334,10 @@ jobs:
       - name: Test pwsh profiles contract (5.1)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\pwsh_profiles.ps1
+
+      - name: Test dot remote (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\remote_access.ps1
 
       - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
         shell: pwsh
