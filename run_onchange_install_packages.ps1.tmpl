@@ -1054,67 +1054,67 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
     }
 }
 
-# agy: MCP via plugin bundle, NOT the global mcp_config.json - agy defers
-#     global stdio servers until a manual /mcp (its fast-startup design),
-#     while plugin-bundled servers start eagerly at session init (agy's own
-#     documented auto-wire path; surveyed live 2026-09-20). Idempotent:
-#     rewriting the bundle is a refresh. BOM-less writes per the opencode
-#     note above (agy's Go consumer has the same BOM class).
-$agyPluginsDir = "$env:USERPROFILE\.gemini\config\plugins\dotfiles-mcp"
+# agy: MCP via the TOP-LEVEL mcp_config.json, each server with
+#     forceAllToolsEager - agy marks every server's tools lazy by default,
+#     and lazy tools are only reachable through the generic call_mcp_tool
+#     invoker, which guardrail denies by design (dotfiles #175: serena and
+#     graft were effectively unusable in agy). forceAllToolsEager promotes
+#     each server's tools to native mcp_<server>_<tool> entries that
+#     guardrail's registry already classifies. A plugin bundle is not an
+#     alternative: it prefixes the server name, and guardrail does not know
+#     mcp_dotfiles-mcp_serena_*. Merge, never clobber: user-added servers
+#     and other keys survive. Idempotent: rewriting our keys is a refresh.
+#     BOM-less writes per the opencode note above (agy's Go consumer has
+#     the same BOM class).
+$agyGlobalMcp = "$env:USERPROFILE\.gemini\config\mcp_config.json"
 $agyWantServers = @()
 if (Get-Command serena -ErrorAction SilentlyContinue) { $agyWantServers += 'serena' }
 if (Get-Command graft -ErrorAction SilentlyContinue) { $agyWantServers += 'graft' }
 if ($agyWantServers.Count -gt 0) {
     try {
-        New-Item -ItemType Directory -Force -Path $agyPluginsDir | Out-Null
-        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'plugin.json'), '{ "name": "dotfiles-mcp" }', (New-Object System.Text.UTF8Encoding($false)))
-        $agyServers = @{}
+        New-Item -ItemType Directory -Force -Path (Split-Path $agyGlobalMcp) | Out-Null
+        $agyCfg = $null
+        if ((Test-Path $agyGlobalMcp) -and ((Get-Item $agyGlobalMcp).Length -gt 0)) {
+            try { $agyCfg = Get-Content $agyGlobalMcp -Raw | ConvertFrom-Json } catch {
+                throw "existing agy mcp_config.json is not valid JSON - leaving it untouched"
+            }
+        }
+        if (-not $agyCfg) { $agyCfg = New-Object PSObject }
+        if (-not $agyCfg.PSObject.Properties['mcpServers']) {
+            $agyCfg | Add-Member -MemberType NoteProperty -Name mcpServers -Value (New-Object PSObject)
+        }
+        # MCP servers, from .chezmoidata/agents.yaml (see #83): only the ones
+        # whose binary is present are (re)written; everything else in the
+        # file is passed through untouched.
         if ($agyWantServers -contains 'serena') {
-            $agyServers['serena'] = @{ command = $mcpCatalog.serena.command; args = $mcpCatalog.serena.args }
+            $serenaDef = @{ command = $mcpCatalog.serena.command; args = $mcpCatalog.serena.args; forceAllToolsEager = $true }
+            if ($agyCfg.mcpServers.PSObject.Properties['serena']) { $agyCfg.mcpServers.serena = $serenaDef }
+            else { $agyCfg.mcpServers | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef }
         }
         if ($agyWantServers -contains 'graft') {
-            $agyServers['graft'] = @{ command = $mcpCatalog.graft.command; args = $mcpCatalog.graft.args }
+            $graftDef = @{ command = $mcpCatalog.graft.command; args = $mcpCatalog.graft.args; forceAllToolsEager = $true }
+            if ($agyCfg.mcpServers.PSObject.Properties['graft']) { $agyCfg.mcpServers.graft = $graftDef }
+            else { $agyCfg.mcpServers | Add-Member -MemberType NoteProperty -Name graft -Value $graftDef }
         }
-        $agyBundle = @{ mcpServers = $agyServers } | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText((Join-Path $agyPluginsDir 'mcp_config.json'), $agyBundle, (New-Object System.Text.UTF8Encoding($false)))
-        Write-Host "  agy MCP plugin bundle written: $($agyWantServers -join ', ')" -ForegroundColor Green
+        [System.IO.File]::WriteAllText($agyGlobalMcp, ($agyCfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  agy MCP registered in global mcp_config.json (forceAllToolsEager): $($agyWantServers -join ', ')" -ForegroundColor Green
     } catch {
-        Write-Host "  Warning: agy MCP plugin bundle failed - $_" -ForegroundColor Red
+        Write-Host "  Warning: agy MCP registration failed - $_" -ForegroundColor Red
     }
 }
 
-# One-time migration: retire serena/graft from the old global
-# mcp_config.json - the plugin bundle is the only MCP source this repo owns
-# (cross-source doubles otherwise; operator instruction 2026-09-20).
-# Surgical: only OUR keys are removed; the file is deleted only when
-# nothing else remains, so a user-added server survives.
-$agyGlobalMcp = "$env:USERPROFILE\.gemini\config\mcp_config.json"
-if (Test-Path $agyGlobalMcp) {
+# One-time migration: retire the dotfiles-mcp plugin bundle this repo
+# wrote before #175 - plugin-prefixed server names (mcp_dotfiles-mcp_*)
+# are unknown to guardrail's registry, and a second MCP source doubles
+# every server the global file now declares. Only OUR dir is removed;
+# other plugins (superpowers) are never touched.
+$agyPluginsDir = "$env:USERPROFILE\.gemini\config\plugins\dotfiles-mcp"
+if (Test-Path $agyPluginsDir) {
     try {
-        $gJson = Get-Content $agyGlobalMcp -Raw | ConvertFrom-Json
-        $msProp = $gJson.PSObject.Properties['mcpServers']
-        $gChanged = $false
-        if ($msProp -and $msProp.Value) {
-            foreach ($k in @('serena', 'graft')) {
-                if ($msProp.Value.PSObject.Properties[$k]) {
-                    $msProp.Value.PSObject.Properties.Remove($k)
-                    $gChanged = $true
-                }
-            }
-        }
-        if ($gChanged) {
-            # Never delete: guardrail's antigravity coverage check (the
-            # `guardrail setup` gate) fails hard on an absent or 0-byte file
-            # (agent-guardrails#334); an empty mcpServers object reads as "none".
-            [System.IO.File]::WriteAllText($agyGlobalMcp, ($gJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
-            if (@($msProp.Value.PSObject.Properties).Count -eq 0) {
-                Write-Host "  Retired serena/graft from agy global mcp_config.json (left an empty mcpServers for guardrail's coverage gate)" -ForegroundColor Green
-            } else {
-                Write-Host "  Retired serena/graft from agy global mcp_config.json (other servers kept)" -ForegroundColor Green
-            }
-        }
+        Remove-Item -LiteralPath $agyPluginsDir -Recurse -Force
+        Write-Host "  Retired the dotfiles-mcp plugin bundle (the global mcp_config.json is the only MCP source now)" -ForegroundColor Green
     } catch {
-        Write-Host "  Warning: agy global mcp_config.json retirement failed - $_" -ForegroundColor Red
+        Write-Host "  Warning: could not remove the dotfiles-mcp plugin bundle - $_" -ForegroundColor Red
     }
 }
 # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
@@ -1460,15 +1460,19 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # 2026-09-20): presence-only here by design - install-if-missing.
 }
 
-# Superpowers for Codex CLI: deliberately NOT automated. Confirmed live
-# via an isolated Docker test that the third-party `codex-plugin` npm
-# helper (the only scriptable option) doesn't just prompt interactively -
-# it expects a plugins/<name>/ marketplace layout that obra/superpowers
-# doesn't use (it ships a root-level .codex-plugin/plugin.json manifest
-# instead), so it fails outright regardless of flags. Codex's real
-# install path for this plugin is its native in-app `/plugins` search UI -
-# genuinely GUI/session-only, no config file or CLI command reaches it
-# from outside a session.
+# Superpowers for Codex CLI: the official Codex plugin marketplace
+# (`openai-curated-remote`, pre-configured in codex) carries superpowers,
+# and `codex plugin add` installs it scriptably (obra/superpowers README,
+# Codex CLI section; verified live on codex-cli 0.157.0 - the third-party
+# `codex-plugin` npm helper this repo once rejected is not involved).
+# Re-running add on an installed plugin is a refresh, so this is idempotent
+# like the Claude Code Superpowers step above. Refresh PATH first:
+# the codex shim may have arrived in this same run (Install-Node above).
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+if (Get-Command codex -ErrorAction SilentlyContinue) {
+    Write-Host "  Installing Superpowers plugin for Codex..." -ForegroundColor Yellow
+    Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { codex plugin add superpowers@openai-curated-remote 2>$null }
+}
 {{- end }}
 
 {{- if $antigravity_cli }}

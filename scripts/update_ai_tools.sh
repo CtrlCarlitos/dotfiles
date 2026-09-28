@@ -124,10 +124,20 @@ else
     echo "   Curated skills: Codex installed=0 skipped=$curated_total failed=0"
 fi
 
-# Superpowers for Codex CLI: not automated - see run_onchange_install_packages.sh.tmpl
-# for why (the only scriptable option is structurally incompatible with this
-# plugin's manifest format, confirmed via an isolated test, not just an
-# interactive-prompt issue). Update it via Codex's own `/plugins` UI.
+# Superpowers for Codex CLI: the official Codex plugin marketplace
+# (`openai-curated-remote`, pre-configured in codex) carries it, and
+# `codex plugin add` both installs and updates (same command, idempotent -
+# like `agy plugin install` above). Defer-aware: the plugin dir is resolved
+# by live codex sessions, same premise as the npm upgrade above.
+if command -v codex &>/dev/null; then
+    if deferred codex; then
+        echo "  codex deferred - Superpowers (Codex) update skipped with it."
+    else
+        echo "✨ Updating Superpowers (Codex)..."
+        net_timeout 300 codex plugin add superpowers@openai-curated-remote &>/dev/null \
+            || echo "   Superpowers not installed for Codex - skipping"
+    fi
+fi
 
 # guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
@@ -281,5 +291,10 @@ if command -v graft &>/dev/null; then
         graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
     fi
 fi
+# No Codex hook-path normalization here, unlike the .ps1 twin: graft writes
+# this OS's native separator, so on Linux/macOS ~/.codex/hooks.json already
+# carries forward slashes. The backslash bug (dotfiles #170) is Windows-only
+# - git bash, which the Codex TUI spawns there, eats backslashes - and the
+# Windows twin normalizes it after every graft upgrade.
 
 echo "✅ AI Tools Update Complete!"

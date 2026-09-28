@@ -257,6 +257,52 @@ catalog:
       group: modern_cli
       choco: pstop
 
+    # Network diagnostics: the familiar ifconfig/dig/traceroute set (#177).
+    # macOS already ships ifconfig, netstat, dig, traceroute, tcpdump and
+    # whois natively, so only the gaps carry brew names here; Windows keeps
+    # its own netsh/ipconfig stack. Order: legacy net-tools first (its
+    # ifconfig/netstat/route/arp are the ones muscle memory reaches for),
+    # then DNS, paths, and the traffic tools.
+    - id: net-tools
+      group: modern_cli
+      apt: net-tools
+      note: "ifconfig/netstat/route/arp; Linux only - macOS and Windows ship their own"
+    - id: dnsutils
+      group: modern_cli
+      apt: dnsutils
+      note: "dig/nslookup/host; macOS ships dig and nslookup"
+    - id: traceroute
+      group: modern_cli
+      apt: traceroute
+      note: "macOS ships traceroute natively; tracepath rides iproute2 on Linux"
+    - id: mtr
+      group: modern_cli
+      apt: mtr-tiny
+      brew: mtr
+      note: "apt: mtr-tiny is the curses traceroute+ping without the GUI dep"
+    - id: tcpdump
+      group: modern_cli
+      apt: tcpdump
+      note: "macOS ships tcpdump natively (sudo required)"
+    - id: nmap
+      group: modern_cli
+      apt: nmap
+      brew: nmap
+    - id: whois
+      group: modern_cli
+      apt: whois
+      note: "macOS ships whois natively"
+    - id: iperf3
+      group: modern_cli
+      apt: iperf3
+      brew: iperf3
+      note: "apt: its postinst may ask whether to start the daemon - the default (no) is what we want; nothing here starts it"
+    - id: telnet
+      group: modern_cli
+      apt: telnet
+      brew: telnet
+      note: "macOS removed telnet in 10.13+ - the brew formula fills that gap"
+
     # ----------------------------------------------------------- fonts
     - id: meslo-nerd-font
       group: fonts

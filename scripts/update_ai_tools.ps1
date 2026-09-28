@@ -226,10 +226,19 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-CuratedSkillsSkippedSummary
 }
 
-# Superpowers for Codex CLI: not automated - see run_onchange_install_packages.ps1.tmpl
-# for why (the only scriptable option is structurally incompatible with this
-# plugin's manifest format, confirmed via an isolated test, not just an
-# interactive-prompt issue). Update it via Codex's own `/plugins` UI.
+# Superpowers for Codex CLI: the official Codex plugin marketplace
+# (`openai-curated-remote`, pre-configured in codex) carries it, and
+# `codex plugin add` both installs and updates (same command, idempotent -
+# like `agy plugin install` above). Defer-aware: the plugin dir is resolved
+# by live codex sessions, same premise as the npm upgrade above.
+if (Get-Command codex -ErrorAction SilentlyContinue) {
+    if (Test-Deferred 'codex') {
+        Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
+    } else {
+        Write-Host "✨ Updating Superpowers (Codex)..." -ForegroundColor Yellow
+        codex plugin add superpowers@openai-curated-remote 2>$null
+    }
+}
 
 # guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
