@@ -113,12 +113,30 @@ lines name the manual action. Never prints secrets.
 
 ## 7. `dot remote fix`
 
-Repairs deterministic machine-local state only: restart sshd, restore the
-expected startup mode, repair the Tailscale-scoped firewall rules, reconcile
-the WSL portproxy, restart the cloudflared service, re-apply configured
-Tailscale Serve mappings, re-render/validate the local tunnel config. It
-never signs in to Tailscale, touches Access policies, weakens SSH auth,
-disables a security control, or exposes a new service.
+Repairs deterministic machine-local state only. Per platform:
+
+- **Windows:** restart sshd and restore its `Automatic` startup mode;
+  re-ensure the Tailscale-scoped firewall rules for the capabilities the
+  config declares (`OpenSSH-Tailscale` :22 when `windows.ssh`,
+  `RemoteDesktop-Tailscale` :3389 when `windows.rdp`, `WSL-SSH-Tailscale`
+  :2222 when `wsl.enabled` — behind the same authenticated-Tailscale gate
+  as setup); reconcile the WSL portproxy when `wsl.enabled`; restart the
+  cloudflared service when it is registered but not running (never
+  installed by fix); re-apply configured Tailscale Serve mappings
+  (auth-gated); re-render the local tunnel config.
+- **Linux:** restart sshd and restore its startup mode; restart the
+  cloudflared service when the systemd unit exists but is not running
+  (read-only `systemctl list-unit-files` existence check); re-apply
+  configured Tailscale Serve mappings (auth-gated); re-render the local
+  tunnel config. The tailnet-scoped firewall stays a verify-only path
+  owned by setup, and the :2222 portproxy is Windows-owned — fix prints
+  the pointer to `dot remote wsl-reconcile` on the Windows host.
+- **macOS:** the Serve and tunnel repairs only — Remote Login, Screen
+  Sharing, and service restarts stay manual.
+
+It never signs in to Tailscale, touches Access policies, weakens SSH auth,
+disables a security control, or exposes a new service. On an already-healthy
+host fix records zero mutations — every repair verifies current state first.
 
 ## 8. `dot remote harden-ssh`
 

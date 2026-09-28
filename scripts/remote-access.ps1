@@ -27,8 +27,11 @@
 # its rule, the logon reconcile task, the serve mappings, the tunnel render)
 # behind the same recorded-call seams the bash twin's tests pin. `fix`
 # repairs deterministic machine-local state only - sshd running and
-# Automatic again, the auth-gated serve re-apply, the deterministic tunnel
-# re-render - and never turns a non-loopback target into exposure.
+# Automatic again, the Tailscale-scoped firewall rules re-ensured (behind
+# the auth gate), the WSL portproxy reconciled, the registered cloudflared
+# service restarted when it is not running, the auth-gated serve re-apply,
+# the deterministic tunnel re-render - and never turns a non-loopback
+# target into exposure.
 # `harden-ssh` flips sshd to key-only behind its two guards (an authorized
 # key present, then -Confirmed). `tunnel render`/`tunnel validate` write and
 # line-scan the machine-local cloudflared config (terminal http_status:404
@@ -765,6 +768,113 @@ function Test-LocalAdmin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-LoginKeyAclUser {
+    # The account the strict private-key ACL grants: the current Windows
+    # identity's name (DOMAIN\user - icacls accepts the qualified form).
+    # The tests override this function, so no real identity lookup ever
+    # runs in a (Linux) test host - the same seam discipline as
+    # Test-LocalAdmin above.
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return $identity.Name
+}
+
+function Initialize-LoginKey {
+    # Initialize-LoginKey -Name <name> [-Generate <bool>]: the
+    # ra_login_key_materialize twin (spec section 5.1 steps 1-2) - ensure
+    # ~\.ssh\<name> exists, idempotent, only-if-missing, confirmation-gated.
+    # Both halves missing: confirm, then `ssh-keygen -t ed25519 -f` the key.
+    # Under the non-TTY confirm seam ($env:RA_CONFIRM_MATERIALIZE) the
+    # passphrase is empty (`-N ''` - no prompt can be answered in a
+    # redirected session, so the empty passphrase exists only in the seam);
+    # a real interactive run omits -N and lets ssh-keygen ask; a
+    # non-interactive run (RA_NONINTERACTIVE, or stdin redirected) WARNS
+    # `not created` and never generates. Only the .pub present: Pattern B -
+    # the public half was dropped here from the owning device; use as-is,
+    # inbound-only, no generation, no missing-private-key complaint.
+    # -Generate $false declares Pattern B up front: WARN to drop the public
+    # half, never generate. The strict private-key ACL rides the creation
+    # (the administrators_authorized_keys discipline: the grant sits beside
+    # the write, so an already-materialized key is verified present and its
+    # ACL is left exactly as the owner set it - a second run records no
+    # call). Key material is never read, never printed.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the creation is double-gated (confirm seam or TTY prompt); a non-interactive run must never prompt (twin parity, invariant #10)')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingReadHost', '', Justification = 'the TTY confirm prompt is the spec-mandated gate for key creation; the non-interactive gates (RA_NONINTERACTIVE / redirected stdin) return before it is ever reached')]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [bool]$Generate = $true
+    )
+    $sshDir = Join-Path (Get-RemoteHome) '.ssh'
+    $priv = Join-Path $sshDir $Name
+    $pub = "${priv}.pub"
+    if (-not (Test-Path -LiteralPath $sshDir -PathType Container)) {
+        $null = New-Item -ItemType Directory -Force -Path $sshDir
+    }
+    if (Test-Path -LiteralPath $priv -PathType Leaf) {
+        Write-RemoteStatusOk "login key ${Name}: present"
+        return
+    }
+    if (Test-Path -LiteralPath $pub -PathType Leaf) {
+        Write-RemoteStatusOk "login key ${Name}: public half present, inbound-only (no private half here)"
+        return
+    }
+    if (-not $Generate) {
+        Write-RemoteStatusWarn "login key ${Name}: generate=false and no public half dropped yet - drop the public half into ${pub} to authorize it"
+        return
+    }
+    if ($env:RA_CONFIRM_MATERIALIZE) {
+        # The non-TTY confirm seam: the empty passphrase exists only here.
+        $keygenArgs = @('-t', 'ed25519', '-f', $priv, '-N', '')
+    } elseif ($env:RA_NONINTERACTIVE -or [Console]::IsInputRedirected) {
+        Write-RemoteStatusWarn "login key ${Name}: not created (non-interactive run - confirm the prompt on a console, or set RA_CONFIRM_MATERIALIZE=1)"
+        return
+    } else {
+        $answer = Read-Host "create login key ${Name} (passphrase prompt follows)? [y/N]"
+        if (($answer -eq 'y') -or ($answer -eq 'Y') -or ($answer -eq 'yes') -or ($answer -eq 'Yes') -or ($answer -eq 'YES')) {
+            # A real run omits -N: ssh-keygen prompts for the passphrase.
+            $keygenArgs = @('-t', 'ed25519', '-f', $priv)
+        } else {
+            Write-RemoteStatusWarn "login key ${Name}: not created (declined)"
+            return
+        }
+    }
+    $null = Get-RemoteQuietOutput { & ssh-keygen @keygenArgs }
+    if ($LASTEXITCODE -ne 0) {
+        Write-RemoteStatusWarn "login key ${Name}: key generation failed (manual: ssh-keygen -t ed25519 -f `"$priv`")"
+        return
+    }
+    # The strict private-key ACL, riding the creation: inheritance disabled,
+    # the current user fully granted - the same icacls discipline the
+    # administrators_authorized_keys grant uses. A failed grant is the
+    # manual-action WARN, never a crash.
+    $user = Get-LoginKeyAclUser
+    $icaclsArgs = @($priv, '/inheritance:r', '/grant', "${user}:F")
+    $null = Get-RemoteQuietOutput { & icacls @icaclsArgs }
+    if ($LASTEXITCODE -ne 0) {
+        Write-RemoteStatusWarn "login key ${Name}: ACL hardening failed (manual: icacls `"$priv`" /inheritance:r /grant `"${user}:F`")"
+    }
+    Write-RemoteStatusOk "login key ${Name}: created"
+}
+
+function Initialize-LoginKeys {
+    # Drive Initialize-LoginKey for every [[data.remote_access.login_keys]]
+    # entry (spec section 5.1 steps 1-2). Setup runs this BEFORE
+    # Publish-LoginKeys - materialize-then-publish, so a just-created key is
+    # authorized in the same pass (the ra_setup_login_keys order). A missing
+    # generate flag defaults to true (Pattern A); the config resolver keeps
+    # a declared false three-state here (a JSON false is a real property
+    # value, not collapsed onto the default), so Pattern B is honored, not
+    # generated over.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Initialize-LoginKey call per entry; kept for twin parity with ra_setup_login_keys (invariant #10)')]
+    param($Config)
+    $keys = Get-RemoteConfigValue $Config 'login_keys' $null
+    if ($null -eq $keys) { return }
+    foreach ($entry in @($keys)) {
+        $name = Get-RemoteConfigValue $entry 'name' ''
+        if ([string]::IsNullOrEmpty($name)) { continue }
+        Initialize-LoginKey -Name $name -Generate ([bool](Get-RemoteConfigValue $entry 'generate' $true))
+    }
+}
+
 function Publish-LoginKey {
     # Publish-LoginKey -Name <key> -Target <target>: authorize the PUBLIC
     # half (~/.ssh/<name>.pub) for <target>. The private half is never
@@ -1168,12 +1278,16 @@ function Invoke-RemoteSetup {
             }
         }
     }
-    # Login keys (spec section 5.1): every declared target authorizes on this
-    # host - wsl through its channel, windows into
-    # administrators_authorized_keys (admin) or the user's authorized_keys.
-    # Machine-local writes, independent of Tailscale and of the WSL gate
-    # (the bash twin's ra_setup_login_keys runs unconditionally; a failed
-    # channel degrades to the WARN inside Publish-LoginKey).
+    # Login keys (spec section 5.1), materialize-then-publish: steps 1-2
+    # (create only-if-missing behind the confirm gate, the strict ACL riding
+    # the creation) run BEFORE step 3 (authorize the declared targets), the
+    # ra_setup_login_keys order - so a just-created key is authorized in the
+    # same pass. Machine-local writes, independent of Tailscale and of the
+    # WSL gate (the bash twin's ra_setup_login_keys runs unconditionally; a
+    # failed channel degrades to the WARN inside Publish-LoginKey). A
+    # non-interactive run never prompts and never generates: a
+    # declared-but-missing key degrades to the WARN.
+    Initialize-LoginKeys -Config $config
     Publish-LoginKeys -Config $config
     # Serve mappings (spec section 6): Tailscale-dependent like the firewall rules
     # and RDP - held unless the backend is authenticated.
@@ -1191,9 +1305,12 @@ function Invoke-RemoteSetup {
 }
 
 # ---------------------------------------------------------------------------
-# fix + harden-ssh (spec section 8, section 4) - the repair-only repairs and the guarded
-# key-only flip. fix touches deterministic machine-local state only: sshd
-# running again + the expected startup mode restored, the configured
+# fix + harden-ssh (spec section 8, section 4) - the repair-only repairs and the
+# guarded key-only flip. fix touches deterministic machine-local state only:
+# sshd running again + the expected startup mode restored, the declared
+# Tailscale-scoped firewall rules re-ensured (behind the auth gate, same as
+# setup), the WSL portproxy reconciled when wsl.enabled, the registered
+# cloudflared service restarted when it is not running, the configured
 # Tailscale Serve mappings re-applied (behind the auth gate, same as setup),
 # the local tunnel config re-rendered. It never logs into Tailscale, touches
 # Cloudflare Access/ACLs, weakens SSH auth, disables a security control,
@@ -1232,17 +1349,45 @@ function Invoke-WindowsSshFix {
     }
 }
 
+function Invoke-CloudflaredServiceFix {
+    # The cloudflared service arm of fix (spec section 8): restart the
+    # registered service when it is present but not running. Presence check
+    # only - fix never installs or registers the service (registration stays
+    # the printed elevated manual step). A running service is verified, not
+    # bounced (repair-only: an already-healthy host records no mutation),
+    # and an absent service has nothing to repair - the quiet skip.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the fix subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
+    param()
+    $svc = Get-Service -Name cloudflared -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return }
+    # String compare, not the enum: 5.1 resolves ServiceControllerStatus
+    # only after the REAL Get-Service has loaded its assembly, and the
+    # tests override the cmdlet (the same string compare Get-SshdState
+    # uses).
+    if ([string]$svc.Status -ne 'Running') {
+        Restart-Service -Name cloudflared
+        Write-RemoteStatusOk 'cloudflared: service restarted'
+    } else {
+        Write-RemoteStatusOk 'cloudflared: service running'
+    }
+}
+
 function Invoke-RemoteFix {
     # The fix arm (spec section 8) - the cmd_fix twin: repair deterministic
     # machine-local state only. sshd restarted and its startup mode
-    # restored (the Windows arm above), the configured Tailscale Serve
-    # mappings re-applied behind the authenticated gate, the local tunnel
-    # config re-rendered. A configured service whose target is not
-    # 127.0.0.1 is refused with a FAIL inside Invoke-ServeApply - fix never
-    # repairs a target into exposure (Review Focus #4). Not configured: a
-    # no-op pointing at the docs, never a crash, never a mutation. No
-    # ShouldProcess: the subcommand IS the explicit repair intent and a
-    # non-interactive run must never prompt.
+    # restored (the Windows arm above), the declared Tailscale-scoped
+    # firewall rules re-ensured behind the authenticated gate (the generic
+    # writer verifies an already-present rule with zero calls), the WSL
+    # portproxy reconciled when wsl.enabled (best-effort: every broken
+    # probe degrades to the WARN inside Invoke-WslReconcile), the
+    # registered cloudflared service restarted when it is not running, the
+    # configured Tailscale Serve mappings re-applied behind the same
+    # authenticated gate, the local tunnel config re-rendered. A configured
+    # service whose target is not 127.0.0.1 is refused with a FAIL inside
+    # Invoke-ServeApply - fix never repairs a target into exposure (Review
+    # Focus #4). Not configured: a no-op pointing at the docs, never a
+    # crash, never a mutation. No ShouldProcess: the subcommand IS the
+    # explicit repair intent and a non-interactive run must never prompt.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the fix subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
     param()
     $config = Get-RemoteAccessConfig
@@ -1265,6 +1410,32 @@ function Invoke-RemoteFix {
     if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
         Invoke-WindowsSshFix
     }
+    # Firewall re-ensure (spec section 8), Tailscale-gated exactly like
+    # setup - the rules are Tailscale-dependent writes. Only the
+    # capabilities the config declares are touched.
+    if ($tsState -eq 'ok') {
+        if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+            Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22
+        }
+        if ((Get-RemoteConfigValue $config 'windows.rdp' $false) -eq $true) {
+            Ensure-TailscaleFirewallRule -Name 'RemoteDesktop-Tailscale' -Port 3389
+        }
+        if ((Get-RemoteConfigValue $config 'wsl.enabled' $false) -eq $true) {
+            Ensure-TailscaleFirewallRule -Name 'WSL-SSH-Tailscale' -Port ([int](Get-RemoteConfigValue $config 'wsl.ssh_port' 2222))
+        }
+    } else {
+        Write-RemoteStatusWarn "firewall: held while tailscale is ${tsState} (dependent paths held)"
+    }
+    # The WSL portproxy reconcile (spec sections 8/9) when wsl.enabled:
+    # best-effort like setup's arm - a broken WSL degrades to the WARN
+    # naming the manual action inside Invoke-WslReconcile, never a crash,
+    # never a blind rule.
+    if ((Get-RemoteConfigValue $config 'wsl.enabled' $false) -eq $true) {
+        Invoke-WslReconcile
+    }
+    # The registered cloudflared service, restarted when present but not
+    # running (presence check - never installed here).
+    Invoke-CloudflaredServiceFix
     # Tailscale-dependent path, gated exactly like setup: re-applying Serve
     # mappings needs an authenticated backend.
     if ($tsState -eq 'ok') {
@@ -1314,7 +1485,23 @@ function Invoke-RemoteAccess {
             Invoke-SshHardening -Confirmed:$confirmed
         }
         'wsl-reconcile' {
-            Invoke-WslReconcile @Rest
+            # --install-task (spec sections 4/9) arrives as a raw argument
+            # word through the dispatcher, matched case-insensitively like
+            # harden-ssh's -Confirmed above; anything else is the
+            # unknown-argument refusal, exit 1 via the terminating error.
+            # The task is registered FIRST, then the reconcile runs - the
+            # task's own action is this reconcile arm, so a fresh install
+            # reconciles in the same invocation.
+            $installTask = $false
+            foreach ($restArg in $Rest) {
+                if (($restArg -eq '-InstallTask') -or ($restArg -eq '--InstallTask') -or ($restArg -eq '--install-task')) {
+                    $installTask = $true
+                } else {
+                    throw "wsl-reconcile: unknown argument: ${restArg}"
+                }
+            }
+            if ($installTask) { Register-WslReconcileTask }
+            Invoke-WslReconcile
         }
         'tunnel' {
             $mode = ''

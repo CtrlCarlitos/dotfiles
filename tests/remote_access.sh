@@ -48,7 +48,10 @@ set -euo pipefail
 # against the recorded stubs - the stubs derive their state from the call
 # log - and the second pass must record zero mutating calls. fix (spec §8)
 # is repair-only: a stopped sshd gets exactly `systemctl restart ssh` plus
-# the startup-mode restore, a healthy host records zero mutating calls (the
+# the startup-mode restore, the cloudflared service restarts only when its
+# unit exists and is not running (read-only list-unit-files probe), the
+# wsl.enabled portproxy pointer names the Windows-host arm, a healthy host
+# records zero mutating calls (the
 # strict stubs fail anything beyond the read-only probes), an
 # unauthenticated backend holds serve, and an unconfigured host is a
 # `not configured` no-op. harden-ssh is guarded: without `--confirmed` or
@@ -1005,6 +1008,7 @@ ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
 case \"\$1 \${2:-}\" in
     \"is-active ssh\") printf 'inactive\n'; exit 3 ;;
     \"is-enabled ssh\") printf 'disabled\n'; exit 1 ;;
+    \"list-unit-files cloudflared.service\") printf 'UNIT FILE         STATE           VENDOR PRESET\n' ;;
     \"restart ssh\")
         line='systemctl'
         for a in \"\$@\"; do line=\"\$line '\$a'\"; done
@@ -1028,6 +1032,9 @@ repair_lines="$(wc -l <"$scratch/calls" 2>/dev/null || true)"
 repair_lines="${repair_lines:-0}"
 [ "$repair_lines" -eq 2 ] ||
     fail "fix must record exactly the two sshd repairs (got $repair_lines: $(cat "$scratch/calls" 2>/dev/null || true))"
+if grep -Fq "systemctl 'restart' 'cloudflared'" "$scratch/calls" 2>/dev/null; then
+    fail "fix must not restart cloudflared when its unit is absent (got: $(cat "$scratch/calls"))"
+fi
 if grep -q '^tailscale ' "$scratch/calls" 2>/dev/null; then
     fail "unauthenticated tailscale must hold the serve path during fix (got: $(cat "$scratch/calls"))"
 fi
@@ -1038,9 +1045,11 @@ printf '%s' "$out" | grep -Fq 'serve: skipped' ||
 pass
 
 # 31. fix on a healthy host (sshd active + enabled, the configured serve
-#     mapping already in place): ZERO mutating calls - fix is repair-only,
-#     the in-place mapping is verified not rewritten, and the tunnel config
-#     re-render is a byte-identical local write.
+#     mapping already in place, the cloudflared unit installed AND
+#     running): ZERO mutating calls - fix is repair-only, the in-place
+#     mapping is verified not rewritten, the running cloudflared service is
+#     verified not bounced, and the tunnel config re-render is a
+#     byte-identical local write.
 ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
     data) cat '$repo_root/tests/fixtures/remote_access/full-linux.json' ;;
 esac"
@@ -1060,6 +1069,8 @@ esac"
 ra_stub "$scratch/bin" systemctl "case \"\$1 \${2:-}\" in
     \"is-active ssh\") printf 'active\n' ;;
     \"is-enabled ssh\") printf 'enabled\n' ;;
+    \"list-unit-files cloudflared.service\") printf 'UNIT FILE         STATE           VENDOR PRESET\ncloudflared.service enabled        enabled\n' ;;
+    \"is-active cloudflared\") printf 'active\n' ;;
     *) printf 'unexpected systemctl call: \$*\n' >&2
        exit 1 ;;
 esac"
@@ -1070,6 +1081,8 @@ out="$(ra_run fix 2>&1)" || rc=$?
 if [ -e "$scratch/calls" ] && [ -s "$scratch/calls" ]; then
     fail "fix on a healthy host must record zero mutating calls (got: $(cat "$scratch/calls"))"
 fi
+printf '%s' "$out" | grep -Fq '✓ cloudflared: service running' ||
+    fail "the running cloudflared service must be verified, not bounced (got: $out)"
 printf '%s' "$out" | grep -Fq 'already mapped' ||
     fail "the in-place serve mapping must be verified, not rewritten (got: $out)"
 printf '%s' "$out" | grep -Fq 'tunnel config written' ||
@@ -1173,6 +1186,90 @@ if ! cmp -s "$scratch/home/sshd_config" "$scratch/home/sshd_config.once"; then
     fail "a second harden-ssh must be byte-identical (idempotent)"
 fi
 unset RA_SSHD_CONFIG
+pass
+
+# ---------------------------------------------------------------------------
+# 35-36. fix's cloudflared + portproxy arms (spec §8). The cloudflared
+# service restarts only when the systemd unit exists and is not running
+# (read-only list-unit-files existence probe); the :2222 portproxy is
+# Windows-owned, so a wsl.enabled host gets the pointer line naming the
+# Windows-host arm, and nothing else is touched.
+# ---------------------------------------------------------------------------
+
+# 35. The unit exists but is not running: exactly one mutating call -
+#     `systemctl restart cloudflared` - the restart is reported, and the
+#     read-only existence probe records nothing.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-server.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"NeedsLogin\"}' ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"is-active ssh\") printf 'active\n' ;;
+    \"is-enabled ssh\") printf 'enabled\n' ;;
+    \"list-unit-files cloudflared.service\") printf 'UNIT FILE         STATE           VENDOR PRESET\ncloudflared.service enabled        enabled\n' ;;
+    \"is-active cloudflared\") printf 'inactive\n'; exit 3 ;;
+    \"restart cloudflared\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run fix 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "fix must exit 0 after restarting cloudflared (got $rc: $out)"
+require "$scratch/calls" "systemctl 'restart' 'cloudflared'"
+repair_lines="$(wc -l <"$scratch/calls" 2>/dev/null || true)"
+repair_lines="${repair_lines:-0}"
+[ "$repair_lines" -eq 1 ] ||
+    fail "the cloudflared restart must be the only mutating call (got $repair_lines: $(cat "$scratch/calls" 2>/dev/null || true))"
+printf '%s' "$out" | grep -Fq '✓ cloudflared: service restarted' ||
+    fail "fix must report the cloudflared restart (got: $out)"
+pass
+
+# 36. The portproxy pointer: a wsl.enabled host (full-linux-wsl.json) gets
+#     the Windows-owned pointer line and NOTHING else - sshd is
+#     active+enabled, the cloudflared unit is absent, serve is held
+#     (unauth), so fix records zero mutating calls.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-wsl.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"NeedsLogin\"}' ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "case \"\$1 \${2:-}\" in
+    \"is-active ssh\") printf 'active\n' ;;
+    \"is-enabled ssh\") printf 'enabled\n' ;;
+    \"list-unit-files cloudflared.service\") printf 'UNIT FILE         STATE           VENDOR PRESET\n' ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run fix 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "fix must exit 0 on the wsl-declared host (got $rc: $out)"
+printf '%s' "$out" | grep -Fq 'portproxy: Windows-owned - run: dot remote wsl-reconcile on the Windows host' ||
+    fail "fix must print the Windows-owned portproxy pointer when wsl.enabled (got: $out)"
+if [ -e "$scratch/calls" ] && [ -s "$scratch/calls" ]; then
+    fail "the healthy wsl-declared host must record zero mutating calls (got: $(cat "$scratch/calls"))"
+fi
 pass
 
 finish

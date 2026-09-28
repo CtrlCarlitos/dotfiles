@@ -1,0 +1,11 @@
+{
+  "remote_access": {
+    "enabled": true,
+    "linux": {
+      "ssh": true
+    },
+    "wsl": {
+      "enabled": true
+    }
+  }
+}

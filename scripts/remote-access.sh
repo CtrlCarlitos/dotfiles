@@ -960,14 +960,18 @@ cmd_setup() {
 # ---------------------------------------------------------------------------
 # fix + harden-ssh (spec §8, §4) - the repair-only repairs and the guarded
 # key-only flip. fix touches deterministic machine-local state only: sshd
-# running again + the expected startup mode restored, the configured Tailscale
-# Serve mappings re-applied (behind the auth gate, same as setup), the local
-# tunnel config re-rendered. It never logs into Tailscale, touches Cloudflare
-# Access/ACLs, weakens SSH auth, disables a security control, creates a
-# public listener, or exposes a new service - and on an already-healthy host
-# it records no mutation at all (the same idempotency discipline as setup).
-# harden-ssh is the one place remote-access turns an auth control off, so it
-# is guarded twice and refuses loudly otherwise.
+# running again + the expected startup mode restored, the cloudflared
+# service restarted when its unit exists but is not running, the configured
+# Tailscale Serve mappings re-applied (behind the auth gate, same as setup),
+# the local tunnel config re-rendered. It never logs into Tailscale, touches
+# Cloudflare Access/ACLs, weakens SSH auth, disables a security control,
+# creates a public listener, or exposes a new service - and on an
+# already-healthy host it records no mutation at all (the same idempotency
+# discipline as setup). The tailnet-scoped firewall stays a verify-only
+# path owned by setup, and the :2222 portproxy is Windows-owned - the Unix
+# fix only points at the Windows-host arm. harden-ssh is the one place
+# remote-access turns an auth control off, so it is guarded twice and
+# refuses loudly otherwise.
 # ---------------------------------------------------------------------------
 
 # ra_fix_linux: the spec §8 Linux arm - sshd restarted when not active and
@@ -992,6 +996,28 @@ ra_fix_linux() {
     return 0
 }
 
+# ra_fix_cloudflared: restart the cloudflared service when its unit is
+# installed but not running (spec §8). The existence probe is read-only
+# (`systemctl list-unit-files` - a unit row in the listing is the cheapest
+# reliable existence check); a running service is verified, not bounced
+# (repair-only: a healthy host records no mutation); a missing unit has
+# nothing to repair; and a host without systemctl (macOS) skips silently -
+# its service restarts stay manual, like every other Remote-Login-era
+# write.
+ra_fix_cloudflared() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    if ! systemctl list-unit-files cloudflared.service 2>/dev/null | grep -q '^cloudflared'; then
+        return 0
+    fi
+    if [ "$(systemctl is-active cloudflared 2>/dev/null || true)" = "active" ]; then
+        ra_ok 'cloudflared: service running'
+    else
+        systemctl restart cloudflared
+        ra_ok 'cloudflared: service restarted'
+    fi
+    return 0
+}
+
 cmd_fix() {
     # Not configured: a no-op pointing at the docs (spec §4) - never a
     # crash, never a mutation.
@@ -1010,13 +1036,22 @@ cmd_fix() {
     case "$(ra_os)" in
         Darwin)
             # Enabling Remote Login / Screen Sharing stays manual on macOS
-            # (spec §6) - the Darwin arm's repairs are the shared serve and
-            # tunnel paths below.
+            # (spec §6) - the Darwin arm's repairs are the shared paths
+            # below.
             ;;
         *)
             ra_fix_linux
             ;;
     esac
+    # The cloudflared service (spec §8): restart the registered unit when
+    # it is not running; the unit-exists gate keeps hosts without the
+    # service untouched.
+    ra_fix_cloudflared
+    # The :2222 portproxy is Windows-owned - nothing to repair on this side
+    # of the pair; point at the Windows-host arm when a WSL arm is declared.
+    if [ "$(ra_cfg wsl.enabled false)" = "true" ]; then
+        printf 'portproxy: Windows-owned - run: dot remote wsl-reconcile on the Windows host\n'
+    fi
     # Tailscale-dependent path, gated exactly like setup: re-applying Serve
     # mappings needs an authenticated backend.
     if [ "$RA_TS_STATE" = "ok" ]; then

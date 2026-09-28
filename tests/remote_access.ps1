@@ -58,10 +58,12 @@
 # wsl.enabled (sshd enable inside WSL, key publication, reconcile task,
 # portproxy + :2222 rule held while tailscale is unauth, broken-WSL WARN).
 # The Task 11 arms complete the twin: fix is repair-only (a stopped sshd is
-# restarted and its startup mode restored, a healthy host records zero
-# mutations, an unauthenticated backend holds serve, and a service whose
-# target is 0.0.0.0 is a FAIL with NO serve/exposure call - Review Focus
-# #4); harden-ssh is guarded in the bash twin's order (zero authorized keys
+# restarted and its startup mode restored, the declared firewall rules are
+# re-ensured behind the auth gate, the wsl portproxy is reconciled, a
+# registered-but-stopped cloudflared service restarts - never installed -,
+# a healthy host records zero mutations, an unauthenticated backend holds
+# serve AND the firewall, and a service whose target is 0.0.0.0 is a FAIL
+# with NO serve/exposure call - Review Focus #4); harden-ssh is guarded in the bash twin's order (zero authorized keys
 # refuses first, then -Confirmed; a refusal is a terminating error that
 # exits 1 through the dispatcher and never writes sshd_config; with both
 # guards met the config at RA_SSHD_CONFIG gains exactly one prepended
@@ -79,7 +81,18 @@
 # (the tailscale stub derives serve status from the recorded calls, so the
 # second apply verifies in place and records zero calls); and setup wires
 # the declared login-key targets (windows + wsl), the serve mappings and
-# the tunnel render into the orchestration idempotently.
+# the tunnel render into the orchestration idempotently. The final-review
+# wave closes three gaps: the dispatcher's wsl-reconcile arm parses
+# --install-task (all spellings, register-first-then-reconcile, unknown
+# arguments refused at dispatcher level - the gap that hid the silent
+# @Rest splat); the ps1 materialize half of the login keys lands
+# (Initialize-LoginKey/Initialize-LoginKeys: the bash suite's blocks 16-22
+# mirrored - non-interactive never generates, the RA_CONFIRM_MATERIALIZE
+# seam records `ssh-keygen -t ed25519 -f <key> -N ''` with the strict ACL
+# grant riding the creation, Pattern B uses a dropped .pub as-is,
+# generate=false warns `drop the public half`, and setup drives
+# materialize-then-publish idempotently); and fix's cloudflared arm is
+# presence-gated (absent = quiet skip).
 # Runs on pwsh 7 AND Windows PowerShell 5.1 (5.1-only syntax throughout, no
 # skip exits - the Windows CI block runs this file under powershell.exe).
 
@@ -120,6 +133,7 @@ $script:TailscaleStatusJson = '{"BackendState": "Running", "CurrentTailnet": {"N
 $script:TailscaleServeStatus = 'https://machine.example.net:443 path / --> http://127.0.0.1:4096'
 $script:SshdServiceStatus = 'Running'
 $script:SshdServiceStartType = 'Automatic'
+$script:CloudflaredServiceStatus = $null
 $script:RdpDenyTSConnections = 0
 # The setup call log: every mutating seam override appends one line per call
 # (the bash suite's $scratch/calls twin), and the stub state moves with the
@@ -211,6 +225,12 @@ function Get-Service {
     if ($Name -eq 'sshd') {
         if ([string]::IsNullOrEmpty($script:SshdServiceStatus)) { return $null }
         return New-Object -TypeName PSObject -Property @{ Name = 'sshd'; Status = $script:SshdServiceStatus; StartType = $script:SshdServiceStartType }
+    }
+    if ($Name -eq 'cloudflared') {
+        # The cloudflared service seam (fix's restart arm): $null answers
+        # "not registered" - the quiet no-repair skip.
+        if ([string]::IsNullOrEmpty($script:CloudflaredServiceStatus)) { return $null }
+        return New-Object -TypeName PSObject -Property @{ Name = 'cloudflared'; Status = $script:CloudflaredServiceStatus; StartType = 'Automatic' }
     }
     return $null
 }
@@ -407,14 +427,15 @@ function Start-Service {
 }
 
 function Restart-Service {
-    # The sshd restart seam (Task 11): fix's restart repair and harden-ssh's
-    # key-only bounce both land here; records the call and moves the stub
-    # state to Running.
+    # The service restart seam (Task 11): fix's sshd restart, fix's
+    # cloudflared restart, and harden-ssh's key-only bounce all land here;
+    # records the call and moves the stub state to Running.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the override IS the seam - the twin must be probed, not the host')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'recording seam - the stub changes scenario state only')]
     [CmdletBinding()]
     param([string]$Name)
     if ($Name -eq 'sshd') { $script:SshdServiceStatus = 'Running' }
+    if ($Name -eq 'cloudflared') { $script:CloudflaredServiceStatus = 'Running' }
     $script:Calls += ("Restart-Service -Name {0}" -f $Name)
 }
 
@@ -427,12 +448,44 @@ function Test-LocalAdmin {
     return $script:LocalAdmin
 }
 
+function Get-LoginKeyAclUser {
+    # The ACL-user seam (the materialize twin): the twin grants the strict
+    # private-key ACL to the current Windows identity; the harness answers
+    # a fixed account so the recorded icacls call is deterministic and no
+    # real identity lookup ever runs (WindowsIdentity is not supported on
+    # the Linux runners).
+    param()
+    return 'TESTDOM\testuser'
+}
+
 function icacls {
     # The ACL seam (Task 11): the administrators_authorized_keys grant is
     # recorded, never applied - a test host has no real ACL stake here, and
     # the assertion reads the call log.
     $global:LASTEXITCODE = 0
     $script:Calls += ("icacls " + ($args -join ' '))
+    return $null
+}
+
+function ssh-keygen {
+    # The key-generation seam (the bash suite's faithful ssh-keygen stub):
+    # records the argv and materializes an empty private half + a .pub, so
+    # the creation and the ACL grant riding it are observable. The empty
+    # passphrase (`-N ''`) never appears here except when the twin's
+    # RA_CONFIRM_MATERIALIZE seam asked for it.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'the override IS the seam - the native command name must stay verbatim')]
+    param()
+    $global:LASTEXITCODE = 0
+    $argList = @($args)
+    $script:Calls += ("ssh-keygen " + (($argList | ForEach-Object { "'{0}'" -f $_ }) -join ' '))
+    $keyFile = $null
+    for ($i = 0; $i -lt $argList.Count; $i++) {
+        if (($argList[$i] -ceq '-f') -and ($i -lt ($argList.Count - 1))) { $keyFile = [string]$argList[$i + 1] }
+    }
+    if ($keyFile) {
+        [IO.File]::WriteAllText($keyFile, '')
+        [IO.File]::WriteAllText(($keyFile + '.pub'), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd stub@local`n")
+    }
     return $null
 }
 
@@ -978,27 +1031,51 @@ try {
     $script:WslStatusOk = $true
 
     # 26. fix (the cmd_fix twin): repair-only semantics. A stopped sshd gets
-    #     the restart + the startup-mode restore; a healthy host records
-    #     ZERO mutations; an unauthenticated backend holds serve; a service
-    #     whose target is 0.0.0.0 is a FAIL and fix records NO serve /
-    #     exposure call (Review Focus #4); an absent config is a no-op.
+    #     the restart + the startup-mode restore; the declared firewall
+    #     rules are re-ensured; the wsl portproxy is reconciled; a
+    #     registered-but-stopped cloudflared service restarts; a healthy
+    #     host records ZERO mutations (every arm's no-op path included); an
+    #     unauthenticated backend holds serve AND the firewall; a broken WSL
+    #     degrades to the WARN (Review Focus #1); a service whose target is
+    #     0.0.0.0 is a FAIL with NO serve/exposure call (Review Focus #4);
+    #     an absent config is a no-op.
     $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
     $script:SshdServiceStatus = 'Stopped'
     $script:SshdServiceStartType = 'Manual'
+    $script:FirewallRules = @{}
+    $script:PortproxyTable = Format-PortproxyStubTable -Rows @()
+    $script:WslIpLine = '172.20.9.9'
+    $script:CloudflaredServiceStatus = 'Stopped'
     $script:Calls = @()
     $out = ((Invoke-RemoteFix *>&1) -join "`n")
     Assert-RecordedCall 'Restart-Service -Name sshd' 'stopped sshd: fix records the restart'
     Assert-RecordedCall 'Set-Service -Name sshd -StartupType Automatic' 'stopped sshd: fix restores the startup mode'
     Assert-OutputHas $out 'sshd restarted' 'stopped sshd: fix reports the restart'
+    Assert-RecordedCall 'New-NetFirewallRule -Name OpenSSH-Tailscale -LocalPort 22*' 'fix re-ensures the :22 rule (windows.ssh)'
+    Assert-RecordedCall 'New-NetFirewallRule -Name RemoteDesktop-Tailscale -LocalPort 3389*' 'fix re-ensures the :3389 rule (windows.rdp)'
+    Assert-RecordedCall 'New-NetFirewallRule -Name WSL-SSH-Tailscale -LocalPort 2222*' 'fix re-ensures the :2222 rule (wsl.enabled)'
+    Assert-RecordedCall 'netsh interface portproxy add v4tov4*listenaddress=100.64.0.1*listenport=2222*connectaddress=172.20.9.9*connectport=22*' 'fix reconciles the missing wsl portproxy'
+    Assert-RecordedCall 'Restart-Service -Name cloudflared' 'registered-but-stopped cloudflared: fix restarts it'
+    Assert-OutputHas $out 'cloudflared: service restarted' 'stopped cloudflared: fix reports the restart'
     $script:Calls = @()
     $out = ((Invoke-RemoteFix *>&1) -join "`n")
-    if ($script:Calls.Count -eq 0) { Ok 'healthy host: fix records zero mutations' } else { Fail 'healthy host: fix records zero mutations' ($script:Calls -join '; ') }
+    Assert-OutputHas $out 'PASS wsl: portproxy :2222 -> 172.20.9.9:22 in sync' 'healthy host: the portproxy verifies in sync'
+    Assert-OutputHas $out ($MarkOk + ' cloudflared: service running') 'healthy host: the running cloudflared service is verified, not bounced'
+    if ($script:Calls.Count -eq 0) { Ok 'healthy host: fix records zero mutations (all arms verify)' } else { Fail 'healthy host: fix records zero mutations (all arms verify)' ($script:Calls -join '; ') }
     Assert-OutputHas $out 'tunnel config written' 'healthy host: fix re-renders the tunnel config (deterministic write)'
     $script:TailscaleStatusJson = '{"BackendState": "NeedsLogin"}'
     $out = ((Invoke-RemoteFix *>&1) -join "`n")
     Assert-OutputHas $out 'serve: skipped while tailscale is unauth' 'unauth tailscale: fix holds the serve path'
+    Assert-OutputHas $out 'firewall: held while tailscale is unauth' 'unauth tailscale: fix holds the firewall path'
     Assert-NoRecordedCall 'tailscale serve*' 'unauth tailscale: fix records no serve call'
+    Assert-NoRecordedCall 'New-NetFirewallRule*' 'unauth tailscale: fix records no firewall write'
     $script:TailscaleStatusJson = '{"BackendState": "Running", "CurrentTailnet": {"Name": "example.net"}, "Self": {"TailscaleIPs": ["100.64.0.1"]}}'
+    $script:WslStatusOk = $false
+    $script:Calls = @()
+    $out = ((Invoke-RemoteFix *>&1) -join "`n")
+    Assert-OutputHas $out 'WARN wsl: not available' 'broken wsl in fix: the availability WARN'
+    Assert-NoRecordedCall 'netsh interface portproxy add*' 'broken wsl in fix: no portproxy mutation'
+    $script:WslStatusOk = $true
     $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/nonloopback-service.json'
     $script:Calls = @()
     $out = ((Invoke-RemoteFix *>&1) -join "`n")
@@ -1191,6 +1268,128 @@ try {
     $serveCalls = @($script:Calls | Where-Object { $_ -like 'tailscale serve --bg*' })
     if ($serveCalls.Count -eq 0) { Ok 'serve: the second apply verifies in place, zero calls' } else { Fail 'serve: the second apply verifies in place, zero calls' ($script:Calls -join '; ') }
     $script:TailscaleServeStatus = 'https://machine.example.net:443 path / --> http://127.0.0.1:4096'
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+
+    # 32. The dispatcher's wsl-reconcile arm (spec sections 4/9): the
+    #     --install-task flag registers the logon task FIRST and still
+    #     reconciles - driven through Invoke-RemoteAccess at dispatcher
+    #     level (the seam gap that hid the silent @Rest splat); every flag
+    #     spelling matches; an unknown argument is the exit-1 refusal
+    #     through the child dispatcher.
+    $script:WslIpLine = '172.20.9.9'
+    $script:PortproxyTable = Format-PortproxyStubTable -Rows @(@{ ListenAddress = '100.64.0.1'; ListenPort = 2222; ConnectAddress = $script:WslIpLine; ConnectPort = 22 })
+    $script:ReconcileTaskInstalled = $false
+    $script:Calls = @()
+    $out = ((Invoke-RemoteAccess 'wsl-reconcile' '--install-task' *>&1) -join "`n")
+    Assert-RecordedCall 'Register-ScheduledTask -TaskName dotfiles-wsl-reconcile -Trigger AtLogOn -RunLevel Highest' 'dispatcher --install-task: the task registration is recorded'
+    if (($out.IndexOf('reconcile task installed') -ge 0) -and ($out.IndexOf('PASS') -gt $out.IndexOf('reconcile task installed'))) {
+        Ok 'dispatcher --install-task: registration first, then the reconcile (PASS)'
+    } else {
+        Fail 'dispatcher --install-task: registration first, then the reconcile (PASS)' $out
+    }
+    $script:ReconcileTaskInstalled = $false
+    $script:Calls = @()
+    $null = ((Invoke-RemoteAccess 'wsl-reconcile' '-InstallTask' *>&1))
+    Assert-RecordedCall 'Register-ScheduledTask -TaskName dotfiles-wsl-reconcile*' 'dispatcher -InstallTask (single dash, mixed case) registers too'
+    $script:ReconcileTaskInstalled = $false
+    $script:Calls = @()
+    $null = ((Invoke-RemoteAccess 'wsl-reconcile' '--InstallTask' *>&1))
+    Assert-RecordedCall 'Register-ScheduledTask -TaskName dotfiles-wsl-reconcile*' 'dispatcher --InstallTask (double dash) registers too'
+    $r = Invoke-TwinChild @('wsl-reconcile', '--wat')
+    if ($r.Exit -eq 1) { Ok 'unknown wsl-reconcile argument exits 1 through the dispatcher' } else { Fail 'unknown wsl-reconcile argument exits 1 through the dispatcher' ("exit=$($r.Exit) out=$($r.Output)") }
+    Assert-OutputHas $r.Output 'unknown argument' 'the wsl-reconcile refusal names the argument'
+
+    # 33. fix's cloudflared arm, absent service: nothing to repair - the
+    #     quiet skip (zero calls, no crash, never an install).
+    $script:CloudflaredServiceStatus = $null
+    $script:Calls = @()
+    $null = ((Invoke-CloudflaredServiceFix *>&1))
+    if ($script:Calls.Count -eq 0) { Ok 'absent cloudflared service: fix skips quietly (zero calls)' } else { Fail 'absent cloudflared service: fix skips quietly (zero calls)' ($script:Calls -join '; ') }
+    $script:CloudflaredServiceStatus = 'Running'
+
+    # 34-38. Initialize-LoginKey (the ra_login_key_materialize twin, spec
+    #        section 5.1) - the bash suite's blocks 16-22 mirrored: Pattern
+    #        A non-interactive, the RA_CONFIRM_MATERIALIZE seam, Pattern B,
+    #        generate=false, and the idempotent present path.
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    $env:RA_NONINTERACTIVE = '1'
+    $script:Calls = @()
+    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
+    Assert-OutputHas $out 'not created' 'pattern A non-interactive: WARN not created'
+    Assert-NoRecordedCall 'ssh-keygen*' 'pattern A non-interactive: no ssh-keygen recorded'
+    if (-not (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf)) { Ok 'pattern A non-interactive: no key files created' } else { Fail 'pattern A non-interactive: no key files created' 'private half exists' }
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    $env:RA_CONFIRM_MATERIALIZE = '1'
+    $script:Calls = @()
+    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
+    Remove-Item Env:RA_CONFIRM_MATERIALIZE
+    Remove-Item Env:RA_NONINTERACTIVE
+    Assert-OutputHas $out 'created' 'pattern A seam: reports created'
+    $expPriv = Join-Path (Join-Path $Home_ '.ssh') 'id_test'
+    Assert-RecordedCall "ssh-keygen '-t' 'ed25519' '-f' '$expPriv' '-N' ''" 'pattern A seam: the exact empty-passphrase keygen call (the empty passphrase exists only in the seam)'
+    Assert-RecordedCall 'icacls *id_test /inheritance:r /grant *:F' 'pattern A seam: the strict ACL grant rides the creation'
+    if (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf) { Ok 'pattern A seam: the private half is materialized' } else { Fail 'pattern A seam: the private half is materialized' 'no file' }
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_test.pub'), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device`n")
+    $script:Calls = @()
+    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
+    Assert-OutputHas $out 'public half present, inbound-only' 'pattern B: the dropped public half is used as-is'
+    if (($out -notlike '*not created*') -and ($out -notlike '*missing*')) { Ok 'pattern B: no not-created / missing-private-key complaint' } else { Fail 'pattern B: no not-created / missing-private-key complaint' $out }
+    if ($script:Calls.Count -eq 0) { Ok 'pattern B: zero calls (no generation, no ACL)' } else { Fail 'pattern B: zero calls (no generation, no ACL)' ($script:Calls -join '; ') }
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    $script:Calls = @()
+    $out = ((Initialize-LoginKey -Name 'id_test' -Generate:$false *>&1) -join "`n")
+    Assert-OutputHas $out 'drop the public half' 'generate=false: the WARN names the drop action'
+    Assert-NoRecordedCall 'ssh-keygen*' 'generate=false: no ssh-keygen recorded'
+    if (-not (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf)) { Ok 'generate=false: no private half created' } else { Fail 'generate=false: no private half created' 'private half exists' }
+    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_test'), 'private-key-placeholder')
+    $script:Calls = @()
+    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
+    Assert-OutputHas $out 'present' 'existing private half: verified present'
+    if ($script:Calls.Count -eq 0) { Ok 'existing private half: zero calls (the ACL grant rides the creation only)' } else { Fail 'existing private half: zero calls (the ACL grant rides the creation only)' ($script:Calls -join '; ') }
+
+    # 39. setup drives materialize-then-publish (spec section 5.1 order):
+    #     with a fresh .ssh and the confirm seam, setup creates the key
+    #     (empty-passphrase seam call, the strict ACL grant riding it) and
+    #     authorizes BOTH declared targets in the same pass; the second
+    #     pass records zero calls (the present key verifies, publish
+    #     dedups).
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-win-targets.json'
+    $script:LocalAdmin = $true
+    $script:WslAuthorizedKeys = @()
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $env:ProgramData 'ssh/administrators_authorized_keys') -Force -ErrorAction SilentlyContinue
+    $env:RA_NONINTERACTIVE = '1'
+    $env:RA_CONFIRM_MATERIALIZE = '1'
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Remove-Item Env:RA_CONFIRM_MATERIALIZE
+    Remove-Item Env:RA_NONINTERACTIVE
+    $expPriv = Join-Path (Join-Path $Home_ '.ssh') 'id_test'
+    Assert-RecordedCall "ssh-keygen '-t' 'ed25519' '-f' '$expPriv' '-N' ''" 'setup keys: the seam materializes the key (empty passphrase in the seam only)'
+    Assert-RecordedCall 'icacls *id_test /inheritance:r /grant *:F' 'setup keys: the strict ACL grant rides the creation'
+    Assert-RecordedCall 'wsl.exe -u root authorize login key (inside WSL)' 'setup keys: the wsl target authorizes the new key'
+    Assert-OutputHas $out 'login key id_test: created' 'setup keys: materialize runs first and reports created'
+    Assert-OutputHas $out 'authorized (windows)' 'setup keys: publish then authorizes (windows)'
+    Assert-OutputHas $out 'authorized (wsl)' 'setup keys: publish then authorizes (wsl)'
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    if ($script:Calls.Count -eq 0) { Ok 'setup keys: second pass records zero calls' } else { Fail 'setup keys: second pass records zero calls' ($script:Calls -join '; ') }
+
+    # 40. setup with a generate=false key and no .pub dropped (the bash
+    #     suite's block 28): the declared WARN path fires ('drop the public
+    #     half'), never the non-interactive one, and no ssh-keygen runs.
+    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-generate-false.json'
+    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
+    $env:RA_NONINTERACTIVE = '1'
+    $script:Calls = @()
+    $out = Get-SetupOutput
+    Remove-Item Env:RA_NONINTERACTIVE
+    Assert-OutputHas $out 'drop the public half' 'setup generate=false: the declared WARN names the drop action'
+    if ($out -notlike '*not created*') { Ok 'setup generate=false: the declared path, not the non-interactive one' } else { Fail 'setup generate=false: the declared path, not the non-interactive one' $out }
+    Assert-NoRecordedCall 'ssh-keygen*' 'setup generate=false: no ssh-keygen anywhere'
     $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
 } finally {
     $env:HOME = $savedHome

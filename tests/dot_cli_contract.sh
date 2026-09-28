@@ -137,10 +137,11 @@ run_dot_up "$dot_tmp" no >/dev/null 2>&1 ||
 [ ! -f "$dot_tmp/applied" ] || fail "dot up must not apply when the config hash is unchanged"
 pass
 
-# 8. dot remote arm: wired into all three dispatchers (#165). The .sh twin
-#    exists now; the .ps1 twin lands in its own task, so the profiles assert
-#    the remote-access.ps1 PATH STRING, not the file - the arm is inert
-#    until invoked.
+# 8. dot remote arm: wired into all three dispatchers (#165). Both twins
+#    landed (scripts/remote-access.sh, scripts/remote-access.ps1) and carry
+#    their own suites (tests/remote_access.sh, tests/remote_access.ps1);
+#    the profiles here assert the delegation strings, and the twins'
+#    behavior is pinned by those suites, not by this file.
 [ -f "$repo_root/scripts/remote-access.sh" ] || fail "scripts/remote-access.sh missing"
 grep -Fq 'remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;' "$zsh_aliases" ||
     fail "$zsh_aliases: no dot remote arm"
