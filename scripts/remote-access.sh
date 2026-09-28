@@ -48,7 +48,6 @@ ra_todo() {
     return 1
 }
 
-cmd_setup()           { ra_todo setup; }
 cmd_fix()             { ra_todo fix; }
 cmd_harden_ssh()      { ra_todo harden-ssh; }
 cmd_tunnel_render()   { ra_tunnel_render; }
@@ -665,6 +664,277 @@ ra_authorized_keys_install() {
     fi
     printf '%s\n' "$line" >>"$ak"
     ra_ok "login key ${name}: authorized (${target})"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# setup (spec §6) - idempotent configure, Unix arm. Prerequisites are
+# checked, never installed (xrdp is the sanctioned exception, §11); an
+# unauthenticated Tailscale prints the issue's ACTION REQUIRED block and
+# stops only the Tailscale-dependent paths (Serve mappings, the
+# tailnet-scoped firewall verification); every write verifies current state
+# first, so an already-correct host is verified, not rewritten - a second
+# run records no mutations and setup exits non-zero only on hard failure.
+# ---------------------------------------------------------------------------
+
+# ra_desktop_detected: the spec §6 signal chain for the xrdp decision. WSL
+# exclusion first - the /proc/version microsoft fingerprint (RA_PROC_VERSION
+# overrides it for tests, the same seam ra_in_wsl uses; an exported
+# WSL_DISTRO_NAME is the other fingerprint) - then `systemctl get-default`
+# returning graphical.target (servers default to multi-user.target), then
+# the corroborating signals: a non-empty session directory or the
+# display-manager unit alias. rc 0 = desktop present, 1 = server/WSL/none.
+ra_desktop_detected() {
+    local pv dir unit
+    pv="${RA_PROC_VERSION:-}"
+    if [ -z "$pv" ]; then
+        if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+            return 1
+        fi
+        if [ -r /proc/version ]; then
+            pv="$(cat /proc/version 2>/dev/null)" || pv=""
+        fi
+    fi
+    case "$pv" in
+        *microsoft* | *Microsoft*) return 1 ;;
+    esac
+    if command -v systemctl >/dev/null 2>&1; then
+        [ "$(systemctl get-default 2>/dev/null || true)" = "graphical.target" ] && return 0
+    fi
+    for dir in /usr/share/xsessions /usr/share/wayland-sessions; do
+        [ -d "$dir" ] || continue
+        set -- "$dir"/*
+        [ -e "$1" ] && return 0
+    done
+    for unit in \
+        /etc/systemd/system/display-manager.service \
+        /lib/systemd/system/display-manager.service \
+        /usr/lib/systemd/system/display-manager.service; do
+        [ -e "$unit" ] && return 0
+    done
+    return 1
+}
+
+# ra_serve_apply: one Tailscale Serve mapping per configured service with
+# tailscale = true (spec §6: path-scoped per instance, targets stay
+# loopback). Idempotent: `tailscale serve status` is read first and a
+# service whose target is already mapped is verified, not rewritten. A
+# non-loopback configured host is refused, never served. The caller gates
+# this on ra_tailscale_state = ok.
+ra_serve_apply() {
+    local json name host port target status
+    json="$(ra_data_json)"
+    status="$(tailscale serve status 2>/dev/null)" || status=""
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        [ "$(ra_json_str "$json" "services.${name}.tailscale" false)" = "true" ] || continue
+        host="$(ra_json_str "$json" "services.${name}.host" "127.0.0.1")"
+        port="$(ra_json_str "$json" "services.${name}.port" "")"
+        if [ "$host" != "127.0.0.1" ]; then
+            ra_fail "serve ${name}: target ${host}:${port} is not loopback - refused (fix the app's bind first)"
+            continue
+        fi
+        if [ -z "$port" ]; then
+            ra_warn "serve ${name}: no port configured - skipped"
+            continue
+        fi
+        target="http://${host}:${port}"
+        case "$status" in
+            *"$target"*)
+                ra_ok "serve ${name}: already mapped (${target})"
+                ;;
+            *)
+                tailscale serve --bg --set-path "/${name}" "$target"
+                ra_ok "serve ${name}: mapped /${name} to ${target}"
+                ;;
+        esac
+    done <<EOF
+$(ra_cfg_keys services)
+EOF
+    return 0
+}
+
+# ra_setup_linux: the spec §6 Linux arm - sshd enable + running, the
+# tailnet-scoped firewall verification (authenticated gate only, see
+# ra_firewall_check), then the desktop-gated xrdp path. linux.ssh /
+# linux.rdp guard their branches so a host that did not declare them is
+# not touched.
+ra_setup_linux() {
+    if [ "$(ra_cfg linux.ssh false)" = "true" ]; then
+        if ! command -v systemctl >/dev/null 2>&1; then
+            ra_warn 'ssh: systemctl unavailable - enable sshd manually (sudo systemctl enable --now ssh)'
+        elif [ "$(systemctl is-active ssh 2>/dev/null || true)" = "active" ]; then
+            ra_ok 'ssh: sshd already active'
+        else
+            systemctl enable --now ssh
+            ra_ok 'ssh: sshd enabled and started'
+        fi
+    fi
+    if [ "$RA_TS_STATE" = "ok" ]; then
+        ra_firewall_check
+    fi
+    ra_setup_linux_rdp
+    return 0
+}
+
+# ra_setup_linux_rdp: xrdp is the sanctioned setup-time install (spec §11)
+# - only on a detected desktop with linux.rdp declared. Detection failure
+# reports the server verdict and changes nothing; inside WSL it is not
+# applicable. The install goes through RA_PKG_MGR (default apt-get) so
+# hosts with another package manager - and the tests - can pin the
+# command; an already-resolving xrdp skips straight to the state check.
+ra_setup_linux_rdp() {
+    [ "$(ra_cfg linux.rdp false)" = "true" ] || return 0
+    if ra_in_wsl; then
+        ra_warn 'rdp: not applicable inside WSL'
+        return 0
+    fi
+    if ! ra_desktop_detected; then
+        ra_warn 'rdp: server, no GUI - RDP not applicable (nothing changed)'
+        return 0
+    fi
+    local pkg="${RA_PKG_MGR:-apt-get}"
+    if ! command -v xrdp >/dev/null 2>&1; then
+        "$pkg" install -y xrdp
+    else
+        ra_ok 'rdp: xrdp already installed'
+    fi
+    if [ "$(systemctl is-active xrdp 2>/dev/null || true)" = "active" ]; then
+        ra_ok 'rdp: xrdp already active'
+    else
+        systemctl enable --now xrdp
+        ra_ok 'rdp: xrdp enabled and started'
+    fi
+    return 0
+}
+
+# ra_setup_darwin: the spec §6 macOS arm - verify Remote Login and Screen
+# Sharing state only; enabling stays manual, so this arm never issues a
+# write (the tests' strict systemsetup stub fails any call beyond
+# -getremotelogin).
+ra_setup_darwin() {
+    local out
+    if [ "$(ra_cfg macos.ssh false)" = "true" ]; then
+        out="$(systemsetup -getremotelogin 2>/dev/null)" || out=""
+        case "$out" in
+            *"Remote Login: On"*)  ra_ok 'ssh: Remote Login on' ;;
+            *"Remote Login: Off"*) ra_fail 'ssh: Remote Login off (manual: System Settings > General > Sharing > Remote Login)' ;;
+            *)                     ra_warn 'ssh: Remote Login state unavailable (check manually: systemsetup -getremotelogin)' ;;
+        esac
+    fi
+    if [ "$(ra_cfg macos.screen_sharing false)" = "true" ]; then
+        if ra_tcp_probe 127.0.0.1 5900; then
+            ra_ok 'rdp: Screen Sharing listening on :5900 (recovery path)'
+        else
+            ra_warn 'rdp: Screen Sharing not active (manual: System Settings > General > Sharing > Screen Sharing)'
+        fi
+    fi
+    return 0
+}
+
+# ra_setup_login_keys: drive ra_login_key_materialize +
+# ra_authorized_keys_install per declared
+# [[data.remote_access.login_keys]] entry (spec §5.1). login_keys is an
+# array, so the walk is index-based through ra_json_str - the resolver
+# that understands numeric segments in both jq and python3 - and the
+# first missing .name ends it. Note the resolver's `//` semantics: an
+# explicit generate=false collapses to the default, so declare generate
+# explicitly and keep it true on this arm (Pattern B is expressed by
+# dropping the .pub, which materialize handles either way).
+ra_setup_login_keys() {
+    local json i=0 t target name generate
+    json="$(ra_data_json)"
+    while :; do
+        name="$(ra_json_str "$json" "login_keys.${i}.name" "")"
+        [ -n "$name" ] || break
+        generate="$(ra_json_str "$json" "login_keys.${i}.generate" "true")"
+        ra_login_key_materialize "$name" "$generate"
+        t=0
+        while :; do
+            target="$(ra_json_str "$json" "login_keys.${i}.targets.${t}" "")"
+            [ -n "$target" ] || break
+            ra_authorized_keys_install "$name" "$target"
+            t=$((t + 1))
+        done
+        i=$((i + 1))
+    done
+    return 0
+}
+
+# ra_firewall_check: tailnet-scoped firewall verification, check-only -
+# spec §6 lists it among the Tailscale-dependent paths, so it runs only
+# behind the authenticated gate, and it never mutates: rule writes stay a
+# manual action on Unix (the Windows arm's twin owns its rule writes).
+ra_firewall_check() {
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -q 'tailscale0'; then
+            ra_ok 'firewall: ufw carries a tailscale0 rule'
+        else
+            ra_warn 'firewall: no tailscale0 rule in ufw (manual: sudo ufw allow in on tailscale0)'
+        fi
+    elif command -v nft >/dev/null 2>&1; then
+        ra_warn 'firewall: nftables present - verify the tailnet scope manually (dot remote does not mutate nftables)'
+    fi
+    return 0
+}
+
+# ra_setup_cloudflared_check: prerequisites are checked, never installed -
+# cloudflared's presence is reported with its manual action; service
+# registration stays a printed elevated manual step (spec §6).
+ra_setup_cloudflared_check() {
+    if command -v cloudflared >/dev/null 2>&1; then
+        ra_ok 'cloudflared: present (service registration stays manual: sudo cloudflared service install)'
+    else
+        ra_warn 'cloudflared: not installed (manual: install cloudflared before using the browser path)'
+    fi
+    return 0
+}
+
+cmd_setup() {
+    local enabled
+    enabled="$(ra_cfg enabled false)"
+    if [ "$enabled" != "true" ]; then
+        printf 'not configured\n'
+        return 0
+    fi
+    # Prerequisite + gate first: RA_TS_STATE is what every later step
+    # branches on.
+    ra_tailscale_state
+    case "$RA_TS_STATE" in
+        ok)
+            ra_ok 'tailscale: connected'
+            ;;
+        unauth)
+            ra_warn 'tailscale: not authenticated'
+            printf '%s\n' 'ACTION REQUIRED:'
+            printf '%s\n' 'Authenticate this host with Tailscale, then rerun:'
+            printf '%s\n' '    dot remote setup'
+            ;;
+        absent)
+            ra_warn 'tailscale: not installed (manual: install Tailscale, then: sudo tailscale up)'
+            ;;
+    esac
+    # Platform transport writes - independent of Tailscale, run either way.
+    case "$(ra_os)" in
+        Darwin) ra_setup_darwin ;;
+        *)      ra_setup_linux ;;
+    esac
+    ra_setup_login_keys
+    # Tailscale-dependent path: serve mappings are held unless the backend
+    # is authenticated (the firewall verification gates inside the Linux
+    # arm on the same state).
+    if [ "$RA_TS_STATE" = "ok" ]; then
+        ra_serve_apply
+    else
+        ra_warn "serve: skipped while tailscale is ${RA_TS_STATE} (dependent paths held)"
+    fi
+    # Tunnel render + service check (machine-local, auth-independent);
+    # render only where a tunnel id is actually configured.
+    if [ -n "$(ra_cfg tunnel.id "")" ]; then
+        ra_tunnel_render
+    fi
+    ra_setup_cloudflared_check
+    printf '%s\n' 'next: verify key login from another device, then run: dot remote harden-ssh'
     return 0
 }
 

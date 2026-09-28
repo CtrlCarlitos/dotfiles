@@ -31,7 +31,22 @@ set -euo pipefail
 # accepted as-is, authorized, no generation). authorize appends the .pub
 # into the local `~/.ssh/authorized_keys` only (`grep -Fxq` dedup, existing
 # lines never touched, mode 600) and skips `windows`/`wsl` targets with a
-# line naming the Windows host - its ps1 twin installs those.
+# line naming the Windows host - its ps1 twin installs those. `setup`
+# (spec §6) orchestrates the whole surface per host: prerequisites are
+# reported, never installed (xrdp through the RA_PKG_MGR seam is the
+# sanctioned exception); an unauthenticated tailscale prints the verbatim
+# ACTION REQUIRED block and holds only the dependent paths (serve, the
+# tailnet-scoped firewall verification) while the sshd enable still runs;
+# the Linux arm installs + enables xrdp only on a detected desktop
+# (graphical.target; RA_PROC_VERSION pins the /proc/version WSL
+# fingerprint, which no PATH stub can reach) and reports `server, no GUI`
+# otherwise; every tailscale=true service gets exactly one path-scoped
+# serve mapping with a 127.0.0.1 target; the declared login keys
+# materialize + authorize; tunnel render runs; darwin stays check-only
+# (`systemsetup -getremotelogin` state line, no enabling call).
+# Idempotency is executed, not grepped: ra_run_twice runs setup twice
+# against the recorded stubs - the stubs derive their state from the call
+# log - and the second pass must record zero mutating calls.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -100,6 +115,30 @@ ra_call() (
     export RA_NO_MAIN=1
     . "$repo_root/scripts/remote-access.sh"
     "$@"
+)
+
+# ra_run_twice ARGS...: run the twin twice against the recorded-stub set,
+# snapshotting the mutating-call log between passes - the idempotency
+# harness: the second pass must add zero lines. Outputs land in
+# $scratch/twice-N.out, the counts in $scratch/twice-N.count.
+# shellcheck disable=SC2030,SC2031  # the subshell is the isolation: PATH
+# and HOME must not leak back into the test process
+ra_run_twice() (
+    export PATH="$scratch/bin:$PATH"
+    export HOME="$scratch/home"
+    bash "$repo_root/scripts/remote-access.sh" "$@" >"$scratch/twice-1.out" 2>&1 || return 1
+    if [ -f "$scratch/calls" ]; then
+        wc -l <"$scratch/calls" >"$scratch/twice-1.count"
+    else
+        : >"$scratch/twice-1.count"
+    fi
+    bash "$repo_root/scripts/remote-access.sh" "$@" >"$scratch/twice-2.out" 2>&1 || return 1
+    if [ -f "$scratch/calls" ]; then
+        wc -l <"$scratch/calls" >"$scratch/twice-2.count"
+    else
+        : >"$scratch/twice-2.count"
+    fi
+    return 0
 )
 
 # 1. Unknown subcommand: usage, exit 2.
@@ -579,6 +618,285 @@ fi
 if [ -e "$scratch/home/.ssh/id_test" ]; then
     fail "generate=false must not create the private half"
 fi
+pass
+
+# ---------------------------------------------------------------------------
+# 23-27. setup (spec §6). The stubs record every mutating call into
+# $scratch/calls (one quoted-argv line per invocation); the systemctl stub
+# derives is-active from that log, the apt-get stub materializes the xrdp
+# binary it installs, and the tailscale stub derives serve status from the
+# serve lines in the log - so a second setup pass finds every state already
+# correct and records nothing (idempotency, executed).
+# ---------------------------------------------------------------------------
+
+# 23. (a) Unauthenticated tailscale: the verbatim ACTION REQUIRED block,
+#     the tailscale-dependent path (serve) records NO calls, and the
+#     independent path (sshd enable) still runs. Exit 0 - setup exits
+#     non-zero only on hard failure, and an auth gate is not a crash.
+#     uname is pinned back to Linux: test 8's Darwin stub persists in the
+#     stub bin, and the arm dispatch keys off it.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-server.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"NeedsLogin\"}' ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"get-default \") printf 'multi-user.target\n' ;;
+    \"is-active ssh\") printf 'inactive\n'; exit 3 ;;
+    \"enable --now\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run setup 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "setup must exit 0 with unauthenticated tailscale (got $rc)"
+printf '%s' "$out" | grep -Fq 'ACTION REQUIRED:' ||
+    fail "setup must print the ACTION REQUIRED block verbatim (got: $out)"
+printf '%s' "$out" | grep -Fq 'Authenticate this host with Tailscale, then rerun:' ||
+    fail "the ACTION REQUIRED block must name the authenticate action (got: $out)"
+printf '%s' "$out" | grep -Fq '    dot remote setup' ||
+    fail "the ACTION REQUIRED block must end with the 4-space rerun line (got: $out)"
+if grep -q '^tailscale ' "$scratch/calls" 2>/dev/null; then
+    fail "unauthenticated tailscale must hold the serve path (got: $(cat "$scratch/calls"))"
+fi
+require "$scratch/calls" "systemctl 'enable' '--now' 'ssh'"
+pass
+
+# 24. (b)(c)(d) Desktop Linux (full-linux-desktop.json, get-default ->
+#     graphical.target, the WSL fingerprint pinned away through
+#     RA_PROC_VERSION): xrdp installed via the RA_PKG_MGR seam (apt-get
+#     default) and enabled; sshd enabled; the declared login key
+#     materialized (confirm seam) + authorized; EXACTLY two path-scoped
+#     serve mappings with 127.0.0.1 targets (one per tailscale=true
+#     service); tunnel render called (terminal 404 present); no "no GUI"
+#     report; no token-shaped material anywhere in the output.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-desktop.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"Running\"}' ;;
+    \"serve status\")
+        if [ -f \"\$log\" ]; then grep '127.0.0.1' \"\$log\" || true; fi
+        exit 0 ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"get-default \") printf 'graphical.target\n' ;;
+    \"is-active ssh\")
+        if grep -Fxq \"systemctl 'enable' '--now' 'ssh'\" \"\$log\" 2>/dev/null; then
+            printf 'active\n'
+        else
+            printf 'inactive\n'; exit 3
+        fi ;;
+    \"is-active xrdp\")
+        if grep -Fxq \"systemctl 'enable' '--now' 'xrdp'\" \"\$log\" 2>/dev/null; then
+            printf 'active\n'
+        else
+            printf 'inactive\n'; exit 3
+        fi ;;
+    \"enable --now\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        printf 'Created symlink /etc/systemd/system/multi-user.target.wants/xrdp.service\n' ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" apt-get "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"install -y\")
+        line='apt-get'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        printf '#!/usr/bin/env bash\nexit 0\n' >'$scratch/bin/xrdp'
+        chmod +x '$scratch/bin/xrdp'
+        printf 'Selecting previously unselected package xrdp.\n' ;;
+    *) printf 'unexpected apt-get call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls" "$scratch/bin/xrdp"
+rm -rf "$scratch/home/.ssh" "$scratch/home/.cloudflared"
+export RA_PROC_VERSION="Linux version 6.8.0-generic"
+export RA_CONFIRM_MATERIALIZE=1
+rc=0
+out="$(ra_run setup 2>&1)" || rc=$?
+unset RA_PROC_VERSION RA_CONFIRM_MATERIALIZE
+[ "$rc" -eq 0 ] || fail "setup must exit 0 on the desktop arm (got $rc)"
+require "$scratch/calls" "apt-get 'install' '-y' 'xrdp'"
+require "$scratch/calls" "systemctl 'enable' '--now' 'xrdp'"
+require "$scratch/calls" "systemctl 'enable' '--now' 'ssh'"
+require "$scratch/calls" "ssh-keygen '-t' 'ed25519' '-f' '$scratch/home/.ssh/id_newcmelgar' '-N' ''"
+serve_count="$(grep -c '^tailscale ' "$scratch/calls" || true)"
+[ "$serve_count" -eq 2 ] ||
+    fail "exactly two serve mappings must be applied (got $serve_count: $(grep '^tailscale ' "$scratch/calls" || true))"
+if grep '^tailscale ' "$scratch/calls" | grep -v -- '--set-path' | grep -q .; then
+    fail "every serve mapping must be path-scoped --set-path (got: $(grep '^tailscale ' "$scratch/calls" || true))"
+fi
+if grep '^tailscale ' "$scratch/calls" | grep -v 'http://127.0.0.1:' | grep -q .; then
+    fail "every serve mapping target must stay on 127.0.0.1 (got: $(grep '^tailscale ' "$scratch/calls" || true))"
+fi
+require "$scratch/home/.cloudflared/config.yml" 'tunnel: 00000000-0000-0000-0000-000000000000'
+require "$scratch/home/.cloudflared/config.yml" '  - service: http_status:404'
+require "$scratch/home/.ssh/authorized_keys" 'stub@local'
+if printf '%s' "$out" | grep -Fq 'no GUI'; then
+    fail "the desktop arm must not report the server no-GUI line (got: $out)"
+fi
+if printf '%s' "$out" | grep -Eq 'ey[A-Za-z0-9_-]{20,}'; then
+    fail "setup output must never contain token-shaped material (got: $out)"
+fi
+pass
+
+# 25. (c) Idempotency, executed (ra_run_twice): the same recorded-stub set,
+#     setup run twice - the second pass verifies already-correct state and
+#     records ZERO mutating calls (the stubs derive is-active and serve
+#     status from the call log; apt-get materialized the xrdp binary; the
+#     login key exists; authorized_keys dedups).
+rc=0
+rm -f "$scratch/calls" "$scratch/bin/xrdp"
+rm -rf "$scratch/home/.ssh" "$scratch/home/.cloudflared"
+export RA_PROC_VERSION="Linux version 6.8.0-generic"
+export RA_CONFIRM_MATERIALIZE=1
+ra_run_twice setup || rc=$?
+unset RA_PROC_VERSION RA_CONFIRM_MATERIALIZE
+[ "$rc" -eq 0 ] ||
+    fail "setup must exit 0 on both idempotency passes (pass1: $(cat "$scratch/twice-1.out"), pass2: $(cat "$scratch/twice-2.out"))"
+count1="$(cat "$scratch/twice-1.count" 2>/dev/null || true)"
+count2="$(cat "$scratch/twice-2.count" 2>/dev/null || true)"
+count1="${count1:-0}"
+count2="${count2:-0}"
+[ "$count1" -gt 0 ] || fail "the first pass must record mutating calls (got $count1)"
+[ "$count1" -eq "$count2" ] ||
+    fail "the second pass must record zero mutating calls (pass1: $count1, pass2: $count2; new: $(tail -n "+$((count1 + 1))" "$scratch/calls" 2>/dev/null || true))"
+require "$scratch/calls" "apt-get 'install' '-y' 'xrdp'"
+require "$scratch/calls" "systemctl 'enable' '--now' 'xrdp'"
+pass
+
+# 26. (b) Server Linux (full-linux-server.json, get-default ->
+#     multi-user.target, the WSL fingerprint pinned away so the DETECTION
+#     decides, not the environment): no xrdp calls at all - the strict
+#     apt-get/systemctl stubs would fail any install or xrdp enable - and
+#     the output carries the spec's no-GUI verdict. sshd enable still
+#     runs; the single tailscale=true service still gets its loopback
+#     mapping.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-server.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"get-default \") printf 'multi-user.target\n' ;;
+    \"is-active ssh\") printf 'inactive\n'; exit 3 ;;
+    \"enable --now\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" apt-get "printf 'unexpected apt-get call: \$*\n' >&2
+exit 1"
+rm -f "$scratch/calls" "$scratch/bin/xrdp"
+export RA_PROC_VERSION="Linux version 6.8.0-generic"
+rc=0
+out="$(ra_run setup 2>&1)" || rc=$?
+unset RA_PROC_VERSION
+[ "$rc" -eq 0 ] || fail "setup must exit 0 on the server arm (got $rc)"
+printf '%s' "$out" | grep -Fq 'no GUI' ||
+    fail "the server arm must report the no-GUI verdict (got: $out)"
+if [ -e "$scratch/calls" ] && grep -q 'xrdp' "$scratch/calls"; then
+    fail "the server arm must make no xrdp calls (got: $(cat "$scratch/calls"))"
+fi
+if [ -e "$scratch/calls" ] && grep -q 'apt-get' "$scratch/calls"; then
+    fail "the server arm must invoke no package manager (got: $(cat "$scratch/calls"))"
+fi
+require "$scratch/calls" "systemctl 'enable' '--now' 'ssh'"
+serve_count="$(grep -c '^tailscale ' "$scratch/calls" || true)"
+[ "$serve_count" -eq 1 ] ||
+    fail "the server arm must apply exactly one serve mapping (got $serve_count)"
+if grep '^tailscale ' "$scratch/calls" | grep -qv 'http://127.0.0.1:4098'; then
+    fail "the server serve mapping must target 127.0.0.1:4098 (got: $(grep '^tailscale ' "$scratch/calls" || true))"
+fi
+pass
+
+# 27. (e) Darwin (full-mac.json, uname stubbed to Darwin): Remote Login is
+#     a check-only state line from the strict systemsetup stub - any
+#     enabling call would surface as an unexpected-invocation error - plus
+#     exactly one serve mapping (127.0.0.1 target) and the tunnel render.
+#     The login-key walk runs non-interactively: it WARNS 'not created',
+#     never prompts, never generates.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-mac.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Darwin\n'"
+ra_stub "$scratch/bin" systemsetup "if [ \"\$1\" = '-getremotelogin' ]; then
+    printf 'Remote Login: On\n'
+else
+    printf 'unexpected systemsetup call: \$*\n' >&2
+    exit 1
+fi"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"Running\"}' ;;
+    \"serve status\")
+        if [ -f \"\$log\" ]; then grep '127.0.0.1' \"\$log\" || true; fi
+        exit 0 ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+export RA_NONINTERACTIVE=1
+rc=0
+out="$(ra_run setup 2>&1)" || rc=$?
+unset RA_NONINTERACTIVE
+[ "$rc" -eq 0 ] || fail "setup must exit 0 on the darwin arm (got $rc)"
+printf '%s' "$out" | grep -Fq '✓ ssh: Remote Login on' ||
+    fail "the darwin arm must print the Remote Login state line (got: $out)"
+if printf '%s' "$out" | grep -Fq 'unexpected systemsetup call'; then
+    fail "darwin setup must stay check-only (no systemsetup writes)"
+fi
+serve_count="$(grep -c '^tailscale ' "$scratch/calls" || true)"
+[ "$serve_count" -eq 1 ] ||
+    fail "the darwin arm must apply exactly one serve mapping (got $serve_count)"
+if grep '^tailscale ' "$scratch/calls" | grep -qv 'http://127.0.0.1:4099'; then
+    fail "the darwin serve mapping must target 127.0.0.1:4099 (got: $(grep '^tailscale ' "$scratch/calls" || true))"
+fi
+require "$scratch/home/.cloudflared/config.yml" '  - service: http_status:404'
+printf '%s' "$out" | grep -Fq 'login key id_newcmelgar' ||
+    fail "the darwin arm must walk the declared login keys (got: $out)"
+printf '%s' "$out" | grep -Fq 'not created' ||
+    fail "non-interactive darwin setup must WARN 'not created' (got: $out)"
 pass
 
 finish
