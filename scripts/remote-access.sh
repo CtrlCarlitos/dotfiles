@@ -40,16 +40,6 @@ ra_die() {
     exit 1
 }
 
-# Implemented by follow-up tasks against this same harness; the dispatch and
-# config load land first so each arm grows one at a time. Never claim success
-# silently.
-ra_todo() {
-    printf 'dot remote %s: not implemented yet\n' "$1" >&2
-    return 1
-}
-
-cmd_fix()             { ra_todo fix; }
-cmd_harden_ssh()      { ra_todo harden-ssh; }
 cmd_tunnel_render()   { ra_tunnel_render; }
 cmd_tunnel_validate() { ra_tunnel_validate; }
 
@@ -964,6 +954,152 @@ cmd_setup() {
     fi
     ra_setup_cloudflared_check
     printf '%s\n' 'next: verify key login from another device, then run: dot remote harden-ssh'
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# fix + harden-ssh (spec §8, §4) - the repair-only repairs and the guarded
+# key-only flip. fix touches deterministic machine-local state only: sshd
+# running again + the expected startup mode restored, the configured Tailscale
+# Serve mappings re-applied (behind the auth gate, same as setup), the local
+# tunnel config re-rendered. It never logs into Tailscale, touches Cloudflare
+# Access/ACLs, weakens SSH auth, disables a security control, creates a
+# public listener, or exposes a new service - and on an already-healthy host
+# it records no mutation at all (the same idempotency discipline as setup).
+# harden-ssh is the one place remote-access turns an auth control off, so it
+# is guarded twice and refuses loudly otherwise.
+# ---------------------------------------------------------------------------
+
+# ra_fix_linux: the spec §8 Linux arm - sshd restarted when not active and
+# the startup mode restored (enable) when missing, gated on linux.ssh so a
+# host that did not declare sshd is not touched. The xrdp path and the
+# firewall have no fix arm: setup treats them as detection-gated /
+# check-only on Unix (spec §6), so fix owns no repair for them either.
+ra_fix_linux() {
+    [ "$(ra_cfg linux.ssh false)" = "true" ] || return 0
+    if ! command -v systemctl >/dev/null 2>&1; then
+        ra_warn 'ssh: systemctl unavailable - restart sshd manually (sudo systemctl restart ssh)'
+        return 0
+    fi
+    if [ "$(systemctl is-active ssh 2>/dev/null || true)" != "active" ]; then
+        systemctl restart ssh
+        ra_ok 'ssh: sshd restarted'
+    fi
+    if [ "$(systemctl is-enabled ssh 2>/dev/null || true)" != "enabled" ]; then
+        systemctl enable ssh
+        ra_ok 'ssh: sshd startup mode restored (systemctl enable ssh)'
+    fi
+    return 0
+}
+
+cmd_fix() {
+    # Not configured: a no-op pointing at the docs (spec §4) - never a
+    # crash, never a mutation.
+    local enabled
+    enabled="$(ra_cfg enabled false)"
+    if [ "$enabled" != "true" ]; then
+        printf 'not configured - see docs/remote-access.md\n'
+        return 0
+    fi
+    ra_tailscale_state
+    case "$RA_TS_STATE" in
+        ok)     ra_ok 'tailscale: connected' ;;
+        unauth) ra_warn 'tailscale: not authenticated' ;;
+        absent) ra_warn 'tailscale: not installed (manual: install Tailscale, then: sudo tailscale up)' ;;
+    esac
+    case "$(ra_os)" in
+        Darwin)
+            # Enabling Remote Login / Screen Sharing stays manual on macOS
+            # (spec §6) - the Darwin arm's repairs are the shared serve and
+            # tunnel paths below.
+            ;;
+        *)
+            ra_fix_linux
+            ;;
+    esac
+    # Tailscale-dependent path, gated exactly like setup: re-applying Serve
+    # mappings needs an authenticated backend.
+    if [ "$RA_TS_STATE" = "ok" ]; then
+        ra_serve_apply
+    else
+        ra_warn "serve: skipped while tailscale is ${RA_TS_STATE} (dependent paths held)"
+    fi
+    # The render is deterministic, so a re-render over a valid config is a
+    # byte-identical local write, not a mutation.
+    if [ -n "$(ra_cfg tunnel.id "")" ]; then
+        ra_tunnel_render
+    fi
+    return 0
+}
+
+# ra_sshd_restart: restart the platform sshd after harden-ssh flipped it to
+# key-only. Linux (and WSL-local) through systemctl; on macOS the restart
+# stays a printed manual step, like every other Remote Login write (spec §6).
+ra_sshd_restart() {
+    case "$(ra_os)" in
+        Darwin)
+            ra_warn 'sshd: restart is manual on macOS (sudo launchctl kickstart -k system/com.openssh.sshd)'
+            ;;
+        *)
+            if command -v systemctl >/dev/null 2>&1; then
+                systemctl restart ssh
+                ra_ok 'sshd: restarted (key-only)'
+            else
+                ra_warn 'ssh: systemctl unavailable - restart sshd manually (sudo systemctl restart ssh)'
+            fi
+            ;;
+    esac
+    return 0
+}
+
+# cmd_harden_ssh: flip sshd to key-only (spec §4). Two guards, both
+# mandatory: the target's authorized_keys must hold at least one key (a way
+# back in exists) and --confirmed must be passed (the operator attests key
+# login was tested from another device). A refused run exits 1 with the
+# reason and never writes sshd_config. With both guards met, the config at
+# RA_SSHD_CONFIG (default /etc/ssh/sshd_config) gains exactly one active
+# `PasswordAuthentication no` and sshd restarts. The line is PREPENDED, not
+# appended: sshd honors the first value it reads, so a trailing Match block
+# can never re-scope the global default. Existing active and commented
+# PasswordAuthentication lines are dropped, so a second run is
+# byte-identical.
+cmd_harden_ssh() {
+    local confirmed="" ak="${HOME}/.ssh/authorized_keys" cfg keys=0 line tmp
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --confirmed) confirmed=1 ;;
+            *) ra_die "harden-ssh: unknown argument: $1" ;;
+        esac
+        shift
+    done
+    if [ -f "$ak" ]; then
+        keys="$(grep -c '[^[:space:]]' "$ak" || true)"
+    fi
+    if [ "$keys" -eq 0 ]; then
+        ra_die "harden-ssh: no authorized key in ${ak} - authorize at least one login key first (dot remote setup), then verify key login from another device"
+    fi
+    if [ -z "$confirmed" ]; then
+        ra_die "harden-ssh: needs --confirmed - verify key login from another device first (this writes PasswordAuthentication no)"
+    fi
+    cfg="${RA_SSHD_CONFIG:-/etc/ssh/sshd_config}"
+    [ -f "$cfg" ] || ra_die "harden-ssh: no sshd_config at ${cfg}"
+    # Rewrite via a temp file and cat back into place: no sed -i (BSD sed
+    # wants a suffix argument) and the original's mode/owner survive, which
+    # sshd's StrictModes insists on.
+    tmp="$(mktemp "${TMPDIR:-/tmp}/remote-access-sshd-XXXXXX")"
+    {
+        printf 'PasswordAuthentication no\n'
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                PasswordAuthentication* | "#PasswordAuthentication"*) ;;
+                *) printf '%s\n' "$line" ;;
+            esac
+        done <"$cfg"
+    } >"$tmp"
+    cat "$tmp" >"$cfg"
+    rm -f -- "$tmp"
+    ra_ok "sshd: PasswordAuthentication no (${cfg})"
+    ra_sshd_restart
     return 0
 }
 

@@ -46,7 +46,17 @@ set -euo pipefail
 # (`systemsetup -getremotelogin` state line, no enabling call).
 # Idempotency is executed, not grepped: ra_run_twice runs setup twice
 # against the recorded stubs - the stubs derive their state from the call
-# log - and the second pass must record zero mutating calls.
+# log - and the second pass must record zero mutating calls. fix (spec §8)
+# is repair-only: a stopped sshd gets exactly `systemctl restart ssh` plus
+# the startup-mode restore, a healthy host records zero mutating calls (the
+# strict stubs fail anything beyond the read-only probes), an
+# unauthenticated backend holds serve, and an unconfigured host is a
+# `not configured` no-op. harden-ssh is guarded: without `--confirmed` or
+# with zero keys in ~/.ssh/authorized_keys it refuses (exit 1, reason
+# printed, sshd_config untouched); with both it rewrites the config at
+# RA_SSHD_CONFIG (default /etc/ssh/sshd_config) to exactly one active
+# `PasswordAuthentication no`, byte-identically on a second run, and
+# records the sshd restart.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -944,6 +954,225 @@ fi
 if [ -e "$scratch/home/.ssh/id_test" ]; then
     fail "generate=false must not create the private half during setup"
 fi
+pass
+
+# ---------------------------------------------------------------------------
+# 29-31. fix (spec §8) - repair-only. A stopped sshd gets exactly the two
+# repairs (restart + startup-mode restore); a healthy host records ZERO
+# mutating calls (the strict systemctl stub fails anything beyond its
+# read-only probes); an unauthenticated backend holds the serve path; an
+# unconfigured host is a `not configured` no-op pointing at the docs.
+# ---------------------------------------------------------------------------
+
+# 29. fix with [data.remote_access] absent: not configured + docs pointer,
+#     exit 0 - a no-op, never a crash, never a call (spec §4).
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/off.json' ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run fix 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "fix must exit 0 when not configured (got $rc)"
+printf '%s' "$out" | grep -Fq 'not configured' ||
+    fail "fix must print 'not configured' when the key is absent (got: $out)"
+printf '%s' "$out" | grep -Fq 'docs/remote-access.md' ||
+    fail "fix's not-configured line must point at the docs (got: $out)"
+if [ -e "$scratch/calls" ]; then
+    fail "the not-configured no-op must record no calls (got: $(cat "$scratch/calls"))"
+fi
+pass
+
+# 30. fix on a server whose sshd is stopped: exactly the two repairs -
+#     `systemctl restart ssh` and the startup-mode restore (`systemctl
+#     enable ssh`) - recorded, exit 0 (a repair is not a failure), and the
+#     unauthenticated backend holds serve (no tailscale mutation at all).
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux-server.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"NeedsLogin\"}' ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"is-active ssh\") printf 'inactive\n'; exit 3 ;;
+    \"is-enabled ssh\") printf 'disabled\n'; exit 1 ;;
+    \"restart ssh\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    \"enable ssh\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run fix 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "fix must exit 0 after repairing (got $rc: $out)"
+require "$scratch/calls" "systemctl 'restart' 'ssh'"
+require "$scratch/calls" "systemctl 'enable' 'ssh'"
+repair_lines="$(wc -l <"$scratch/calls" 2>/dev/null || true)"
+repair_lines="${repair_lines:-0}"
+[ "$repair_lines" -eq 2 ] ||
+    fail "fix must record exactly the two sshd repairs (got $repair_lines: $(cat "$scratch/calls" 2>/dev/null || true))"
+if grep -q '^tailscale ' "$scratch/calls" 2>/dev/null; then
+    fail "unauthenticated tailscale must hold the serve path during fix (got: $(cat "$scratch/calls"))"
+fi
+printf '%s' "$out" | grep -Fq '✓ ssh: sshd restarted' ||
+    fail "fix must report the restart (got: $out)"
+printf '%s' "$out" | grep -Fq 'serve: skipped' ||
+    fail "fix must hold the serve path while tailscale is unauthenticated (got: $out)"
+pass
+
+# 31. fix on a healthy host (sshd active + enabled, the configured serve
+#     mapping already in place): ZERO mutating calls - fix is repair-only,
+#     the in-place mapping is verified not rewritten, and the tunnel config
+#     re-render is a byte-identical local write.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/full-linux.json' ;;
+esac"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"Running\"}' ;;
+    \"serve status\")
+        printf '%s\n' 'https://machine.example.net:443 path / --> http://127.0.0.1:4098' ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "case \"\$1 \${2:-}\" in
+    \"is-active ssh\") printf 'active\n' ;;
+    \"is-enabled ssh\") printf 'enabled\n' ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+rm -f "$scratch/calls"
+rc=0
+out="$(ra_run fix 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "fix must exit 0 on a healthy host (got $rc: $out)"
+if [ -e "$scratch/calls" ] && [ -s "$scratch/calls" ]; then
+    fail "fix on a healthy host must record zero mutating calls (got: $(cat "$scratch/calls"))"
+fi
+printf '%s' "$out" | grep -Fq 'already mapped' ||
+    fail "the in-place serve mapping must be verified, not rewritten (got: $out)"
+printf '%s' "$out" | grep -Fq 'tunnel config written' ||
+    fail "fix must re-render the tunnel config (got: $out)"
+pass
+
+# ---------------------------------------------------------------------------
+# 32-34. harden-ssh (spec §4) - the guarded key-only flip. Two guards, both
+# required: ~/.ssh/authorized_keys holds at least one key AND --confirmed
+# is passed. A refusal exits 1 with the reason and never writes
+# sshd_config; with both guards met, the config at $RA_SSHD_CONFIG gains
+# exactly one active `PasswordAuthentication no` and the restart is
+# recorded - byte-identically on a second run.
+# ---------------------------------------------------------------------------
+
+# 32. Key authorized but no --confirmed: the refusal names the attestation,
+#     exit 1, no sshd_config write, no systemctl call (the strict stub
+#     would fail any).
+ra_stub "$scratch/bin" systemctl "printf 'unexpected systemctl call: \$*\n' >&2
+exit 1"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/authorized_keys"
+rm -f "$scratch/home/sshd_config" "$scratch/calls"
+export RA_SSHD_CONFIG="$scratch/home/sshd_config"
+rc=0
+out="$(ra_run harden-ssh 2>&1)" || rc=$?
+unset RA_SSHD_CONFIG
+[ "$rc" -eq 1 ] || fail "harden-ssh without --confirmed must exit 1 (got $rc)"
+printf '%s' "$out" | grep -Fq -- '--confirmed' ||
+    fail "the refusal must name --confirmed (got: $out)"
+if [ -e "$scratch/home/sshd_config" ]; then
+    fail "the refusal must not write sshd_config"
+fi
+if [ -e "$scratch/calls" ]; then
+    fail "the refusal must not restart sshd (got: $(cat "$scratch/calls"))"
+fi
+pass
+
+# 33. --confirmed but authorized_keys holds no key: the refusal names the
+#     authorized_keys state, exit 1, sshd_config byte-identical, no restart.
+printf 'Port 22\n' >"$scratch/home/sshd_config"
+cp "$scratch/home/sshd_config" "$scratch/home/sshd_config.before"
+rm -rf "$scratch/home/.ssh"
+rm -f "$scratch/calls"
+export RA_SSHD_CONFIG="$scratch/home/sshd_config"
+rc=0
+out="$(ra_run harden-ssh --confirmed 2>&1)" || rc=$?
+unset RA_SSHD_CONFIG
+[ "$rc" -eq 1 ] || fail "harden-ssh with zero authorized keys must exit 1 (got $rc)"
+printf '%s' "$out" | grep -Fq 'no authorized key' ||
+    fail "the refusal must name the missing authorized key (got: $out)"
+if ! cmp -s "$scratch/home/sshd_config" "$scratch/home/sshd_config.before"; then
+    fail "the refusal must leave sshd_config untouched"
+fi
+if [ -e "$scratch/calls" ]; then
+    fail "the refusal must not restart sshd (got: $(cat "$scratch/calls"))"
+fi
+pass
+
+# 34. Both guards met: the config gains exactly one active
+#     `PasswordAuthentication no` (the commented default line goes), the
+#     unrelated lines survive, the restart is the only systemctl call - and
+#     a second run is byte-identical.
+rm -f "$scratch/calls"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/authorized_keys"
+printf '%s\n' \
+    'Port 22' \
+    '#PasswordAuthentication yes' \
+    'PubkeyAuthentication yes' >"$scratch/home/sshd_config"
+ra_stub "$scratch/bin" systemctl "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"restart ssh\")
+        line='systemctl'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected systemctl call: \$*\n' >&2
+       exit 1 ;;
+esac"
+export RA_SSHD_CONFIG="$scratch/home/sshd_config"
+rc=0
+out="$(ra_run harden-ssh --confirmed 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "harden-ssh with a key and --confirmed must exit 0 (got $rc: $out)"
+require "$scratch/home/sshd_config" 'PasswordAuthentication no'
+require "$scratch/home/sshd_config" 'Port 22'
+require "$scratch/home/sshd_config" 'PubkeyAuthentication yes'
+pa_lines="$(grep -c 'PasswordAuthentication' "$scratch/home/sshd_config" || true)"
+[ "$pa_lines" -eq 1 ] ||
+    fail "exactly one PasswordAuthentication line must remain (got $pa_lines: $(cat "$scratch/home/sshd_config"))"
+require "$scratch/calls" "systemctl 'restart' 'ssh'"
+restart_lines="$(wc -l <"$scratch/calls" 2>/dev/null || true)"
+restart_lines="${restart_lines:-0}"
+[ "$restart_lines" -eq 1 ] ||
+    fail "the restart must be the only systemctl call (got: $(cat "$scratch/calls" 2>/dev/null || true))"
+cp "$scratch/home/sshd_config" "$scratch/home/sshd_config.once"
+rc=0
+out="$(ra_run harden-ssh --confirmed 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "the second harden-ssh must exit 0 (got $rc)"
+if ! cmp -s "$scratch/home/sshd_config" "$scratch/home/sshd_config.once"; then
+    fail "a second harden-ssh must be byte-identical (idempotent)"
+fi
+unset RA_SSHD_CONFIG
 pass
 
 finish
