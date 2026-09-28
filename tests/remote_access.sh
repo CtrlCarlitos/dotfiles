@@ -20,6 +20,18 @@ set -euo pipefail
 # default, and `tunnel validate` exits 0/1 with named findings (`loopback`,
 # `http_status:404`) that never echo the file's own lines -
 # `RA_TUNNEL_CONFIG` pins the file under test where the default is not it.
+# Login keys (spec §5.1) run function-level: `ra_call` sources the twin into
+# a subshell with `RA_NO_MAIN=1` (the seam that keeps its dispatch off, the
+# ps1 twin's `REMOTE_ACCESS_NO_MAIN=1` mirror) and invokes a helper directly,
+# because their driver, `setup`, is the next task's. materialize is
+# idempotent, only-if-missing, confirmation-gated (RA_NONINTERACTIVE=1 warns
+# `not created` and never calls ssh-keygen; the `RA_CONFIRM_MATERIALIZE=1`
+# non-TTY seam records `ssh-keygen -t ed25519 -f ~/.ssh/<name> -N ''` - the
+# empty passphrase exists only in the seam; only-a-.pub is pattern B:
+# accepted as-is, authorized, no generation). authorize appends the .pub
+# into the local `~/.ssh/authorized_keys` only (`grep -Fxq` dedup, existing
+# lines never touched, mode 600) and skips `windows`/`wsl` targets with a
+# line naming the Windows host - its ps1 twin installs those.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -46,9 +58,9 @@ EOF
 
 # ra_run ARGS...: execute the twin with the stub bin first on PATH and a
 # scratch HOME - no host chezmoi, no host config can leak in.
+# shellcheck disable=SC2030,SC2031  # the subshell is the isolation: PATH
+# and HOME must not leak back into the test process
 ra_run() (
-    # shellcheck disable=SC2030  # the subshell is the isolation: HOST PATH
-    # and HOME must not leak back into the test process
     export PATH="$scratch/bin:$PATH"
     export HOME="$scratch/home"
     exec bash "$repo_root/scripts/remote-access.sh" "$@"
@@ -68,6 +80,27 @@ ra_section_line() {
     [ -n "$n" ] || n=0
     printf '%s' "$n"
 }
+
+# ra_mode FILE: permission bits of FILE, portable across GNU stat (Linux,
+# `stat -c %a`) and BSD stat (macOS, `stat -f %Lp`); "unknown" when neither
+# stat can read it (a missing file must fail the mode assertion, not abort
+# the run before finish).
+ra_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || printf 'unknown'
+}
+
+# ra_call ARGS...: source the twin into a subshell (RA_NO_MAIN=1 keeps its
+# main off - see the header) and invoke ARGS as a function call: how the
+# login-key helpers are driven before `setup` wires them to a subcommand.
+# shellcheck disable=SC2030,SC2031  # the subshell is the isolation: PATH,
+# HOME and RA_NO_MAIN must not leak back into the test process
+ra_call() (
+    export PATH="$scratch/bin:$PATH"
+    export HOME="$scratch/home"
+    export RA_NO_MAIN=1
+    . "$repo_root/scripts/remote-access.sh"
+    "$@"
+)
 
 # 1. Unknown subcommand: usage, exit 2.
 rc=0
@@ -353,6 +386,198 @@ out="$(RA_TUNNEL_CONFIG="$scratch/home/.cloudflared/inline-token.yml" ra_run tun
 [ "$rc" -eq 0 ] || fail "a token-shaped credentials-file must still validate structurally (got $rc)"
 if printf '%s' "$out" | grep -Eq 'ey[A-Za-z0-9_-]{20,}'; then
     fail "tunnel validate output must never echo token material (got: $out)"
+fi
+pass
+
+# ---------------------------------------------------------------------------
+# 15-22. login keys - materialize + authorize (spec §5.1, Unix arm). The
+# declared key lives in keys-win-targets.json (name id_test, generate=true,
+# targets windows/wsl); on this arm the local ~/.ssh/authorized_keys is the
+# only writer - windows/wsl targets are the Windows host's job and are
+# skipped with a line saying so. The ssh-keygen stub is faithful (creates
+# the pair it is asked for, so permission normalization is observable) and
+# records its quoted argv into $scratch/calls; no path prints key material.
+# ---------------------------------------------------------------------------
+
+# The twin's config source for these scenarios: the declared login key.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/keys-win-targets.json' ;;
+esac"
+# The ssh-keygen stub: quoted argv (one invocation per line) into calls,
+# then a faithful materialization - empty private half + a .pub.
+ra_stub "$scratch/bin" ssh-keygen "line='ssh-keygen'
+keyfile=''
+prev=''
+for a in \"\$@\"; do
+    line=\"\$line '\$a'\"
+    if [ \"\$prev\" = '-f' ]; then keyfile=\"\$a\"; fi
+    prev=\"\$a\"
+done
+printf '%s\n' \"\$line\" >>'$scratch/calls'
+if [ -n \"\$keyfile\" ]; then
+    : >\"\$keyfile\"
+    printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd stub@local\n' >\"\$keyfile.pub\"
+fi"
+
+# 15. The fixture pins the spec §5.1 shape: one
+#     [[data.remote_access.login_keys]] entry with name, optional generate,
+#     targets.
+if jq -e '.remote_access.login_keys
+    == [{"name": "id_test", "generate": true, "targets": ["windows", "wsl"]}]' \
+    "$repo_root/tests/fixtures/remote_access/keys-win-targets.json" >/dev/null 2>&1; then
+    :
+else
+    fail "keys-win-targets.json must declare id_test/generate=true/targets windows+wsl per spec §5.1"
+fi
+pass
+
+# 16. Pattern A, non-interactive: WARN 'not created', no ssh-keygen
+#     recorded, no key files created - a non-interactive run never prompts
+#     and never creates keys.
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+export RA_NONINTERACTIVE=1
+rc=0
+out="$(ra_call ra_login_key_materialize id_test true 2>&1)" || rc=$?
+unset RA_NONINTERACTIVE
+[ "$rc" -eq 0 ] || fail "materialize must exit 0 on the non-interactive WARN path (got $rc)"
+printf '%s' "$out" | grep -Fq 'not created' ||
+    fail "non-interactive materialize must WARN 'not created' (got: $out)"
+if [ -e "$scratch/calls" ]; then
+    fail "non-interactive materialize must not invoke ssh-keygen (got: $(cat "$scratch/calls"))"
+fi
+if [ -e "$scratch/home/.ssh/id_test" ] || [ -e "$scratch/home/.ssh/id_test.pub" ]; then
+    fail "non-interactive materialize must not create key files"
+fi
+pass
+
+# 17. Pattern A through the non-TTY confirm seam (RA_CONFIRM_MATERIALIZE=1,
+#     still under RA_NONINTERACTIVE=1 - the seam is the confirmation):
+#     `ssh-keygen -t ed25519 -f <home>/.ssh/id_test -N ''` recorded (the
+#     empty passphrase exists only in the seam; real runs prompt by omitting
+#     -N), private half normalized to 600.
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+export RA_NONINTERACTIVE=1 RA_CONFIRM_MATERIALIZE=1
+rc=0
+out="$(ra_call ra_login_key_materialize id_test true 2>&1)" || rc=$?
+unset RA_NONINTERACTIVE RA_CONFIRM_MATERIALIZE
+[ "$rc" -eq 0 ] || fail "seam materialize must exit 0 (got $rc)"
+[ -f "$scratch/calls" ] || fail "the confirm seam must drive ssh-keygen (no call recorded)"
+require "$scratch/calls" "ssh-keygen '-t' 'ed25519' '-f' '$scratch/home/.ssh/id_test' '-N' ''"
+[ -f "$scratch/home/.ssh/id_test" ] || fail "the seam run must materialize the private half"
+priv_mode="$(ra_mode "$scratch/home/.ssh/id_test")"
+[ "$priv_mode" = "600" ] ||
+    fail "the materialized private half must be chmod 600 (got: $priv_mode)"
+pass
+
+# 18. Pattern B: only the .pub dropped (generated on the owning device) -
+#     materialize is a silent success (no WARN, no ssh-keygen, no
+#     missing-private-key complaint), and authorizing lands exactly the
+#     dropped line in the local authorized_keys.
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/id_test.pub"
+rc=0
+out="$(ra_call ra_login_key_materialize id_test true 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "pattern B materialize must exit 0 (got $rc)"
+if printf '%s' "$out" | grep -Fq 'not created'; then
+    fail "pattern B must not WARN 'not created' (got: $out)"
+fi
+if [ -e "$scratch/calls" ]; then
+    fail "pattern B must not invoke ssh-keygen (got: $(cat "$scratch/calls"))"
+fi
+if printf '%s' "$out" | grep -Fqi 'missing'; then
+    fail "pattern B must not complain about the missing private half (got: $out)"
+fi
+rc=0
+out="$(ra_call ra_authorized_keys_install id_test linux 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "pattern B authorize must exit 0 (got $rc)"
+require "$scratch/home/.ssh/authorized_keys" 'dropped@other-device'
+pass
+
+# 19. Authorize, append path: authorized_keys pre-seeded with an unrelated
+#     line - exactly one line appended (the .pub content), the original
+#     line intact, file mode 600.
+rm -rf "$scratch/home/.ssh"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAALegacyKeyMaterial operator@legacy\n' >"$scratch/home/.ssh/authorized_keys"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/id_test.pub"
+rc=0
+out="$(ra_call ra_authorized_keys_install id_test linux 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "authorize must exit 0 on the append path (got $rc)"
+ak_lines="$(wc -l <"$scratch/home/.ssh/authorized_keys")"
+[ "$ak_lines" -eq 2 ] ||
+    fail "authorize must append exactly one line (got $ak_lines lines)"
+ak_first="$(sed -n '1p' "$scratch/home/.ssh/authorized_keys")"
+[ "$ak_first" = 'ssh-ed25519 AAAALegacyKeyMaterial operator@legacy' ] ||
+    fail "the pre-existing line must stay first and intact (got: $ak_first)"
+ak_second="$(sed -n '2p' "$scratch/home/.ssh/authorized_keys")"
+[ "$ak_second" = "$(cat "$scratch/home/.ssh/id_test.pub")" ] ||
+    fail "the appended line must be the .pub content (got: $ak_second)"
+ak_mode="$(ra_mode "$scratch/home/.ssh/authorized_keys")"
+[ "$ak_mode" = "600" ] || fail "authorized_keys must be mode 600 (got: $ak_mode)"
+pass
+
+# 20. Authorize, dedup path: unrelated line + the target key already
+#     present - the file stays byte-identical (no duplicate, no reorder).
+rm -rf "$scratch/home/.ssh"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAALegacyKeyMaterial operator@legacy\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/authorized_keys"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/id_test.pub"
+cp "$scratch/home/.ssh/authorized_keys" "$scratch/home/.ssh/authorized_keys.before"
+rc=0
+out="$(ra_call ra_authorized_keys_install id_test linux 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "authorize must exit 0 on the already-present path (got $rc)"
+if cmp -s "$scratch/home/.ssh/authorized_keys" "$scratch/home/.ssh/authorized_keys.before"; then
+    :
+else
+    fail "authorize must leave an already-authorized file byte-identical"
+fi
+printf '%s' "$out" | grep -Fq 'already authorized' ||
+    fail "the already-present path must say so (got: $out)"
+pass
+
+# 21. Targets this arm does not own: windows (administrators_authorized_keys
+#     + ACL) and wsl (the wsl.exe channel) are installed by the Windows
+#     host's ps1 twin - skipped with a clear line, the local file untouched.
+rm -rf "$scratch/home/.ssh"
+mkdir -p "$scratch/home/.ssh"
+printf 'ssh-ed25519 AAAALegacyKeyMaterial operator@legacy\n' >"$scratch/home/.ssh/authorized_keys"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device\n' >"$scratch/home/.ssh/id_test.pub"
+cp "$scratch/home/.ssh/authorized_keys" "$scratch/home/.ssh/authorized_keys.before"
+rc=0
+out="$(ra_call ra_authorized_keys_install id_test windows 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "the windows target must skip cleanly (got $rc)"
+printf '%s' "$out" | grep -Fq 'Windows host' ||
+    fail "the windows skip line must name the Windows host (got: $out)"
+rc=0
+out="$(ra_call ra_authorized_keys_install id_test wsl 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "the wsl target must skip cleanly (got $rc)"
+printf '%s' "$out" | grep -Fq 'Windows host' ||
+    fail "the wsl skip line must name the Windows host channel (got: $out)"
+if cmp -s "$scratch/home/.ssh/authorized_keys" "$scratch/home/.ssh/authorized_keys.before"; then
+    :
+else
+    fail "skipped targets must not touch the local authorized_keys"
+fi
+pass
+
+# 22. generate=false + no .pub dropped yet: WARN naming the action - drop
+#     the public half - and nothing generated, no private half created.
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+rc=0
+out="$(ra_call ra_login_key_materialize id_test false 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "generate=false materialize must exit 0 (got $rc)"
+printf '%s' "$out" | grep -Fq 'drop the public half' ||
+    fail "generate=false with no .pub must WARN 'drop the public half' (got: $out)"
+if [ -e "$scratch/calls" ]; then
+    fail "generate=false must not invoke ssh-keygen (got: $(cat "$scratch/calls"))"
+fi
+if [ -e "$scratch/home/.ssh/id_test" ]; then
+    fail "generate=false must not create the private half"
 fi
 pass
 

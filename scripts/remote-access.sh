@@ -568,6 +568,106 @@ ra_tunnel_validate() {
     return 1
 }
 
+# ---------------------------------------------------------------------------
+# login keys (spec §5.1) - materialize + authorize, Unix arm. `setup` drives
+# these per declared [[data.remote_access.login_keys]] entry; Tasks 10-11's
+# ps1 twin inverts the same two names for the Windows host. Private key
+# material is never printed: the commands' output names files and verdicts,
+# never key contents. The confirm gate defaults to WARN-and-skip whenever
+# nothing can answer a prompt - a non-interactive run never prompts and
+# never creates keys.
+# ---------------------------------------------------------------------------
+
+# ra_login_key_materialize NAME GENERATE: ensure ~/.ssh/NAME exists per spec
+# §5.1 - idempotent, only-if-missing, confirmation-gated. Both halves
+# missing: confirm, then `ssh-keygen -t ed25519` (through the
+# RA_CONFIRM_MATERIALIZE seam the passphrase is empty, `-N ''`, because no
+# prompt can be answered there; a real interactive run omits -N and lets
+# ssh-keygen ask). Only NAME.pub present: Pattern B - the public half was
+# generated on the owning device and dropped here; inbound-only, use as-is,
+# no generation, no missing-private-key complaint. GENERATE=false and no
+# .pub yet: WARN to drop the public half. Either way the private half's
+# mode is normalized to 600 and ~/.ssh to 700.
+ra_login_key_materialize() {
+    local name="$1" generate="${2:-true}"
+    local priv="${HOME}/.ssh/${name}" pub="${HOME}/.ssh/${name}.pub" answer=""
+    mkdir -p -- "${HOME}/.ssh"
+    chmod 700 -- "${HOME}/.ssh"
+    if [ -f "$priv" ]; then
+        chmod 600 -- "$priv"
+        ra_ok "login key ${name}: present"
+        return 0
+    fi
+    if [ -f "$pub" ]; then
+        ra_ok "login key ${name}: public half present, inbound-only (no private half here)"
+        return 0
+    fi
+    if [ "$generate" != "true" ]; then
+        ra_warn "login key ${name}: generate=false and no public half dropped yet - drop the public half into ${pub} to authorize it"
+        return 0
+    fi
+    if [ -n "${RA_CONFIRM_MATERIALIZE:-}" ]; then
+        ssh-keygen -t ed25519 -f "$priv" -N ''
+    elif [ -n "${RA_NONINTERACTIVE:-}" ] || [ ! -t 0 ]; then
+        ra_warn "login key ${name}: not created (non-interactive run - confirm the prompt on a TTY, or set RA_CONFIRM_MATERIALIZE=1)"
+        return 0
+    else
+        printf 'create login key %s (passphrase prompt follows)? [y/N] ' "$name"
+        read -r answer || answer=""
+        case "$answer" in
+            y | Y | yes | Yes | YES)
+                ssh-keygen -t ed25519 -f "$priv"
+                ;;
+            *)
+                ra_warn "login key ${name}: not created (declined)"
+                return 0
+                ;;
+        esac
+    fi
+    chmod 600 -- "$priv"
+    ra_ok "login key ${name}: created"
+    return 0
+}
+
+# ra_authorized_keys_install NAME TARGET: authorize ~/.ssh/NAME.pub for
+# TARGET - append-only into the local ~/.ssh/authorized_keys behind a
+# `grep -Fxq` guard (never a duplicate, never a reorder, existing lines
+# never touched), mode 600. `linux`/`macos` targets are this machine's
+# local arm; `windows`/`wsl` are the Windows host's ps1 twin's installs
+# (administrators_authorized_keys with its admins-only ACL, and the
+# wsl.exe channel) and are skipped here with a line saying so.
+ra_authorized_keys_install() {
+    local name="$1" target="$2"
+    local pub="${HOME}/.ssh/${name}.pub" ak="${HOME}/.ssh/authorized_keys" line
+    case "$target" in
+        linux | macos)
+            ;;
+        windows | wsl)
+            ra_warn "login key ${name}: target ${target} is installed by the Windows arm (dot remote on the Windows host)"
+            return 0
+            ;;
+        *)
+            ra_warn "login key ${name}: unknown target ${target} - skipped"
+            return 0
+            ;;
+    esac
+    [ -f "$pub" ] || {
+        ra_warn "login key ${name}: no public half at ${pub} - nothing to authorize into ${target}"
+        return 0
+    }
+    line="$(cat "$pub")"
+    mkdir -p -- "${HOME}/.ssh"
+    [ -f "$ak" ] || : >"$ak"
+    chmod 600 -- "$ak"
+    if grep -Fxq -- "$line" "$ak"; then
+        ra_ok "login key ${name}: already authorized (${target})"
+        return 0
+    fi
+    printf '%s\n' "$line" >>"$ak"
+    ra_ok "login key ${name}: authorized (${target})"
+    return 0
+}
+
 main() {
     local cmd="${1:-}"
     [ $# -gt 0 ] && shift
@@ -591,4 +691,7 @@ main() {
     esac
 }
 
-main ${1+"$@"}
+# RA_NO_MAIN=1 keeps dispatch off: tests source this file and drive the
+# ra_* helpers function-level (the ps1 twin's REMOTE_ACCESS_NO_MAIN=1
+# mirror). Every direct caller goes through main() below.
+[ -n "${RA_NO_MAIN:-}" ] || main ${1+"$@"}
