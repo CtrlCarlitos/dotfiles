@@ -899,4 +899,51 @@ printf '%s' "$out" | grep -Fq 'not created' ||
     fail "non-interactive darwin setup must WARN 'not created' (got: $out)"
 pass
 
+# 28. generate=false at setup level (spec §5.1 Pattern B declared up
+#     front): the fixture declares generate=false and no .pub is dropped -
+#     setup must hit materialize's declared-WARN path ('drop the public
+#     half') and record NO ssh-keygen call, never silently generate into
+#     the pre-drop window. RA_NONINTERACTIVE pins determinism; the
+#     'not created' absence proves the declared-false branch, not the
+#     non-interactive one, produced the WARN.
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$repo_root/tests/fixtures/remote_access/keys-generate-false.json' ;;
+esac"
+ra_stub "$scratch/bin" uname "printf 'Linux\n'"
+ra_stub "$scratch/bin" tailscale "log='$scratch/calls'
+case \"\$1 \${2:-}\" in
+    \"status --json\") printf '%s\n' '{\"BackendState\": \"Running\"}' ;;
+    \"serve status\")
+        if [ -f \"\$log\" ]; then grep '127.0.0.1' \"\$log\" || true; fi
+        exit 0 ;;
+    serve*)
+        line='tailscale'
+        for a in \"\$@\"; do line=\"\$line '\$a'\"; done
+        printf '%s\n' \"\$line\" >>\"\$log\"
+        exit 0 ;;
+    *) printf 'unexpected tailscale call: \$*\n' >&2
+       exit 1 ;;
+esac"
+ra_stub "$scratch/bin" systemctl "printf 'unexpected systemctl call: \$*\n' >&2
+exit 1"
+rm -f "$scratch/calls"
+rm -rf "$scratch/home/.ssh"
+export RA_NONINTERACTIVE=1
+rc=0
+out="$(ra_run setup 2>&1)" || rc=$?
+unset RA_NONINTERACTIVE
+[ "$rc" -eq 0 ] || fail "setup must exit 0 with a generate=false key (got $rc)"
+printf '%s' "$out" | grep -Fq 'drop the public half' ||
+    fail "generate=false with no .pub must WARN 'drop the public half' through setup (got: $out)"
+if printf '%s' "$out" | grep -Fq 'not created'; then
+    fail "generate=false must take the declared-WARN path, not the non-interactive one (got: $out)"
+fi
+if [ -e "$scratch/calls" ] && grep -q '^ssh-keygen' "$scratch/calls"; then
+    fail "generate=false must not invoke ssh-keygen during setup (got: $(cat "$scratch/calls"))"
+fi
+if [ -e "$scratch/home/.ssh/id_test" ]; then
+    fail "generate=false must not create the private half during setup"
+fi
+pass
+
 finish

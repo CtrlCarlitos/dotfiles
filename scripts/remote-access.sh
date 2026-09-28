@@ -832,22 +832,51 @@ ra_setup_darwin() {
     return 0
 }
 
+# ra_login_key_generate JSON INDEX: the declared generate flag for
+# login_keys.INDEX - "false" only when the entry declares generate=false
+# explicitly, "true" when the flag is absent or true (the spec §5.1
+# default). The generic resolvers collapse JSON false onto the default
+# (jq `//`, python3 `is False`), which would silently turn a declared
+# Pattern B into generation, so this reads the flag three-state in both
+# backends; anything unreadable resolves to "true".
+ra_login_key_generate() {
+    local json="$1" idx="$2" out=""
+    if command -v jq >/dev/null 2>&1; then
+        # No `//` anywhere: false is falsy in jq, so `false // empty`
+        # would drop the one value this read exists for - compare
+        # explicitly instead (null on absent, == false / == true).
+        out="$(printf '%s' "$json" | jq -r "if .login_keys[${idx}].generate? == false then \"false\" elif .login_keys[${idx}].generate? == true then \"true\" else empty end" 2>/dev/null)" || out=""
+    elif command -v python3 >/dev/null 2>&1; then
+        out="$(printf '%s' "$json" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+keys = doc.get("login_keys") or []
+i = int(sys.argv[1])
+v = None
+if 0 <= i < len(keys) and isinstance(keys[i], dict):
+    v = keys[i].get("generate")
+print("false" if v is False else ("true" if v is True else ""))
+' "$idx" 2>/dev/null)" || out=""
+    fi
+    [ -n "$out" ] || out="true"
+    printf '%s' "$out"
+}
+
 # ra_setup_login_keys: drive ra_login_key_materialize +
 # ra_authorized_keys_install per declared
 # [[data.remote_access.login_keys]] entry (spec §5.1). login_keys is an
 # array, so the walk is index-based through ra_json_str - the resolver
 # that understands numeric segments in both jq and python3 - and the
-# first missing .name ends it. Note the resolver's `//` semantics: an
-# explicit generate=false collapses to the default, so declare generate
-# explicitly and keep it true on this arm (Pattern B is expressed by
-# dropping the .pub, which materialize handles either way).
+# first missing .name ends it. generate is read three-state (see
+# ra_login_key_generate) so a declared Pattern B is honored, not
+# generated over.
 ra_setup_login_keys() {
     local json i=0 t target name generate
     json="$(ra_data_json)"
     while :; do
         name="$(ra_json_str "$json" "login_keys.${i}.name" "")"
         [ -n "$name" ] || break
-        generate="$(ra_json_str "$json" "login_keys.${i}.generate" "true")"
+        generate="$(ra_login_key_generate "$json" "$i")"
         ra_login_key_materialize "$name" "$generate"
         t=0
         while :; do
