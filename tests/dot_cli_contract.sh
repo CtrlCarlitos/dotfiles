@@ -39,6 +39,17 @@ grep -Fq 'chezmoi update --apply' "$ps1_profile" || fail "$ps1_profile: dot up m
 grep -Fq 'chezmoi init' "$ps1_profile" || fail "$ps1_profile: dot up must re-init config after pull"
 grep -Fq 'chezmoi init' "$zsh_aliases" || fail "$zsh_aliases: dot up must re-init config after pull"
 
+# 3b. dot up refreshes the LIVE session: zsh drops its PATH-listing cache
+#     (HASH_LIST_ALL hides installs made after the shell started - observed
+#     live 2026-09-29: `codex` "not found" in a session that predated its
+#     install), and the PowerShell twins re-read the registry PATH. A full
+#     profile reload is deliberately NOT attempted (double-loaded hooks).
+grep -Fq 'rehash' "$zsh_aliases" || fail "$zsh_aliases: dot up must rehash (zsh hides post-start installs)"
+for f in "$ps1_profile" "$ps1_profile5"; do
+    grep -Fq 'New installs land in the registry PATH' "$f" ||
+        fail "$f: dot up must re-read the registry PATH"
+done
+
 # 4. dot upgrade twins exist with gates, sweep, devcontainer guard.
 for f in "$up_ps1" "$up_sh"; do
     [ -f "$f" ] || fail "$f: dotupgrade script missing"
