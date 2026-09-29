@@ -158,6 +158,26 @@ logon (WSL IPs change across reboots). Idempotent, and not required by
 default — the default workflow reconciles on demand with `dot remote
 wsl-reconcile` or `dot remote fix`.
 
+### Config gates the plumbing reads
+
+All of these live in your machine-local `~/.config/chezmoi/chezmoi.toml`
+(never committed), next to `services`, `tunnel` and `login_keys`:
+
+```toml
+[data.remote_access.wsl]
+enabled = true    # arms the Windows side to configure the WSL machine: sshd
+                  # inside the distro, the login keys there, the :2222
+                  # portproxy reconcile (+ its firewall rule), and the logon
+                  # reconcile task
+
+[data.remote_access.linux]
+ssh = true        # opts a native Linux host's own sshd handling in
+                  # (absent or false = that arm stays manual)
+```
+
+With `wsl.enabled` absent or false, the WSL arm degrades to a WARN naming the
+manual action instead of touching the distro.
+
 ## 10. `dot remote tunnel render` and `tunnel validate`
 
 `tunnel render` writes the machine-local cloudflared `config.yml` from
