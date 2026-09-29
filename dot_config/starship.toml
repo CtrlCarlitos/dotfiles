@@ -8,6 +8,12 @@
 # checkout hits this too.)
 scan_timeout = 100
 
+# Module command budget (default 500 ms). The first `go` probe in a Go repo
+# (toolchain resolution, cold cache) blows past it - starship prints
+# "Executing command ... timed out" and drops the version segment. 2000 ms
+# keeps cold-start probes honest; warm probes are single-digit ms.
+command_timeout = 2000
+
 [aws]
 format = '\[[$symbol($profile)(\($region\))(\[$duration\])]($style)\]'
 
