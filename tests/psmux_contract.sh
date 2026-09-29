@@ -71,4 +71,15 @@ grep -Fq 'scan_timeout = 100' "$repo_root/dot_config/starship.toml" ||
 grep -Fq '.config/psmux/**' "$repo_root/.chezmoiignore" ||
     fail ".chezmoiignore: .config/psmux/** must be excluded on non-Windows (no psmux outside Windows)"
 
+# The operator guide (issue #188): must exist, teach the canonical prefix (not
+# stock Ctrl+b), and be linked from every surface an operator starts from.
+guide="$repo_root/docs/remote-agent-sessions.md"
+[ -f "$guide" ] || fail "docs/remote-agent-sessions.md missing (issue #188 operator guide)"
+for want in 'Ctrl+a' 'not stock tmux' '`Ctrl+a`, `d`' '`Ctrl+a`, `\|`' '`Ctrl+a`, `-`' 'h`/`j`/`k`/`l' '`Ctrl+a`, `[' '`Ctrl+a`, `r`' 'escape-time 0'; do
+    grep -Fq -- "$want" "$guide" || fail "remote-agent-sessions.md: missing canonical content: $want"
+done
+for linker in "$repo_root/README.md" "$repo_root/docs/terminal.md" "$repo_root/docs/tmux.md" "$repo_root/docs/remote-access.md"; do
+    grep -Fq 'remote-agent-sessions' "$linker" || fail "$(basename "$linker"): must link the remote-agent-sessions guide"
+done
+
 finish

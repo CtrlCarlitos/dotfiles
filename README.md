@@ -177,6 +177,7 @@ New to zsh, tmux, or neovim? Start here:
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
 | [Git](docs/git.md) | Line endings, gitconfig defaults, delta, and aliases |
 | [Terminal Experience](docs/terminal.md) | Windows Terminal, VS Code terminal, OpenCode theme, agent keys, clipboard, SSH hosts |
+| [Remote Agent Sessions](docs/remote-agent-sessions.md) | tmux/psmux across desk and phone: canonical keys, detach/attach, recovery |
 | [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
 | [Menu Demo](docs/menu-demo.md) | What the selection menu looks like |
 | [Config Example](docs/chezmoi.toml.example) | Complete chezmoi.toml with all options |

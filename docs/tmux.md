@@ -30,6 +30,8 @@ You must press `Ctrl+a`, **release it**, and then press the command key.
 > same workflow in a plain Terminal tab. Its config
 > (`dot_config/psmux/psmux.conf`) is the twin of this file - same prefix, same
 > keys, same bar - and `tests/psmux_contract.sh` fails CI if the two drift.
+> For the desk-to-phone workflow (detach, reattach from mobile, recovery):
+> [Remote Agent Sessions](remote-agent-sessions.md).
 
 | Action | Key Binding | Mnemonic |
 | :--- | :--- | :--- |

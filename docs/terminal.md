@@ -391,7 +391,9 @@ keeps TUI settings in `tui.json`, not `opencode.json`.
 [psmux](https://github.com/psmux/psmux) is a native Windows tmux (Rust, ConPTY,
 tmux command language). It makes the tmux workflow - persistent sessions,
 panes, copy mode - available in a plain Windows tab, with the same keys as the
-tmux you use over SSH (see the [Tmux Guide](tmux.md)).
+tmux you use over SSH (see the [Tmux Guide](tmux.md)). The desk-to-phone
+operator guide for running agents in these sessions:
+[Remote Agent Sessions](remote-agent-sessions.md).
 
 - **Launch it from the `psmux` Terminal profile** (teal tab): it starts an
   attached session in `%USERPROFILE%`. Never launch it as a bare commandline
