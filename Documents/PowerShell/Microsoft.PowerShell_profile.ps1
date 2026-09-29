@@ -214,6 +214,19 @@ function docker-stop-all {
     docker stop (docker ps -aq) 2>$null
 }
 
+# serena-clean (oraios/serena#2122): agy leaves serena shim+python trees
+# running after exit; the next agy session's /mcp reload fails ("failed to
+# stop mcp instance: serena: exit status 1") until they are gone. Close the
+# agent CLIs first, then run it.
+function serena-clean {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'name is alias-parity with docker-clean')]
+    param()
+    Get-Process serena -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
+        Where-Object { $_.CommandLine -match 'serena' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+}
+
 #-------------------------------------------------------------------------------
 # Utilities
 #-------------------------------------------------------------------------------
