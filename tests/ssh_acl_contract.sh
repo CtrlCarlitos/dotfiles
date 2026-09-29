@@ -20,6 +20,17 @@ grep -Fq 'ContainerInherit' "$tmpl" || fail "directory ACL rule lost ContainerIn
 grep -Fq 'ObjectInherit' "$tmpl" || fail "directory ACL rule lost ObjectInherit"
 grep -Fq 'SetAccessRuleProtection($true, $false)' "$tmpl" ||
     fail "ACL must stay protected (inheritance severed from the parent's parent)"
+# The ACL write must go through the .NET API, not the Set-Acl cmdlet
+# (2026-09-28 incident: against the live ~/.ssh directory Set-Acl died with
+# PrivilegeNotHeldException SeSecurityPrivilege on a descriptor the script
+# built from scratch, while the identical call succeeded on a scratch dir;
+# the .NET entry points persist owner/group/DACL only and never request the
+# audit section). Split by interpreter - 5.1's Directory/File::SetAccessControl
+# do not exist on .NET 5+, FileSystemAclExtensions does not exist on 5.1.
+grep -Fq 'SetAccessControl' "$tmpl" || fail "ACL persistence must use the .NET SetAccessControl API"
+grep -Fq 'FileSystemAclExtensions' "$tmpl" || fail "pwsh branch: ACL persistence must use FileSystemAclExtensions"
+grep -Fq 'PSVersionTable.PSVersion.Major -ge 6' "$tmpl" || fail "ACL persistence needs the 5.1/pwsh split"
+! grep -Fq 'Set-Acl -Path' "$tmpl" || fail "the Set-Acl cmdlet must not come back (SeSecurityPrivilege incident)"
 # .pub files must stay OUT of the strict per-file pass (public keys aren't
 # secret) - they ride the inheritable directory rule instead.
 grep -Fq 'Extension -ne ".pub"' "$tmpl" ||
