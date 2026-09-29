@@ -206,6 +206,9 @@ tmux new-session -A -s main   # attach to "main" or create it
 tmux attach -d                # detach other clients and take over
 ```
 
+The operator guide for durable agent sessions across desk and phone
+(canonical keys, handoff, recovery): [Remote Agent Sessions](remote-agent-sessions.md).
+
 `[[data.ssh_hosts]]` entries with `tmux = true` make the Windows Terminal SSH
 tab re-attach to session "main" (or a named session) on connect; see
 [Secrets & SSH Hosts](secrets.md#ssh-hosts-datassh_hosts) and the
