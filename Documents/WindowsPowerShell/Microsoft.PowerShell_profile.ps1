@@ -153,6 +153,9 @@ function dot {
             if ($LASTEXITCODE -ne 0) { return }
             $after = if (Test-Path $cfg) { (Get-FileHash $cfg -ErrorAction SilentlyContinue).Hash } else { $null }
             if ($before -ne $after) { chezmoi apply }
+            # New installs land in the registry PATH; this session only sees
+            # them after a re-read (child installers keep their own PATH).
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         }
         'upgrade'   { & (Join-Path $repoScripts 'dotupgrade.ps1') @rest }
         'backup'    { & (Join-Path $repoScripts 'dotbackup.ps1') @rest }

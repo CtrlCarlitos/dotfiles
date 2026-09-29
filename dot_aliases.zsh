@@ -190,6 +190,15 @@ dot() {
             if [ "$before" != "$after" ]; then
                 chezmoi apply
             fi
+            # zsh caches every PATH dir's listing on first command lookup
+            # (HASH_LIST_ALL): installs from this run stay invisible to THIS
+            # shell until the cache is dropped - `codex` was "not found" in a
+            # session that predated its install (2026-09-29). A full profile
+            # reload is deliberately not attempted (double-loaded hooks);
+            # rehash only drops the cache. Guarded: the contract executes this
+            # function under bash too, where rehash does not exist, and an
+            # unguarded tail would return non-zero (#116 class).
+            if command -v rehash >/dev/null 2>&1; then rehash; fi
             ;;
         upgrade)  shift; bash "$repo_scripts/dotupgrade.sh" "$@" ;;
         backup)   shift; bash "$repo_scripts/dotbackup.sh" "$@" ;;
