@@ -253,6 +253,26 @@ exec "$real_chezmoi" execute-template --source "$gscratch" "\$@"
 EOF
 chmod +x "$gbin/chezmoi"
 
+# npm/npx stubs: the PATH pin above keeps /usr/bin for coreutils, and on a box
+# with apt-installed npm that means the host's REAL npm/npx stay reachable -
+# so the updater's npm section ran for real: it resolved the codex package,
+# called `sudo npm install`, and sudo without a tty BLOCKED reading a password
+# instead of failing fast, killing the whole test at exit 124 (observed live).
+# The updater's failure paths expect a failing package manager: installs and
+# removals exit 1 instantly (never a password prompt, never the network). One
+# query must SUCCEED: `npm prefix -g` is read unguarded under set -e
+# (AGENT_BROWSER_BIN=$(npm prefix -g)/...), so it prints a scratch dir whose
+# agent-browser binary then fails the updater's own -x guard.
+cat >"$gbin/npm" <<'EOF'
+#!/bin/sh
+case "${1:-}" in
+    prefix) mktemp -d; exit 0 ;;
+    *) exit 1 ;;
+esac
+EOF
+printf '#!/bin/sh\nexit 1\n' >"$gbin/npx"
+chmod +x "$gbin/npm" "$gbin/npx"
+
 g_run() { # $1 = script to run; $2 = output file (config baked into HOME)
     local script="$1" outfile="$2"
     # PATH is pinned to the stubs + system coreutils: with the host's real
