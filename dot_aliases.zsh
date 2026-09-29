@@ -195,6 +195,7 @@ dot() {
         backup)   shift; bash "$repo_scripts/dotbackup.sh" "$@" ;;
         restore)  shift; bash "$repo_scripts/dotrestore.sh" "$@" ;;
         doctor)   shift; bash "$repo_scripts/dotfiles-doctor.sh" "$@" ;;
+        remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;
         *)
             echo "dot - dotfiles command family"
             echo "  dot up        sync state (pull + apply + config re-init; never upgrades)"
@@ -202,6 +203,7 @@ dot() {
             echo "  dot backup    encrypted portable backup"
             echo "  dot restore   restore a backup"
             echo "  dot doctor    dotfiles health check"
+            echo "  dot remote    remote-access setup/status/fix"
             ;;
     esac
 }

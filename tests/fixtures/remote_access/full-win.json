@@ -1,0 +1,35 @@
+{
+  "remote_access": {
+    "enabled": true,
+    "windows": {
+      "ssh": true,
+      "rdp": true
+    },
+    "wsl": {
+      "enabled": true,
+      "ssh_port": 2222
+    },
+    "services": {
+      "opencode_windows": {
+        "enabled": true,
+        "environment": "windows",
+        "port": 4096,
+        "tailscale": true,
+        "cloudflare": true
+      }
+    },
+    "tunnel": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "ingress": {
+        "ssh": {
+          "hostname": "ssh.example.com",
+          "service": "ssh://127.0.0.1:22"
+        },
+        "opencode": {
+          "hostname": "opencode.example.com",
+          "service": "http://127.0.0.1:4096"
+        }
+      }
+    }
+  }
+}

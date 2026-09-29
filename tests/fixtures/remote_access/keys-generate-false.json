@@ -1,0 +1,12 @@
+{
+  "remote_access": {
+    "enabled": true,
+    "login_keys": [
+      {
+        "name": "id_test",
+        "generate": false,
+        "targets": ["linux"]
+      }
+    ]
+  }
+}

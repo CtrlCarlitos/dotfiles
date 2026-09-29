@@ -1,49 +1,53 @@
 # Remote Access
 
+`dot remote` (scripts/remote-access.sh on Linux, macOS, and inside WSL;
+scripts/remote-access.ps1 on the Windows host) sets up, reports on, and
+repairs the machine-local plumbing for private remote access: Tailscale
+provides connectivity, SSH/RDP provide remote access, tmux provides session
+persistence, and a Cloudflare tunnel gated by Cloudflare Access is the
+optional browser path. The scripts configure the host; provider-side steps
+stay manual. This guide is the map between the two.
+
 ## 1. Scope and non-goals
 
-This guide describes manual, machine-local setup after installing the optional
-package groups. Keep development-agent backends private: use a tailnet or a
-local console, never a public route.
+Keep development-agent backends private: use a tailnet or a local console,
+never a public route.
 No Caddy, code-server, Tailscale Funnel, or public agent backends.
 Do not provide an external route to an agent backend.
 
 Identities, credentials, tunnel definitions, SSH keys, and tailnet ACL values
 belong on the machine or in the provider dashboard, never in this repository.
 
-## 2. Install-only package groups
+Install-only package groups never configure anything: `remote_access`
+installs the Tailscale and cloudflared clients only; `remote_access_server`
+installs OpenSSH-server prerequisites only.
 
-`remote_access` installs only the Tailscale and cloudflared clients. It never
-signs in, creates tunnels, changes service state, or stores credentials.
+## 2. Policy for agent web services
 
-`remote_access_server` installs only OpenSSH server prerequisites. It never
-enables a server, opens a firewall, writes SSH configuration or keys, or creates
-a portproxy. Selecting either group is not remote-access configuration.
+Agent web services (OpenCode and similar backends) stay private:
 
-## 3. Private OpenCode
+- They MUST bind to loopback (127.0.0.1) in their own environment and never
+  be router-forwarded or reachable without authentication. Ports must not
+  collide across environments: a Windows listener wins WSL2 localhost
+  forwarding on the same port.
+- They MUST retain their application authentication — the
+  `OPENCODE_SERVER_PASSWORD` stays set even when only the tailnet can reach
+  the port.
+- An OpenCode listener may ride Tailscale Serve or a Cloudflare tunnel only behind Cloudflare Access.
 
-Run OpenCode only on loopback and protect it with a machine-local password.
+Windows and WSL instances are separate backends; each declares its own
+`environment` and port under `[data.remote_access.services]` (example ports:
+4096 windows, 4097 wsl). Remove an exposure when it is no longer needed:
+`tailscale serve off` on the serving machine.
 
-**Manual, machine-local action:** start the private listener in the terminal
-where its password is available locally.
+Manual start of a private listener and its private mapping:
 
 ```bash
 OPENCODE_SERVER_PASSWORD='<machine-local secret>' opencode web --hostname 127.0.0.1 --port 4096
-```
-
-**Warning, manual machine-local exposure action:** after authenticating this
-machine to the tailnet, map the loopback listener with Tailscale Serve. Review
-the tailnet ACL before making it reachable.
-
-```bash
 tailscale serve --https=443 http://127.0.0.1:4096
 ```
 
-Open the machine's tailnet HTTPS name from an authorized device. Do not publish
-the listener. **Warning, manual machine-local exposure action:** to remove the
-mapping, run `tailscale serve off` on that machine.
-
-## 4. Native phone and browser agent paths
+## 3. Native phone and browser agent paths
 
 Use each vendor's authenticated remote-control path rather than exposing its
 backend:
@@ -56,146 +60,215 @@ backend:
   and revoke the session when it is no longer needed.
 - **Universal fallback:** run work in tmux and connect through private SSH.
 
-These are manual, machine-local choices. Vendor pairing, tokens, and session
-approvals must not be copied into dotfiles or shared configuration.
+Vendor pairing, tokens, and session approvals must not be copied into
+dotfiles or shared configuration.
 
-## 5. Approved external app sharing
+## 4. Manual provider actions (never scripted)
 
-Share only an approved non-agent web application through Cloudflare Access. Use
-one Access application per approved app, send cloudflared directly to that
-app's loopback origin, and end every ingress list with `http_status:404`.
+`dot remote` checks for these and prints `ACTION REQUIRED` when missing; it
+never automates provider authentication:
 
-**Manual, machine-local tunnel lifecycle action:** create the tunnel and its
-credentials through the provider's login flow on the host. Keep the resulting
-credential file local.
+- Enroll the machine in the tailnet (`tailscale up` or the GUI login), and
+  review the tailnet ACL that limits approved devices and ports.
+- `cloudflared tunnel login`, then `cloudflared tunnel create <name>` — the
+  resulting credential file `~/.cloudflared/<tunnel-id>.json` is machine-local
+  and is never committed.
+- Create one Cloudflare Access application and allow policy per exposed
+  hostname, with MFA enforced by your identity provider.
+- Register the cloudflared service as an elevated manual step:
+  `cloudflared service install`.
+- macOS: enable Remote Login and Screen Sharing by hand — `dot remote`
+  verifies their state but never flips it.
+
+## 5. `dot remote setup`
+
+Idempotent configure for the running host: already-correct state is verified,
+not rewritten, and a second run makes zero mutations. Missing prerequisites
+are reported, never installed.
+
+- **Windows:** sshd Automatic + running; the `OpenSSH-Tailscale` (:22),
+  `WSL-SSH-Tailscale` (:2222), and `RemoteDesktop-Tailscale` (:3389) rules
+  scoped to the Tailscale interface and tailnet address space; Remote Desktop
+  when `windows.rdp`; the WSL arm (sshd, login keys, the :2222 portproxy);
+  Tailscale Serve mappings from `services.*`; and `tunnel render`.
+- **Linux:** sshd; a tailnet-scoped firewall; xrdp installed through the
+  system package manager only when a desktop environment is detected and
+  `linux.rdp`; Tailscale Serve mappings; `tunnel render`.
+- **macOS:** Remote Login / Screen Sharing verification only; Tailscale Serve
+  mappings; `tunnel render`.
 
 ```bash
-cloudflared tunnel login
-cloudflared tunnel create <approved-app>
+dot remote setup
 ```
 
-**Warning, manual machine-local exposure action:** create the local tunnel
-configuration with a loopback origin for the approved app only.
+Setup ends with the staged-flow reminder: verify key login from another
+device, then run `dot remote harden-ssh`.
+
+## 6. `dot remote status`
+
+Read-only doctor; always exit 0. One section per area — Tailscale, SSH, RDP,
+WSL, Tailscale Serve, Cloudflare, Applications, tmux — with verified /
+manual-action / FAIL markers. FAIL lines name what `fix` would repair; WARN
+lines name the manual action. Never prints secrets.
+
+## 7. `dot remote fix`
+
+Repairs deterministic machine-local state only. Per platform:
+
+- **Windows:** restart sshd and restore its `Automatic` startup mode;
+  re-ensure the Tailscale-scoped firewall rules for the capabilities the
+  config declares (`OpenSSH-Tailscale` :22 when `windows.ssh`,
+  `RemoteDesktop-Tailscale` :3389 when `windows.rdp`, `WSL-SSH-Tailscale`
+  :2222 when `wsl.enabled` — behind the same authenticated-Tailscale gate
+  as setup); reconcile the WSL portproxy when `wsl.enabled`; restart the
+  cloudflared service when it is registered but not running (never
+  installed by fix); re-apply configured Tailscale Serve mappings
+  (auth-gated); re-render the local tunnel config.
+- **Linux:** restart sshd and restore its startup mode; restart the
+  cloudflared service when the systemd unit exists but is not running
+  (read-only `systemctl list-unit-files` existence check); re-apply
+  configured Tailscale Serve mappings (auth-gated); re-render the local
+  tunnel config. The tailnet-scoped firewall stays a verify-only path
+  owned by setup, and the :2222 portproxy is Windows-owned — fix prints
+  the pointer to `dot remote wsl-reconcile` on the Windows host.
+- **macOS:** the Serve and tunnel repairs only — Remote Login, Screen
+  Sharing, and service restarts stay manual.
+
+It never signs in to Tailscale, touches Access policies, weakens SSH auth,
+disables a security control, or exposes a new service. On an already-healthy
+host fix records zero mutations — every repair verifies current state first.
+
+## 8. `dot remote harden-ssh`
+
+Flips the target sshd to key-only (`PasswordAuthentication no`). Two guards:
+it refuses unless the target's authorized_keys state holds at least one login
+key, and it refuses without `--confirmed` — you attest that key login was
+tested from another device.
+
+## 9. `dot remote wsl-reconcile`
+
+Windows-only. The reconcile-not-hardcode pattern: query the current WSL IPv4,
+inspect the managed :2222 portproxy rule, compare, no-op when correct, replace
+only the managed rule when stale or missing, verify the WSL SSH target, and
+report PASS / WARN / FAIL.
+
+`dot remote wsl-reconcile --install-task` registers the elevated logon
+Scheduled Task `dotfiles-wsl-reconcile`, which re-runs the reconcile on every
+logon (WSL IPs change across reboots). Idempotent, and not required by
+default — the default workflow reconciles on demand with `dot remote
+wsl-reconcile` or `dot remote fix`.
+
+## 10. `dot remote tunnel render` and `tunnel validate`
+
+`tunnel render` writes the machine-local cloudflared `config.yml` from
+`[data.remote_access.tunnel]`: one ingress pair per declared
+hostname/service, the terminal `http_status:404` always appended, credentials
+referenced by path only. `tunnel validate` parses an existing config: every
+`http://` origin must be loopback, the last ingress entry must be
+`http_status:404`, and no token material may appear inline.
 
 ```yaml
 tunnel: <machine-local-tunnel-id>
 credentials-file: /home/<user>/.cloudflared/<machine-local-tunnel-id>.json
 ingress:
-  - hostname: <approved-app.example.com>
-    service: http://127.0.0.1:<approved-app-port>
+  - hostname: <machine-local-hostname>
+    service: http://127.0.0.1:4096
   - service: http_status:404
 ```
 
-**Warning, manual machine-local exposure action:** create a separate Cloudflare
-Access application and allow policy for that app. Keep its identities, policy
-values, and tunnel credentials in the dashboard or on the host. This workflow
-is never for an agent execution backend.
+## 11. tmux session persistence
 
-## 6. SSH key boundaries
-
-Git authentication keys, Git signing keys, and `allowed_signers` files are not
-login keys. Create a dedicated, passphrase-protected SSH key pair for each
-device and target account. Keep private keys on the source device and add only
-the matching public key to the target account's local `authorized_keys` file.
-
-**Warning, manual machine-local authorized_keys action:** verify the target
-account and public-key fingerprint before adding it; never reuse a Git or
-signing key.
+Attach-or-create is the durable pattern; take over a session stuck to a dead
+client:
 
 ```bash
-ssh-copy-id -i ~/.ssh/id_ed25519_<device>_access.pub <account>@<tailnet-host>
+tmux new-session -A -s main   # attach to "main" or create it
+tmux attach -d                # detach other clients and take over
 ```
 
-## 7. Linux setup
+`[[data.ssh_hosts]]` entries with `tmux = true` make the Windows Terminal SSH
+tab re-attach to session "main" (or a named session) on connect; see
+[Secrets & SSH Hosts](secrets.md#ssh-hosts-datassh_hosts) and the
+[Tmux Guide](tmux.md).
 
-Use a non-root account, a reviewed Tailscale SSH policy, and tmux for durable
-sessions. Test changes from a second terminal before ending the current SSH
-session.
+## 12. Login keys (distinct from Git identities)
 
-**Warning, manual machine-local service action:** enable and check the SSH
-daemon only after placing the dedicated public key and reviewing the tailnet
-ACL that limits access.
+Login keys live under machine-local `[[data.remote_access.login_keys]]` and
+are owned by `dot remote`; `data.accounts` and
+`run_onchange_generate_identities` keep owning Git auth/signing identities.
+Never one key for both purposes.
 
-```bash
-sudo systemctl enable --now ssh
-sudo systemctl status ssh --no-pager
-tmux new -s work
+```toml
+[[data.remote_access.login_keys]]
+  name = "id_<machine-local-key-name>"   # ~/.ssh/<name>(.pub) - names only, never key material
+  targets = ["windows", "wsl"]           # which server arms authorize the .pub
+  generate = true                        # Pattern A; false declares Pattern B
 ```
 
-Keep normal elevation interactive with passworded `sudo`; do not permit root
-SSH or generic `NOPASSWD` rules.
+- **Pattern A** (`generate = true`, generated here): setup offers to create
+  `~/.ssh/<name>` with `ssh-keygen -t ed25519` (passphrase-protected) when
+  both halves are missing, then normalizes permissions (strict ACL on
+  Windows, chmod 600 on Unix).
+- **Pattern B** (`generate = false`, dropped .pub): the pair was generated on
+  another device; the public half is dropped into `~/.ssh/<name>.pub` and
+  authorized as-is — inbound-only, no generation prompt, no
+  missing-private-key complaint. Setup warns until the `.pub` has been
+  dropped.
 
-## 8. Windows setup
+Authorized `.pub` halves land in the declared targets' local
+`authorized_keys` (the admins-only file on Windows for admin accounts),
+never touching existing entries. Private halves stay on the owning device;
+WSL never holds a private copy — outbound WSL SSH/git signs through the
+existing Windows ssh-agent relay.
 
-Use **Windows :22** for Windows administration. Configure key-only OpenSSH.
-The Windows firewall limits inbound traffic to the Tailscale interface and
-tailnet address space; Tailscale ACLs select approved identities and ports. Use
-RDP **:3389** only for GUI work or WSL recovery.
+## 13. SSH host aliases
 
-**Warning, manual machine-local service, firewall, and SSH-configuration
-action:** confirm a dedicated public key works before disabling password login
-or changing the firewall. Apply these commands in an elevated local PowerShell
-session, not through an unattended installer.
+Placeholders only — real values live in the machine-local chezmoi.toml and
+render into `~/.ssh/config` on apply (see
+[Config Example](chezmoi.toml.example)):
 
-```powershell
-Set-Service -Name sshd -StartupType Automatic
-Start-Service sshd
-New-NetFirewallRule -Name OpenSSH-Tailscale -DisplayName 'OpenSSH via Tailscale' -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -InterfaceAlias Tailscale -RemoteAddress <tailnet-address-space>
-notepad $env:ProgramData\ssh\sshd_config
+```toml
+[[data.ssh_hosts]]
+  name     = "dev-win"
+  hostname = "<windows-tailscale-ip-or-magicdns>"
+  user     = "<account>"
+  identity = "id_<machine-local-key-name>"
+  os       = "windows"
+
+[[data.ssh_hosts]]
+  name     = "dev-wsl"
+  hostname = "<windows-tailscale-ip-or-magicdns>"
+  port     = 2222                       # the WSL portproxy on the Windows host
+  user     = "<account>"
+  identity = "id_<machine-local-key-name>"
+  tmux     = true
 ```
 
-Use a normal Windows account. For rare UAC work, use a local RDP session rather
-than Administrator SSH or agent forwarding.
+`dev-win` reaches **Windows :22**; `dev-wsl` rides the Windows portproxy at
+**WSL :2222**, never the WSL IP directly.
 
-## 9. WSL setup
+## 14. GUI paths
 
-Keep Tailscale on Windows only. Reach WSL sshd through a Windows Tailscale-IP
-portproxy at **WSL :2222**. The Windows firewall limits traffic to its
-Tailscale interface and address space; Tailscale ACLs select approved
-identities and ports. Reconcile the portproxy when WSL reboots or its IP
-changes.
+| Capability | Port | Scope |
+|---|---|---|
+| Windows Remote Desktop | 3389 | Tailscale-scoped rule (`RemoteDesktop-Tailscale`) + ACLs |
+| Linux xrdp | 3389 | desktop-detected hosts only (`linux.rdp`); same tailnet scope |
+| macOS Screen Sharing (VNC) | 5900 | recovery only; manual enable; over the tailnet |
 
-**Warning, manual machine-local service, SSH-configuration, and portproxy
-action:** first configure WSL sshd for dedicated-key authentication, then obtain
-the current WSL IP and create the Windows-side mapping. Re-check it after every
-reboot or address change.
+RDP is for GUI work or WSL recovery; prefer SSH + tmux otherwise. Use a
+normal account; for rare UAC work use a local RDP session, never
+Administrator SSH or agent forwarding.
 
-```bash
-sudo systemctl enable --now ssh
-sudoedit /etc/ssh/sshd_config
-hostname -I
-```
+## 15. Elevation
 
-```powershell
-netsh interface portproxy add v4tov4 listenaddress=<windows-tailscale-ip> listenport=2222 connectaddress=<current-wsl-ip> connectport=22
-New-NetFirewallRule -Name WSL-SSH-Tailscale -DisplayName 'WSL SSH via Tailscale' -Direction Inbound -Protocol TCP -LocalPort 2222 -Action Allow -InterfaceAlias Tailscale -RemoteAddress <tailnet-address-space>
-```
+Interactive, passworded `sudo` on Unix; user-scope installs on Windows where
+possible. Never root or Administrator SSH, generic `NOPASSWD`, or agent
+forwarding.
 
-## 10. macOS setup
-
-Use the Tailscale app with Apple Remote Login/OpenSSH, dedicated login keys,
-and VS Code Remote-SSH. Use Screen Sharing only for recovery.
-
-**Warning, manual machine-local service and authorized_keys action:** enable
-Remote Login only after reviewing its allowed users and installing a dedicated
-public key for the target account.
-
-```bash
-sudo systemsetup -setremotelogin on
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-```
-
-## 11. Elevation
-
-Use interactive, passworded `sudo` on Unix. Use user-scope installs on Windows
-where possible and RDP for rare Windows UAC. Never use root or Administrator
-SSH, generic `NOPASSWD`, or agent forwarding.
-
-## 12. Operations
+## 16. Operations
 
 Keep credentials and keys machine-local. Rotate dedicated login keys, review
-tailnet ACLs and service logs, revoke vendor remote sessions, and regularly
-check that unattended hosts still have their expected power, network, disk,
-and recovery path. **Warning, manual machine-local exposure lifecycle action:**
-remove Tailscale Serve mappings and external-app tunnels when they are no
-longer needed.
+tailnet ACLs and service logs, revoke vendor remote sessions, and check that
+unattended hosts still have their expected power, network, disk, and recovery
+path. Remove Tailscale Serve mappings and Cloudflare hostname ingress when
+they are no longer needed.
