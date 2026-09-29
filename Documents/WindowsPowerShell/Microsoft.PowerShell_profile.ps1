@@ -38,11 +38,31 @@ if (Get-Command zoxide -ErrorAction SilentlyContinue) {
 # module is disabled in starship.toml so nothing else spawns it either.
 
 #-------------------------------------------------------------------------------
-# Chocolatey
+# OpenCode TUI clipboard - twin of the PowerShell 7 profile's block.
 #-------------------------------------------------------------------------------
-$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
-if (Test-Path($ChocolateyProfile)) {
-  Import-Module "$ChocolateyProfile"
+# Upstream's experimental flag (verified against 1.18.33: the binary parses
+# "true"/"1" as its only truthy spellings and treats UNSET as true). Set to
+# "false", highlighting a selection copies it on mouse-release with a "Copied
+# to clipboard" toast - the same highlight-copies contract as Windows
+# Terminal's copyOnSelect and VS Code's copyOnSelection. Unset, opencode
+# keeps right-click-to-copy instead. Restart opencode after changing this.
+$env:OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT = 'false'
+
+#-------------------------------------------------------------------------------
+# Chocolatey - lazy on purpose (twin of the PowerShell 7 profile's block).
+# Importing chocolateyProfile (tab completion, refreshenv) measured ~320 ms on
+# every shell start, and it only matters once you actually type `choco`. The
+# first call imports the module globally, removes this shim, and forwards to
+# the real exe - after that, `choco` and `refreshenv` behave stock. Until the
+# first call there is no choco tab completion and no refreshenv; that is the
+# trade.
+#-------------------------------------------------------------------------------
+if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+    function choco {
+        Remove-Item function:choco -ErrorAction SilentlyContinue
+        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -Global
+        & "$env:ChocolateyInstall\choco.exe" @args
+    }
 }
 
 #-------------------------------------------------------------------------------
@@ -226,17 +246,37 @@ if (Test-Path $LocalBin) {
 # service that got cleared, or the generator not having re-run since an account
 # was added. Only ADDS - never flushes. To remove a key: ssh-add -d ~/.ssh/<key>
 # (or ssh-add -D for all); de-declaring the account does not evict it.
+#
+# Twin of the PowerShell 7 profile's block, cost discipline included: the
+# normal case (agent already holds every declared key - it persists them
+# across reboots) is one `ssh-add -l` plus a fingerprint compare against
+# $SshAgentFingerprints, which the generator computes from the .pub files once
+# per apply. Older generator output (no map yet) falls back to fingerprinting
+# each key file itself - one ssh-keygen spawn per key, once, until the
+# generator re-runs.
 try {
     $__sshAgentIds = Join-Path $env:USERPROFILE ".ssh\agent-identities.ps1"
     if ((Test-Path $__sshAgentIds) -and (Get-Command ssh-add -ErrorAction SilentlyContinue)) {
-        . $__sshAgentIds   # -> $SshAgentIdentities
-        $__loaded = & ssh-add -l 2>$null
-        foreach ($__k in $SshAgentIdentities) {
+        . $__sshAgentIds   # -> $SshAgentIdentities (+ $SshAgentFingerprints from newer generators)
+        $__loaded = @(& ssh-add -l 2>$null)
+        $__loadFps = @($__loaded | ForEach-Object { ($_ -split '\s+')[1] })
+        $__missing = @(
+            foreach ($__k in @($SshAgentIdentities)) {
+                $__kp = Join-Path $env:USERPROFILE ".ssh\$__k"
+                if (-not (Test-Path $__kp)) { continue }
+                if ($SshAgentFingerprints -and $SshAgentFingerprints.Contains($__k)) {
+                    # Fast path: compare against the generated fingerprint - no spawn.
+                    if ($__loadFps -notcontains $SshAgentFingerprints[$__k]) { $__k }
+                } else {
+                    # Older generator output: fingerprint the key file (one spawn per key).
+                    $__fpSrc = if (Test-Path "$__kp.pub") { "$__kp.pub" } else { $__kp }
+                    $__fp = ((& ssh-keygen -lf $__fpSrc 2>$null) -split '\s+')[1]
+                    if (-not ($__fp -and ($__loaded -match [regex]::Escape($__fp)))) { $__k }
+                }
+            }
+        )
+        foreach ($__k in $__missing) {
             $__kp = Join-Path $env:USERPROFILE ".ssh\$__k"
-            if (-not (Test-Path $__kp)) { continue }
-            $__fpSrc = if (Test-Path "$__kp.pub") { "$__kp.pub" } else { $__kp }
-            $__fp = ((& ssh-keygen -lf $__fpSrc 2>$null) -split '\s+')[1]
-            if ($__fp -and ($__loaded -match [regex]::Escape($__fp))) { continue }
             # Never block a new shell - twin of the PowerShell 7 profile's guard:
             # ssh-add on a passphrase-protected key prompts on the console and
             # would hang every terminal at startup. `ssh-keygen -y -P ""` exits
@@ -250,5 +290,5 @@ try {
         }
     }
 } catch { Write-Verbose "ssh-agent prewarm skipped: $($_.Exception.Message)" } finally {
-    Remove-Variable __sshAgentIds,__loaded,__k,__kp,__fpSrc,__fp -ErrorAction SilentlyContinue
+    Remove-Variable __sshAgentIds,__loaded,__loadFps,__missing,__k,__kp,__fpSrc,__fp -ErrorAction SilentlyContinue
 }

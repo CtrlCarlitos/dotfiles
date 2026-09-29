@@ -8,6 +8,13 @@
 export ZSH="$HOME/.oh-my-zsh"
 export DOTFILES_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi"
 
+# OpenCode TUI copy-on-select (docs/terminal.md #clipboard): upstream's flag
+# reads as "disabled" when UNSET, so the default is right-click-to-copy.
+# "false" turns highlight-copies-on - the same behavior as every terminal
+# here. Experimental upstream flag (verified against 1.18.33); restart
+# opencode after changing it.
+export OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT=false
+
 # Theme
 # shellcheck disable=SC2034  # Consumed by Oh My Zsh when sourced below.
 ZSH_THEME=""
