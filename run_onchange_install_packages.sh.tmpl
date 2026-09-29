@@ -1344,8 +1344,11 @@ install_agent_toolkit() {
             if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
                 net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
             fi
-            # shellcheck disable=SC2015  # A && B || warn is the intended shape here (warn also when codex absent - benign skip)
-            command -v codex &>/dev/null && net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
+            # Codex is registered AFTER its install below, not here: this
+            # section runs first, so on a machine where codex is missing
+            # until this very run the early registration skipped and codex
+            # stayed MCP-less (observed live 2026-09-29, codex 0.159.0).
+            # See install_codex_cli's MCP registration.
         fi
     fi
 
@@ -1578,6 +1581,16 @@ install_chatgpt_cli() {
         info "Installing Superpowers plugin for Codex..."
         net_timeout 300 codex plugin add superpowers@openai-curated-remote \
             || warn "Superpowers plugin install for Codex failed - continuing"
+        # MCP registration for Codex lives HERE, not in the serena section
+        # above (see that section's note): codex only exists from this point
+        # on a fresh/reinstall machine. Idempotent: serena's own setup tool
+        # rewrites its entry; graft goes in via the codex CLI only while
+        # config.toml does not name it yet.
+        net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
+        if ! grep -Fq '[mcp_servers.graft]' "$HOME/.codex/config.toml" 2>/dev/null; then
+            net_timeout 60 codex mcp add graft -- graft mcp \
+                || warn "graft MCP registration for Codex failed - continuing"
+        fi
     fi
 }
 
