@@ -987,9 +987,11 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
                 Invoke-WithTimeout -Description "serena setup claude-code" -Seconds 60 -Action { serena setup claude-code 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
             }
         }
-        if (Get-Command codex -ErrorAction SilentlyContinue) {
-            Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
-        }
+        # Codex is registered AFTER its install below, not here: this section
+        # runs first, so on a machine where codex is missing until this very
+        # run the early registration skipped and codex stayed MCP-less
+        # (observed live 2026-09-29, codex 0.159.0). See the codex install
+        # block's MCP registration.
     }
 }
 
@@ -1472,6 +1474,20 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";
 if (Get-Command codex -ErrorAction SilentlyContinue) {
     Write-Host "  Installing Superpowers plugin for Codex..." -ForegroundColor Yellow
     Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { codex plugin add superpowers@openai-curated-remote 2>$null }
+    # MCP registration for Codex lives HERE, not in the serena section above
+    # (see that section's note): codex only exists from this point on a
+    # fresh/reinstall machine. Idempotent: serena's own setup tool rewrites
+    # its entry; graft goes in via the codex CLI only while config.toml does
+    # not name it yet.
+    Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    $codexToml = "$env:USERPROFILE\.codex\config.toml"
+    $codexHasGraft = $false
+    if (Test-Path $codexToml) {
+        try { $codexHasGraft = ((Get-Content $codexToml -Raw) -match '(?m)^\[mcp_servers\.graft\]') } catch { Write-Verbose "codex config.toml unreadable: $($_.Exception.Message)" }
+    }
+    if (-not $codexHasGraft) {
+        Invoke-Quietly -Description "Failed to register graft MCP for Codex" -Action { codex mcp add graft -- graft mcp 2>$null }
+    }
 }
 {{- end }}
 
