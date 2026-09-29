@@ -1,5 +1,13 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
+# Prompt directory-scan budget (default 30 ms). Big or AV-scanned Windows
+# directories (C:\Windows\System32, node_modules trees) blow past it - starship
+# prints "Scanning current directory timed out" and drops the scan's info.
+# 100 ms keeps those prompts honest without a visible pause. (The root fix for
+# the psmux-in-System32 case is the profile's startingDirectory, but any big
+# checkout hits this too.)
+scan_timeout = 100
+
 [aws]
 format = '\[[$symbol($profile)(\($region\))(\[$duration\])]($style)\]'
 

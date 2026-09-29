@@ -119,7 +119,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `ssh-agent-filter` | core | `ssh-agent-filter` | — | — | — | ssh-agent-relay's per-account key filtering |
 | `gsudo` | core | — | — | — | `gsudo` |  |
 | `powershell-core` | core | — | — | — | `powershell-core` |  |
-| `psmux` | core | — | — | — | `psmux` | The native Windows tmux (Rust, github.com/psmux/psmux) - official Chocolatey package, ships psmux/pmux/tmux commands. A binary install only: the dotfiles stay tmux-free on Windows (.tmux.conf and .tmux/ are ignored there), so no tmux config is managed for it. Listed right after powershell-core deliberately: psmux recommends PS 7+, and the install order follows this list. |
+| `psmux` | core | — | — | — | `psmux` | The native Windows tmux (Rust, github.com/psmux/psmux) - official Chocolatey package, ships psmux/pmux/tmux commands. Listed right after powershell-core deliberately: psmux recommends PS 7+, and the install order follows this list. The dotfiles manage its config at dot_config/psmux/psmux.conf (the Windows twin of dot_tmux.conf) and a matching "psmux" Windows Terminal profile; ~/.tmux.conf and ~/.tmux/ stay Windows-ignored. |
 | `wsl2` | core | — | — | — | `wsl2` |  |
 | `npiperelay` | core | — | — | — | `npiperelay` | Bridges the Windows ssh-agent named pipe into WSL, so a WSL distro (and any devcontainer launched from it) uses the Windows agent and holds no private keys of its own. See docs/ssh-agents.md. |
 | `bat` | modern_cli | `bat` | `bat` | — | `bat` | apt: binary installs as batcat, aliased to bat; shares its apt install line with fd - a multi-package apt install fails wholesale if one name is unavailable on a release |

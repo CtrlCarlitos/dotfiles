@@ -10,6 +10,9 @@ set -euo pipefail
 #   - the WSL profile gets the Nerd Font back (WSL's fragment forces Ubuntu Mono)
 #   - one "SSH: <name>" profile per [[data.ssh_hosts]], GUID from the name,
 #     and a removed host loses its profile
+#   - a "psmux" profile always exists: commandline psmux.exe and
+#     startingDirectory %USERPROFILE% (a bare commandline override starts in
+#     C:\Windows\System32, where starship's dir scan times out every prompt)
 #   - the merge is idempotent (no ping-pong rewrites)
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,9 +38,12 @@ if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
     hosts='{"ssh_hosts":[{"name":"mac1","hostname":"a","os":"mac"},{"name":"box","hostname":"b","os":"linux"},{"name":"nohost"}]}'
     wsl='{4e32b81b-1048-573a-93b5-97a765b27f69}'
 
-    # Fresh machine: empty file.
-    : | merge '{}' | jq -e '.theme == "Catppuccin Mocha" and (.profiles.list | length) == 0' >/dev/null ||
-        fail "empty settings.json: expected theme set and no invented profiles"
+    # Fresh machine: only the owned psmux profile - no invented styled or SSH
+    # profiles.
+    : | merge '{}' | jq -e '.theme == "Catppuccin Mocha" and (.profiles.list | length) == 1
+        and .profiles.list[0].name == "psmux" and .profiles.list[0].commandline == "psmux.exe"
+        and .profiles.list[0].startingDirectory == "%USERPROFILE%" and .profiles.list[0].tabColor == "#94E2D5"' >/dev/null ||
+        fail "empty settings.json: expected theme + exactly the psmux profile (psmux.exe, %USERPROFILE% start, teal tab)"
 
     # Existing file with a user key, a WSL profile in Ubuntu Mono, a
     # Terminal-generated profile, a stale owned SSH profile, and a user
@@ -48,7 +54,8 @@ if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
    "list": [
      {"guid": "$wsl", "name": "Ubuntu-24.04", "source": "Microsoft.WSL", "font": {"face": "Ubuntu Mono"}, "colorScheme": "Ubuntu"},
      {"guid": "{01dd2430-8c3c-573c-be55-3bb966a856a1}", "name": "VS", "source": "Windows.Terminal.VisualStudio"},
-     {"guid": "{00000000-0000-0000-0000-000000000000}", "name": "SSH: gone", "commandline": "ssh.exe gone"}]},
+     {"guid": "{00000000-0000-0000-0000-000000000000}", "name": "SSH: gone", "commandline": "ssh.exe gone"},
+     {"guid": "{11111111-2222-3333-4444-555555555555}", "name": "psmux", "commandline": "psmux.exe", "startingDirectory": "C:/Windows/System32"}]},
  "keybindings": [{"id": "User.mine", "keys": "ctrl+shift+p"}, {"id": "User.keep", "keys": "ctrl+alt+k"}]}
 JSON
     out=$(merge "$hosts" <"$tmp/cur.json")
@@ -62,6 +69,10 @@ JSON
     j 'all(.profiles.list[]; .guid != "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}")' "styled profile was created on a machine without it"
     j '[.profiles.list[].name | select(startswith("SSH: "))] == ["SSH: mac1", "SSH: box"]' \
         "SSH profiles: expected exactly mac1 + box (stale removed, hostless skipped)"
+    j '[.profiles.list[] | select(.name == "psmux")] | length == 1' \
+        "psmux profile must exist exactly once (a stale copy is replaced, not duplicated)"
+    j '.profiles.list[] | select(.name == "psmux") | .startingDirectory == "%USERPROFILE%" and .tabColor == "#94E2D5"' \
+        "stale psmux profile must be re-owned: home-folder start + teal tab color forced"
     j '.profiles.list[] | select(.name == "SSH: mac1") | .tabColor == "#A6E3A1"' "mac host should get the green tab color"
     j '[.profiles.list[].guid] | all(test("^\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\}$"))' \
         "every profile GUID must be well-formed"
@@ -118,7 +129,7 @@ JSON
 
     # tmux = true / "<name>": the profile re-attaches to a remote tmux session.
     tm=$(: | merge '{"ssh_hosts":[{"name":"a","hostname":"x","tmux":true},{"name":"b","hostname":"y","tmux":"work"},{"name":"c","hostname":"z","tmux":false}]}')
-    printf '%s' "$tm" | jq -e '[.profiles.list[].commandline] == ["ssh.exe -t a \"tmux new-session -A -s main\"", "ssh.exe -t b \"tmux new-session -A -s work\"", "ssh.exe c"]' >/dev/null ||
+    printf '%s' "$tm" | jq -e '[.profiles.list[] | select(.name | startswith("SSH: ")) | .commandline] == ["ssh.exe -t a \"tmux new-session -A -s main\"", "ssh.exe -t b \"tmux new-session -A -s work\"", "ssh.exe c"]' >/dev/null ||
         fail "tmux field: expected main / named session / plain ssh"
 
     guid() { printf '%s' "$1" | jq -r '.profiles.list[] | select(.name == "SSH: box") | .guid'; }
