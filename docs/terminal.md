@@ -14,6 +14,7 @@ hosts. Colors are **Catppuccin Mocha** everywhere, and the font is
 | VS Code terminal: settings | `run_onchange_install_packages.{ps1,sh}.tmpl` | installer VS Code step, see [VS Code](vscode.md) |
 | VS Code terminal: keys | `.chezmoitemplates/vscode-keybindings.json`, via `modify_keybindings.json` in `AppData/Roaming/Code/User` (Windows), `Library/Application Support/Code/User` (macOS), `dot_config/Code/User` (Linux desktop) | modify-template: merges into `keybindings.json`, only where VS Code's User folder exists |
 | OpenCode theme | `dot_config/opencode/modify_tui.json` | modify-template: merges into `~/.config/opencode/tui.json` |
+| psmux conf (Windows tmux twin) | `dot_config/psmux/psmux.conf` | owned file (psmux reads it at server start and never rewrites it) |
 | Same-folder splits | `Documents/PowerShell/…profile.ps1`, `dot_zshrc` | the shell reports its folder (OSC 9;9) |
 | Clipboard over SSH | `dot_tmux.conf`, `dot_config/nvim/init.lua` | OSC 52 |
 
@@ -38,6 +39,7 @@ wrote it". So the templates read the current file and force only their own keys:
 | Terminal app look (colors, font) | ✅ Windows Terminal | ✅ (a Windows Terminal tab) | ✅ Ghostty | ✅ Ghostty |
 | Terminal app: highlight copies, right-click pastes | ✅ | ✅ | ✅ Ghostty | ✅ Ghostty |
 | Terminal app: pane keys, agent keys, drop-down window | ✅ | ✅ | ✅ Ghostty (drop-down: not on GNOME) | ✅ Ghostty |
+| Multiplexer: C-a prefix, splits `\|`/`-`, vi copy, Catppuccin bar | ✅ psmux | ✅ tmux | ✅ tmux | ✅ tmux |
 | VS Code terminal: colors, font, clipboard, `Ctrl+B`/`J` | ✅ | ✅ (Windows VS Code) | ✅ | ✅ |
 | VS Code agent keys | ✅ | ✅ (Windows VS Code) | ✅ desktop | ✅ |
 | VS Code Shift+Enter | ✅ win32-input-mode | ✅ (Windows VS Code) | ✅ kitty protocol (default) | ✅ kitty protocol (default) |
@@ -231,7 +233,8 @@ and worth knowing you've enabled it before typing anything destructive.
 ## Keys inside the agent CLIs
 
 These belong to each CLI, not to the terminal. Checked against the installed builds:
-Claude Code 2.1.278, Codex 0.155.1, OpenCode 1.18.31, agy (September 2026).
+Claude Code 2.1.284, Codex 0.155.1 (removed 2026-09-28 on purpose; back after the
+next `chezmoi update`), OpenCode 1.18.33, agy 1.2.7, psmux 3.3.8 (September 2026).
 
 ### New line vs submit
 
@@ -245,6 +248,10 @@ Enter submits in all four. For a new line:
 | agy | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | |
 
 - **`Ctrl+J` works in all four, in every terminal.** It's the safe habit.
+- **Inside psmux, `Ctrl+J` is the only safe newline.** psmux 3.3.8 implements
+  neither win32-input-mode nor the kitty keyboard protocol, so `Shift+Enter`
+  can arrive as a bare Enter - it *submits* instead. Same advice as over flaky
+  SSH: reach for `Ctrl+J`.
 - **Windows Terminal** passes `Shift+Enter` to all four. `Alt+Enter` reaches them
   too, because it's unbound here (full screen is `F11`).
 - **VS Code terminal:** `Shift+Enter` relies on `terminal.integrated.enableWin32InputMode`
@@ -342,10 +349,16 @@ Same in Windows Terminal and the VS Code terminal:
 - **Highlight copies.** Selecting text puts it on the clipboard (`copyOnSelect`,
   `terminal.integrated.copyOnSelection`).
 - **Right-click pastes** (`terminal.integrated.rightClickBehavior = paste`).
-- **OpenCode** keeps its mouse capture, so its mouse wheel and menus work. The
-  terminal never sees those clicks, so paste with **Shift+right-click** (Windows
-  Terminal; Shift hands the mouse back to the terminal) or `Ctrl+V`. OpenCode copies
-  its own selections.
+- **OpenCode** also copies on select: `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT=false`,
+  set by both PowerShell profiles and `.zshrc` (unset, opencode 1.18 treats the
+  flag as *disabled = true* and copies on right-click instead). Restart
+  opencode to pick it up. Paste with **Shift+right-click** or `Ctrl+V` (Shift
+  hands the mouse back to the terminal); a plain right-click does nothing.
+  Upstream experimental flag, verified against 1.18.33 - if a future version
+  renames it, right-click-to-copy silently comes back.
+- **In psmux** the mouse belongs to the multiplexer, same as tmux: `y` in copy
+  mode (and a mouse-drag copy) lands on the Windows clipboard via OSC 52, which
+  Windows Terminal accepts. Paste with `Ctrl+V` or Shift+right-click.
 - **Over SSH**, copies inside the remote session reach your local clipboard through
   OSC 52, see [Remote hosts](#remote-ssh-hosts).
 
@@ -372,6 +385,33 @@ so `tui.json` pins `"theme": "catppuccin"`, whose dark variant is Catppuccin Moc
 terminal for its palette and silently falls back to OpenCode's own theme when the
 terminal doesn't answer. Only the theme is forced; your keybinds stay. OpenCode 1.x
 keeps TUI settings in `tui.json`, not `opencode.json`.
+
+## psmux (Windows tmux twin)
+
+[psmux](https://github.com/psmux/psmux) is a native Windows tmux (Rust, ConPTY,
+tmux command language). It makes the tmux workflow - persistent sessions,
+panes, copy mode - available in a plain Windows tab, with the same keys as the
+tmux you use over SSH (see the [Tmux Guide](tmux.md)).
+
+- **Launch it from the `psmux` Terminal profile** (teal tab): it starts an
+  attached session in `%USERPROFILE%`. Never launch it as a bare commandline
+  override on another profile - that starts in `C:\Windows\System32`, where
+  starship's directory scan times out on every prompt (see
+  [Troubleshooting](#troubleshooting)).
+- **Config:** `dot_config/psmux/psmux.conf`, the Windows twin of
+  `dot_tmux.conf`. Same `Ctrl+a` prefix, `|`/`-` splits in the current folder,
+  `hjkl` pane navigation, `HJKL` resize, `Shift+arrows` for windows, vi copy
+  mode (`v` select, `y` yank → Windows clipboard via OSC 52), 50000-line
+  scrollback, and the same Catppuccin Mocha status bar. `tests/psmux_contract.sh`
+  asserts the shared lines verbatim in both files, so the two multiplexers
+  cannot drift.
+- **What carries over, quietly:** `escape-time 0` (psmux's 500 ms default is
+  why `Esc` `Esc` felt dead in the agent CLIs) and `focus-events on` for Neovim.
+- **What is deliberately different:** no TPM (psmux has no plugin manager, and
+  its server already keeps sessions alive across detaches); no `clip.exe`/
+  `xclip` copy pipes (psmux yanks straight to the Windows clipboard); panes run
+  pwsh like every local tab. For a newline inside an agent CLI, use `Ctrl+J`
+  (see [above](#keys-inside-the-agent-clis)).
 
 ## Remote SSH hosts
 
@@ -413,6 +453,14 @@ What you get in its `SSH: <name>` tab:
   it. Change it in the template.
 - **Right-click doesn't paste in OpenCode:** expected, use Shift+right-click or
   `Ctrl+V` (see [Clipboard](#clipboard)).
+- **Starship warns "Scanning current directory timed out" in psmux:** the pane
+  started in `C:\Windows\System32`. Launch psmux from its `psmux` profile
+  (`startingDirectory: %USERPROFILE%`), not as a commandline override.
+  `scan_timeout = 100` in `starship.toml` is the safety net for any big or
+  AV-scanned directory.
+- **A psmux tab opens in System32 on every Terminal launch:** a commandline
+  override got persisted into the saved window layout. Close that tab once -
+  layouts restore it until you do.
 - **A new split opens in your home folder:** the shell isn't reporting its folder.
   pwsh needs starship (the hook is `Invoke-Starship-PreCommand`); WSL zsh needs
   `WT_SESSION` (passed in by default through `WSLENV`) and `wslpath`.

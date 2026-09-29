@@ -73,3 +73,9 @@ docs/superpowers/
 /.serena/cache/
 /.serena/memories/
 /.serena/project.local.yml
+
+# Skills-repo clones: a skills installer once cloned its upstream into this
+# source tree under a mangled, invisible-character-prefixed name. The
+# installed skills live in ~/.agents/skills; clones in here are transient
+# tooling state, never dotfiles (the chezmoi side ignores *mp-skills-repo/**).
+*mp-skills-repo/

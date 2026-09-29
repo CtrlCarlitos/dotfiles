@@ -69,6 +69,13 @@
   applies and machines. Output is strict JSON; a hand-added // comment in
   settings.json makes fromJson fail the apply loudly (Terminal never writes
   comments itself).
+
+  psmux profile: always created (this whole file is Windows-only). It runs the
+  local tmux twin (dot_config/psmux/psmux.conf) in pwsh panes. startingDirectory
+  is forced to %USERPROFILE%: psmux first launched as a bare commandline
+  override on a generated profile, landed in C:\Windows\System32, and starship's
+  directory scan timed out on every prompt (30 ms default scan_timeout). Teal
+  tab - the one Mocha accent no other profile claims.
 */ -}}
 {{- $raw := .chezmoi.stdin | trimPrefix "﻿" | trim -}}
 {{- $cur := dict -}}
@@ -219,10 +226,17 @@
 {{-   end }}
 {{- end }}{{ end -}}
 
+{{- /* psmux profile: always created, Windows-only via the AppData/** ignore.
+       Stable GUID from a fixed seed, same scheme as the SSH profiles. The
+       %USERPROFILE% start is the root-cause fix for the System32 launch in the
+       header comment. */ -}}
+{{- $ph := sha256sum "wt-psmux" }}
+{{- $psmux := dict "guid" (printf "{%s-%s-%s-%s-%s}" (substr 0 8 $ph) (substr 8 12 $ph) (substr 12 16 $ph) (substr 16 20 $ph) (substr 20 32 $ph)) "name" "psmux" "commandline" "psmux.exe" "startingDirectory" "%USERPROFILE%" "hidden" false "tabColor" "#94E2D5" }}
+
 {{- /* globals */ -}}
 {{- range $k, $v := $want.globals }}{{ $_ := set $cur $k $v }}{{ end -}}
 
-{{- /* profiles: defaults, styled-if-present, owned SSH */ -}}
+{{- /* profiles: defaults, styled-if-present, owned psmux + SSH */ -}}
 {{- if not (kindIs "map" (get $cur "profiles")) }}{{ $_ := set $cur "profiles" dict }}{{ end -}}
 {{- $profiles := get $cur "profiles" -}}
 {{- if not (kindIs "map" (get $profiles "defaults")) }}{{ $_ := set $profiles "defaults" dict }}{{ end -}}
@@ -233,7 +247,9 @@
 {{- $kept := list -}}
 {{- range $ep := $list }}
 {{-   $name := toString (get $ep "name") }}
-{{-   if not (and (hasPrefix "SSH: " $name) (hasPrefix "ssh.exe " (toString (get $ep "commandline")))) }}
+{{-   $cmd := toString (get $ep "commandline") }}
+{{-   $stale := or (and (hasPrefix "SSH: " $name) (hasPrefix "ssh.exe " $cmd)) (and (eq $name "psmux") (eq $cmd "psmux.exe")) }}
+{{-   if not $stale }}
 {{-     range $sp := $want.styled }}
 {{-       $byGuid := and (hasKey $sp "guid") (eq (lower (toString (get $ep "guid"))) (lower (toString (get $sp "guid")))) }}
 {{-       $bySource := and (hasKey $sp "source") (eq (toString (get $ep "source")) (toString (get $sp "source"))) }}
@@ -244,7 +260,7 @@
 {{-     $kept = append $kept $ep }}
 {{-   end }}
 {{- end -}}
-{{- $_ := set $profiles "list" (concat $kept $ssh) -}}
+{{- $_ := set $profiles "list" (concat $kept (list $psmux) $ssh) -}}
 
 {{- /* schemes + themes by name */ -}}
 {{- range $section := list "schemes" "themes" }}

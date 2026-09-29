@@ -37,6 +37,13 @@ devcontainer/**
 tests/**
 scripts/**
 
+# Skills-repo clones: a skills installer once cloned its upstream INTO this
+# source tree under a mangled, invisible-character-prefixed name
+# ("<ZWSP>mp-skills-repo"), and the irregular file types inside crashed
+# `chezmoi apply` outright. The installed skills live in ~/.agents/skills -
+# any clone in here is transient tooling state, never a dotfile.
+*mp-skills-repo/**
+
 # More repo-only files that were landing in $HOME. Same test as above: nothing
 # reads the home copy.
 #   AGENTS.md    - this repo's agent instructions (graft status + where
@@ -69,6 +76,9 @@ Documents/**
 # Windows Terminal settings + VS Code keybindings (modify_ merges under AppData)
 AppData/**
 .local/bin/*.ps1
+# psmux config: the Windows tmux twin (dot_config/psmux/psmux.conf). No psmux
+# outside Windows (ConPTY multiplexer).
+.config/psmux/**
 {{- end }}
 
 {{- if eq .chezmoi.os "windows" }}

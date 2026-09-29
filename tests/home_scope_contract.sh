@@ -16,7 +16,7 @@ ignore="$repo_root/.chezmoiignore"
 . "$repo_root/tests/lib.sh"
 
 # Repo-only, every OS.
-for p in 'tests/**' 'scripts/**' 'AGENTS.md' 'graft/**' 'guardrail.toml' 'devcontainer/**' 'docs/**' 'bin/**'; do
+for p in 'tests/**' 'scripts/**' 'AGENTS.md' 'graft/**' 'guardrail.toml' 'devcontainer/**' 'docs/**' 'bin/**' '*mp-skills-repo/**'; do
     grep -Fq "$p" "$ignore" || fail ".chezmoiignore: '$p' must never be applied to \$HOME"
 done
 
@@ -43,6 +43,12 @@ if command -v chezmoi >/dev/null; then
     for p in '.oh-my-zsh/**' '.tmux/**'; do
         ! printf '%s\n' "$lin" | grep -Fxq "$p" || fail "linux: '$p' must NOT be excluded (oh-my-zsh/tmux live there)"
     done
+    # psmux config is the Windows twin of dot_tmux.conf: deployed on Windows
+    # only (ConPTY multiplexer - nothing outside Windows reads it).
+    ! printf '%s\n' "$win" | grep -Fxq '.config/psmux/**' ||
+        fail "windows: '.config/psmux/**' must NOT be excluded (psmux runs there)"
+    printf '%s\n' "$lin" | grep -Fxq '.config/psmux/**' ||
+        fail "linux: '.config/psmux/**' must be excluded (no psmux off Windows)"
     for p in 'tests/**' 'scripts/**' 'AGENTS.md' 'graft/**'; do
         printf '%s\n' "$lin" | grep -Fxq "$p" || fail "linux: '$p' is not excluded"
     done
@@ -84,8 +90,11 @@ if command -v chezmoi >/dev/null; then
         '.tmux.conf' '.zshrc' '.aliases.zsh'; do
         grep -Fxq "$p" "$tmp/win-managed.txt" && fail "windows: managed lists '$p'"
     done
+    grep -Fxq '.config/psmux/psmux.conf' "$tmp/win-managed.txt" ||
+        fail "windows: .config/psmux/psmux.conf must stay managed (psmux runs there)"
     managed_for linux '6.8.0-generic' "$tmp/lin-managed.txt"
-    for p in '.codex/config.toml' '.config/opencode/tui.json' '.local/bin/devprofile.ps1'; do
+    for p in '.codex/config.toml' '.config/opencode/tui.json' '.local/bin/devprofile.ps1' \
+        '.config/psmux/psmux.conf'; do
         grep -Fxq "$p" "$tmp/lin-managed.txt" && fail "linux: managed lists '$p'"
     done
     # Positive controls: the fixtures must not be ignoring the world.

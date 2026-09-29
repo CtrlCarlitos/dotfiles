@@ -279,7 +279,7 @@ run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
 guardrail.toml                        # guardrail overlay (read from the source repo, not $HOME)
 dot_zshrc / dot_aliases.zsh           # Shell config + the dot/devprofile/dco alias layer
 dot_tmux.conf / dot_gitconfig.tmpl    # tmux bindings; gitconfig with includeIf identity routing
-dot_config/                           # nvim (Lazy.nvim), git hooks, starship, ghostty, opencode, Code keys
+dot_config/                           # nvim (Lazy.nvim), git hooks, starship, ghostty, opencode, psmux (Windows tmux twin), Code keys
 dot_codex/modify_config.toml          # Codex config (merged, never clobbered)
 dot_local/bin/                        # devprofile (+ .ps1 twin), ssh-agent-relay
 private_dot_ssh/private_config.tmpl   # SSH config (templated, mode 600)

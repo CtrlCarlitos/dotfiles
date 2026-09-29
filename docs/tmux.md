@@ -26,6 +26,11 @@ tmux attach -t my-project
 In this config, the "Command Key" (Prefix) has been changed from `Ctrl+b` (default) to **`Ctrl+a`**. safely easier to reach!
 You must press `Ctrl+a`, **release it**, and then press the command key.
 
+> **On Windows:** [psmux](terminal.md#psmux-windows-tmux-twin) gives you the
+> same workflow in a plain Terminal tab. Its config
+> (`dot_config/psmux/psmux.conf`) is the twin of this file - same prefix, same
+> keys, same bar - and `tests/psmux_contract.sh` fails CI if the two drift.
+
 | Action | Key Binding | Mnemonic |
 | :--- | :--- | :--- |
 | **Split Vertically** | `Ctrl+a` then `\|` | (Visual split) |
