@@ -52,6 +52,8 @@ for line in \
 done
 
 # psmux-only behavior.
+grep -Fq 'set -g paste-detection off' "$psmux_conf" ||
+    fail "psmux.conf: paste detection must be off (psmux's own paste injection strips escape bytes - literal [A in pastes - and has deadlocked panes; Windows Terminal pastes natively)"
 grep -Fq 'set -s set-clipboard on' "$psmux_conf" ||
     fail "psmux.conf: set-clipboard must be on (OSC 52 reaches Windows Terminal's clipboard)"
 grep -Fq 'default-shell pwsh' "$psmux_conf" ||
