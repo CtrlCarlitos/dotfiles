@@ -182,6 +182,36 @@ function dp { devprofile @args }
 # (4-up) definition silently won, so `...` jumped four levels and 2-up was
 # unreachable. (`cd -` is pwsh 7-only - it is not available in 5.1.)
 function ~ { Set-Location ~ }
+
+# Path-like tokens autocd (twin of the PowerShell 7 profile's block,
+# interactive via PSReadLine): PowerShell parses a bare token like
+# ~\.local\share\chezmoi as a MODULE spec - "The module '~' could not be
+# loaded" - and its command resolution never reaches CommandNotFoundAction
+# for separator tokens (verified). The Enter handler rewrites such lines to
+# Set-Location before accepting: zsh autocd, scoped to separator-containing
+# tokens that exist as directories (no whitespace/quotes), so command typos
+# and every other input are accepted unchanged.
+if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
+    Set-PSReadLineKeyHandler -Chord Enter -ScriptBlock {
+        $line = $null
+        $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+        $trimmed = $line.Trim()
+        if ($trimmed -and $trimmed -notmatch '[\s"'']' -and $trimmed -match '[/\\]') {
+            $candidate = if ($trimmed.StartsWith('~')) { Join-Path $HOME $trimmed.Substring(1) } else { $trimmed }
+            if (Test-Path -LiteralPath $candidate -PathType Container -ErrorAction SilentlyContinue) {
+                $escaped = $candidate.Replace("'", "''")
+                try {
+                    [Microsoft.PowerShell.PSConsoleReadLine]::Delete(0, $line.Length)
+                    [Microsoft.PowerShell.PSConsoleReadLine]::Insert("Set-Location -LiteralPath '$escaped'")
+                } catch {
+                    Write-Debug "autocd rewrite unavailable: $($_.Exception.Message)"
+                }
+            }
+        }
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    }
+}
 function .. { Set-Location .. }
 function ... { Set-Location ..\.. }
 function .... { Set-Location ..\..\.. }
