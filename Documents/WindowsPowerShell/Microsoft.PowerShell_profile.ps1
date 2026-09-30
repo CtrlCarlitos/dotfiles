@@ -222,6 +222,21 @@ function serena-clean {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 }
 
+# clip-to-file (psmux#719) - twin of the PowerShell 7 profile's block: pastes
+# into agent TUIs through psmux arrive as a raw blob, so substantial content
+# goes via a file instead. Copies the highlighted text (already on the
+# clipboard through copyOnSelect) to a timestamped file, puts the file path
+# back on the clipboard, and prints it: in the agent, reference it as @<path>
+# (or just paste the path) and the agent reads the content.
+function clip-to-file {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'user-facing workflow name (clip-to-file), not an action verb')]
+    param()
+    $f = Join-Path $env:TEMP ("clip-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".txt")
+    Get-Clipboard -Raw | Set-Content -NoNewline $f
+    Set-Clipboard $f
+    Write-Output $f
+}
+
 #-------------------------------------------------------------------------------
 # Utilities
 #-------------------------------------------------------------------------------
