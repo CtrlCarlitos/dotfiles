@@ -68,7 +68,8 @@ alias serena-clean='pkill -f serena 2>/dev/null; true'
 # print the path and put it back on the clipboard; in the agent reference it
 # as @<path> (or just paste the path) and the agent reads the content.
 clip-to-file() {
-    local f="/tmp/clip-$(date +%Y%m%d-%H%M%S).txt"
+    local f
+    f="/tmp/clip-$(date +%Y%m%d-%H%M%S).txt"
     powershell.exe -NoProfile -Command 'Get-Clipboard -Raw' | tr -d '\r' > "$f"
     print -r -- "$f" | clip.exe 2>/dev/null
     print -r -- "$f"
