@@ -58,6 +58,10 @@ alias mkdir='mkdir -p'
 alias d='docker'
 alias docker-clean='docker system prune -af --volumes'
 alias docker-stop-all='docker stop $(docker ps -aq) 2>/dev/null || true'
+# serena-clean (oraios/serena#2122): agy leaves serena shim+python trees
+# running after exit; the next session's /mcp reload fails until they are
+# gone. Close the agent CLIs first, then run it.
+alias serena-clean='pkill -f serena 2>/dev/null; true'
 
 #-------------------------------------------------------------------------------
 # Development
