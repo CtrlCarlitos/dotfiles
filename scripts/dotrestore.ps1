@@ -83,8 +83,8 @@ try {
     }
 
     $payloadEntries = @(Get-ChildItem -LiteralPath $payloadRoot -Force)
-    $expectedPayloadEntries = 'manifest.json', 'chezmoi', 'ssh'
-    if ($payloadEntries.Count -ne 3 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
+    $expectedPayloadEntries = 'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'
+    if ($payloadEntries.Count -ne 4 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
 
@@ -142,6 +142,23 @@ try {
             $destination = Join-Path $sshDestinationRoot $relative
             New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
             Copy-Item -LiteralPath $source.FullName -Destination $destination
+        }
+
+        # Cross-OS normalization: an archive from a non-Windows platform
+        # carries Unix-style keys - lock restored id_* files to the owning
+        # user (OpenSSH for Windows refuses identity files readable by broad
+        # principals) and print the translation. Same-platform restores keep
+        # current behavior.
+        $sourcePlatform = "$manifestData.source_platform"
+        if ($sourcePlatform -and $sourcePlatform -ne 'windows') {
+            $normalized = @()
+            foreach ($keyfile in (Get-ChildItem (Join-Path $sshDestinationRoot '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
+                & icacls $keyfile.FullName /grant:r "$($env:USERNAME):R" *> $null
+                & icacls $keyfile.FullName /inheritance:r *> $null
+                & icacls $keyfile.FullName /remove:g *S-1-1-0 *S-1-5-11 *S-1-5-32-545 *> $null
+                $normalized += $keyfile.Name
+            }
+            Write-Output "Cross-OS restore (source: $sourcePlatform, target: windows): normalized ACL on $($normalized.Count) key file(s)."
         }
     }
 

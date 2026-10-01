@@ -46,6 +46,8 @@ for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         manifest.json) [ -f "$entry" ] && manifest_entry=1 ;;
         chezmoi) [ -d "$entry" ] && chezmoi_entry=1 ;;
         ssh) [ -d "$entry" ] && ssh_entry=1 ;;
+        # RESTORE.md: human-only orientation, optional (older archives lack it)
+        RESTORE.md) ;;
         *)
             printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
             exit 1
@@ -117,13 +119,37 @@ if [ -d "$ssh_source" ]; then
         destination="$HOME/.ssh/$relative"
         mkdir -p "$(dirname "$destination")"
         cp "$source" "$destination"
-        case "$relative" in
-            # .pub halves are IdentityFile targets (OpenSSH enforces
-            # private-key permissions on them) - 600, like the private halves.
-            *.pub) chmod 600 "$destination" ;;
-            *) chmod 600 "$destination" ;;
-        esac
+        # 600 for every restored file: private halves need it, and .pub halves
+        # are IdentityFile targets (OpenSSH enforces private-key permissions
+        # on them too).
+        chmod 600 "$destination"
     done < <(find "$ssh_source" -type f -print0)
+fi
+
+# Cross-OS normalization: when the archive was created on a different
+# platform, translate what translates and say what was done. source_platform
+# comes from the backup manifest (windows / linux / darwin). A Windows-origin
+# restore carries CRLF line endings that Unix OpenSSH refuses ("error in
+# libcrypto" before any auth) - stripped here; permissions are already
+# normalized to 600 above.
+target_platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$target_platform" in darwin*) target_platform="darwin" ;; esac
+source_platform=""
+if command -v jq >/dev/null 2>&1; then
+    source_platform="$(jq -r '.source_platform // empty' "$manifest" 2>/dev/null || true)"
+else
+    source_platform="$(sed -n 's/.*"source_platform"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$manifest" 2>/dev/null || true)"
+fi
+if [ -n "$source_platform" ] && [ "$source_platform" != "$target_platform" ]; then
+    translated=0
+    while IFS= read -r -d '' restored; do
+        if [ -s "$restored" ] && grep -q "$(printf '\r')" "$restored" 2>/dev/null; then
+            perl -pi -e 's/\r$//' "$restored" 2>/dev/null || true
+            translated=$((translated + 1))
+        fi
+    done < <(find "$HOME/.ssh" -type f -print0)
+    printf 'Cross-OS restore (source: %s, target: %s): stripped Windows CRLF from %d file(s); permissions normalized to 600.\n' \
+        "$source_platform" "$target_platform" "$translated"
 fi
 
 printf 'Restore complete. Run:\n  chezmoi init\n  chezmoi apply\n'

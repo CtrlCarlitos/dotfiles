@@ -55,16 +55,54 @@ try {
     # WriteAllText with UTF8Encoding($false) = no BOM, same as every other
     # script here. 5.1 has no `-Encoding utf8NoBOM` (pwsh 6+), and 5.1's
     # default Set-Content encoding writes a BOM.
+    # source_platform is normalized to the canonical vocabulary the restore
+    # twins compare against: windows / linux / darwin (Win32NT etc. mapped).
     $manifest = [ordered]@{
         format_version = 'dotfiles-backup-v1'
         created_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
-        source_platform = [Environment]::OSVersion.Platform.ToString()
+        source_platform = 'windows'
     } | ConvertTo-Json
     [IO.File]::WriteAllText((Join-Path $payloadRoot 'manifest.json'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
 
+    # RESTORE.md: human-only orientation inside the archive (the restore
+    # scripts never read it - they act on manifest.json). What is inside, how
+    # to restore on the same OS, and what changes on a different OS.
+    $restoreMd = @"
+# Dotfiles backup (created on windows, $(Get-Date -Format 'yyyy-MM-dd'))
+
+## Contents
+
+- ``chezmoi/chezmoi.toml`` - this machine's ChezMoi config (prompted values,
+  package groups, ssh_hosts, remote_access). Review before reusing on a
+  different OS: paths and remote_access values are machine-specific.
+- ``ssh/`` - every regular file from this machine's ``~/.ssh``: private keys,
+  .pub halves, config, known_hosts.
+
+## Restore on the same OS
+
+````powershell
+7z x -p <this-archive> -o<stage>
+.\dotrestore.ps1 -Archive <stage>/dotfiles-backup-v1   # from the dotfiles repo
+`````
+Then: ``chezmoi init`` && ``chezmoi apply``.
+
+## Restore on a different OS
+
+The ssh keys translate: the restore normalizes permissions (user-only ACL on
+Windows, 600 + CRLF strip on Linux/macOS targets). The chezmoi config needs a
+human pass first - machine paths and remote_access values do not translate.
+
+## Model
+
+Private keys live in exactly one place per platform (the Windows agent vault,
+or this machine's ~/.ssh) - .pub halves are the only thing duplicated across
+machines, and Host blocks reference the .pub.
+"@
+    [IO.File]::WriteAllText((Join-Path $payloadRoot 'RESTORE.md'), $restoreMd, (New-Object System.Text.UTF8Encoding($false)))
+
     $backupDirectory = Join-Path $HOME '.dot_backups'
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
-    $archive = Join-Path $backupDirectory ("dotfiles-" + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.7z')
+    $archive = Join-Path $backupDirectory ("dotfiles-windows-" + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.7z')
     if (Test-Path -LiteralPath $archive) {
         throw "Backup archive already exists: $archive"
     }
