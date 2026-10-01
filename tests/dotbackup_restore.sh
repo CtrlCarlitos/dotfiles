@@ -255,7 +255,7 @@ run_restore "$restore_home" "$valid_archive" >/dev/null
 [ "$(<"$restore_home/.ssh/custom_key.pub")" = 'restored public' ] || fail '[5] public SSH file not restored'
 [ "$(stat -c '%a' "$restore_home/.ssh")" = 700 ] || fail '[5] SSH directory mode incorrect'
 [ "$(stat -c '%a' "$restore_home/.ssh/custom_key")" = 600 ] || fail '[5] private SSH mode incorrect'
-[ "$(stat -c '%a' "$restore_home/.ssh/custom_key.pub")" = 644 ] || fail '[5] public SSH mode incorrect'
+[ "$(stat -c '%a' "$restore_home/.ssh/custom_key.pub")" = 600 ] || fail '[5] public SSH mode incorrect (600: .pub halves are IdentityFile targets)'
 printf '  ok: valid payload restored with SSH modes\n'
 
 finish

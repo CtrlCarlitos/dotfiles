@@ -61,7 +61,9 @@ accounts_json='[
 ]'
 
 # Fake keys: marker content only, deliberately wrong private modes - the
-# rendered identity script is what must normalize them (600 / 644). Signing
+# rendered identity script is what must normalize them (600, .pub included:
+# id_*.pub halves are IdentityFile targets and OpenSSH enforces private-key
+# permissions on them). Signing
 # keys carry the "<email>-sign" comment convention devprofile init writes.
 mk_fake_key() { # $1 = key name, $2 = comment
     printf 'STUB-PRIVATE-KEY %s\n' "$1" > "$home/.ssh/$1"
@@ -189,7 +191,7 @@ else
 fi
 assert_mode "$home/.ssh/allowed_signers" 600
 assert_mode "$home/.ssh/id_bob" 600          # normalized from the wrong 644 above
-assert_mode "$home/.ssh/id_bob.pub" 644
+assert_mode "$home/.ssh/id_bob.pub" 600
 require "$home/.ssh/agent-identities.zsh" 'id_bob_commit'
 assert_mode "$home/.ssh/agent-identities.zsh" 600
 if [ -d "$home/projects/bobcorp" ]; then pass; else fail "rendered script did not create the account dirs"; fi
