@@ -118,7 +118,9 @@ if [ -d "$ssh_source" ]; then
         mkdir -p "$(dirname "$destination")"
         cp "$source" "$destination"
         case "$relative" in
-            *.pub) chmod 644 "$destination" ;;
+            # .pub halves are IdentityFile targets (OpenSSH enforces
+            # private-key permissions on them) - 600, like the private halves.
+            *.pub) chmod 600 "$destination" ;;
             *) chmod 600 "$destination" ;;
         esac
     done < <(find "$ssh_source" -type f -print0)

@@ -220,6 +220,36 @@ else
 fi
 fi
 
+#-------------------------------------------------------------------------------
+# 7. ~/.ssh key files too open (the .pub halves are IdentityFile targets on
+#    WSL, and OpenSSH enforces private-key permissions on whatever
+#    IdentityFile names - a 0644 id_*.pub copy arrived live and every auth
+#    died with "UNPROTECTED PRIVATE KEY FILE"). GNU stat (Linux/WSL); on
+#    macOS the probe degrades to a skip. --fix chmods 600.
+#-------------------------------------------------------------------------------
+if [ -d "$HOME/.ssh" ]; then
+    bad=""
+    for keyfile in "$HOME"/.ssh/id_*; do
+        [ -f "$keyfile" ] || continue
+        perms="$(stat -c '%a' "$keyfile" 2>/dev/null)" || continue
+        case "$perms" in
+            *[4567]?|?[4567]*) bad="$bad ${keyfile#"$HOME"/.ssh/} ($perms)" ;;
+        esac
+    done
+    if [ -n "$bad" ]; then
+        if $FIX; then
+            for keyfile in "$HOME"/.ssh/id_*; do
+                [ -f "$keyfile" ] && chmod 600 "$keyfile"
+            done
+            result ok ssh-pubkeys "normalized to 600:$bad"
+        else
+            result warn ssh-pubkeys "too open (OpenSSH refuses these as IdentityFile):$bad - fix: chmod 600 ~/.ssh/id_* (or re-run with --fix)"
+        fi
+    else
+        result ok ssh-pubkeys "key file permissions private"
+    fi
+fi
+
 if [ "$errors" -gt 0 ]; then
     printf '\n%d error(s). ' "$errors"
     if $FIX; then printf '(--fix applied where safe)\n'; else printf 're-run with --fix for auto-repairable items\n'; fi

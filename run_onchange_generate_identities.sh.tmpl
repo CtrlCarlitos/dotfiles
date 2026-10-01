@@ -152,13 +152,13 @@ chmod 700 "$HOME/.ssh"
 # *copied in* from another machine instead, which routinely arrives with the
 # wrong permissions (the copy itself doesn't preserve them), and which SSH
 # then just silently refuses to use ("UNPROTECTED PRIVATE KEY FILE") with no
-# hint that permissions are the reason.
+# hint that permissions are the reason. The .pub halves get 600 too since
+# the ssh_hosts Host blocks reference id_*.pub as IdentityFile - OpenSSH
+# enforces private-key permissions on whatever IdentityFile names, copied
+# or not (0644 .pub copy observed live: same refusal, WSL side).
 for key in "$HOME"/.ssh/id_*; do
     [[ -f "$key" ]] || continue
-    case "$key" in
-        *.pub) chmod 644 "$key" ;;
-        *)     chmod 600 "$key" ;;
-    esac
+    chmod 600 "$key"
 done
 
 # ~/.ssh/agent-identities.zsh - sourced by ~/.zshrc BEFORE oh-my-zsh loads, so
