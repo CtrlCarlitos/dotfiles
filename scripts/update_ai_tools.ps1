@@ -5,6 +5,10 @@ the AI CLIs (Claude Code, Codex, OpenCode, agy, Serena, Graft, act) and
 re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 `dot upgrade` (which exports the defer list) or direct: .\update_ai_tools.ps1
 #>
+# Windows PowerShell 5.1 redraws the Invoke-WebRequest progress bar for every
+# received chunk, throttling downloads to a crawl. Script-scoped; the child
+# `irm | iex` below is a separate process and sets it itself.
+$ProgressPreference = 'SilentlyContinue'
 Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
@@ -371,7 +375,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     $claudeInstallUrl = ''
     try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
     if ($claudeInstallUrl) {
-        & powershell -c "irm $claudeInstallUrl | iex"
+        & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex"
     } else {
         Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall (claude update owns in-place updates)" -ForegroundColor Red
     }

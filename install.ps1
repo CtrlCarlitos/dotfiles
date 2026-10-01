@@ -2,6 +2,10 @@
 # Usage: iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 redraws the Invoke-WebRequest/Expand-Archive progress
+# bar for every received chunk, throttling downloads to a crawl. Scope-local
+# here (script or `& { }` block), so it never leaks into the caller's session.
+$ProgressPreference = 'SilentlyContinue'
 
 function Write-Info { param([string]$Message) Write-Host "[:] $Message" -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host "[v] $Message" -ForegroundColor Green }
