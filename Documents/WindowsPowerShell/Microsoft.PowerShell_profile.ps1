@@ -183,6 +183,15 @@ function dp { devprofile @args }
 # unreachable. (`cd -` is pwsh 7-only - it is not available in 5.1.)
 function ~ { Set-Location ~ }
 
+# wsl (twin of the PowerShell 7 profile's function): land in the WSL home
+# directory instead of the /mnt/c mirror of the Windows cwd - the mirror's
+# directory scans are slow (9p + AV) and starship times out on them
+# ("Scanning current directory timed out"). Arguments pass through
+# (wsl -d <distro> still works); `wsl --cd <dir>` overrides when wanted.
+function wsl {
+    wsl.exe --cd ~ @args
+}
+
 # Path-like tokens autocd (twin of the PowerShell 7 profile's block,
 # interactive via PSReadLine): PowerShell parses a bare token like
 # ~\.local\share\chezmoi as a MODULE spec - "The module '~' could not be

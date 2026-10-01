@@ -33,7 +33,11 @@ profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-termi
   hostname = "10.0.0.5"               # required: IP or DNS
   user     = "carlitos"               # optional: login user
   port     = 22                       # optional
-  identity = "id_personal"            # optional: key name in ~/.ssh
+  identity = "id_personal"            # optional: key NAME in ~/.ssh - the .pub
+                                      # half is referenced and must be copied to
+                                      # every machine that SSHes out from it; the
+                                      # private half stays Windows-side (offered
+                                      # through the ssh-agent relay on WSL)
   # Omit proxy unless this host needs a configured bastion alias.
   proxy    = "bastion"                # optional: ProxyJump alias
   comment  = "Bastion for staging - office IP only"   # optional: free text
@@ -44,8 +48,11 @@ profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-termi
 The `comment` field renders as the block's header comment in
 `~/.ssh/config`, so `grep` on the config answers "what was this host?" —
 the operator's memory hook. Fields are all optional except `name` and
-`hostname`; `identity` files get their ACL normalized by
-`run_onchange_generate_identities` on every apply.
+`hostname`; `identity` entries reference key NAMES in `~/.ssh`:
+`run_onchange_generate_identities` (on every apply) normalizes the private
+key's ACL on Windows, the `.pub` half is what the rendered Host block points
+at — copy each `.pub` to a machine's `~/.ssh` and that machine SSHes out
+through the ssh-agent relay (the private half stays Windows-side).
 
 Add hosts, run `chezmoi apply`, done. Remove the entry and apply to retire
 the alias.

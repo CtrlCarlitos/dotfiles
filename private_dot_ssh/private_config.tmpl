@@ -4,8 +4,11 @@
 # Auto-generated from chezmoi accounts configuration
 #===============================================================================
 
-# Note: IdentityFile points to the key.
-# IdentitiesOnly=yes ensures we don't try all keys in the agent.
+# Note: IdentityFile names the key. For the git account aliases below the
+# private key lives on this machine and IdentitiesOnly=yes keeps the offer
+# deterministic. For the operator SSH HOSTS the .pub half is referenced
+# instead (see the block comment there) - the private half stays in the
+# Windows ssh-agent and is offered through the ssh-agent relay on WSL.
 
 #-------------------------------------------------------------------------------
 # Global options (must come before any Host block to apply everywhere).
@@ -33,7 +36,6 @@ UseKeychain yes
 {{- $alias := printf "%s-%s" $provider $username }}
 
 {{- if .key }}
-
 # {{ .name }}
 Host {{ $alias }}
     HostName {{ $provider }}.com
@@ -58,8 +60,10 @@ Host {{ $alias }}
 #   hostname (required)  IP or DNS name
 #   user     (optional)  login user
 #   port     (optional)  SSH port (default 22)
-#   identity (optional)  key file name in ~/.ssh (e.g. "id_work"); must
-#                        exist - generate_identities normalizes its ACL
+#   identity (optional)  key NAME in ~/.ssh (e.g. "id_work") - its .pub half
+#                        is referenced and must be copied to every machine
+#                        that SSHes out from it; on Windows generate_identities
+#                        normalizes the private key's ACL
 #   proxy    (optional)  ProxyJump target alias (e.g. a bastion `name`)
 #   comment  (optional)  free text - rendered as the block's header comment
 #                        so `grep ~/.ssh/config` answers "what was this host?"
@@ -97,7 +101,12 @@ Host {{ $name }}
     Port {{ .port }}
 {{- end }}
 {{- if hasKey . "identity" }}
-    IdentityFile ~/.ssh/{{ .identity }}
+    # The PUBLIC half is referenced here (and deployed to every machine's
+    # ~/.ssh): ssh matches it against the ssh-agent relay upstream, which
+    # holds the private half on the Windows side - so the same line works
+    # everywhere without duplicating private keys. IdentitiesOnly then makes
+    # the offer deterministic (exactly this key, no MaxAuthTries roulette).
+    IdentityFile ~/.ssh/{{ .identity }}.pub
     IdentitiesOnly yes
 {{- end }}
 {{- if hasKey . "proxy" }}
