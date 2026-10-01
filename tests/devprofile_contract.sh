@@ -12,12 +12,14 @@ set -euo pipefail
 #
 # Unix-only: POSIX file modes are asserted. The PowerShell twin has its own
 # test (tests/devprofile_identity.ps1); CI runs this file on Linux.
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# lib.sh first: skip() is defined there, so the guard below needs it loaded.
+. "$repo_root/tests/lib.sh"
+
 case "${OSTYPE:-}" in
     msys*|cygwin*|win32) skip "devprofile_contract.sh is Unix-only (asserts POSIX modes)" ;;
 esac
-
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$repo_root/tests/lib.sh"
 
 devprofile="$repo_root/dot_local/bin/executable_devprofile"
 tmpl="$repo_root/run_onchange_generate_identities.sh.tmpl"
