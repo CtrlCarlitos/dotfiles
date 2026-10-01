@@ -159,4 +159,22 @@ for f in "$run_after_sh" "$run_after_ps1"; do
 done
 echo "  ok: run_after hook stops apply on doctor errors (no auto-fix)"
 
+# [7] CRLF line endings in key files: detected, --fix strips to LF. The
+# Windows->WSL key-copy class: Windows OpenSSH tolerates CRLF, Linux
+# libcrypto refuses it before any auth.
+H="$TMP/home-crlf"; valid_config "$H"
+mkdir -p "$H/.ssh"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIprobe comment\r\n' > "$H/.ssh/id_probe.pub"
+printf '%s\r\n' '-----BEGIN OPENSSH PRIVATE KEY-----' 'b3BlbnNzaC1rZXktdjEAAAAA' '-----END OPENSSH PRIVATE KEY-----' > "$H/.ssh/id_probe"
+out="$(env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor")" || true
+grep -q 'ssh-crlf' <<<"$out" || fail "[7] CRLF not detected: $out"
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" --fix >/dev/null 2>&1 ||
+    fail "[7] --fix must succeed stripping CRLF"
+if grep -q $'\r' "$H/.ssh/id_probe.pub" || grep -q $'\r' "$H/.ssh/id_probe"; then
+    fail "[7] CRLF must be stripped after --fix"
+fi
+env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 ||
+    fail "[7] doctor should pass after CRLF strip"
+echo "  ok: CRLF key files detected and stripped"
+
 finish

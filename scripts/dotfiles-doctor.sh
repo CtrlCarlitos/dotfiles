@@ -252,6 +252,35 @@ if [ -d "$HOME/.ssh" ]; then
     fi
 fi
 
+#-------------------------------------------------------------------------------
+# 8. Windows CRLF line endings in key files. A CRLF key fails on Linux/WSL
+#    with "error in libcrypto" before any auth attempt (observed live on a
+#    Windows->WSL id_*.pub copy; Windows OpenSSH tolerates CRLF, so the
+#    Windows twin treats this as hygiene only). --fix strips trailing CRs
+#    with perl (cross-platform: the repo already requires perl in CI).
+#-------------------------------------------------------------------------------
+if [ -d "$HOME/.ssh" ]; then
+    crlf=""
+    for keyfile in "$HOME"/.ssh/id_*; do
+        [ -f "$keyfile" ] || continue
+        if grep -q "$(printf '\r')" "$keyfile" 2>/dev/null; then
+            crlf="$crlf ${keyfile#"$HOME"/.ssh/}"
+        fi
+    done
+    if [ -n "$crlf" ]; then
+        if $FIX; then
+            for keyfile in "$HOME"/.ssh/id_*; do
+                [ -f "$keyfile" ] && perl -pi -e 's/\r$//' "$keyfile"
+            done
+            result ok ssh-crlf "stripped Windows CRLF:$crlf"
+        else
+            result warn ssh-crlf "Windows CRLF line endings (Linux/WSL ssh refuses these):$crlf - fix: perl -pi -e 's/\\r\\\$//' ~/.ssh/id_* (or re-run with --fix)"
+        fi
+    else
+        result ok ssh-crlf "key files are LF (Unix-clean)"
+    fi
+fi
+
 if [ "$errors" -gt 0 ]; then
     printf '\n%d error(s). ' "$errors"
     if $FIX; then printf '(--fix applied where safe)\n'; else printf 're-run with --fix for auto-repairable items\n'; fi

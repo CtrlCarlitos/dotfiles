@@ -285,6 +285,32 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
     }
 }
 
+# --- 8. CRLF line endings in key files ----------------------------------------
+# Windows-native, and Windows OpenSSH accepts them - but a CRLF key copied to
+# WSL/Linux dies in libcrypto before any auth. Detect + offer -Fix so future
+# copies land Unix-clean.
+
+if (Test-Path (Join-Path $homeDir '.ssh')) {
+    $crlfFiles = @()
+    foreach ($keyfile in (Get-ChildItem (Join-Path $homeDir '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
+        $raw = [IO.File]::ReadAllText($keyfile.FullName)
+        if ($raw -match "`r") { $crlfFiles += $keyfile.FullName }
+    }
+    if ($crlfFiles.Count -gt 0) {
+        if ($Fix) {
+            foreach ($f in $crlfFiles) {
+                $text = [IO.File]::ReadAllText($f)
+                [IO.File]::WriteAllText($f, ($text -replace "`r", ''))
+            }
+            Result 'ok' 'ssh-crlf' "stripped CR from: $($crlfFiles -join ', ')"
+        } else {
+            Result 'warn' 'ssh-crlf' "CRLF line endings (breaks ssh on WSL/Linux): $($crlfFiles -join ', ') - re-run with -Fix"
+        }
+    } else {
+        Result 'ok' 'ssh-crlf' 'key files are LF (Unix-clean)'
+    }
+}
+
 if ($script:Errors -gt 0) {
     Write-Host ""
     Write-Host "$($script:Errors) error(s). $(if ($Fix) { '(-Fix applied where safe)' } else { 're-run with -Fix for auto-repairable items' })"
