@@ -206,13 +206,15 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
         if ($trimmed -and $trimmed -notmatch '[\s"'']' -and $trimmed -match '[/\\]') {
             $candidate = if ($trimmed.StartsWith('~')) { Join-Path $HOME $trimmed.Substring(1) } else { $trimmed }
             if (Test-Path -LiteralPath $candidate -PathType Container -ErrorAction SilentlyContinue) {
+                # Echoed as a short, honest "cd -LiteralPath '<path>'" line.
+                # A silent variant (Set-Location + InvokePrompt re-render) was
+                # tried and rejected: InvokePrompt re-runs the prompt before
+                # its git segment resolves, littering the scrollback with a
+                # "?" placeholder line.
                 $escaped = $candidate.Replace("'", "''")
-                try {
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Delete(0, $line.Length)
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Insert("Set-Location -LiteralPath '$escaped'")
-                } catch {
-                    Write-Debug "autocd rewrite unavailable: $($_.Exception.Message)"
-                }
+                [Microsoft.PowerShell.PSConsoleReadLine]::Delete(0, $line.Length)
+                [Microsoft.PowerShell.PSConsoleReadLine]::Insert("cd '$escaped'")
+                [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
             }
         }
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
