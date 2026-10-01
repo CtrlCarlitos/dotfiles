@@ -241,7 +241,7 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
     $broadSids = 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'
     $sshDir = Join-Path $homeDir '.ssh'
 
-    function Get-LooseKeyFiles {
+    function Get-LooseKeyFileList {
         $found = @()
         foreach ($keyfile in (Get-ChildItem $sshDir -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
             $acl = Get-Acl -LiteralPath $keyfile.FullName -ErrorAction SilentlyContinue
@@ -258,7 +258,7 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
         return ,@($found)
     }
 
-    $loose = Get-LooseKeyFiles
+    $loose = Get-LooseKeyFileList
     if ($loose.Count -gt 0) {
         if ($Fix) {
             # Lock each flagged file to the owning user: explicit user:R
@@ -271,7 +271,7 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
                 & icacls $f.FullName /inheritance:r *> $null
                 & icacls $f.FullName /remove:g *S-1-1-0 *S-1-5-11 *S-1-5-32-545 *> $null
             }
-            $still = Get-LooseKeyFiles
+            $still = Get-LooseKeyFileList
             if ($still.Count -gt 0) {
                 Result 'warn' 'ssh-keyacl' "still readable by broad principals after -Fix: $(($still | ForEach-Object { $_.Name }) -join ', ')"
             } else {
