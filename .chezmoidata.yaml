@@ -48,6 +48,9 @@ vscode:
       terminal.integrated.shellIntegration.enabled: true
       # Terminal parity with Windows Terminal (12pt there ~= 16px here).
       terminal.integrated.fontSize: 16
+      # Windows Terminal uses a bar cursor; the integrated terminal defaults
+      # to block.
+      terminal.integrated.cursorStyle: bar
       # Ctrl+B / Ctrl+J reach the agent CLIs (background task / newline) instead
       # of toggling the sidebar / panel while the terminal has focus.
       terminal.integrated.commandsToSkipShell:

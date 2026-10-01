@@ -115,8 +115,8 @@ JSON
     cp "$repo_root/dot_config/Code/User/modify_keybindings.json" "$tmp/src/modify_dot_kb.json"
     printf '[]' >"$tmp/dest/.kb.json"
     chezmoi --source "$tmp/src" --destination "$tmp/dest" --config "$tmp/chezmoi.toml" --no-tty apply --force >/dev/null 2>&1
-    jq -e 'length == 8 and any(.[]; .key == "ctrl+alt+c")' "$tmp/dest/.kb.json" >/dev/null ||
-        fail "applying the keybindings modify-template produced no agent keys (shared template unresolved?)"
+    jq -e 'length == 17 and any(.[]; .key == "ctrl+alt+c") and any(.[]; .key == "ctrl+shift+w" and .command == "workbench.action.terminal.kill") and any(.[]; .key == "alt+shift+d" and .command == "workbench.action.terminal.split" and .when == "terminalFocus") and any(.[]; .key == "ctrl+0" and .command == "workbench.action.terminal.fontZoomReset")' "$tmp/dest/.kb.json" >/dev/null ||
+        fail "applying the keybindings modify-template produced the wrong keybinding set (8 agent chords + 9 terminal-parity chords expected)"
     for g in 'Library/Application Support/Code/**' '.config/Code/**' 'AppData/Roaming/Code/**'; do
         grep -Fq "$g" "$ignore" || fail ".chezmoiignore: missing VS Code keybindings guard $g"
     done
