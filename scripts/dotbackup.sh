@@ -28,10 +28,51 @@ if [ -d "$HOME/.ssh" ]; then
     done < <(find "$HOME/.ssh" -type f -print0)
 fi
 
-printf '{\n  "format_version": "dotfiles-backup-v1",\n  "created_at": "%s",\n  "source_platform": "%s"\n}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(uname -s)" > "$root/manifest.json"
+# source_platform: normalized to the canonical vocabulary the restore twins
+# compare against (windows / linux / darwin; uname -s gives Linux/Darwin).
+platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$platform" in darwin*) platform="darwin" ;; esac
 
-archive="$HOME/.dot_backups/dotfiles-$(date -u +%Y%m%d-%H%M%S).7z"
+printf '{\n  "format_version": "dotfiles-backup-v1",\n  "created_at": "%s",\n  "source_platform": "%s"\n}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$platform" > "$root/manifest.json"
+
+# RESTORE.md: human-only orientation inside the archive (the restore scripts
+# never read it - they act on manifest.json). What is inside, how to restore
+# on the same OS, and what changes on a different OS.
+cat > "$root/RESTORE.md" <<EOF
+# Dotfiles backup (created on $platform, $(date -u +%Y-%m-%d))
+
+## Contents
+
+- \`chezmoi/chezmoi.toml\` - this machine's ChezMoi config (prompted values,
+  package groups, ssh_hosts, remote_access). Review before reusing on a
+  different OS: paths and remote_access values are machine-specific.
+- \`ssh/\` - every regular file from this machine's \`~/.ssh\`: private keys,
+  .pub halves, config, known_hosts.
+
+## Restore on the same OS
+
+\`\`\`bash
+7z x -p <this-archive> -o<stage>
+bash dotrestore.sh <stage>/dotfiles-backup-v1   # from the dotfiles repo
+\`\`\`
+Then: \`chezmoi init && chezmoi apply\`.
+
+## Restore on a different OS
+
+The ssh keys translate: the restore normalizes permissions (600 on
+Linux/macOS, user-only ACL on Windows) and strips Windows CRLF line endings
+on Unix targets. The chezmoi config needs a human pass first - machine paths
+and remote_access values do not translate.
+
+## Model
+
+Private keys live in exactly one place per platform (the Windows agent vault,
+or this machine's ~/.ssh) - .pub halves are the only thing duplicated across
+machines, and Host blocks reference the .pub.
+EOF
+
+archive="$HOME/.dot_backups/dotfiles-$platform-$(date -u +%Y%m%d-%H%M%S).7z"
 [ ! -e "$archive" ] || { printf 'ERROR: backup archive already exists: %s\n' "$archive" >&2; exit 1; }
 "$seven_zip" a -t7z -mhe=on -p "$archive" "$root"
 # Say what is in the archive. The docs list it, but the person holding the file

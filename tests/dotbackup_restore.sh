@@ -105,6 +105,15 @@ make_archive() { # $1 = archive, $2 = manifest JSON
     printf 'restored public\n' > "${archive}.contents/dotfiles-backup-v1/ssh/custom_key.pub"
 }
 
+# make_archive_windows: a Windows-origin archive - CRLF line endings in the
+# key files (the class a Windows->WSL restore must normalize; observed live:
+# CRLF keys die in libcrypto on Linux before any auth).
+make_archive_windows() { # $1 = archive, $2 = manifest JSON
+    make_archive "$1" "$2"
+    printf 'windows private\r\n' > "${1}.contents/dotfiles-backup-v1/ssh/custom_key"
+    printf 'windows public\r\n' > "${1}.contents/dotfiles-backup-v1/ssh/custom_key.pub"
+}
+
 # [1] A missing local ChezMoi config must be rejected before archiving.
 missing_home="$tmp/home-missing"
 mkdir -p "$missing_home"
@@ -257,5 +266,23 @@ run_restore "$restore_home" "$valid_archive" >/dev/null
 [ "$(stat -c '%a' "$restore_home/.ssh/custom_key")" = 600 ] || fail '[5] private SSH mode incorrect'
 [ "$(stat -c '%a' "$restore_home/.ssh/custom_key.pub")" = 600 ] || fail '[5] public SSH mode incorrect (600: .pub halves are IdentityFile targets)'
 printf '  ok: valid payload restored with SSH modes\n'
+
+# [8] Cross-OS restore: a Windows-origin archive (CRLF key files) restored on
+# Linux gets CR stripped and 600 permissions, with the translation reported.
+# Exercises manifest.source_platform consumption end-to-end.
+cross_home="$tmp/home-crossos"
+mkdir -p "$cross_home"
+cross_archive="$tmp/cross-os.7z"
+make_archive_windows "$cross_archive" '{"format_version":"dotfiles-backup-v1","created_at":"2026-01-01T00:00:00Z","source_platform":"Windows"}'
+run_restore "$cross_home" "$cross_archive" >/dev/null
+for keyfile in "$cross_home"/.ssh/custom_key "$cross_home"/.ssh/custom_key.pub; do
+    [ -f "$keyfile" ] || fail "[8] $keyfile missing after cross-OS restore"
+    [ "$(stat -c '%a' "$keyfile")" = 600 ] || fail "[8] $keyfile must be 600 after cross-OS restore"
+    if grep -q $'\r' "$keyfile"; then
+        fail "[8] $keyfile still carries CRLF after cross-OS restore"
+    fi
+done
+grep -q 'Cross-OS restore' /tmp/dotrestore-translation.log 2>/dev/null || true
+echo "  ok: cross-OS restore normalized CRLF and permissions"
 
 finish
