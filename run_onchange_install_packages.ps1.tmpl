@@ -88,6 +88,13 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
         Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
     Import-Module Microsoft.PowerShell.Security, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
 }
+# Windows PowerShell 5.1 redraws the progress bar of Invoke-WebRequest and
+# Expand-Archive ("Writing request stream...") for every received chunk, which
+# throttles large downloads to a crawl: measured 2026-09-30, the 161 MB Chrome
+# MSI ran at ~6 MB/min on a link that does ~8 MB/s. Silence it for this session.
+# This does NOT reach Start-Job jobs or child powershell processes (separate
+# sessions): Invoke-WithTimeout and the `irm | iex` launches below set it again.
+$ProgressPreference = 'SilentlyContinue'
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with
@@ -107,7 +114,10 @@ function Invoke-WithTimeout {
         [switch]$NoStream
     )
     $jobStarted = Get-Date
-    $job = Start-Job -ScriptBlock $Action
+    # -InitializationScript: a job is a fresh process and does not inherit the
+    # session's $ProgressPreference (see the note above); without this every
+    # Invoke-WebRequest inside an Action still pays the progress-bar tax.
+    $job = Start-Job -InitializationScript { $ProgressPreference = 'SilentlyContinue' } -ScriptBlock $Action
     $deadline = $jobStarted.AddSeconds($Seconds)
     $collected = @()
     while ($job.State -eq 'Running' -and (Get-Date) -lt $deadline) {
@@ -885,7 +895,7 @@ if (-not $vsApply) {
 # Ollama - installer downloads a large (~700MB+) setup with no timeout of its own
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Host "  Installing Ollama..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "Ollama install" -Seconds 1200 -Action { & powershell -NoProfile -c "irm https://ollama.com/install.ps1 | iex" }
+    Invoke-WithTimeout -Description "Ollama install" -Seconds 1200 -Action { & powershell -NoProfile -c "`$ProgressPreference = 'SilentlyContinue'; irm https://ollama.com/install.ps1 | iex" }
 }
 
 Install-Node
@@ -935,7 +945,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     # NOTE on the skills scriptblocks below); the trailing exit-code throw
     # keeps a failed download visible as a job failure.
     Invoke-WithTimeout -Description "uv install" -Seconds 300 -Action {
-        & powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+        & powershell -ExecutionPolicy ByPass -Command "`$ProgressPreference = 'SilentlyContinue'; irm https://astral.sh/uv/install.ps1 | iex"
         if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
     }
 }
@@ -1375,7 +1385,7 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
     # Official Native Install - URL single-sourced from .chezmoidata.yaml
     # versions.claude_install_ps1 (#125), the same key update_ai_tools.ps1
     # reads at runtime, so install and update can never diverge.
-    Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "irm {{ .versions.claude_install_ps1 }} | iex" }
+    Invoke-WithTimeout -Description "Claude Code install" -Seconds 300 -Action { & powershell -NoProfile -c "`$ProgressPreference = 'SilentlyContinue'; irm {{ .versions.claude_install_ps1 }} | iex" }
 }
 
 function Set-ClaudeAttribution {
