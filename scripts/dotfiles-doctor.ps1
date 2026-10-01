@@ -228,6 +228,33 @@ if (-not $guardrailPin) {
 
 } # end not-in-apply (guardrail-pin)
 
+# --- 7. ~/.ssh key files readable by broad principals -------------------------
+# OpenSSH for Windows refuses identity files whose ACL grants read to broad
+# principals (Everyone / Users / Authenticated Users). Live observation: the
+# default inherited ACLs (user-only) pass, so this only trips when something
+# loosens them. Warn + remedy; no -Fix (ACL surgery is not a safe blind
+# mutation - the .sh twin's chmod 600 fix is the Unix equivalent).
+
+if (Test-Path (Join-Path $homeDir '.ssh')) {
+    $broad = 'Everyone', 'BUILTIN\Users', 'NT AUTHORITY\Authenticated Users'
+    $loose = @()
+    foreach ($keyfile in (Get-ChildItem (Join-Path $homeDir '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
+        $acl = Get-Acl -LiteralPath $keyfile.FullName -ErrorAction SilentlyContinue
+        foreach ($ace in $acl.Access) {
+            if ($ace.AccessControlType -ne 'Allow') { continue }
+            if ($broad -contains $ace.IdentityReference.Value) {
+                $loose += "$($keyfile.Name) ($($ace.IdentityReference.Value))"
+                break
+            }
+        }
+    }
+    if ($loose.Count -gt 0) {
+        Result 'warn' 'ssh-keyacl' "readable by broad principals:$($loose -join ', ') - remedy: icacls <file> /inheritance:r /grant:r `"$env:USERNAME`:R`""
+    } else {
+        Result 'ok' 'ssh-keyacl' 'key file ACLs not broadly readable'
+    }
+}
+
 if ($script:Errors -gt 0) {
     Write-Host ""
     Write-Host "$($script:Errors) error(s). $(if ($Fix) { '(-Fix applied where safe)' } else { 're-run with -Fix for auto-repairable items' })"

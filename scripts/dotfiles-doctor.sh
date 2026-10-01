@@ -231,7 +231,9 @@ if [ -d "$HOME/.ssh" ]; then
     bad=""
     for keyfile in "$HOME"/.ssh/id_*; do
         [ -f "$keyfile" ] || continue
-        perms="$(stat -c '%a' "$keyfile" 2>/dev/null)" || continue
+        # GNU stat on Linux/WSL, BSD stat on macOS (probe degrades to skip
+        # where neither spelling works).
+        perms="$(stat -c '%a' "$keyfile" 2>/dev/null || stat -f '%Lp' "$keyfile" 2>/dev/null)" || continue
         case "$perms" in
             *[4567]?|?[4567]*) bad="$bad ${keyfile#"$HOME"/.ssh/} ($perms)" ;;
         esac
