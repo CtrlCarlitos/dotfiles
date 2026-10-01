@@ -232,24 +232,54 @@ if (-not $guardrailPin) {
 # OpenSSH for Windows refuses identity files whose ACL grants read to broad
 # principals (Everyone / Users / Authenticated Users). Live observation: the
 # default inherited ACLs (user-only) pass, so this only trips when something
-# loosens them. Warn + remedy; no -Fix (ACL surgery is not a safe blind
-# mutation - the .sh twin's chmod 600 fix is the Unix equivalent).
+# loosens them. -Fix locks each flagged file to the owning user (explicit
+# user:R first, then strip inherited ACEs) and re-verifies.
 
 if (Test-Path (Join-Path $homeDir '.ssh')) {
-    $broad = 'Everyone', 'BUILTIN\Users', 'NT AUTHORITY\Authenticated Users'
-    $loose = @()
-    foreach ($keyfile in (Get-ChildItem (Join-Path $homeDir '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
-        $acl = Get-Acl -LiteralPath $keyfile.FullName -ErrorAction SilentlyContinue
-        foreach ($ace in $acl.Access) {
-            if ($ace.AccessControlType -ne 'Allow') { continue }
-            if ($broad -contains $ace.IdentityReference.Value) {
-                $loose += "$($keyfile.Name) ($($ace.IdentityReference.Value))"
-                break
+    # SIDs, not names: ACE identity display names are localized on non-English
+    # Windows. Everyone=S-1-1-0, Authenticated Users=S-1-5-11, Users=S-1-5-32-545.
+    $broadSids = 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'
+    $sshDir = Join-Path $homeDir '.ssh'
+
+    function Get-LooseKeyFiles {
+        $found = @()
+        foreach ($keyfile in (Get-ChildItem $sshDir -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
+            $acl = Get-Acl -LiteralPath $keyfile.FullName -ErrorAction SilentlyContinue
+            foreach ($ace in $acl.Access) {
+                if ($ace.AccessControlType -ne 'Allow') { continue }
+                $sid = ''
+                try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { Write-Verbose "unresolvable ACE identity skipped" }
+                if ($broadSids -contains $sid) {
+                    $found += $keyfile
+                    break
+                }
             }
         }
+        return ,@($found)
     }
+
+    $loose = Get-LooseKeyFiles
     if ($loose.Count -gt 0) {
-        Result 'warn' 'ssh-keyacl' "readable by broad principals:$($loose -join ', ') - remedy: icacls <file> /inheritance:r /grant:r `"$env:USERNAME`:R`""
+        if ($Fix) {
+            # Lock each flagged file to the owning user: explicit user:R
+            # first (so stripping inheritance cannot lock anyone out), then
+            # remove inherited ACEs, then remove any explicit grants for the
+            # broad principals (observed live: an EXPLICIT Everyone ACE on a
+            # copied .pub survives /inheritance:r).
+            foreach ($f in $loose) {
+                & icacls $f.FullName /grant:r "$($env:USERNAME):R" *> $null
+                & icacls $f.FullName /inheritance:r *> $null
+                & icacls $f.FullName /remove:g *S-1-1-0 *S-1-5-11 *S-1-5-32-545 *> $null
+            }
+            $still = Get-LooseKeyFiles
+            if ($still.Count -gt 0) {
+                Result 'warn' 'ssh-keyacl' "still readable by broad principals after -Fix: $(($still | ForEach-Object { $_.Name }) -join ', ')"
+            } else {
+                Result 'ok' 'ssh-keyacl' "normalized to user-only ACL: $(($loose | ForEach-Object { $_.Name }) -join ', ')"
+            }
+        } else {
+            Result 'warn' 'ssh-keyacl' "readable by broad principals: $(($loose | ForEach-Object { $_.Name }) -join ', ') - remedy: icacls <file> /grant:r '<user>:R' /inheritance:r /remove:g *S-1-1-0 *S-1-5-11 *S-1-5-32-545 (or re-run with -Fix)"
+        }
     } else {
         Result 'ok' 'ssh-keyacl' 'key file ACLs not broadly readable'
     }
