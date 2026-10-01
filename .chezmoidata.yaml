@@ -134,6 +134,7 @@ vscode:
     - rahulraghunathb.excel-lite
     - mikestead.dotenv
     - redhat.vscode-yaml
+    - tamasfe.even-better-toml
   # Windows-only additions (the list above is cross-platform)
   extensions_windows:
     - ms-vscode-remote.remote-wsl
