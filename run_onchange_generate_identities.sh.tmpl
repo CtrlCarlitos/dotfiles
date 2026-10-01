@@ -158,6 +158,9 @@ chmod 700 "$HOME/.ssh"
 # or not (0644 .pub copy observed live: same refusal, WSL side).
 for key in "$HOME"/.ssh/id_*; do
     [[ -f "$key" ]] || continue
+    # Strip Windows CRLF line endings: a CRLF key fails on Linux with
+    # "error in libcrypto" (observed live on a Windows->WSL .pub copy).
+    sed -i 's/\r$//' "$key" 2>/dev/null || true
     chmod 600 "$key"
 done
 
