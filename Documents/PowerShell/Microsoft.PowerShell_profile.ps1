@@ -189,6 +189,15 @@ function dp { devprofile @args }
 # unreachable. `cd -` needs no alias - pwsh 7 supports it natively.
 function ~ { Set-Location ~ }
 
+# wsl: land in the WSL home directory instead of the /mnt/c mirror of the
+# Windows cwd - the mirror's directory scans are slow (9p + AV) and starship
+# times out on them ("Scanning current directory timed out"). Arguments pass
+# through (wsl -d <distro> still works); run `wsl --cd <dir>` when the
+# /mnt/c mirror of the current directory IS the destination.
+function wsl {
+    wsl.exe --cd ~ @args
+}
+
 # Path-like tokens autocd (interactive, via PSReadLine): PowerShell parses a
 # bare token like ~\.local\share\chezmoi as a MODULE spec - "The module '~'
 # could not be loaded" - and its command resolution never reaches
