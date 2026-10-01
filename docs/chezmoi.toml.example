@@ -24,8 +24,9 @@
 # The 16 package groups share one vocabulary across the menu
 # (scripts/select-packages.*), these keys, and CI seeds. Full table, menu
 # flow, presets, and the rename map from the old install_* toggles:
-# docs/package-groups.md. `true` requests desired state on the next apply;
-# host-only desktop groups remain skipped in WSL and containers.
+# docs/package-groups.md. `true` requests desired state on the next apply.
+# Groups marked "Host only" are skipped in WSL and containers; every other
+# group applies there too.
 #
 # NOTE: the menu OWNS this section — re-running scripts/select-packages.sh
 # (or .ps1) rewrites it wholesale. Hand-edits here survive `chezmoi apply`
@@ -45,12 +46,11 @@
     fonts = true
 
     # agent_toolkit — Cross-vendor agent layer: Serena, Graft, act,
-    #                 Playwright Chromium. Not host-gated (applies on
-    #                 WSL too).
+    #                 Playwright Chromium.
     agent_toolkit = true
 
     # opencode_cli — OpenCode CLI + Superpowers + skills + guardrail
-    #                wiring. Not host-gated (applies on WSL too).
+    #                wiring.
     opencode_cli = true
 
     # opencode_desktop — OpenCode Desktop app. Host only; installs on all
@@ -67,7 +67,7 @@
     claude_desktop = false
 
     # chatgpt_cli — Codex CLI (@openai/codex npm) + the curated-skills pass
-    #                 for Codex.
+    #               for Codex.
     chatgpt_cli = false
 
     # chatgpt_desktop — ChatGPT Desktop app. Host only; Linux has no
@@ -96,6 +96,7 @@
     #             Deliberately a separate opt-in from the agent groups.
     #             See docs/guardrail-install.md.
     guardrail = true
+
     # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,
     #               ScreenRec, Termius, Handy... Host only: auto-skipped on
     #               WSL/containers even if true.
