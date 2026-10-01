@@ -40,7 +40,6 @@ staged_symlink="$(find "$root" -type l -print -quit)"
 manifest_entry=0
 chezmoi_entry=0
 ssh_entry=0
-restore_md_entry=0
 for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
     case "${entry##*/}" in
@@ -48,7 +47,7 @@ for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         chezmoi) [ -d "$entry" ] && chezmoi_entry=1 ;;
         ssh) [ -d "$entry" ] && ssh_entry=1 ;;
         # RESTORE.md: human-only orientation, optional (older archives lack it)
-        RESTORE.md) [ -f "$entry" ] && restore_md_entry=1 ;;
+        RESTORE.md) ;;
         *)
             printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
             exit 1
