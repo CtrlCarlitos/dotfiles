@@ -123,7 +123,7 @@ if command -v chezmoi >/dev/null; then
     HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" CI=true DEVCONTAINER=true \
         chezmoi init --source="$repo_root" >/dev/null ||
         fail "config template: first-run devcontainer initialization failed"
-    grep -Fq 'email = "devcontainer@local"' "$tmp/config/chezmoi/chezmoi.toml" ||
+    grep -Eq 'email[[:space:]]*=[[:space:]]*"devcontainer@local"' "$tmp/config/chezmoi/chezmoi.toml" ||
         fail "config template: first-run devcontainer identity missing"
 fi
 
