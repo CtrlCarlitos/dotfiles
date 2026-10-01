@@ -43,8 +43,8 @@ require "$restore" 'Get-Item -LiteralPath $configDestination -Force -ErrorAction
 require "$restore" 'Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue'
 require "$restore" 'Refusing reparse-point destination:'
 require "$restore" 'ReparsePoint'
-require "$restore" '$payloadEntries.Count -ne 3'
-require "$restore" "'manifest.json', 'chezmoi', 'ssh'"
+require "$restore" '$payloadEntries.Count -ne 4'
+require "$restore" "'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'"
 require "$restore" 'Get-ChildItem -LiteralPath $payloadRoot -Force -Recurse'
 require "$backup" 'finally'
 require "$restore" 'finally'

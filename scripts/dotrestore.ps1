@@ -84,7 +84,7 @@ try {
 
     $payloadEntries = @(Get-ChildItem -LiteralPath $payloadRoot -Force)
     $expectedPayloadEntries = 'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'
-    if ($payloadEntries.Count -ne 3 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
+    if ($payloadEntries.Count -ne 4 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
 

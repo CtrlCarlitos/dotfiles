@@ -68,7 +68,7 @@ chmod +x "$bin/7z"
 
 no_jq_bin="$tmp/no-jq-bin"
 mkdir -p "$no_jq_bin"
-for tool in chmod cp dirname find grep mkdir mktemp rm; do
+for tool in chmod cp dirname find grep mkdir mktemp rm uname tr perl; do
     ln -s "$(command -v "$tool")" "$no_jq_bin/$tool"
 done
 ln -s "$bin/7z" "$no_jq_bin/7z"
