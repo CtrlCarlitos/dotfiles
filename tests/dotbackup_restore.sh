@@ -285,4 +285,106 @@ done
 grep -q 'Cross-OS restore' /tmp/dotrestore-translation.log 2>/dev/null || true
 echo "  ok: cross-OS restore normalized CRLF and permissions"
 
+# --- guardrail operator state -------------------------------------------------
+make_guardrail_home() { # $1 = home, $2 = approval mode
+    make_source_home "$1"
+    mkdir -p "$1/.config/guardrail" "$1/.local/state/guardrail/operator-auth/nested" \
+        "$1/.local/state/guardrail/manifests" "$1/.local/state/guardrail/allowances"
+    printf 'approval = "%s"\n' "$2" > "$1/.config/guardrail/waivers.toml"
+    printf 'night = true\n' > "$1/.config/guardrail/night.toml"
+    printf 'credential\n' > "$1/.local/state/guardrail/operator-auth/enrollment.json"
+    printf 'nested credential\n' > "$1/.local/state/guardrail/operator-auth/nested/key"
+    printf '{"event":1}\n' > "$1/.local/state/guardrail/audit-2026.jsonl"
+    printf 'regenerated\n' > "$1/.local/state/guardrail/manifests/claude.json"
+    printf 'machine secret\n' > "$1/.local/state/guardrail/allowances/auth.key"
+    printf 'trust record\n' > "$1/.local/state/guardrail/selftest-passed"
+}
+
+backup_payload() { # $1 = home; prints the staged payload dir of its only archive
+    local archives=("$1"/.dot_backups/dotfiles-*.7z)
+    printf '%s\n' "${archives[0]}.contents/dotfiles-backup-v1"
+}
+
+# [9] Passkey mode: operator config and enrollment captured; the audit log only
+# on request; regenerated and per-machine state never.
+pk_home="$tmp/home-guardrail-passkey"
+make_guardrail_home "$pk_home" passkey
+run_backup "$pk_home" >/dev/null
+pk_payload="$(backup_payload "$pk_home")"
+[ -f "$pk_payload/guardrail/config/waivers.toml" ] || fail '[9] waivers.toml not captured'
+[ -f "$pk_payload/guardrail/config/night.toml" ] || fail '[9] night.toml not captured'
+[ -f "$pk_payload/guardrail/operator-auth/nested/key" ] || fail '[9] passkey enrollment not captured in passkey mode'
+[ ! -e "$pk_payload/guardrail/audit" ] || fail '[9] audit log captured without DOTBACKUP_AUDIT=1'
+for never in manifests allowances selftest-passed; do
+    [ -z "$(find "$pk_payload" -name "$never" -print -quit)" ] || fail "[9] $never must never be captured"
+done
+rm -rf "$pk_home/.dot_backups"
+HOME="$pk_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+[ -f "$(backup_payload "$pk_home")/guardrail/audit/audit-2026.jsonl" ] || fail '[9] audit log not captured with DOTBACKUP_AUDIT=1'
+echo "  ok: guardrail backup captures operator state, skips regenerated state"
+
+# [10] Prompt mode (the default) does not use the passkey, so it is not captured.
+pr_home="$tmp/home-guardrail-prompt"
+make_guardrail_home "$pr_home" prompt
+run_backup "$pr_home" >/dev/null
+pr_payload="$(backup_payload "$pr_home")"
+[ -f "$pr_payload/guardrail/config/waivers.toml" ] || fail '[10] waivers.toml not captured in prompt mode'
+[ ! -e "$pr_payload/guardrail/operator-auth" ] || fail '[10] passkey enrollment captured outside passkey mode'
+echo "  ok: passkey enrollment captured only in passkey mode"
+
+# [11] No guardrail state at all: no guardrail/ entry (older layout unchanged).
+plain_home="$tmp/home-no-guardrail"
+make_source_home "$plain_home"
+run_backup "$plain_home" >/dev/null
+[ ! -e "$(backup_payload "$plain_home")/guardrail" ] || fail '[11] guardrail/ present without guardrail state'
+echo "  ok: no guardrail section when guardrail was never configured"
+
+# [12] Same-OS restore: owner-only modes, enrollment included.
+pk_archive=("$pk_home"/.dot_backups/dotfiles-*.7z)
+gr_restore="$tmp/home-guardrail-restore"
+mkdir -p "$gr_restore"
+run_restore "$gr_restore" "${pk_archive[0]}" >/dev/null
+[ "$(<"$gr_restore/.config/guardrail/waivers.toml")" = 'approval = "passkey"' ] || fail '[12] waivers.toml not restored'
+[ "$(stat -c '%a' "$gr_restore/.config/guardrail/waivers.toml")" = 600 ] || fail '[12] waivers.toml must be 600'
+[ "$(stat -c '%a' "$gr_restore/.config/guardrail")" = 700 ] || fail '[12] guardrail config dir must be 700'
+[ "$(stat -c '%a' "$gr_restore/.local/state/guardrail/operator-auth/nested/key")" = 600 ] || fail '[12] enrollment must be 600'
+[ -f "$gr_restore/.local/state/guardrail/audit-2026.jsonl" ] || fail '[12] audit log not restored'
+echo "  ok: guardrail state restored owner-only"
+
+# [13] Cross-OS: config restored, passkey enrollment skipped with a notice.
+gr_cross_archive="$tmp/guardrail-cross.7z"
+mkdir -p "${gr_cross_archive}.contents"
+cp -R "$(backup_payload "$pk_home")" "${gr_cross_archive}.contents/"
+: > "$gr_cross_archive"
+sed -i 's/"source_platform": "[a-z]*"/"source_platform": "windows"/' "${gr_cross_archive}.contents/dotfiles-backup-v1/manifest.json"
+gr_cross="$tmp/home-guardrail-cross"
+mkdir -p "$gr_cross"
+cross_out="$(run_restore "$gr_cross" "$gr_cross_archive")"
+[ -f "$gr_cross/.config/guardrail/waivers.toml" ] || fail '[13] cross-OS restore dropped waivers.toml'
+[ ! -e "$gr_cross/.local/state/guardrail/operator-auth" ] || fail '[13] cross-OS restore wrote passkey enrollment'
+printf '%s' "$cross_out" | grep -q 'enroll again' || fail '[13] skipped enrollment not reported'
+echo "  ok: cross-OS restore skips passkey enrollment"
+
+# [14] An existing guardrail file is never overwritten, and nothing is written first.
+gr_collide="$tmp/home-guardrail-collide"
+mkdir -p "$gr_collide/.config/guardrail"
+printf 'keep\n' > "$gr_collide/.config/guardrail/waivers.toml"
+run_restore "$gr_collide" "${pk_archive[0]}" >/dev/null 2>&1 && fail '[14] existing waivers.toml was overwritten'
+[ "$(<"$gr_collide/.config/guardrail/waivers.toml")" = keep ] || fail '[14] collision changed waivers.toml'
+[ ! -e "$gr_collide/.config/chezmoi/chezmoi.toml" ] || fail '[14] collision rejection wrote config first'
+echo "  ok: restore refuses to overwrite guardrail files"
+
+# [15] Anything outside the fixed guardrail allowlist is rejected.
+gr_bad_archive="$tmp/guardrail-bad.7z"
+mkdir -p "${gr_bad_archive}.contents"
+cp -R "$(backup_payload "$pk_home")" "${gr_bad_archive}.contents/"
+: > "$gr_bad_archive"
+mkdir -p "${gr_bad_archive}.contents/dotfiles-backup-v1/guardrail/manifests"
+printf 'stale\n' > "${gr_bad_archive}.contents/dotfiles-backup-v1/guardrail/manifests/claude.json"
+gr_bad="$tmp/home-guardrail-bad"
+mkdir -p "$gr_bad"
+run_restore "$gr_bad" "$gr_bad_archive" >/dev/null 2>&1 && fail '[15] archive with a stale manifest was restored'
+[ ! -e "$gr_bad/.config/chezmoi/chezmoi.toml" ] || fail '[15] rejected archive wrote config'
+echo "  ok: guardrail allowlist enforced on restore"
+
 finish

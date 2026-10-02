@@ -43,7 +43,10 @@ require "$restore" 'Get-Item -LiteralPath $configDestination -Force -ErrorAction
 require "$restore" 'Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue'
 require "$restore" 'Refusing reparse-point destination:'
 require "$restore" 'ReparsePoint'
-require "$restore" '$payloadEntries.Count -ne 4'
+require "$restore" '$payloadNames.Count -ne 4'
+require "$restore" 'Get-GuardrailDestination'
+require "$restore" 'Refusing to overwrite existing guardrail file:'
+require "$backup" 'DOTBACKUP_AUDIT'
 require "$restore" "'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'"
 require "$restore" 'Get-ChildItem -LiteralPath $payloadRoot -Force -Recurse'
 require "$backup" 'finally'

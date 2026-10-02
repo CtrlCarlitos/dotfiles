@@ -52,6 +52,53 @@ try {
             }
     }
 
+    # guardrail operator state (optional section; twin of dotbackup.sh). Windows
+    # splits it across three roots: %APPDATA%\guardrail (waivers.toml,
+    # night.toml), %LOCALAPPDATA%\guardrail (audit log) and
+    # %USERPROFILE%\.local\state\guardrail (operator-auth). Only what cannot be
+    # recreated is captured; operator-auth only in passkey mode, the audit log
+    # only with DOTBACKUP_AUDIT=1. manifests, sessions, allowances (auth.key),
+    # selftest-passed, the binary and backups\*.exe are never captured.
+    $guardrailCount = 0
+    $guardrailConfig = Join-Path $env:APPDATA 'guardrail'
+    $guardrailState = Join-Path $env:USERPROFILE '.local\state\guardrail'
+    $guardrailRoot = Join-Path $payloadRoot 'guardrail'
+    foreach ($name in 'waivers.toml', 'night.toml') {
+        $item = Get-Item -LiteralPath (Join-Path $guardrailConfig $name) -Force -ErrorAction SilentlyContinue
+        if ($null -ne $item -and -not $item.PSIsContainer -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            New-Item -ItemType Directory -Path (Join-Path $guardrailRoot 'config') -Force | Out-Null
+            Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $guardrailRoot "config\$name")
+            $guardrailCount++
+        }
+    }
+    $waivers = Join-Path $guardrailConfig 'waivers.toml'
+    $authSource = Join-Path $guardrailState 'operator-auth'
+    if ((Test-Path -LiteralPath $waivers -PathType Leaf) -and
+        (Select-String -LiteralPath $waivers -Pattern '^\s*approval\s*=\s*"passkey"' -Quiet) -and
+        (Test-Path -LiteralPath $authSource -PathType Container)) {
+        Get-ChildItem -LiteralPath $authSource -File -Recurse -Force |
+            Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+            ForEach-Object {
+                $relative = $_.FullName.Substring($authSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+                $destination = Join-Path $guardrailRoot "operator-auth\$relative"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+                Copy-Item -LiteralPath $_.FullName -Destination $destination
+                $guardrailCount++
+            }
+    }
+    if ($env:DOTBACKUP_AUDIT -eq '1') {
+        $auditSource = Join-Path $env:LOCALAPPDATA 'guardrail'
+        if (Test-Path -LiteralPath $auditSource -PathType Container) {
+            Get-ChildItem -LiteralPath $auditSource -Filter 'audit*.jsonl' -File -Force |
+                Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+                ForEach-Object {
+                    New-Item -ItemType Directory -Path (Join-Path $guardrailRoot 'audit') -Force | Out-Null
+                    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $guardrailRoot "audit\$($_.Name)")
+                    $guardrailCount++
+                }
+        }
+    }
+
     # WriteAllText with UTF8Encoding($false) = no BOM, same as every other
     # script here. 5.1 has no `-Encoding utf8NoBOM` (pwsh 6+), and 5.1's
     # default Set-Content encoding writes a BOM.
@@ -77,6 +124,11 @@ try {
   different OS: paths and remote_access values are machine-specific.
 - ``ssh/`` - every regular file from this machine's ``~/.ssh``: private keys,
   .pub halves, config, known_hosts.
+- ``guardrail/`` - present only if guardrail was configured: ``config/``
+  (waivers.toml, night.toml: approval mode and every per-repo grant),
+  ``operator-auth/`` (passkey enrollment, same machine only) and ``audit/``
+  (history). Review waivers.toml before restoring: it re-applies every old
+  grant.
 
 ## Restore on the same OS
 
@@ -124,6 +176,7 @@ machines, and Host blocks reference the .pub.
 
     Write-Output "Backup created: $archive"
     Write-Output "  Contains $keyCount private key file(s) from ~/.ssh. Treat this archive as key material."
+    Write-Output "  Contains $guardrailCount guardrail operator file(s)."
     Write-Output "  This is disaster recovery for THIS machine, not a way to set up another one:"
     Write-Output "  give an additional machine its own keys instead (docs/ssh-agents.md)."
     Write-Output "  Re-run after rotating a key - older archives still hold the old ones."
