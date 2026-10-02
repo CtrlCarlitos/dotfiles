@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force -Path $user, $public | Out-Null
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # --- [1] Config switch: only an explicit `false` under [data.upgrade] counts.
-function New-Config([string]$Body) {
+function Get-ScratchConfig([string]$Body) {
     $p = Join-Path $Tmp ([IO.Path]::GetRandomFileName() + '.toml')
     [IO.File]::WriteAllText($p, $Body, $Utf8NoBom)
     return $p
@@ -33,7 +33,7 @@ $cases = @(
     @{ Name = 'false in a different table';         Body = "[data.packages]`ndesktop_shortcuts = false`n[data.upgrade]`nother = 1`n"; Want = $false }
 )
 foreach ($c in $cases) {
-    $got = [bool](Test-DesktopShortcutsDisabled -ConfigPath (New-Config $c.Body))
+    $got = [bool](Test-DesktopShortcutsDisabled -ConfigPath (Get-ScratchConfig $c.Body))
     if ($got -ne $c.Want) { Fail "[1] $($c.Name): expected $($c.Want), got $got" }
 }
 if (Test-DesktopShortcutsDisabled -ConfigPath (Join-Path $Tmp 'missing.toml')) { Fail '[1] a missing config must mean "leave shortcuts alone"' }
