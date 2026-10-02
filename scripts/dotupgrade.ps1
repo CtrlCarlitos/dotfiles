@@ -37,6 +37,14 @@ if ($defer.Count -gt 0) {
     Write-Host "  No live agent sessions - full sweep." -ForegroundColor Green
 }
 
+# --- Desktop shortcuts: installers drop them on every upgrade. With
+# [data.upgrade] desktop_shortcuts = false, snapshot now and delete only the
+# NEW ones after the sweeps. Per-installer switches do not exist for a
+# `choco upgrade all` / `winget upgrade --all` sweep.
+$dropDesktopShortcuts = Test-DesktopShortcutsDisabled
+$shortcutsBefore = @()
+if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
+
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading choco packages (choco upgrade all)..." -ForegroundColor Yellow
@@ -63,6 +71,14 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 & (Join-Path $PSScriptRoot 'update_ai_tools.ps1')
+
+if ($dropDesktopShortcuts) {
+    $removedShortcuts = @(Remove-NewDesktopShortcut -Before $shortcutsBefore)
+    if ($removedShortcuts.Count -gt 0) {
+        Write-Host "  Removed $($removedShortcuts.Count) new desktop shortcut(s) (desktop_shortcuts = false):" -ForegroundColor Yellow
+        foreach ($removed in $removedShortcuts) { Write-Host "    $removed" }
+    }
+}
 
 # --- Deferred report: what to re-run when quiet. ---
 if ($defer.Count -gt 0) {
