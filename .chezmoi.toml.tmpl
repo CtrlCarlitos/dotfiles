@@ -218,15 +218,15 @@
 # filename in ~/.ssh (never a private key or passphrase).
 #
 # Add one [[data.accounts]] block per identity:
-#   name          = "Work Name"             # required: commit author name
-#   email         = "work@company.com"      # required: commit author email
-#   username      = "work-user"             # required: GitHub/GitLab account
-#   provider      = "github"                # github (default) or gitlab
-#   key           = "id_work"               # optional: ~/.ssh key filename
-#   signingKey    = "id_work_sign"          # optional: falls back to key
-#   agent_key_comments = ["<email>", "<email>-sign"]  # optional: ssh-agent-relay key comments
-#   organizations = ["company-org"]         # optional: URL rewrite scope
-#   dirs          = ["projects/work"]       # paths using this identity
+#   name               = "Work Name"                  # required: commit author name
+#   email              = "work@company.com"           # required: commit author email
+#   username           = "work-user"                  # required: GitHub/GitLab account
+#   provider           = "github"                     # github (default) or gitlab
+#   key                = "id_work"                    # optional: ~/.ssh key filename
+#   signingKey         = "id_work_sign"               # optional: falls back to key
+#   agent_key_comments = ["<email>", "<email>-sign"]  # optional: allowed key comments (default <email>, <email>-sign)
+#   organizations      = ["company-org"]              # optional: URL rewrite scope
+#   dirs               = ["projects/work"]            # paths using this identity
 #
 # `chezmoi init` regenerates this file. Only fields explicitly re-emitted
 # below survive it; the gitconfig alias is derived, not a stored field.
@@ -411,6 +411,22 @@
   # die on the missing binary.
   pager = "delta"
 {{- end }}
+
+# Script interpreters
+# chezmoi runs each script (run_*.ps1, run_*.py, ...) with an interpreter chosen
+# by its file extension. [interpreters.<ext>] sets the command, and optionally
+# its arguments, for one extension. Built-in defaults include py = python3,
+# rb = ruby, pl = perl and nu = nu; .ps1 is set per OS below:
+#   windows: Windows PowerShell 5.1 (`powershell`) with no profile and the
+#            execution policy bypassed, so this repo's unsigned scripts run.
+#            Identical to chezmoi's built-in Windows default, kept explicit.
+#   macOS:   `pwsh` (PowerShell 7) - there is no Windows PowerShell there.
+#   linux:   no override.
+#
+# Example - run .py scripts with a pinned Python in UTF-8 mode:
+# [interpreters.py]
+#   command = "python3"
+#   args    = ["-X", "utf8"]
 {{ if eq .chezmoi.os "darwin" }}
 [interpreters.ps1]
   command = "pwsh"
