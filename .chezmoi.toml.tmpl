@@ -401,14 +401,22 @@
 {{- template "emit-toml-table" (dict "path" "data.remote_access" "table" .remote_access "depth" 0 "aot" false) }}
 {{- end }}
 
+# chezmoi add: secret scanning
+# `chezmoi add` scans a file for secrets (API keys, tokens, private keys) with
+# gitleaks rules before copying it into the source repo. `secrets` sets what a
+# finding does:
+#   "warning"  print the finding and still add the file (chezmoi's default)
+#   "error"    print the finding and refuse to add the file
+#   "ignore"   skip the scan
 [add]
   secrets = "warning"
 {{- if and (hasKey . "packages") (hasKey .packages "modern_cli") .packages.modern_cli }}
 
+# chezmoi diff: pager
+# Gated on modern_cli for the same reason dot_gitconfig gates git's pager:
+# with modern_cli=false delta is not installed, and 'chezmoi diff' would
+# die on the missing binary.
 [diff]
-  # Gated on modern_cli for the same reason dot_gitconfig gates git's pager:
-  # with modern_cli=false delta is not installed, and 'chezmoi diff' would
-  # die on the missing binary.
   pager = "delta"
 {{- end }}
 
