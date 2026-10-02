@@ -69,6 +69,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/remote-access-XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/bin" "$scratch/home"
+unset RA_SSHD_CONFIG
+printf 'AuthorizedKeysFile .ssh/authorized_keys\n' > "$scratch/sshd_config.fixture"
 printf '[data.remote_access.ssh]\nlogin_keys = []\n' > "$scratch/contract.toml"
 
 # ra_stub DIR NAME BODY: write NAME into DIR as an executable stub whose
@@ -98,6 +100,7 @@ EOF
 ra_run() (
     export PATH="$scratch/bin:$PATH"
     export HOME="$scratch/home"
+    export RA_SSHD_CONFIG="${RA_SSHD_CONFIG:-$scratch/sshd_config.fixture}"
     exec bash "$repo_root/scripts/remote-access.sh" "$@"
 )
 
@@ -132,6 +135,7 @@ ra_mode() {
 ra_call() (
     export PATH="$scratch/bin:$PATH"
     export HOME="$scratch/home"
+    export RA_SSHD_CONFIG="${RA_SSHD_CONFIG:-$scratch/sshd_config.fixture}"
     export RA_NO_MAIN=1
     . "$repo_root/scripts/remote-access.sh"
     "$@"
@@ -146,6 +150,7 @@ ra_call() (
 ra_run_twice() (
     export PATH="$scratch/bin:$PATH"
     export HOME="$scratch/home"
+    export RA_SSHD_CONFIG="${RA_SSHD_CONFIG:-$scratch/sshd_config.fixture}"
     bash "$repo_root/scripts/remote-access.sh" "$@" >"$scratch/twice-1.out" 2>&1 || return 1
     if [ -f "$scratch/calls" ]; then
         wc -l <"$scratch/calls" >"$scratch/twice-1.count"

@@ -1291,6 +1291,17 @@ try {
     # Execute the real adapter/dispatcher on a public-only fixture after the
     # transport cases. Only chezmoi data and the group lookup remain stubbed.
     Set-Item -Path Function:Invoke-RemoteKeys -Value $script:RealKeyAdapter
+    function Invoke-CheckedKeyCommand([string[]]$Command) {
+        $captured = [Collections.Generic.List[string]]::new()
+        try {
+            Invoke-RemoteAccess -Sub keys -Rest $Command *>&1 | ForEach-Object { $captured.Add([string]$_) }
+        } catch {
+            throw ("Native key adapter failed: $($_.Exception.Message)`n" + ($captured -join "`n"))
+        }
+        return ($captured -join "`n")
+    }
+    $keyPython = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
+    & $keyPython --version
     $script:LocalAdmin = $false
     $keyConfig = Join-Path $Tmp 'key-contract.json'
     $script:KeyConfigPath = Join-Path $Tmp 'key-contract.toml'
@@ -1300,13 +1311,13 @@ try {
     $publicLine = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd contract@fixture'
     [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_contract.pub'), ($publicLine + "`n"))
     Remove-Item -LiteralPath (Join-Path $Home_ '.ssh/authorized_keys') -ErrorAction SilentlyContinue
-    $out = ((Invoke-RemoteAccess -Sub keys -Rest @('status') *>&1) -join "`n")
+    $out = Invoke-CheckedKeyCommand @('status')
     if (-not (Test-Path (Join-Path $Home_ '.ssh/authorized_keys'))) { Ok 'keys status: does not create authorization' } else { Fail 'keys status: does not create authorization' $out }
-    $out = ((Invoke-RemoteAccess -Sub keys -Rest @('sync') *>&1) -join "`n")
+    $out = Invoke-CheckedKeyCommand @('sync')
     if ((Get-Content -Raw (Join-Path $Home_ '.ssh/authorized_keys')).Trim() -eq $publicLine) { Ok 'keys sync: real adapter authorizes the declared public-only key' } else { Fail 'keys sync: real adapter authorizes the declared public-only key' $out }
     [IO.File]::WriteAllText($keyConfig, '{"remote_access":{"enabled":true,"ssh":{"enabled":true,"login_keys":[]}}}')
     [IO.File]::WriteAllText($script:KeyConfigPath, "[data.remote_access.ssh]`nlogin_keys = []`n")
-    $null = Invoke-RemoteAccess -Sub keys -Rest @('sync')
+    $null = Invoke-CheckedKeyCommand @('sync')
     if ((Get-Item (Join-Path $Home_ '.ssh/authorized_keys')).Length -eq 0) { Ok 'keys sync: empty contract revokes all' } else { Fail 'keys sync: empty contract revokes all' 'file not empty' }
 } finally {
     $env:HOME = $savedHome
