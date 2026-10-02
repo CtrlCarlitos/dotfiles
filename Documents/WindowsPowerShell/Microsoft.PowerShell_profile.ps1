@@ -169,13 +169,13 @@ function dot {
         'ssh-fingerprints' { python (Join-Path $repoScripts 'ssh_fingerprints.py') @rest }
         default {
             Write-Host "dot - dotfiles command family"
-            Write-Host "  dot ssh-fingerprints  preview agent fingerprint sync (--write to save)"
-            Write-Host "  dot up        sync state (pull + apply + config re-init; never upgrades)"
-            Write-Host "  dot upgrade   upgrade ALL tooling (choco + AI tools, session-gated)"
-            Write-Host "  dot backup    encrypted portable backup"
-            Write-Host "  dot restore   restore a backup"
-            Write-Host "  dot doctor    dotfiles health check"
-            Write-Host "  dot remote    remote-access setup/status/fix"
+            Write-Host ("  {0,-20}  {1}" -f 'dot ssh-fingerprints', 'preview agent fingerprint sync (--write to save)')
+            Write-Host ("  {0,-20}  {1}" -f 'dot up', 'sync state (pull + apply + config re-init; never upgrades)')
+            Write-Host ("  {0,-20}  {1}" -f 'dot upgrade', 'upgrade ALL tooling (choco + AI tools, session-gated)')
+            Write-Host ("  {0,-20}  {1}" -f 'dot backup', 'encrypted portable backup')
+            Write-Host ("  {0,-20}  {1}" -f 'dot restore', 'restore a backup')
+            Write-Host ("  {0,-20}  {1}" -f 'dot doctor', 'dotfiles health check')
+            Write-Host ("  {0,-20}  {1}" -f 'dot remote', 'remote-access setup/status/fix')
         }
     }
 }

@@ -1,10 +1,8 @@
 {
   "remote_access": {
     "enabled": true,
-    "linux": {
-      "ssh": true,
-      "rdp": true
-    },
+    "ssh": {"enabled": true, "login_keys": []},
+    "rdp": {"enabled": true},
     "services": {
       "opencode_linux": {
         "enabled": true,

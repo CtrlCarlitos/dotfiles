@@ -89,11 +89,11 @@ are reported, never installed.
 - **Windows:** sshd Automatic + running; the `OpenSSH-Tailscale` (:22),
   `WSL-SSH-Tailscale` (:2222), and `RemoteDesktop-Tailscale` (:3389) rules
   scoped to the Tailscale interface and tailnet address space; Remote Desktop
-  when `windows.rdp`; the WSL arm (sshd, login keys, the :2222 portproxy);
+  when `rdp.enabled`; optional Windows-side WSL port forwarding;
   Tailscale Serve mappings from `services.*`; and `tunnel render`.
 - **Linux:** sshd; a tailnet-scoped firewall; xrdp installed through the
   system package manager only when a desktop environment is detected and
-  `linux.rdp`; Tailscale Serve mappings; `tunnel render`.
+  `rdp.enabled`; Tailscale Serve mappings; `tunnel render`.
 - **macOS:** Remote Login / Screen Sharing verification only; Tailscale Serve
   mappings; `tunnel render`.
 
@@ -117,8 +117,8 @@ Repairs deterministic machine-local state only. Per platform:
 
 - **Windows:** restart sshd and restore its `Automatic` startup mode;
   re-ensure the Tailscale-scoped firewall rules for the capabilities the
-  config declares (`OpenSSH-Tailscale` :22 when `windows.ssh`,
-  `RemoteDesktop-Tailscale` :3389 when `windows.rdp`, `WSL-SSH-Tailscale`
+  config declares (`OpenSSH-Tailscale` :22 when `ssh.enabled`,
+  `RemoteDesktop-Tailscale` :3389 when `rdp.enabled`, `WSL-SSH-Tailscale`
   :2222 when `wsl.enabled` — behind the same authenticated-Tailscale gate
   as setup); reconcile the WSL portproxy when `wsl.enabled`; restart the
   cloudflared service when it is registered but not running (never
@@ -165,14 +165,11 @@ All of these live in your machine-local `~/.config/chezmoi/chezmoi.toml`
 
 ```toml
 [data.remote_access.wsl]
-enabled = true    # arms the Windows side to configure the WSL machine: sshd
-                  # inside the distro, the login keys there, the :2222
-                  # portproxy reconcile (+ its firewall rule), and the logon
-                  # reconcile task
+enabled = true    # Windows-side portproxy/firewall/logon reconciliation only
 
-[data.remote_access.linux]
-ssh = true        # opts a native Linux host's own sshd handling in
-                  # (absent or false = that arm stays manual)
+[data.remote_access.ssh]
+enabled = true
+login_keys = ["id_phone", "id_laptop"]
 ```
 
 With `wsl.enabled` absent or false, the WSL arm degrades to a WARN naming the
@@ -214,35 +211,62 @@ tab re-attach to session "main" (or a named session) on connect; see
 [Secrets & SSH Hosts](secrets.md#ssh-hosts-datassh_hosts) and the
 [Tmux Guide](tmux.md).
 
-## 12. Login keys (distinct from Git identities)
+## 12. Login keys (authoritative local contract)
 
-Login keys live under machine-local `[[data.remote_access.login_keys]]` and
-are owned by `dot remote`; `data.accounts` and
-`run_onchange_generate_identities` keep owning Git auth/signing identities.
-Never one key for both purposes.
+Each receiving OS declares existing public-key names in its own config:
 
 ```toml
-[[data.remote_access.login_keys]]
-  name = "id_<machine-local-key-name>"   # ~/.ssh/<name>(.pub) - names only, never key material
-  targets = ["windows", "wsl"]           # which server arms authorize the .pub
-  generate = true                        # Pattern A; false declares Pattern B
+[data.remote_access]
+enabled = true
+
+[data.remote_access.ssh]
+enabled = true
+login_keys = ["id_phone", "id_laptop"]
+
+[data.remote_access.rdp]
+enabled = true
 ```
 
-- **Pattern A** (`generate = true`, generated here): setup offers to create
-  `~/.ssh/<name>` with `ssh-keygen -t ed25519` (passphrase-protected) when
-  both halves are missing, then normalizes permissions (strict ACL on
-  Windows, chmod 600 on Unix).
-- **Pattern B** (`generate = false`, dropped .pub): the pair was generated on
-  another device; the public half is dropped into `~/.ssh/<name>.pub` and
-  authorized as-is — inbound-only, no generation prompt, no
-  missing-private-key complaint. Setup warns until the `.pub` has been
-  dropped.
+Each name refers to `~/.ssh/<name>.pub`. No private key is required on the
+receiving host. There is no key generation, `targets`, or old-schema fallback.
+Outgoing Git/server identities and `dot ssh-fingerprints` remain separate.
 
-Authorized `.pub` halves land in the declared targets' local
-`authorized_keys` (the admins-only file on Windows for admin accounts),
-never touching existing entries. Private halves stay on the owning device;
-WSL never holds a private copy — outbound WSL SSH/git signs through the
-existing Windows ssh-agent relay.
+```sh
+dot remote keys status             # read-only comparison
+dot remote keys sync               # add declared keys, revoke undeclared keys
+dot remote keys remove id_phone    # edit local TOML and reconcile authorization
+```
+
+Setup and fix invoke the same reconciliation when SSH provisioning is enabled.
+A missing list or invalid/missing desired public file is an error, before any
+key change. An explicit `login_keys = []` revokes all authorization entries.
+This includes manually installed keys: there is no unmanaged-key exception.
+Existing restrictions/options on retained identities survive, and changing a
+comment does not create duplicate authorization.
+
+Windows administrator accounts use the shared
+`%ProgramData%/ssh/administrators_authorized_keys`; other Windows accounts and
+Unix hosts use the login user's `~/.ssh/authorized_keys`. The administrator
+contract governs that entire shared file. Setup, status and hardening select
+the same file. Custom SSH authorization routing must be reviewed explicitly.
+
+Before replacement, the writer keeps a `.remote-backup-<unique-id>` beside the
+original file. Removal validates the remaining list even when the removed key's
+public file is gone. It updates TOML as well as authorization so fix cannot add
+the key back. Sync binds its effective key list to a local configuration snapshot
+and rechecks it before replacement. Concurrent edits are rejected. A failed
+removal attempts to restore both files when their contents still match this
+operation's writes; external edits are preserved and partial recovery is reported
+with both backup paths. This is not a cross-file atomic transaction. Retain the backups until client login
+has been verified. Source key files and agent identities are never deleted.
+Revocation affects new logins, not established sessions.
+
+Migration: remove the old `[[data.remote_access.login_keys]]` tables and
+OS-specific SSH/RDP toggles; add the sections above. Run status, then explicitly
+sync/setup, and verify login from another device before key-only hardening.
+For cm03, use `login_keys = ["id_newcmelgar"]` and keep direct WSL incoming access
+disabled. Another distro may opt into its own local configuration; Windows
+forwarding does not install keys or enable that distro's SSH daemon.
 
 ## 13. SSH host aliases
 
@@ -275,7 +299,7 @@ render into `~/.ssh/config` on apply (see
 | Capability | Port | Scope |
 |---|---|---|
 | Windows Remote Desktop | 3389 | Tailscale-scoped rule (`RemoteDesktop-Tailscale`) + ACLs |
-| Linux xrdp | 3389 | desktop-detected hosts only (`linux.rdp`); same tailnet scope |
+| Linux xrdp | 3389 | desktop-detected hosts only (`rdp.enabled`); same tailnet scope |
 | macOS Screen Sharing (VNC) | 5900 | recovery only; manual enable; over the tailnet |
 
 RDP is for GUI work or WSL recovery; prefer SSH + tmux otherwise. Use a

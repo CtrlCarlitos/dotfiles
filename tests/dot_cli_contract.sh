@@ -156,14 +156,17 @@ pass
 [ -f "$repo_root/scripts/remote-access.sh" ] || fail "scripts/remote-access.sh missing"
 grep -Fq 'remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;' "$zsh_aliases" ||
     fail "$zsh_aliases: no dot remote arm"
-grep -Fq 'dot remote    remote-access setup/status/fix' "$zsh_aliases" ||
-    fail "$zsh_aliases: no dot remote help line"
+help_output="$(
+    export DOTFILES_DIR="$dot_tmp/source"
+    eval "$(awk '/^dot\(\) \{/{f=1} f{print} f && /^\}$/{exit}' "$zsh_aliases")"
+    dot help
+)"
+printf '%s\n' "$help_output" | python3 -c 'import sys,re; text=sys.stdin.read(); rows=[re.match(r"^  dot \S+\s{2,}(\S.*)$", line) for line in text.splitlines() if line.startswith("  dot ")]; assert rows and all(rows); assert len({row.start(1) for row in rows}) == 1; assert "dot remote" in text and "remote-access setup/status/fix" in text' || fail 'dot help descriptions must align and include remote'
 for f in "$ps1_profile" "$ps1_profile5"; do
     grep -Fq "'remote' { & (Join-Path \$repoScripts 'remote-access.ps1') @rest }" "$f" ||
         fail "$f: no dot remote arm"
     grep -Fq 'remote-access.ps1' "$f" || fail "$f: no remote-access.ps1 reference"
-    grep -Fq 'dot remote    remote-access setup/status/fix' "$f" ||
-        fail "$f: no dot remote help line"
+    # PowerShell help alignment is executed in dot_doctor_windows.ps1.
 done
 
 finish

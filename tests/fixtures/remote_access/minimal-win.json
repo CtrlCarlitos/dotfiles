@@ -1,10 +1,8 @@
 {
   "remote_access": {
     "enabled": true,
-    "windows": {
-      "ssh": true,
-      "rdp": false
-    },
+    "ssh": {"enabled": true, "login_keys": []},
+    "rdp": {"enabled": false},
     "wsl": {
       "enabled": true,
       "ssh_port": 2222

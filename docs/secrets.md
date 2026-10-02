@@ -27,7 +27,7 @@ table survives only if the template re-emits it for that machine:
 |---|---|---|---|
 | `[[data.accounts]]` | yes | yes | yes (git identity, SSH aliases and the agent relay read it) |
 | `[[data.ssh_hosts]]` | yes | yes | yes, outgoing aliases and fingerprint selectors |
-| `[data.remote_access]` | yes | yes | no, Windows owns it |
+| `[data.remote_access]` | yes | yes | preserved when explicitly configured; local incoming access |
 | `[data.upgrade]` | yes | no | no |
 | `[interpreters.ps1]` | yes | macOS only | no |
 

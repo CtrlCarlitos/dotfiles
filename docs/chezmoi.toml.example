@@ -229,37 +229,27 @@
 # [data.remote_access]
 #   enabled = true
 #
-#   # Windows host: sshd + Remote Desktop, both Tailscale-scoped.
-#   [data.remote_access.windows]
-#     ssh = true
-#     rdp = true
-#
-#   # Linux: own sshd; xrdp honored only when a desktop environment is
-#   # detected.
-#   [data.remote_access.linux]
-#     ssh = true
-#     rdp = true
+#   # Local incoming SSH: authoritative public-key names, no generation.
+#   [data.remote_access.ssh]
+#     enabled = true
+#     login_keys = ["id_phone", "id_laptop"]
+#   # Windows Remote Desktop / desktop-gated native Linux xrdp.
+#   [data.remote_access.rdp]
+#     enabled = true
 #
 #   # macOS: Remote Login (setup verifies; enabling stays a manual step) and
 #   # Screen Sharing (VNC :5900 recovery path, status-check only).
 #   [data.remote_access.macos]
-#     ssh = true
 #     screen_sharing = true
 #
-#   # WSL never joins the tailnet; its sshd is reached through the Windows
-#   # :2222 portproxy.
+#   # Optional Windows-side forwarding; the distro owns its daemon and keys.
 #   [data.remote_access.wsl]
 #     enabled = true
 #     ssh_port = 2222
 #
-#   # Remote-LOGIN keys - a separate namespace from Git identities. Names
-#   # only, never key material. generate=true: setup offers to create the key
-#   # on this machine (Pattern A). generate=false: the key was generated on
-#   # another device; drop its public half into ~/.ssh/<name>.pub (Pattern B).
-#   [[data.remote_access.login_keys]]
-#     name = "id_<machine-local-key-name>"
-#     targets = ["windows", "wsl"]
-#     generate = true
+#   # Existing ~/.ssh/<name>.pub files are required. setup/fix/keys sync revoke
+#   # undeclared authorizations; an explicit [] revokes all. Keep private keys
+#   # on the connecting devices. See docs/remote-access.md for migration.
 #
 #   # Loopback web services exposed privately. environment = where the
 #   # listener lives; ports must not collide across environments.

@@ -150,6 +150,7 @@ $script:WslAuthorizedKeys = @()
 $script:ReconcileTaskInstalled = $false
 $script:ReconcileTaskAction = $null
 $script:LocalAdmin = $true
+$script:KeyActions = @()
 $script:PortproxyTable = @'
 
 Listen on ipv4:             Connect to ipv4:
@@ -173,6 +174,7 @@ Remove-Item Env:REMOTE_ACCESS_NO_MAIN
 # override instead of PATH. Nothing here touches a real chezmoi.
 function chezmoi {
     $global:LASTEXITCODE = 0
+    if ($args[0] -eq 'execute-template') { return $script:KeyConfigPath }
     $raw = Get-Content -Raw -LiteralPath $script:ConfigFixture -ErrorAction SilentlyContinue
     if ($null -eq $raw) {
         $global:LASTEXITCODE = 1
@@ -437,6 +439,20 @@ function Restart-Service {
     if ($Name -eq 'sshd') { $script:SshdServiceStatus = 'Running' }
     if ($Name -eq 'cloudflared') { $script:CloudflaredServiceStatus = 'Running' }
     $script:Calls += ("Restart-Service -Name {0}" -f $Name)
+}
+
+$script:RealKeyAdapter = (Get-Command Invoke-RemoteKeys).ScriptBlock
+$script:RealAdminProbe = (Get-Command Test-LocalAdmin).ScriptBlock
+function Invoke-RemoteKeys {
+    # Transport tests isolate key I/O; real CLI/writer cases live in
+    # ssh_authorization_test.py. Keep path selection real for hardening.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Mock of the public collection adapter')]
+    param([string]$Action, [string]$Name)
+    $script:KeyActions += ("$Action $Name").Trim()
+    if ($Action -eq 'count') {
+        $path = Get-RemoteAuthorizedKeysPath
+        return @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue | Where-Object { $_ -match '^ssh-' }).Count
+    }
 }
 
 function Test-LocalAdmin {
@@ -850,7 +866,7 @@ try {
     Assert-OutputHas $out 'OpenSSH-Server-In-TCP' 'the constraint prints a warning line naming the generic rule'
     Assert-RecordedCall 'Set-ItemProperty*fDenyTSConnections*Value 0*' 'RDP enable writes fDenyTSConnections 0'
     Assert-RecordedCall 'New-NetFirewallRule -Name RemoteDesktop-Tailscale -LocalPort 3389*' 'the :3389 rule is created for RDP'
-    Assert-RecordedCall 'wsl.exe -u root enable ssh (inside WSL)' 'setup enables sshd inside WSL (best-effort wsl.exe -u root)'
+    Assert-NoRecordedCall 'wsl.exe -u root enable ssh (inside WSL)' 'setup does not configure the guest SSH daemon'
     Assert-RecordedCall 'Register-ScheduledTask -TaskName dotfiles-wsl-reconcile -Trigger AtLogOn -RunLevel Highest' 'setup registers the reconcile task (logon trigger, RunLevel Highest)'
     Assert-RecordedCall 'New-NetFirewallRule -Name WSL-SSH-Tailscale -LocalPort 2222*' 'the :2222 WSL rule is created for the wsl arm'
     Assert-NoTokenMaterial $out 'setup output carries no token material'
@@ -902,7 +918,7 @@ try {
     Assert-RecordedCall 'Set-ItemProperty*fDenyTSConnections*Value 0*' 'rdp=true records the registry write'
     Assert-RecordedCall 'New-NetFirewallRule -Name RemoteDesktop-Tailscale -LocalPort 3389*' 'rdp=true records the :3389 rule call'
     $rdpOff = Join-Path $Tmp 'rdp-off.json'
-    [IO.File]::WriteAllText($rdpOff, (Get-Content -Raw -LiteralPath $script:ConfigFixture).Replace('"rdp": true', '"rdp": false'))
+    [IO.File]::WriteAllText($rdpOff, (Get-Content -Raw -LiteralPath $script:ConfigFixture).Replace('"rdp": {"enabled": true}', '"rdp": {"enabled": false}'))
     $script:ConfigFixture = $rdpOff
     $cfg = Get-RemoteAccessConfig
     $script:Calls = @()
@@ -986,40 +1002,8 @@ try {
     Assert-NoRecordedCall 'Register-ScheduledTask*' 'reconcile task: second call does not duplicate the registration'
     Assert-RecordedCall 'Set-ScheduledTask -TaskName dotfiles-wsl-reconcile -Trigger AtLogOn' 'reconcile task: second call records the update path'
 
-    # 23. Publish-LoginKey -Target wsl (Review Focus #2): the appended line
-    #     IS the .pub content, the pre-seeded lines echo intact, and the
-    #     second call is already-authorized (no duplicate).
-    $pubLine = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtur3Body9pQrT carlitos@task10-device'
-    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
-    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_test.pub'), ($pubLine + "`n"))
-    $script:WslAuthorizedKeys = @('ssh-ed25519 AAAApreexisting-one first@host', 'ssh-ed25519 AAAApreexisting-two second@host')
-    $script:Calls = @()
-    $out = ((Publish-LoginKey -Name 'id_test' -Target 'wsl' *>&1) -join "`n")
-    if ((@($script:WslAuthorizedKeys).Count -eq 3) -and (@($script:WslAuthorizedKeys)[2] -ceq $pubLine)) {
-        Ok 'wsl login key: the appended line is the .pub content'
-    } else {
-        Fail 'wsl login key: the appended line is the .pub content' (@($script:WslAuthorizedKeys) -join ' | ')
-    }
-    if ((@($script:WslAuthorizedKeys)[0] -eq 'ssh-ed25519 AAAApreexisting-one first@host') -and (@($script:WslAuthorizedKeys)[1] -eq 'ssh-ed25519 AAAApreexisting-two second@host')) {
-        Ok 'wsl login key: the pre-seeded lines echo intact (append-only)'
-    } else {
-        Fail 'wsl login key: the pre-seeded lines echo intact (append-only)' (@($script:WslAuthorizedKeys) -join ' | ')
-    }
-    Assert-RecordedCall 'wsl.exe -u root authorize login key (inside WSL)' 'wsl login key: the append is recorded behind the wsl.exe -u root channel'
-    Assert-OutputHas $out 'authorized (wsl)' 'wsl login key: first call reports authorized'
-    Assert-NoTokenMaterial $out 'wsl login key: output carries no token material'
-    $out = ((Publish-LoginKey -Name 'id_test' -Target 'wsl' *>&1) -join "`n")
-    if (@($script:WslAuthorizedKeys).Count -eq 3) { Ok 'wsl login key: second call appends no duplicate' } else { Fail 'wsl login key: second call appends no duplicate' (@($script:WslAuthorizedKeys) -join ' | ') }
-    Assert-OutputHas $out 'already authorized (wsl)' 'wsl login key: second call reports already authorized'
-
-    # 24. Publish-LoginKey degraded paths: no public half and an unknown
-    #     target are WARNs (never a crash, never a mutation); the windows
-    #     arm's own scenarios are block 28 below.
-    $out = ((Publish-LoginKey -Name 'id_absent' -Target 'wsl' *>&1) -join "`n")
-    Assert-OutputHas $out 'no public half' 'missing .pub: the WARN names the missing half'
-    if (@($script:WslAuthorizedKeys).Count -eq 3) { Ok 'missing .pub: authorized_keys untouched' } else { Fail 'missing .pub: authorized_keys untouched' (@($script:WslAuthorizedKeys) -join ' | ') }
-    $out = ((Publish-LoginKey -Name 'id_test' -Target 'tablet' *>&1) -join "`n")
-    Assert-OutputHas $out 'unknown target' 'unknown target: WARN skipped'
+    # Legacy generation/cross-OS publication cases were removed with that API.
+    # Authoritative key behavior is exercised by ssh_authorization_test.py.
 
     # 25. The setup arm on a broken WSL (Review Focus #1 at setup level):
     #     the WARN names the manual action and setup still completes.
@@ -1095,6 +1079,8 @@ try {
     #     met, exactly one prepended `PasswordAuthentication no` replaces
     #     every active+commented line (Match block intact), sshd restarts,
     #     and a second run is byte-identical.
+    $script:LocalAdmin = $false
+    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
     $ak = Join-Path $Home_ '.ssh/authorized_keys'
     $akLine = 'ssh-ed25519 AAAAharden-key0 operator@device'
     [IO.File]::WriteAllText($ak, ($akLine + "`n"))
@@ -1140,58 +1126,23 @@ try {
     if ($r.Exit -eq 1) { Ok 'zero-keys harden-ssh exits 1 through the dispatcher' } else { Fail 'zero-keys harden-ssh exits 1 through the dispatcher' ("exit=$($r.Exit) out=$($r.Output)") }
     Assert-OutputHas $r.Output 'no authorized key' 'the zero-keys refusal names the key guard'
 
-    # 28. Publish-LoginKey -Target windows (spec section 5.1): an admin account
-    #     gets administrators_authorized_keys append-only plus the strict
-    #     admins-only ACL grant recorded (inheritance disabled,
-    #     Administrators:F); the second call is already-authorized and
-    #     records nothing; a non-admin lands in the user's authorized_keys
-    #     with no icacls anywhere.
     $script:LocalAdmin = $true
-    $winLine = 'ssh-ed25519 AAAAwindows-key0 carlitos@task11-device'
-    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_win.pub'), ($winLine + "`n"))
-    $aaPath = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys'
-    $script:Calls = @()
-    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
-    if ((Get-Content -Raw -LiteralPath $aaPath) -ceq ($winLine + "`n")) { Ok 'windows key: the appended line is the .pub content (file created)' } else { Fail 'windows key: the appended line is the .pub content (file created)' (Get-Content -Raw -LiteralPath $aaPath) }
-    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'windows key: the ACL grant is recorded (inheritance disabled, Administrators:F)'
-    Assert-OutputHas $out 'authorized (windows)' 'windows key: first call reports authorized'
-    Assert-NoTokenMaterial $out 'windows key: output carries no token material'
-    $script:Calls = @()
-    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
-    if ((@(Get-Content -LiteralPath $aaPath).Count -eq 1) -and (@($script:Calls).Count -eq 0)) { Ok 'windows key: second call is already-authorized, zero calls' } else { Fail 'windows key: second call is already-authorized, zero calls' (($script:Calls -join '; ') + ' | ' + (Get-Content -Raw -LiteralPath $aaPath)) }
-    Assert-OutputHas $out 'already authorized (windows)' 'windows key: second call reports already authorized'
-    $winLine2 = 'ssh-ed25519 AAAAwindows-key1 other@device'
-    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_win2.pub'), ($winLine2 + "`n"))
-    $script:Calls = @()
-    $null = (Publish-LoginKey -Name 'id_win2' -Target 'windows' *>&1)
-    $aaLines = @(Get-Content -LiteralPath $aaPath)
-    if (($aaLines.Count -eq 2) -and ($aaLines[0] -ceq $winLine) -and ($aaLines[1] -ceq $winLine2)) { Ok 'windows key: a second key appends, the first line intact' } else { Fail 'windows key: a second key appends, the first line intact' ($aaLines -join ' | ') }
-    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'windows key: the append-riding ACL grant recorded again'
-    $script:LocalAdmin = $false
-    Remove-Item -LiteralPath (Join-Path $Home_ '.ssh/authorized_keys') -Force -ErrorAction SilentlyContinue
-    $script:Calls = @()
-    $out = ((Publish-LoginKey -Name 'id_win' -Target 'windows' *>&1) -join "`n")
-    if ((Get-Content -Raw -LiteralPath $ak) -ceq ($winLine + "`n")) { Ok 'non-admin key: the user authorized_keys gets the line' } else { Fail 'non-admin key: the user authorized_keys gets the line' (Get-Content -Raw -LiteralPath $ak) }
-    Assert-NoRecordedCall 'icacls*' 'non-admin key: no icacls anywhere'
-    Assert-OutputHas $out 'authorized (windows)' 'non-admin key: reports authorized'
-    $script:LocalAdmin = $true
+    $adminKeyPath = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys'
+    New-Item -ItemType Directory -Force -Path (Split-Path $adminKeyPath) | Out-Null
+    [IO.File]::WriteAllText($adminKeyPath, ($akLine + "`n"))
+    [IO.File]::WriteAllText($sshdCfg, ($sshdOriginal + "Match Group administrators`n    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys`n"))
+    $env:RA_SSHD_CONFIG = $sshdCfg
+    $refusal = ''
+    try { $null = (Invoke-SshHardening -Confirmed *>&1) } catch { $refusal = $_.Exception.Message }
+    if (-not $refusal) { Ok 'admin hardening: uses the admin authorization file' } else { Fail 'admin hardening: uses the admin authorization file' $refusal }
+    [IO.File]::WriteAllText($sshdCfg, "Match User somebody-else`n    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys`n")
+    $refused = $false
+    try { $null = Get-RemoteAuthorizedKeysPath } catch { $refused = $true }
+    if ($refused) { Ok 'custom match routing: refused rather than assuming the admin file' } else { Fail 'custom match routing: refused rather than assuming the admin file' 'accepted unrelated Match rule' }
+    Remove-Item Env:RA_SSHD_CONFIG
 
-    # 29. setup drives the declared login-key targets (keys-win-targets.json):
-    #     windows into administrators_authorized_keys with its ACL grant,
-    #     wsl through its channel, and the second pass records zero calls.
-    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-win-targets.json'
-    $script:LocalAdmin = $true
-    $script:WslAuthorizedKeys = @()
-    $script:Calls = @()
-    $out = Get-SetupOutput
-    Assert-RecordedCall 'icacls * /inheritance:r /grant Administrators:F' 'setup keys: the windows target gets the ACL grant'
-    Assert-OutputHas $out 'authorized (windows)' 'setup keys: the windows target authorizes'
-    Assert-RecordedCall 'wsl.exe -u root authorize login key (inside WSL)' 'setup keys: the wsl target authorizes through its channel'
-    Assert-OutputHas $out 'authorized (wsl)' 'setup keys: the wsl target authorizes'
-    $script:Calls = @()
-    $out = Get-SetupOutput
-    if ($script:Calls.Count -eq 0) { Ok 'setup keys: second pass records zero calls' } else { Fail 'setup keys: second pass records zero calls' ($script:Calls -join '; ') }
-    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+    # Local authoritative key reconciliation is covered by the shared engine
+    # suite; no Windows-to-WSL publication or generation API remains.
 
     # 30. tunnel render/validate (the Task 3 assertions, mirrored): the
     #     render carries the id, credentials by path, every declared
@@ -1307,90 +1258,56 @@ try {
     if ($script:Calls.Count -eq 0) { Ok 'absent cloudflared service: fix skips quietly (zero calls)' } else { Fail 'absent cloudflared service: fix skips quietly (zero calls)' ($script:Calls -join '; ') }
     $script:CloudflaredServiceStatus = 'Running'
 
-    # 34-38. Initialize-LoginKey (the ra_login_key_materialize twin, spec
-    #        section 5.1) - the bash suite's blocks 16-22 mirrored: Pattern
-    #        A non-interactive, the RA_CONFIRM_MATERIALIZE seam, Pattern B,
-    #        generate=false, and the idempotent present path.
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    $env:RA_NONINTERACTIVE = '1'
-    $script:Calls = @()
-    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
-    Assert-OutputHas $out 'not created' 'pattern A non-interactive: WARN not created'
-    Assert-NoRecordedCall 'ssh-keygen*' 'pattern A non-interactive: no ssh-keygen recorded'
-    if (-not (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf)) { Ok 'pattern A non-interactive: no key files created' } else { Fail 'pattern A non-interactive: no key files created' 'private half exists' }
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    $env:RA_CONFIRM_MATERIALIZE = '1'
-    $script:Calls = @()
-    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
-    Remove-Item Env:RA_CONFIRM_MATERIALIZE
-    Remove-Item Env:RA_NONINTERACTIVE
-    Assert-OutputHas $out 'created' 'pattern A seam: reports created'
-    $expPriv = Join-Path (Join-Path $Home_ '.ssh') 'id_test'
-    Assert-RecordedCall "ssh-keygen '-t' 'ed25519' '-f' '$expPriv' '-N' ''" 'pattern A seam: the exact empty-passphrase keygen call (the empty passphrase exists only in the seam)'
-    Assert-RecordedCall 'icacls *id_test /inheritance:r /grant *:F' 'pattern A seam: the strict ACL grant rides the creation'
-    if (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf) { Ok 'pattern A seam: the private half is materialized' } else { Fail 'pattern A seam: the private half is materialized' 'no file' }
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
-    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_test.pub'), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd dropped@other-device`n")
-    $script:Calls = @()
-    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
-    Assert-OutputHas $out 'public half present, inbound-only' 'pattern B: the dropped public half is used as-is'
-    if (($out -notlike '*not created*') -and ($out -notlike '*missing*')) { Ok 'pattern B: no not-created / missing-private-key complaint' } else { Fail 'pattern B: no not-created / missing-private-key complaint' $out }
-    if ($script:Calls.Count -eq 0) { Ok 'pattern B: zero calls (no generation, no ACL)' } else { Fail 'pattern B: zero calls (no generation, no ACL)' ($script:Calls -join '; ') }
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    $script:Calls = @()
-    $out = ((Initialize-LoginKey -Name 'id_test' -Generate:$false *>&1) -join "`n")
-    Assert-OutputHas $out 'drop the public half' 'generate=false: the WARN names the drop action'
-    Assert-NoRecordedCall 'ssh-keygen*' 'generate=false: no ssh-keygen recorded'
-    if (-not (Test-Path -LiteralPath (Join-Path $Home_ '.ssh/id_test') -PathType Leaf)) { Ok 'generate=false: no private half created' } else { Fail 'generate=false: no private half created' 'private half exists' }
-    New-Item -ItemType Directory -Force -Path (Join-Path $Home_ '.ssh') | Out-Null
-    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_test'), 'private-key-placeholder')
-    $script:Calls = @()
-    $out = ((Initialize-LoginKey -Name 'id_test' *>&1) -join "`n")
-    Assert-OutputHas $out 'present' 'existing private half: verified present'
-    if ($script:Calls.Count -eq 0) { Ok 'existing private half: zero calls (the ACL grant rides the creation only)' } else { Fail 'existing private half: zero calls (the ACL grant rides the creation only)' ($script:Calls -join '; ') }
+    # Explicitly pin the setup/fix gates at the key-engine boundary.
+    $gatingConfig = Join-Path $Tmp 'key-gates.json'
+    [IO.File]::WriteAllText($gatingConfig, '{"remote_access":{"enabled":true,"ssh":{"enabled":false,"login_keys":[]}}}')
+    $script:ConfigFixture = $gatingConfig
+    $script:KeyActions = @()
+    $null = Get-SetupOutput
+    $null = Invoke-RemoteFix
+    if ($script:KeyActions.Count -eq 0) { Ok 'disabled SSH: setup/fix do not invoke key reconciliation' } else { Fail 'disabled SSH: setup/fix do not invoke key reconciliation' ($script:KeyActions -join ',') }
+    [IO.File]::WriteAllText($gatingConfig, '{"remote_access":{"enabled":true,"ssh":{"enabled":true,"login_keys":[]}}}')
+    $script:KeyActions = @()
+    $null = Get-SetupOutput
+    $null = Invoke-RemoteFix
+    if (($script:KeyActions -join ',') -eq 'validate,sync,validate,sync') { Ok 'enabled SSH: setup/fix each validate then synchronize once' } else { Fail 'enabled SSH: setup/fix each validate then synchronize once' ($script:KeyActions -join ',') }
 
-    # 39. setup drives materialize-then-publish (spec section 5.1 order):
-    #     with a fresh .ssh and the confirm seam, setup creates the key
-    #     (empty-passphrase seam call, the strict ACL grant riding it) and
-    #     authorizes BOTH declared targets in the same pass; the second
-    #     pass records zero calls (the present key verifies, publish
-    #     dedups).
-    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-win-targets.json'
-    $script:LocalAdmin = $true
-    $script:WslAuthorizedKeys = @()
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $env:ProgramData 'ssh/administrators_authorized_keys') -Force -ErrorAction SilentlyContinue
-    $env:RA_NONINTERACTIVE = '1'
-    $env:RA_CONFIRM_MATERIALIZE = '1'
-    $script:Calls = @()
-    $out = Get-SetupOutput
-    Remove-Item Env:RA_CONFIRM_MATERIALIZE
-    Remove-Item Env:RA_NONINTERACTIVE
-    $expPriv = Join-Path (Join-Path $Home_ '.ssh') 'id_test'
-    Assert-RecordedCall "ssh-keygen '-t' 'ed25519' '-f' '$expPriv' '-N' ''" 'setup keys: the seam materializes the key (empty passphrase in the seam only)'
-    Assert-RecordedCall 'icacls *id_test /inheritance:r /grant *:F' 'setup keys: the strict ACL grant rides the creation'
-    Assert-RecordedCall 'wsl.exe -u root authorize login key (inside WSL)' 'setup keys: the wsl target authorizes the new key'
-    Assert-OutputHas $out 'login key id_test: created' 'setup keys: materialize runs first and reports created'
-    Assert-OutputHas $out 'authorized (windows)' 'setup keys: publish then authorizes (windows)'
-    Assert-OutputHas $out 'authorized (wsl)' 'setup keys: publish then authorizes (wsl)'
-    $script:Calls = @()
-    $out = Get-SetupOutput
-    if ($script:Calls.Count -eq 0) { Ok 'setup keys: second pass records zero calls' } else { Fail 'setup keys: second pass records zero calls' ($script:Calls -join '; ') }
+    if ($env:OS -eq 'Windows_NT') {
+        # Native token and ACL checks, confined to disposable files.
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $member = @($identity.Groups | ForEach-Object { $_.Value }) -contains 'S-1-5-32-544'
+        if ((& $script:RealAdminProbe) -eq $member) { Ok 'native administrator membership probe agrees with token groups' } else { Fail 'native administrator membership probe agrees with token groups' 'membership mismatch' }
+        $adminFixture = Join-Path $Tmp 'admin-acl-fixture'
+        [IO.File]::WriteAllText($adminFixture, 'public fixture')
+        $ownerBefore = (Get-Acl -LiteralPath $adminFixture).Owner
+        $engine = if ($PSVersionTable.PSVersion.Major -ge 6) { Join-Path $PSHOME 'pwsh.exe' } else { Join-Path $PSHOME 'powershell.exe' }
+        & $engine -NoProfile -File (Join-Path $RepoRoot 'scripts/lib/ssh_authorization_acl.ps1') -Path $adminFixture -Mode Admin
+        if ($LASTEXITCODE -ne 0) { Fail 'native admin ACL helper succeeds on fixture' "exit=$LASTEXITCODE" }
+        $acl = Get-Acl -LiteralPath $adminFixture
+        $sids = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object)
+        if ($acl.AreAccessRulesProtected -and ($sids -join ',') -eq 'S-1-5-18,S-1-5-32-544' -and $acl.Owner -eq $ownerBefore) { Ok 'native admin ACL: owner preserved, only Administrators and SYSTEM granted' } else { Fail 'native admin ACL: owner preserved, only Administrators and SYSTEM granted' ($sids -join ',') }
+    }
 
-    # 40. setup with a generate=false key and no .pub dropped (the bash
-    #     suite's block 28): the declared WARN path fires ('drop the public
-    #     half'), never the non-interactive one, and no ssh-keygen runs.
-    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/keys-generate-false.json'
-    Remove-Item -Recurse -Force (Join-Path $Home_ '.ssh') -ErrorAction SilentlyContinue
-    $env:RA_NONINTERACTIVE = '1'
-    $script:Calls = @()
-    $out = Get-SetupOutput
-    Remove-Item Env:RA_NONINTERACTIVE
-    Assert-OutputHas $out 'drop the public half' 'setup generate=false: the declared WARN names the drop action'
-    if ($out -notlike '*not created*') { Ok 'setup generate=false: the declared path, not the non-interactive one' } else { Fail 'setup generate=false: the declared path, not the non-interactive one' $out }
-    Assert-NoRecordedCall 'ssh-keygen*' 'setup generate=false: no ssh-keygen anywhere'
-    $script:ConfigFixture = Join-Path $RepoRoot 'tests/fixtures/remote_access/full-win.json'
+    # Execute the real adapter/dispatcher on a public-only fixture after the
+    # transport cases. Only chezmoi data and the group lookup remain stubbed.
+    Set-Item -Path Function:Invoke-RemoteKeys -Value $script:RealKeyAdapter
+    $script:LocalAdmin = $false
+    $keyConfig = Join-Path $Tmp 'key-contract.json'
+    $script:KeyConfigPath = Join-Path $Tmp 'key-contract.toml'
+    [IO.File]::WriteAllText($script:KeyConfigPath, "[data.remote_access.ssh]`nlogin_keys = [`"id_contract`"]`n")
+    [IO.File]::WriteAllText($keyConfig, '{"remote_access":{"enabled":true,"ssh":{"enabled":true,"login_keys":["id_contract"]}}}')
+    $script:ConfigFixture = $keyConfig
+    $publicLine = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd contract@fixture'
+    [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_contract.pub'), ($publicLine + "`n"))
+    Remove-Item -LiteralPath (Join-Path $Home_ '.ssh/authorized_keys') -ErrorAction SilentlyContinue
+    $out = ((Invoke-RemoteAccess -Sub keys -Rest @('status') *>&1) -join "`n")
+    if (-not (Test-Path (Join-Path $Home_ '.ssh/authorized_keys'))) { Ok 'keys status: does not create authorization' } else { Fail 'keys status: does not create authorization' $out }
+    $out = ((Invoke-RemoteAccess -Sub keys -Rest @('sync') *>&1) -join "`n")
+    if ((Get-Content -Raw (Join-Path $Home_ '.ssh/authorized_keys')).Trim() -eq $publicLine) { Ok 'keys sync: real adapter authorizes the declared public-only key' } else { Fail 'keys sync: real adapter authorizes the declared public-only key' $out }
+    [IO.File]::WriteAllText($keyConfig, '{"remote_access":{"enabled":true,"ssh":{"enabled":true,"login_keys":[]}}}')
+    [IO.File]::WriteAllText($script:KeyConfigPath, "[data.remote_access.ssh]`nlogin_keys = []`n")
+    $null = Invoke-RemoteAccess -Sub keys -Rest @('sync')
+    if ((Get-Item (Join-Path $Home_ '.ssh/authorized_keys')).Length -eq 0) { Ok 'keys sync: empty contract revokes all' } else { Fail 'keys sync: empty contract revokes all' 'file not empty' }
 } finally {
     $env:HOME = $savedHome
     $env:USERPROFILE = $savedProfile

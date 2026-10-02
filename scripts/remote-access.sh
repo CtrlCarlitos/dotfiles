@@ -25,6 +25,9 @@ subcommands:
   setup             idempotently configure this host's remote-access plumbing
   status            read-only doctor: report the current state
   fix               repair deterministic machine-local state only
+  keys status       compare declared and authorized incoming keys (read-only)
+  keys sync         enforce the local login_keys list, including revocation
+  keys remove NAME  remove the declaration and its local authorization
   harden-ssh        flip sshd to key-only (guarded; needs --confirmed)
   wsl-reconcile     re-sync the :2222 portproxy (Windows host only)
   tunnel render     write the machine-local cloudflared config.yml
@@ -279,8 +282,8 @@ ra_status_ssh() {
     local out
     case "$(ra_os)" in
         Darwin)
-            if [ "$(ra_cfg macos.ssh false)" != "true" ]; then
-                ra_warn 'ssh: not configured for this host (macos.ssh)'
+            if [ "$(ra_cfg ssh.enabled false)" != "true" ]; then
+                ra_warn 'ssh: not configured for this host (ssh.enabled)'
                 return 0
             fi
             # Check-only: enabling Remote Login stays a manual step.
@@ -292,8 +295,8 @@ ra_status_ssh() {
             esac
             ;;
         *)
-            if [ "$(ra_cfg linux.ssh false)" != "true" ]; then
-                ra_warn 'ssh: not configured for this host (linux.ssh)'
+            if [ "$(ra_cfg ssh.enabled false)" != "true" ]; then
+                ra_warn 'ssh: not configured for this host (ssh.enabled)'
                 return 0
             fi
             if ! command -v systemctl >/dev/null 2>&1; then
@@ -307,6 +310,7 @@ ra_status_ssh() {
             fi
             ;;
     esac
+    ra_keys status || ra_fail 'ssh keys: authorization check failed'
     return 0
 }
 
@@ -325,8 +329,8 @@ ra_status_rdp() {
             fi
             ;;
         *)
-            if [ "$(ra_cfg linux.rdp false)" != "true" ]; then
-                ra_warn 'rdp: not configured for this host (linux.rdp)'
+            if [ "$(ra_cfg rdp.enabled false)" != "true" ]; then
+                ra_warn 'rdp: not configured for this host (rdp.enabled)'
                 return 0
             fi
             if ra_in_wsl; then
@@ -558,103 +562,28 @@ ra_tunnel_validate() {
 }
 
 # ---------------------------------------------------------------------------
-# login keys (spec §5.1) - materialize + authorize, Unix arm. `setup` drives
-# these per declared [[data.remote_access.login_keys]] entry; Tasks 10-11's
-# ps1 twin inverts the same two names for the Windows host. Private key
-# material is never printed: the commands' output names files and verdicts,
-# never key contents. The confirm gate defaults to WARN-and-skip whenever
-# nothing can answer a prompt - a non-interactive run never prompts and
-# never creates keys.
+# Local authoritative public-key contract. No generation or cross-OS targets.
 # ---------------------------------------------------------------------------
 
-# ra_login_key_materialize NAME GENERATE: ensure ~/.ssh/NAME exists per spec
-# §5.1 - idempotent, only-if-missing, confirmation-gated. Both halves
-# missing: confirm, then `ssh-keygen -t ed25519` (through the
-# RA_CONFIRM_MATERIALIZE seam the passphrase is empty, `-N ''`, because no
-# prompt can be answered there; a real interactive run omits -N and lets
-# ssh-keygen ask). Only NAME.pub present: Pattern B - the public half was
-# generated on the owning device and dropped here; inbound-only, use as-is,
-# no generation, no missing-private-key complaint. GENERATE=false and no
-# .pub yet: WARN to drop the public half. Either way the private half's
-# mode is normalized to 600 and ~/.ssh to 700.
-ra_login_key_materialize() {
-    local name="$1" generate="${2:-true}"
-    local priv="${HOME}/.ssh/${name}" pub="${HOME}/.ssh/${name}.pub" answer=""
-    mkdir -p -- "${HOME}/.ssh"
-    chmod 700 -- "${HOME}/.ssh"
-    if [ -f "$priv" ]; then
-        chmod 600 -- "$priv"
-        ra_ok "login key ${name}: present"
-        return 0
+ra_keys() {
+    [ "$#" -le 2 ] || ra_die 'usage: dot remote keys {status|sync|remove NAME}'
+    local action="${1:-status}" name="${2:-}" config script_dir
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    local args=("$script_dir/remote_keys.py" "$action" --public-key-dir "$HOME/.ssh"
+        --authorized-keys "$HOME/.ssh/authorized_keys" --platform unix
+        --sshd-config "${RA_SSHD_CONFIG:-/etc/ssh/sshd_config}")
+    if [ "$action" = sync ] || [ "$action" = remove ]; then
+        config="$(chezmoi execute-template '{{ .chezmoi.configFile }}')" || return 1
+        [ -n "$config" ] || ra_die 'cannot resolve the local chezmoi config path'
+        args+=(--config "$config")
     fi
-    if [ -f "$pub" ]; then
-        ra_ok "login key ${name}: public half present, inbound-only (no private half here)"
-        return 0
+    if [ "$action" = remove ]; then
+        [ -n "$name" ] || ra_die 'keys remove requires NAME'
+        args+=("$name")
+    elif [ -n "$name" ]; then
+        ra_die 'unexpected key argument'
     fi
-    if [ "$generate" != "true" ]; then
-        ra_warn "login key ${name}: generate=false and no public half dropped yet - drop the public half into ${pub} to authorize it"
-        return 0
-    fi
-    if [ -n "${RA_CONFIRM_MATERIALIZE:-}" ]; then
-        ssh-keygen -t ed25519 -f "$priv" -N ''
-    elif [ -n "${RA_NONINTERACTIVE:-}" ] || [ ! -t 0 ]; then
-        ra_warn "login key ${name}: not created (non-interactive run - confirm the prompt on a TTY, or set RA_CONFIRM_MATERIALIZE=1)"
-        return 0
-    else
-        printf 'create login key %s (passphrase prompt follows)? [y/N] ' "$name"
-        read -r answer || answer=""
-        case "$answer" in
-            y | Y | yes | Yes | YES)
-                ssh-keygen -t ed25519 -f "$priv"
-                ;;
-            *)
-                ra_warn "login key ${name}: not created (declined)"
-                return 0
-                ;;
-        esac
-    fi
-    chmod 600 -- "$priv"
-    ra_ok "login key ${name}: created"
-    return 0
-}
-
-# ra_authorized_keys_install NAME TARGET: authorize ~/.ssh/NAME.pub for
-# TARGET - append-only into the local ~/.ssh/authorized_keys behind a
-# `grep -Fxq` guard (never a duplicate, never a reorder, existing lines
-# never touched), mode 600. `linux`/`macos` targets are this machine's
-# local arm; `windows`/`wsl` are the Windows host's ps1 twin's installs
-# (administrators_authorized_keys with its admins-only ACL, and the
-# wsl.exe channel) and are skipped here with a line saying so.
-ra_authorized_keys_install() {
-    local name="$1" target="$2"
-    local pub="${HOME}/.ssh/${name}.pub" ak="${HOME}/.ssh/authorized_keys" line
-    case "$target" in
-        linux | macos)
-            ;;
-        windows | wsl)
-            ra_warn "login key ${name}: target ${target} is installed by the Windows arm (dot remote on the Windows host)"
-            return 0
-            ;;
-        *)
-            ra_warn "login key ${name}: unknown target ${target} - skipped"
-            return 0
-            ;;
-    esac
-    [ -f "$pub" ] || {
-        ra_warn "login key ${name}: no public half at ${pub} - nothing to authorize into ${target}"
-        return 0
-    }
-    line="$(cat "$pub")"
-    mkdir -p -- "${HOME}/.ssh"
-    [ -f "$ak" ] || : >"$ak"
-    chmod 600 -- "$ak"
-    if grep -Fxq -- "$line" "$ak"; then
-        ra_ok "login key ${name}: already authorized (${target})"
-        return 0
-    fi
-    printf '%s\n' "$line" >>"$ak"
-    ra_ok "login key ${name}: authorized (${target})"
-    return 0
+    ra_data_json | python3 "${args[@]}"
 }
 
 # ---------------------------------------------------------------------------
@@ -750,7 +679,7 @@ EOF
 # linux.rdp guard their branches so a host that did not declare them is
 # not touched.
 ra_setup_linux() {
-    if [ "$(ra_cfg linux.ssh false)" = "true" ]; then
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then
         if ! command -v systemctl >/dev/null 2>&1; then
             ra_warn 'ssh: systemctl unavailable - enable sshd manually (sudo systemctl enable --now ssh)'
         elif [ "$(systemctl is-active ssh 2>/dev/null || true)" = "active" ]; then
@@ -774,7 +703,7 @@ ra_setup_linux() {
 # hosts with another package manager - and the tests - can pin the
 # command; an already-resolving xrdp skips straight to the state check.
 ra_setup_linux_rdp() {
-    [ "$(ra_cfg linux.rdp false)" = "true" ] || return 0
+    [ "$(ra_cfg rdp.enabled false)" = "true" ] || return 0
     if ra_in_wsl; then
         ra_warn 'rdp: not applicable inside WSL'
         return 0
@@ -804,7 +733,7 @@ ra_setup_linux_rdp() {
 # -getremotelogin).
 ra_setup_darwin() {
     local out
-    if [ "$(ra_cfg macos.ssh false)" = "true" ]; then
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then
         out="$(systemsetup -getremotelogin 2>/dev/null)" || out=""
         case "$out" in
             *"Remote Login: On"*)  ra_ok 'ssh: Remote Login on' ;;
@@ -819,64 +748,6 @@ ra_setup_darwin() {
             ra_warn 'rdp: Screen Sharing not active (manual: System Settings > General > Sharing > Screen Sharing)'
         fi
     fi
-    return 0
-}
-
-# ra_login_key_generate JSON INDEX: the declared generate flag for
-# login_keys.INDEX - "false" only when the entry declares generate=false
-# explicitly, "true" when the flag is absent or true (the spec §5.1
-# default). The generic resolvers collapse JSON false onto the default
-# (jq `//`, python3 `is False`), which would silently turn a declared
-# Pattern B into generation, so this reads the flag three-state in both
-# backends; anything unreadable resolves to "true".
-ra_login_key_generate() {
-    local json="$1" idx="$2" out=""
-    if command -v jq >/dev/null 2>&1; then
-        # No `//` anywhere: false is falsy in jq, so `false // empty`
-        # would drop the one value this read exists for - compare
-        # explicitly instead (null on absent, == false / == true).
-        out="$(printf '%s' "$json" | jq -r "if .login_keys[${idx}].generate? == false then \"false\" elif .login_keys[${idx}].generate? == true then \"true\" else empty end" 2>/dev/null)" || out=""
-    elif command -v python3 >/dev/null 2>&1; then
-        out="$(printf '%s' "$json" | python3 -c '
-import json, sys
-doc = json.load(sys.stdin)
-keys = doc.get("login_keys") or []
-i = int(sys.argv[1])
-v = None
-if 0 <= i < len(keys) and isinstance(keys[i], dict):
-    v = keys[i].get("generate")
-print("false" if v is False else ("true" if v is True else ""))
-' "$idx" 2>/dev/null)" || out=""
-    fi
-    [ -n "$out" ] || out="true"
-    printf '%s' "$out"
-}
-
-# ra_setup_login_keys: drive ra_login_key_materialize +
-# ra_authorized_keys_install per declared
-# [[data.remote_access.login_keys]] entry (spec §5.1). login_keys is an
-# array, so the walk is index-based through ra_json_str - the resolver
-# that understands numeric segments in both jq and python3 - and the
-# first missing .name ends it. generate is read three-state (see
-# ra_login_key_generate) so a declared Pattern B is honored, not
-# generated over.
-ra_setup_login_keys() {
-    local json i=0 t target name generate
-    json="$(ra_data_json)"
-    while :; do
-        name="$(ra_json_str "$json" "login_keys.${i}.name" "")"
-        [ -n "$name" ] || break
-        generate="$(ra_login_key_generate "$json" "$i")"
-        ra_login_key_materialize "$name" "$generate"
-        t=0
-        while :; do
-            target="$(ra_json_str "$json" "login_keys.${i}.targets.${t}" "")"
-            [ -n "$target" ] || break
-            ra_authorized_keys_install "$name" "$target"
-            t=$((t + 1))
-        done
-        i=$((i + 1))
-    done
     return 0
 }
 
@@ -916,6 +787,7 @@ cmd_setup() {
         printf 'not configured\n'
         return 0
     fi
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then ra_keys validate || return 1; fi
     # Prerequisite + gate first: RA_TS_STATE is what every later step
     # branches on.
     ra_tailscale_state
@@ -938,7 +810,7 @@ cmd_setup() {
         Darwin) ra_setup_darwin ;;
         *)      ra_setup_linux ;;
     esac
-    ra_setup_login_keys
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then ra_keys sync || return 1; fi
     # Tailscale-dependent path: serve mappings are held unless the backend
     # is authenticated (the firewall verification gates inside the Linux
     # arm on the same state).
@@ -980,7 +852,7 @@ cmd_setup() {
 # firewall have no fix arm: setup treats them as detection-gated /
 # check-only on Unix (spec §6), so fix owns no repair for them either.
 ra_fix_linux() {
-    [ "$(ra_cfg linux.ssh false)" = "true" ] || return 0
+    [ "$(ra_cfg ssh.enabled false)" = "true" ] || return 0
     if ! command -v systemctl >/dev/null 2>&1; then
         ra_warn 'ssh: systemctl unavailable - restart sshd manually (sudo systemctl restart ssh)'
         return 0
@@ -1027,6 +899,7 @@ cmd_fix() {
         printf 'not configured - see docs/remote-access.md\n'
         return 0
     fi
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then ra_keys validate || return 1; fi
     ra_tailscale_state
     case "$RA_TS_STATE" in
         ok)     ra_ok 'tailscale: connected' ;;
@@ -1046,6 +919,7 @@ cmd_fix() {
     # The cloudflared service (spec §8): restart the registered unit when
     # it is not running; the unit-exists gate keeps hosts without the
     # service untouched.
+    if [ "$(ra_cfg ssh.enabled false)" = "true" ]; then ra_keys sync || return 1; fi
     ra_fix_cloudflared
     # The :2222 portproxy is Windows-owned - nothing to repair on this side
     # of the pair; point at the Windows-host arm when a WSL arm is declared.
@@ -1107,9 +981,7 @@ cmd_harden_ssh() {
         esac
         shift
     done
-    if [ -f "$ak" ]; then
-        keys="$(grep -c '[^[:space:]]' "$ak" || true)"
-    fi
+    keys="$(ra_keys count)" || return 1
     if [ "$keys" -eq 0 ]; then
         ra_die "harden-ssh: no authorized key in ${ak} - authorize at least one login key first (dot remote setup), then verify key login from another device"
     fi
@@ -1148,6 +1020,12 @@ main() {
         setup)         cmd_setup ${1+"$@"} ;;
         status)        cmd_status ${1+"$@"} ;;
         fix)           cmd_fix ${1+"$@"} ;;
+        keys)
+            case "${1:-}" in
+                status|sync|remove) ra_keys ${1+"$@"} ;;
+                *) ra_usage >&2; return 2 ;;
+            esac
+            ;;
         harden-ssh)    cmd_harden_ssh ${1+"$@"} ;;
         wsl-reconcile) cmd_wsl_reconcile ${1+"$@"} ;;
         tunnel)

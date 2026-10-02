@@ -15,6 +15,9 @@ try {
         if ($parseErrors.Count) { throw "Profile parse failed: $parseErrors" }
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'dot' }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
+        $helpLines = @(dot help 6>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match '^  dot ' })
+        $columns = @($helpLines | ForEach-Object { [regex]::Match($_, '^  dot \S+\s{2,}(\S.*)$').Groups[1].Index } | Select-Object -Unique)
+        if ($columns.Count -ne 1 -or -not ($helpLines -match 'ssh-fingerprints')) { throw "${profileName}: help descriptions are not aligned" }
         if ((dot doctor) -ne $false) { throw "${profileName}: read-only doctor enabled repair" }
         if ((dot doctor --fix) -ne $true) { throw "${profileName}: --fix was not forwarded" }
         if ((dot doctor -Fix) -ne $true) { throw "${profileName}: -Fix was not forwarded" }
