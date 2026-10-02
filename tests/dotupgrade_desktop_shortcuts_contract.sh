@@ -31,23 +31,32 @@ else
     [ "$cleanup_line" -gt "$ai_line" ] || fail 'the shortcut cleanup must follow the last sweep'
 fi
 
-# The template: a set value is re-emitted, an unset one leaves only a comment.
+# The template: a set value is re-emitted, an unset one leaves only a comment,
+# and only Windows carries [data.upgrade] at all. The OS is forced through
+# --override-data so the verdict does not depend on the runner.
 empty_config="$(mktemp -d)/empty.toml"
 : > "$empty_config"
 render_init() { # $1 = --override-data JSON
     CI=1 chezmoi execute-template --init --config "$empty_config" --source "$repo_root" \
         --override-data "$1" < "$tmpl"
 }
-set_out="$(render_init '{"upgrade":{"desktop_shortcuts":false}}')"
+win='"chezmoi":{"os":"windows"}'
+lin='"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}}'
+
+set_out="$(render_init "{$win,\"upgrade\":{\"desktop_shortcuts\":false}}")"
 printf '%s\n' "$set_out" | grep -Eq '^[[:space:]]*\[data\.upgrade\]$' ||
-    fail 'config template dropped [data.upgrade] when desktop_shortcuts is set'
+    fail 'windows: config template dropped [data.upgrade] when desktop_shortcuts is set'
 printf '%s\n' "$set_out" | grep -Eq '^[[:space:]]*desktop_shortcuts = false$' ||
-    fail 'config template dropped desktop_shortcuts = false'
-unset_out="$(render_init '{}')"
+    fail 'windows: config template dropped desktop_shortcuts = false'
+unset_out="$(render_init "{$win}")"
 if printf '%s\n' "$unset_out" | grep -Eq '^[[:space:]]*\[data\.upgrade\]$'; then
-    fail 'config template emitted a live [data.upgrade] with no setting'
+    fail 'windows: config template emitted a live [data.upgrade] with no setting'
 fi
 printf '%s\n' "$unset_out" | grep -Fq '# [data.upgrade]' ||
-    fail 'config template lost the commented [data.upgrade] example'
+    fail 'windows: config template lost the commented [data.upgrade] example'
+lin_out="$(render_init "{$lin,\"upgrade\":{\"desktop_shortcuts\":false}}")"
+if printf '%s\n' "$lin_out" | grep -Fq 'data.upgrade'; then
+    fail 'linux: [data.upgrade] must be Windows-only (neither live nor commented)'
+fi
 
 finish
