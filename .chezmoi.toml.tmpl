@@ -203,15 +203,18 @@
 {{- end }}
 
 {{/* upgrade: machine-local `dot upgrade` behavior. Its own table, not
-     [data.packages], so the package-selection menu never rewrites it. */}}
+     [data.packages], so the package-selection menu never rewrites it.
+     Windows only: the desktop-shortcut cleanup lives in dotupgrade.ps1. */}}
+{{- if eq .chezmoi.os "windows" }}
 {{- if and (hasKey . "upgrade") (hasKey .upgrade "desktop_shortcuts") }}
-  # `dot upgrade` (Windows): false = delete the desktop shortcuts that the
+  # `dot upgrade`: false = delete the desktop shortcuts that the
   # choco/winget sweeps newly create. Pre-existing shortcuts are never touched.
   [data.upgrade]
     desktop_shortcuts = {{ .upgrade.desktop_shortcuts }}
 {{- else }}
   # [data.upgrade]
-  #   desktop_shortcuts = false   # Windows: remove shortcuts new installers drop on the Desktop
+  #   desktop_shortcuts = false   # remove shortcuts new installers drop on the Desktop
+{{- end }}
 {{- end }}
 {{ if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
@@ -288,7 +291,9 @@
 
 {{/* ssh_hosts: rendered into the SSH client config by
      private_dot_ssh/private_config.tmpl; VS Code Remote-SSH reads them
-     natively. comment renders as the block header - your memory hook. */}}
+     natively. comment renders as the block header - your memory hook.
+     Not on WSL: hosts are declared on the Windows side. */}}
+{{- if not $isWsl }}
 {{- if hasKey . "ssh_hosts" -}}
 # SSH Host Aliases
 # Each [[data.ssh_hosts]] block becomes an SSH Host entry and is picked up by
@@ -351,13 +356,16 @@
 #   os       = "linux"                # optional  mac|linux: Windows Terminal tab color
 #   tmux     = true                   # optional  Terminal tab attaches to tmux session "main" (or a name)
 {{- end }}
+{{- end }}
 
 {{/* remote_access: machine-local `dot remote` intent (docs/remote-access.md),
      documented and ROUND-TRIPPED. `chezmoi init` regenerates this whole file,
      so any table not re-emitted here is destroyed. emit-toml-table writes every
      key present in ~/.config/chezmoi/chezmoi.toml, so new keys survive too.
      All comments sit in ONE block above the live tables, like the accounts and
-     ssh_hosts sections; the tables themselves render bare. */}}
+     ssh_hosts sections; the tables themselves render bare. Not on WSL: its
+     sshd is reached through the Windows portproxy, so Windows owns this. */}}
+{{- if not $isWsl }}
 # ==========================================================================
 # Remote Access (`dot remote`) - machine-local intent; see docs/remote-access.md
 # Names/targets only: no key material, tunnel credentials or Access policies.
@@ -411,6 +419,7 @@
 #     service  = "ssh://127.0.0.1:22"
 {{- if hasKey . "remote_access" }}
 {{- template "emit-toml-table" (dict "path" "data.remote_access" "table" .remote_access "depth" 0 "aot" false) }}
+{{- end }}
 {{- end }}
 
 # chezmoi add: secret scanning

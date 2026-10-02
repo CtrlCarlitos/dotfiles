@@ -18,6 +18,22 @@ intentionally tracked; real host names, aliases, and credentials are not.
 Nothing in this table is ever committed. If you can `git grep` it, it is in
 the wrong place.
 
+### Which machine carries which table
+
+`chezmoi init` regenerates `chezmoi.toml` from `.chezmoi.toml.tmpl`, and a
+table survives only if the template re-emits it for that machine:
+
+| Table | Windows | macOS / Linux | WSL |
+|---|---|---|---|
+| `[[data.accounts]]` | yes | yes | yes (git identity, SSH aliases and the agent relay read it) |
+| `[[data.ssh_hosts]]` | yes | yes | no, declared on the Windows side |
+| `[data.remote_access]` | yes | yes | no, Windows owns it |
+| `[data.upgrade]` | yes | no | no |
+| `[interpreters.ps1]` | yes | macOS only | no |
+
+So a table you hand-add on WSL that the template does not emit there is
+dropped at the next `chezmoi init`.
+
 ## SSH hosts (`[[data.ssh_hosts]]`)
 
 Rendered into `~/.ssh/config` by `private_dot_ssh/private_config.tmpl` on
