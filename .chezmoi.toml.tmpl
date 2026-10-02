@@ -207,6 +207,18 @@
   #     "editor.rulers"       = [80, 120]
   #     "[python]"            = { "editor.tabSize" = 4 }
 {{- end }}
+
+{{/* upgrade: machine-local `dot upgrade` behavior. Its own table, not
+     [data.packages], so the package-selection menu never rewrites it. */}}
+{{- if and (hasKey . "upgrade") (hasKey .upgrade "desktop_shortcuts") }}
+  # `dot upgrade` (Windows): false = delete the desktop shortcuts that the
+  # choco/winget sweeps newly create. Pre-existing shortcuts are never touched.
+  [data.upgrade]
+    desktop_shortcuts = {{ .upgrade.desktop_shortcuts }}
+{{- else }}
+  # [data.upgrade]
+  #   desktop_shortcuts = false   # Windows: remove shortcuts new installers drop on the Desktop
+{{- end }}
 {{ if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
 [[data.accounts]]

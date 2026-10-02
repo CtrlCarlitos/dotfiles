@@ -43,6 +43,24 @@ currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
 quiet. Inside a devcontainer, upgrades ship via image rebuild and the
 script no-ops.
 
+#### Stop upgrades from recreating desktop shortcuts
+
+Installers drop a shortcut on the Desktop on every upgrade, and neither
+`choco upgrade all` nor `winget upgrade --all` has a global switch against
+it. Set this in `~/.config/chezmoi/chezmoi.toml`:
+
+```toml
+[data.upgrade]
+  desktop_shortcuts = false
+```
+
+`dot upgrade` then snapshots the `.lnk`/`.url` files on your Desktop and the
+Public Desktop before the sweeps and deletes only the ones that appeared
+during them, listing each. Shortcuts you already had are never touched.
+Absent or `true` keeps today's behavior. The table survives `chezmoi init`.
+Windows only: apt packages add menu entries rather than Desktop icons, and
+Homebrew casks install into `/Applications`.
+
 Windows provides the host side of the setup:
 
 - **Windows Terminal**, configured by chezmoi. Details are in [Terminal Experience](terminal.md).

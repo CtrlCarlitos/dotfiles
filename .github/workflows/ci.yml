@@ -249,6 +249,10 @@ jobs:
       - name: Test dot remote (pwsh twin)
         run: pwsh -NoProfile -File tests/remote_access.ps1
 
+      # `dot upgrade` desktop-shortcut helpers (scratch dirs, never the real Desktop).
+      - name: Test desktop-shortcut cleanup (pwsh)
+        run: pwsh -NoProfile -File tests/desktop_shortcuts.ps1
+
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
