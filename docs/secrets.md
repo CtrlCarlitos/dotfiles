@@ -26,7 +26,7 @@ table survives only if the template re-emits it for that machine:
 | Table | Windows | macOS / Linux | WSL |
 |---|---|---|---|
 | `[[data.accounts]]` | yes | yes | yes (git identity, SSH aliases and the agent relay read it) |
-| `[[data.ssh_hosts]]` | yes | yes | no, declared on the Windows side |
+| `[[data.ssh_hosts]]` | yes | yes | yes, outgoing aliases and fingerprint selectors |
 | `[data.remote_access]` | yes | yes | no, Windows owns it |
 | `[data.upgrade]` | yes | no | no |
 | `[interpreters.ps1]` | yes | macOS only | no |
@@ -49,11 +49,8 @@ profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-termi
   hostname = "10.0.0.5"               # required: IP or DNS
   user     = "carlitos"               # optional: login user
   port     = 22                       # optional
-  identity = "id_personal"            # optional: key NAME in ~/.ssh - the .pub
-                                      # half is referenced and must be copied to
-                                      # every machine that SSHes out from it; the
-                                      # private half stays Windows-side (offered
-                                      # through the ssh-agent relay on WSL)
+  identity = "id_personal"            # optional: Windows/native key NAME
+  identity_fingerprint = "SHA256:<fingerprint>" # WSL agent selector; populated by dot ssh-fingerprints
   # Omit proxy unless this host needs a configured bastion alias.
   proxy    = "bastion"                # optional: ProxyJump alias
   comment  = "Bastion for staging - office IP only"   # optional: free text
@@ -66,9 +63,10 @@ The `comment` field renders as the block's header comment in
 the operator's memory hook. Fields are all optional except `name` and
 `hostname`; `identity` entries reference key NAMES in `~/.ssh`:
 `run_onchange_generate_identities` (on every apply) normalizes the private
-key's ACL on Windows, the `.pub` half is what the rendered Host block points
-at — copy each `.pub` to a machine's `~/.ssh` and that machine SSHes out
-through the ssh-agent relay (the private half stays Windows-side).
+key's ACL on Windows. Native host blocks use a `.pub` selector. WSL blocks
+instead select a fingerprint-filtered Windows-agent socket: neither private keys
+nor `.pub` copies belong in WSL after migration. See [SSH agents](ssh-agents.md)
+for fingerprint synchronization and verification before removing old selectors.
 
 Add hosts, run `chezmoi apply`, done. Remove the entry and apply to retire
 the alias.

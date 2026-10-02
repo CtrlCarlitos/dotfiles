@@ -47,7 +47,9 @@
     name = {{ $simpleName | quote }}
     email = {{ $simpleEmail | quote }}
 {{- if $simpleKey }}
+{{- if not (and $isWsl (not (env "SSH_AGENT_RELAY_NATIVE")) (not $isDevcontainer)) }}
     signingkey = ~/.ssh/{{ if $simpleSigningKey }}{{ $simpleSigningKey }}{{ else }}{{ $simpleKey }}{{ end }}.pub
+{{- end }}
 {{- end }}
 {{- else }}
     # No accounts configured - use 'devprofile use' to set identity per-repo
@@ -102,7 +104,7 @@
 {{- if $modernCli }}
     pager = delta
 {{- end }}
-{{- if and $simpleKey (not $isDevcontainer) }}
+{{- if and $simpleKey (not $isDevcontainer) (not (and $isWsl (not (env "SSH_AGENT_RELAY_NATIVE")))) }}
     sshCommand = "ssh -i ~/.ssh/{{ $simpleKey }} -o IdentitiesOnly=yes"
 {{- else }}
     # Devcontainers (and keyless configs) use plain ssh: a container has no key
@@ -275,6 +277,14 @@
     remotes = remote -v
 
 {{- if and (hasKey . "accounts") .accounts }}
+{{- if and $isWsl (not $isDevcontainer) (not (env "SSH_AGENT_RELAY_NATIVE")) }}
+{{- $defaultAccount := first .accounts }}
+{{- if and (hasKey $defaultAccount "username") $defaultAccount.username }}
+{{- $provider := "github" }}{{ if hasKey $defaultAccount "provider" }}{{ $provider = $defaultAccount.provider }}{{ end }}
+[include]
+    path = ~/.gitconfig-{{ $provider }}-{{ $defaultAccount.username }}
+{{- end }}
+{{- end }}
 # ------------------------------------------------------------------------------
 # Conditional Includes (Auto-generated from accounts)
 # Each account's dirs list determines which directories use that identity

@@ -1244,6 +1244,7 @@ if ($graftWorks) {
     # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
+# graft-install-section: end (contract-test extraction boundary)
 {{- end }}
 
 {{- if $opencode_cli }}

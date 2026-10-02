@@ -62,6 +62,7 @@ sock_reachable() {
 RELAY_ALIASES=()
 RELAY_COMMENTS=()
 RELAY_KEYS=()
+RELAY_FINGERPRINTS=()
 {{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- $username := "" }}{{ if hasKey . "username" }}{{ $username = .username }}{{ end }}
@@ -79,17 +80,44 @@ RELAY_COMMENTS+=({{ (printf "%s|%s-sign" .email .email) | quote }})
 {{- $keyRow := "" }}
 {{- if hasKey . "key" }}{{ $keyRow = printf "%s%s" .key (ternary (printf "|%s" $signKey) "" (ne $signKey "")) }}{{ end }}
 RELAY_KEYS+=({{ $keyRow | quote }})
+{{- $fps := list }}
+{{- if hasKey . "auth_fingerprint" }}{{ $fps = append $fps .auth_fingerprint }}{{ end }}
+{{- if hasKey . "signing_fingerprint" }}{{ $fps = append $fps .signing_fingerprint }}{{ end }}
+RELAY_FINGERPRINTS+=({{ join "|" (uniq $fps) | quote }})
 RELAY_ALIASES+=({{ $alias | quote }})
 {{- end }}
 {{- end }}
 {{- end }}
 
-relay_field() { # $1 = alias, $2 = "comments" or "keys"
+{{- if and (eq .chezmoi.os "linux") (contains "microsoft" (.chezmoi.kernel.osrelease | lower)) (not (env "SSH_AGENT_RELAY_NATIVE")) }}
+{{- $seenHosts := dict }}
+{{- if hasKey . "ssh_hosts" }}
+{{- range .ssh_hosts }}
+{{- if and (hasKey . "identity") .identity }}
+{{- $hostFingerprint := "" }}{{ if hasKey . "identity_fingerprint" }}{{ $hostFingerprint = .identity_fingerprint }}{{ end }}
+{{- if and (hasKey $seenHosts .identity) (ne (index $seenHosts .identity) $hostFingerprint) }}
+{{- fail (printf "conflicting fingerprints for host identity %s" .identity) }}
+{{- end }}
+{{- if not (hasKey $seenHosts .identity) }}
+{{- $_ := set $seenHosts .identity $hostFingerprint }}
+RELAY_ALIASES+=({{ printf "host-%s" (.identity | sha256sum | trunc 16) | quote }})
+RELAY_KEYS+=({{ .identity | quote }})
+RELAY_COMMENTS+=("")
+RELAY_FINGERPRINTS+=({{ if hasKey . "identity_fingerprint" }}{{ .identity_fingerprint | quote }}{{ else }}""{{ end }})
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+relay_field() { # $1 = alias, $2 = comments, fingerprints or keys
     local i
     for i in "${!RELAY_ALIASES[@]}"; do
         if [ "${RELAY_ALIASES[i]}" = "$1" ]; then
             if [ "$2" = "comments" ]; then
                 printf '%s\n' "${RELAY_COMMENTS[i]}"
+            elif [ "$2" = fingerprints ]; then
+                printf '%s\n' "${RELAY_FINGERPRINTS[i]}"
             else
                 printf '%s\n' "${RELAY_KEYS[i]}"
             fi
@@ -173,26 +201,38 @@ start_own_agent() { # $1 = alias
 }
 
 start_filter() { # $1 = alias
-    local alias="$1" comments record sock line
+    local alias="$1" fingerprints record sock line
     record="$state_dir/$alias.sock"
     if [ -r "$record" ]; then
         sock="$(cat "$record")"
-        sock_reachable "$sock" && return 0
+        # Never reuse a comment-selected or differently pinned filter after a
+        # config update. Store the mapping beside the record to detect drift.
+        fingerprints="$(relay_field "$alias" fingerprints)"
+        if [ "$sock" != "$upstream_sock" ] && [ -n "$fingerprints" ] &&
+            [ "$(cat "$state_dir/$alias.fingerprints" 2>/dev/null)" = "$fingerprints" ] && sock_reachable "$sock"; then
+            ln -sfn "$sock" "$state_dir/$alias.agent"
+            return 0
+        fi
     fi
-    comments="$(relay_field "$alias" comments)"
-    [ -n "$comments" ] || { echo "ssh-agent-relay: unknown account '$alias'" >&2; return 1; }
+    fingerprints="$(relay_field "$alias" fingerprints)"
+    rm -f "$state_dir/$alias.agent" "$record"
+    [ -n "$fingerprints" ] || { echo "ssh-agent-relay: missing fingerprints for '$alias'; run dot ssh-fingerprints on Windows" >&2; return 1; }
     if ! command -v ssh-agent-filter >/dev/null 2>&1; then
-        # No filter available: fall back to the unfiltered upstream so things
-        # still work, but say so - this is the isolation we wanted.
-        echo "ssh-agent-relay: ssh-agent-filter missing (apt install ssh-agent-filter) - '$alias' falls back to the UNFILTERED agent" >&2
-        printf '%s\n' "$upstream_sock" > "$record"
-        return 0
+        echo "ssh-agent-relay: ssh-agent-filter missing (apt install ssh-agent-filter); refusing unfiltered fallback for '$alias'" >&2
+        return 1
     fi
-    # Comments are "|"-separated (an email cannot contain one).
+    # SHA256 selectors resolve in memory to the exact blob accepted by --key.
+    # The packaged filter's --fingerprint flag only supports legacy MD5.
     local args=() IFS_SAVE="$IFS"
     IFS='|'
-    for line in $comments; do
-        [ -n "$line" ] && args+=(--comment "$line")
+    for line in $fingerprints; do
+        local blob
+        blob="$(SSH_AUTH_SOCK="$upstream_sock" ssh-add -L | ssh-agent-key "$line" blob)" || {
+            IFS="$IFS_SAVE"
+            echo "ssh-agent-relay: configured key missing for '$alias': $line" >&2
+            return 1
+        }
+        args+=(--key "$blob")
     done
     IFS="$IFS_SAVE"
     # ssh-agent-filter reads its upstream from SSH_AUTH_SOCK, forks, and prints
@@ -201,13 +241,21 @@ start_filter() { # $1 = alias
     # (DrvFs, e.g. TMPDIR under /mnt/c) fails with "bind: Operation not
     # supported" - confirmed live. The runtime dir is always native.
     local out
-    out="$(SSH_AUTH_SOCK="$upstream_sock" TMPDIR="$runtime_dir" \
-        ssh-agent-filter --name "$alias" "${args[@]}" 2>/dev/null)" || {
+    out="$(
+        cd -- "$runtime_dir" || exit 1
+        SSH_AUTH_SOCK="$upstream_sock" TMPDIR="$runtime_dir" \
+            ssh-agent-filter --name "$alias" "${args[@]}"
+    )" || {
         echo "ssh-agent-relay: ssh-agent-filter failed for '$alias'" >&2; return 1; }
     # It prints shell code with the path SINGLE-QUOTED: SSH_AUTH_SOCK='/tmp/agent.123';
     sock="$(printf '%s\n' "$out" | sed -n "s/^SSH_AUTH_SOCK='\{0,1\}\([^';]*\)'\{0,1\};.*/\1/p" | head -1)"
     [ -n "$sock" ] || { echo "ssh-agent-relay: could not parse filter socket for '$alias'" >&2; return 1; }
     printf '%s\n' "$sock" > "$record"
+    printf '%s\n' "$fingerprints" > "$state_dir/$alias.fingerprints"
+    local filter_pid
+    filter_pid="$(printf '%s\n' "$out" | sed -n "s/^SSH_AGENT_PID='\{0,1\}\([0-9]*\)'\{0,1\};.*/\1/p" | head -1)"
+    [ -z "$filter_pid" ] || printf '%s\n' "$filter_pid" > "$state_dir/$alias.pid"
+    ln -sfn "$sock" "$state_dir/$alias.agent"
 }
 
 # Which account a shell gets when it does not choose one. Override with
@@ -264,6 +312,8 @@ start_all() {
     if [ -n "$DEFAULT_ALIAS" ] && [ -r "$state_dir/$DEFAULT_ALIAS.sock" ]; then
         cp "$state_dir/$DEFAULT_ALIAS.sock" "$state_dir/default.sock.tmp" &&
             mv "$state_dir/default.sock.tmp" "$state_dir/default.sock"
+    else
+        rm -f "$state_dir/default.sock"
     fi
     return $rc
 }
@@ -284,10 +334,24 @@ cmd_start() {
 cmd_use() { # $1 = alias
     local alias="${1:-}" record
     [ -n "$alias" ] || { echo "usage: ssh-agent-relay use <alias>" >&2; return 2; }
-    cmd_start >/dev/null 2>&1
+    if is_wsl; then
+        # A missing server key must not prevent an unrelated Git account from
+        # working. Start and validate only the requested filter here.
+        acquire_lock || { echo 'ssh-agent-relay: startup busy; retry' >&2; return 1; }
+        local rc=0
+        start_upstream && start_filter "$alias" || rc=$?
+        release_lock
+        [ "$rc" -eq 0 ] || return "$rc"
+    else
+        cmd_start >/dev/null || return 1
+    fi
     record="$state_dir/$alias.sock"
     [ -r "$record" ] || { echo "ssh-agent-relay: no socket for '$alias' (run: ssh-agent-relay start)" >&2; return 1; }
-    printf 'export SSH_AUTH_SOCK=%s\n' "$(cat "$record")"
+    local sock
+    sock="$(cat "$record")"
+    sock_reachable "$sock" || { echo "ssh-agent-relay: unreachable socket for '$alias'" >&2; return 1; }
+    [ "$sock" != "$upstream_sock" ] || { echo "ssh-agent-relay: refusing unfiltered socket for '$alias'" >&2; return 1; }
+    printf 'export SSH_AUTH_SOCK=%q\n' "$sock"
 }
 
 cmd_status() {
@@ -332,8 +396,8 @@ cmd_stop() {
             rm -f "$state_dir/$alias.pid"
         fi
         rm -f "$runtime_dir/ssh-agent.$alias.sock"
+        rm -f "$state_dir/$alias.agent" "$state_dir/$alias.fingerprints"
     done
-    pkill -f "ssh-agent-filter --name" 2>/dev/null || true
     if is_wsl; then
         pkill -f "UNIX-LISTEN:$upstream_sock" 2>/dev/null || true
     fi

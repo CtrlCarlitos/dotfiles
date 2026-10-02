@@ -166,10 +166,16 @@ function dot {
         'upgrade'   { & (Join-Path $repoScripts 'dotupgrade.ps1') @rest }
         'backup'    { & (Join-Path $repoScripts 'dotbackup.ps1') @rest }
         'restore'   { & (Join-Path $repoScripts 'dotrestore.ps1') @rest }
-        'doctor'    { & (Join-Path $repoScripts 'dotfiles-doctor.ps1') @rest }
+        'doctor'    {
+            $repair = @($rest | Where-Object { $_ -in '--fix', '-Fix' }).Count -gt 0
+            $doctorArgs = @($rest | Where-Object { $_ -notin '--fix', '-Fix' })
+            & (Join-Path $repoScripts 'dotfiles-doctor.ps1') -Fix:$repair @doctorArgs
+        }
         'remote' { & (Join-Path $repoScripts 'remote-access.ps1') @rest }
+        'ssh-fingerprints' { python (Join-Path $repoScripts 'ssh_fingerprints.py') @rest }
         default {
             Write-Host "dot - dotfiles command family"
+            Write-Host "  dot ssh-fingerprints  preview agent fingerprint sync (--write to save)"
             Write-Host "  dot up        sync state (pull + apply + config re-init; never upgrades)"
             Write-Host "  dot upgrade   upgrade ALL tooling (choco + AI tools, session-gated)"
             Write-Host "  dot backup    encrypted portable backup"

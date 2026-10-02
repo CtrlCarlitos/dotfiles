@@ -88,6 +88,9 @@ AppData/**
 .aliases.zsh
 .local/bin/devprofile
 .local/bin/ssh-agent-relay
+.local/bin/git-agent
+.local/bin/ssh-agent-key
+.local/lib/ssh_agent_key.py
 # The zsh/tmux externals too: no zsh or tmux runs on Windows (WSL has its own
 # home), so ~/.oh-my-zsh was 15 MB and ~/.tmux 153 KB of unusable plugin trees.
 .oh-my-zsh/**

@@ -4,7 +4,7 @@ set -euo pipefail
 # Which machine-local tables .chezmoi.toml.tmpl emits where. Each table is only
 # re-emitted when this machine's config already carries it, so the gates decide
 # what `chezmoi init` keeps:
-#   ssh_hosts      everywhere except WSL (hosts are declared on the Windows side)
+#   ssh_hosts      everywhere, including WSL's outgoing client aliases
 #   remote_access  everywhere except WSL (Windows owns it; WSL's sshd is reached
 #                  through the Windows portproxy)
 #   interpreters.ps1  windows and macOS only
@@ -45,7 +45,7 @@ for name in win mac lin; do
 done
 
 wsl_out="$(render_init "$wsl")"
-refuse wsl "$wsl_out" data.ssh_hosts
+want wsl "$wsl_out" data.ssh_hosts
 refuse wsl "$wsl_out" data.remote_access
 if printf '%s\n' "$wsl_out" | grep -Fq 'Remote Access ('; then
     fail 'wsl: the remote_access section (comments included) must be omitted'
@@ -58,5 +58,11 @@ want windows "$(render_init "$win")" interpreters.ps1
 want darwin "$(render_init "$mac")" interpreters.ps1
 refuse linux "$(render_init "$lin")" interpreters.ps1
 refuse wsl "$wsl_out" interpreters.ps1
+
+fingerprints='{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8-microsoft"}},"accounts":[{"name":"Fixture","email":"fixture@example.test","username":"fixture","provider":"github","key":"id_fixture","auth_fingerprint":"SHA256:auth","signing_fingerprint":"SHA256:sign","dirs":[]}],"ssh_hosts":[{"name":"jump","hostname":"example.test","identity":"id_server","identity_fingerprint":"SHA256:host"}]}'
+fp_out="$(render_init "$fingerprints")"
+for value in SHA256:auth SHA256:sign SHA256:host; do
+    if grep -Fq "$value" <<<"$fp_out"; then pass; else fail "WSL init dropped $value"; fi
+done
 
 finish

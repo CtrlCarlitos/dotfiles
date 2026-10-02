@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# git-agent: WSL Git transport/signing adapter, called by generated per-account
+# wrappers. Select the account socket for EVERY invocation, not the shell's
+# ambient agent. No private keys or .pub copies are created in WSL.
+set -euo pipefail
+alias_name="${1:?account alias required}"
+sign_fingerprint="${2:?signing key fingerprint required}"
+shift 2
+agent_env="$(ssh-agent-relay use "$alias_name")" || exit 1
+eval "$agent_env"
+case "${1:-}" in
+    ssh)
+        shift
+        exec ssh -o "IdentityAgent=$SSH_AUTH_SOCK" -o IdentitiesOnly=no "$@"
+        ;;
+    key)
+        ssh-add -L | ssh-agent-key "$sign_fingerprint" key
+        ;;
+    *) exec ssh-keygen "$@" ;;
+esac

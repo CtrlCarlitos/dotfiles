@@ -121,29 +121,59 @@ mounts directly.
 
 ## How accounts map to keys
 
-`ssh-agent-relay` allows a key into an account's socket by **comment**. `devprofile`
-creates keys with the account email as the comment, and `<email>-sign` for the
-signing key, so the default mapping needs no configuration. If your keys carry other
-comments, set them explicitly:
+WSL relay mode selects keys by **SHA256 fingerprint**, not mutable comments or
+local `.pub` files. Run `dot ssh-fingerprints` on Windows to preview the mapping
+from configured key filenames to identities already loaded in the Windows agent.
+Run it with `--write` to save the fields; each changed config gets a unique backup.
+The command requires Python 3.11+ and never reads private keys or loads the agent.
+
+To update the existing WSL config at the same time, use Windows PowerShell:
+
+```powershell
+dot ssh-fingerprints --target-config '\\wsl.localhost\Ubuntu-24.04\home\carlitos\.config\chezmoi\chezmoi.toml'
+dot ssh-fingerprints --write --target-config '\\wsl.localhost\Ubuntu-24.04\home\carlitos\.config\chezmoi\chezmoi.toml'
+```
+
+Only fingerprint fields are synchronized, matched by account provider/username
+and host identity filename. Existing host definitions and machine-local settings
+are retained. Missing source mappings or keys absent from the agent stop the sync.
+`chezmoi init` preserves these fields and WSL host definitions:
 
 ```toml
 [[data.accounts]]
   username = "work-user"
   email = "me@work.example"
-  agent_key_comments = ["me@work.example", "work-laptop-2026"]
+  auth_fingerprint = "SHA256:<authentication-key-fingerprint>"
+  signing_fingerprint = "SHA256:<signing-key-fingerprint>"
 ```
+
+Each `[[data.ssh_hosts]]` with an `identity` also gets `identity_fingerprint`.
+WSL exposes a filtered socket per server identity; host aliases point at that
+socket with no `IdentityFile` path. No WSL `.pub` files are required. Keep existing
+selectors until fingerprint sync, apply, relay startup and actual login tests
+have succeeded. Native Linux/macOS retain local keys. Fingerprints and
+`allowed_signers` are public metadata, not private-key copies.
 
 Check what a socket actually exposes — this is the security property, so verify it
 rather than assume it:
 
 ```sh
-SSH_AUTH_SOCK=$(ssh-agent-relay use github-work | cut -d= -f2) ssh-add -l
+eval "$(ssh-agent-relay use github-work-user)"
+ssh-add -l
 ```
 
 ## Signing
 
-Signing needs the **public** key file plus the private key in an agent. On a host
-that is already true. In a devcontainer the identity generator writes the `.pub`
+WSL relay mode uses a generated `git-agent-<provider>-<username>` wrapper for both
+Git transport and signing. Every invocation selects that account's filtered socket,
+regardless of the ambient shell agent. Git's `gpg.ssh.defaultKeyCommand` obtains a
+`key::` public-key selector from the agent: no private keys or `.pub` copies are
+created in WSL. `signing_fingerprint` explicitly selects the signing identity.
+Missing matches fail explicitly. Apply merges the agent's signing
+public key into `allowed_signers` for local verification, preserving existing entries.
+
+Native Linux/macOS retain local-key behavior (`SSH_AGENT_RELAY_NATIVE=1` opts into
+that behavior on WSL too). In a devcontainer the identity generator writes the `.pub`
 from the forwarded agent and enables `commit.gpgsign` for that account; with no
 matching key in the agent it leaves signing off and says so, instead of failing
 every commit.
@@ -152,11 +182,12 @@ every commit.
 
 - **`bind: Operation not supported`** from `ssh-agent-filter` means its socket
   landed on a Windows-mounted path (`/mnt/c`, DrvFs). The relay sets `TMPDIR` to the
-  runtime dir to avoid it; if you run the filter by hand, do the same.
+  runtime dir and starts the filter from that directory; `TMPDIR` alone is not
+  sufficient with the packaged filter. If you run it by hand, change directory too.
 - **A container sees no keys** → the upstream agent is empty. `ssh-add -l` on
   Windows. Keys must be loaded *before* you attach: `AddKeysToAgent` cannot help,
   because it only triggers when ssh reads a key *file*, and containers have none.
-- **`ssh-agent-filter` missing** → the relay falls back to the unfiltered upstream
-  and warns. Things work; isolation does not. `apt install ssh-agent-filter`.
+- **`ssh-agent-filter` missing** → account routing fails closed. Install it with
+  `apt install ssh-agent-filter`; no account may fall back to the all-keys upstream.
 - **Launch devcontainers from WSL**, not PowerShell: the Windows agent is a named
   pipe, which a Linux container cannot bind.

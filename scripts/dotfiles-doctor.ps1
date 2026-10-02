@@ -285,30 +285,39 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
     }
 }
 
-# --- 8. CRLF line endings in key files ----------------------------------------
-# Windows-native, and Windows OpenSSH accepts them - but a CRLF key copied to
-# WSL/Linux dies in libcrypto before any auth. Detect + offer -Fix so future
-# copies land Unix-clean.
+# --- 8. SSH text files use LF on every platform -------------------------------
+# Strict UTF-8 text only; preserve binary files, standalone CRs and ACLs.
+# Do not follow reparse points out of the SSH directory.
+function Get-SshTextCandidate([string]$Directory) {
+    if ((Get-Item -LiteralPath $Directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
+    foreach ($entry in (Get-ChildItem -LiteralPath $Directory -Force -ErrorAction Stop)) {
+        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if ($entry.PSIsContainer) { Get-SshTextCandidate $entry.FullName }
+        else { $entry }
+    }
+}
 
 if (Test-Path (Join-Path $homeDir '.ssh')) {
-    $crlfFiles = @()
-    foreach ($keyfile in (Get-ChildItem (Join-Path $homeDir '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
-        $raw = [IO.File]::ReadAllText($keyfile.FullName)
-        if ($raw -match "`r") { $crlfFiles += $keyfile.FullName }
-    }
-    if ($crlfFiles.Count -gt 0) {
-        if ($Fix) {
-            foreach ($f in $crlfFiles) {
-                $text = [IO.File]::ReadAllText($f)
-                [IO.File]::WriteAllText($f, ($text -replace "`r", ''))
+    $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
+    $crlfCount = 0
+    foreach ($keyfile in (Get-SshTextCandidate (Join-Path $homeDir '.ssh'))) {
+        try {
+            $bytes = [IO.File]::ReadAllBytes($keyfile.FullName)
+            try { $text = $utf8Strict.GetString($bytes) }
+            catch [Text.DecoderFallbackException] { continue }
+            if ($text -match '[\x00-\x08\x0b\x0e-\x1f]' -or -not $text.Contains("`r`n")) { continue }
+            $crlfCount++
+            if ($Fix) {
+                [IO.File]::WriteAllBytes($keyfile.FullName, $utf8Strict.GetBytes($text.Replace("`r`n", "`n")))
+                Result 'ok' 'ssh-crlf' "normalized CRLF to LF: $($keyfile.FullName)"
+            } else {
+                Result 'warn' 'ssh-crlf' "CRLF violates SSH text LF policy: $($keyfile.FullName) - re-run with -Fix"
             }
-            Result 'ok' 'ssh-crlf' "stripped CR from: $($crlfFiles -join ', ')"
-        } else {
-            Result 'warn' 'ssh-crlf' "CRLF line endings (breaks ssh on WSL/Linux): $($crlfFiles -join ', ') - re-run with -Fix"
+        } catch {
+            Result 'error' 'ssh-crlf' "could not inspect or normalize $($keyfile.FullName): $_"
         }
-    } else {
-        Result 'ok' 'ssh-crlf' 'key files are LF (Unix-clean)'
     }
+    if ($crlfCount -eq 0) { Result 'ok' 'ssh-crlf' 'SSH text files are LF' }
 }
 
 if ($script:Errors -gt 0) {

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Isolated filter fixtures reset their environment; native fixtures set it anew.
+# shellcheck disable=SC2030,SC2031
 set -euo pipefail
 
 # ssh-agent-relay contract: one key vault (the Windows agent), one FILTERED
@@ -7,9 +9,9 @@ set -euo pipefail
 # accounts' keys in one agent, not assumed.
 #
 # Pinned behaviors:
-#   - one socket per [[data.accounts]] entry, keys selected by comment
-#     (devprofile's convention: <email> and <email>-sign), overridable
-#   - a missing ssh-agent-filter degrades to the unfiltered agent WITH a warning
+#   - one socket per account, WSL keys selected by explicit fingerprints;
+#     native hosts retain local key filenames
+#   - a missing ssh-agent-filter fails closed rather than exposing other accounts
 #   - idempotent start, clear errors, no key material anywhere
 #   - the tooling it needs is actually installed by the package groups
 #   - bash 3.2-safe (macOS ships 3.2): indexed arrays only, renders for
@@ -73,8 +75,8 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
             --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"6.8-microsoft\"}},\"accounts\":$2}" \
             <"$tmpl"
     }
-    two='[{"name":"A","email":"a@x.test","username":"alpha","provider":"github","key":"id_a"},
-          {"name":"B","email":"b@x.test","username":"beta","provider":"github","key":"id_b","agent_key_comments":["custom-comment"]}]'
+    two='[{"name":"A","email":"a@x.test","username":"alpha","provider":"github","key":"id_a","auth_fingerprint":"SHA256:fixture-alpha"},
+          {"name":"B","email":"b@x.test","username":"beta","provider":"github","key":"id_b","auth_fingerprint":"SHA256:fixture-beta","agent_key_comments":["custom-comment"]}]'
     out=$(render_relay linux "$two")
     printf '%s' "$out" >"$tmp/relay"
     bash -n "$tmp/relay" || fail "rendered relay is not valid bash"
@@ -109,7 +111,37 @@ if command -v chezmoi >/dev/null && command -v shellcheck >/dev/null; then
     grep -Fq 'ssh-agent-filter --name' "$tmpl" || fail "relay must drive ssh-agent-filter in relay mode"
     grep -Fq 'TMPDIR="$runtime_dir"' "$tmpl" ||
         fail "the filter needs a native TMPDIR (a /mnt/c path fails with 'bind: Operation not supported')"
-    grep -Fq 'UNFILTERED' "$tmpl" || fail "a missing ssh-agent-filter must warn that isolation is lost"
+    grep -Fq 'refusing unfiltered fallback' "$tmpl" || fail "a missing filter must fail closed"
+    grep -Fq 'cd -- "$runtime_dir"' "$tmpl" || fail "filter startup must use a native working directory"
+
+    # Execute start_filter from the caller's directory. The stub models the
+    # packaged filter's cwd requirement; removing the cd makes this fail.
+    (
+        export XDG_RUNTIME_DIR="$tmp/filter-run" SSH_AGENT_RELAY_DIR="$tmp/filter-state"
+        mkdir -p "$XDG_RUNTIME_DIR"
+        # Load function definitions, excluding the CLI dispatcher.
+        source /dev/stdin <<<"$(sed '/^case "${1:-status}" in/,$d' "$tmp/relay")"
+        # Called indirectly by the sourced start_filter function.
+        # shellcheck disable=SC2317
+        ssh-agent-key() { printf 'fixture-public-blob\n'; }
+        # shellcheck disable=SC2317
+        ssh-add() { printf 'fixture-agent-key\n'; }
+        # shellcheck disable=SC2317
+        ssh-agent-filter() {
+            [ "$PWD" = "$XDG_RUNTIME_DIR" ] || return 1
+            printf "SSH_AUTH_SOCK='/tmp/fixture-filter'; export SSH_AUTH_SOCK;\n"
+        }
+        start_filter github-alpha
+        [ "$(cat "$SSH_AGENT_RELAY_DIR/github-alpha.sock")" = /tmp/fixture-filter ]
+        # Absence of the dependency must not write an upstream fallback record.
+        # shellcheck disable=SC2317
+        command() {
+            if [ "$*" = '-v ssh-agent-filter' ]; then return 1; fi
+            builtin command "$@"
+        }
+        if start_filter github-beta; then exit 1; fi
+        [ ! -f "$SSH_AGENT_RELAY_DIR/github-beta.sock" ]
+    ) || fail 'filter cwd or missing-dependency isolation regression'
 
     # Native mode behaviour, exercised for real: each account's socket must hold
     # ONLY that account's keys, and a passphrase-protected key must not block.

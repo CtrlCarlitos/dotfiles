@@ -253,6 +253,9 @@ jobs:
       - name: Test desktop-shortcut cleanup (pwsh)
         run: pwsh -NoProfile -File tests/desktop_shortcuts.ps1
 
+      - name: Doctor dispatch and SSH LF policy
+        run: pwsh -NoProfile -File tests/dot_doctor_windows.ps1
+
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -279,7 +282,7 @@ jobs:
       # chezmoi above are everything `bash tests/run.sh --strict` needs here.
       - name: Install shellcheck (macOS)
         if: matrix.os == 'macos-latest'
-        run: brew install shellcheck
+        run: brew install shellcheck coreutils
 
       - name: Verify chezmoi version
         run: ~/.local/bin/chezmoi --version
@@ -330,6 +333,9 @@ jobs:
       - name: Test dotbackup/restore round-trip (5.1)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotbackup_restore.ps1
+
+      - name: Doctor dispatch and SSH LF policy (5.1)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dot_doctor_windows.ps1
 
       - name: Test dotfiles doctor (5.1)
         shell: powershell

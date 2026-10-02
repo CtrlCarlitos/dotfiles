@@ -253,32 +253,44 @@ if [ -d "$HOME/.ssh" ]; then
 fi
 
 #-------------------------------------------------------------------------------
-# 8. Windows CRLF line endings in key files. A CRLF key fails on Linux/WSL
-#    with "error in libcrypto" before any auth attempt (observed live on a
-#    Windows->WSL id_*.pub copy; Windows OpenSSH tolerates CRLF, so the
-#    Windows twin treats this as hygiene only). --fix strips trailing CRs
-#    with perl (cross-platform: the repo already requires perl in CI).
+# 8. SSH text files use LF on every platform. Only replace CRLF pairs;
+#    preserve other bytes, modes, binary files and symlink targets.
 #-------------------------------------------------------------------------------
 if [ -d "$HOME/.ssh" ]; then
-    crlf=""
-    for keyfile in "$HOME"/.ssh/id_*; do
-        [ -f "$keyfile" ] || continue
-        if grep -q "$(printf '\r')" "$keyfile" 2>/dev/null; then
-            crlf="$crlf ${keyfile#"$HOME"/.ssh/}"
-        fi
-    done
-    if [ -n "$crlf" ]; then
-        if $FIX; then
-            for keyfile in "$HOME"/.ssh/id_*; do
-                [ -f "$keyfile" ] && perl -pi -e 's/\r$//' "$keyfile"
-            done
-            result ok ssh-crlf "stripped Windows CRLF:$crlf"
+    crlf_count=0
+    while IFS= read -r -d '' keyfile; do
+        if outcome="$(perl -MEncode=decode,FB_CROAK - "$keyfile" "$FIX" <<'PERL'
+use strict;
+use warnings;
+my ($path, $fix) = @ARGV;
+open my $in, '<:raw', $path or die "$path: $!";
+local $/;
+my $raw = <$in>;
+close $in or die "$path: $!";
+exit 0 if $raw =~ /[\x00-\x08\x0b\x0e-\x1f]/;
+my $copy = $raw;
+eval { decode('UTF-8', $copy, FB_CROAK) };
+exit 0 if $@ || $raw !~ /\r\n/;
+if ($fix eq 'true') {
+    $raw =~ s/\r\n/\n/g;
+    open my $out, '>:raw', $path or die "$path: $!";
+    print {$out} $raw or die "$path: $!";
+    close $out or die "$path: $!";
+    print 'fixed';
+} else {
+    print 'warn';
+}
+PERL
+        )"; then
+            case "$outcome" in
+                fixed) crlf_count=$((crlf_count + 1)); result ok ssh-crlf "normalized CRLF to LF: $keyfile" ;;
+                warn) crlf_count=$((crlf_count + 1)); result warn ssh-crlf "CRLF violates SSH text LF policy: $keyfile - re-run with --fix" ;;
+            esac
         else
-            result warn ssh-crlf "Windows CRLF line endings (Linux/WSL ssh refuses these):$crlf - fix: perl -pi -e 's/\\r\\\$//' ~/.ssh/id_* (or re-run with --fix)"
+            result error ssh-crlf "could not inspect or normalize: $keyfile"
         fi
-    else
-        result ok ssh-crlf "key files are LF (Unix-clean)"
-    fi
+    done < <(find "$HOME/.ssh" -type f -print0)
+    if [ "$crlf_count" -eq 0 ]; then result ok ssh-crlf 'SSH text files are LF'; fi
 fi
 
 if [ "$errors" -gt 0 ]; then

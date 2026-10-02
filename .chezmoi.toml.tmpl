@@ -272,6 +272,12 @@
   {{ printf "%-*s" (int $w) "agent_key_comments" }} = [{{ range $i, $c := .agent_key_comments }}{{ if $i }}, {{ end }}{{ $c | quote }}{{ end }}]
 {{-   end }}
 {{- end }}
+{{- $account := . }}
+{{- range $field := list "auth_fingerprint" "signing_fingerprint" "agent_signing_key_comment" }}
+{{- if hasKey $account $field }}
+  {{ $field }} = {{ index $account $field | quote }}
+{{- end }}
+{{- end }}
 {{- if hasKey . "organizations" }}
 {{-   if kindOf .organizations | eq "string" }}
   {{ printf "%-*s" (int $w) "organizations" }} = [{{ .organizations | quote }}]
@@ -292,8 +298,7 @@
 {{/* ssh_hosts: rendered into the SSH client config by
      private_dot_ssh/private_config.tmpl; VS Code Remote-SSH reads them
      natively. comment renders as the block header - your memory hook.
-     Not on WSL: hosts are declared on the Windows side. */}}
-{{- if not $isWsl }}
+     WSL needs outgoing aliases too; only private key storage is Windows-only. */}}
 {{- if hasKey . "ssh_hosts" -}}
 # SSH Host Aliases
 # Each [[data.ssh_hosts]] block becomes an SSH Host entry and is picked up by
@@ -331,6 +336,9 @@
 {{- if hasKey . "identity" }}
   identity = {{ .identity | quote }}
 {{- end }}
+{{- if hasKey . "identity_fingerprint" }}
+  identity_fingerprint = {{ .identity_fingerprint | quote }}
+{{- end }}
 {{- if hasKey . "proxy" }}
   proxy    = {{ .proxy | quote }}
 {{- end }}
@@ -355,7 +363,6 @@
 #   comment  = "Bastion for staging"  # optional  block header (memory hook)
 #   os       = "linux"                # optional  mac|linux: Windows Terminal tab color
 #   tmux     = true                   # optional  Terminal tab attaches to tmux session "main" (or a name)
-{{- end }}
 {{- end }}
 
 {{/* remote_access: machine-local `dot remote` intent (docs/remote-access.md),

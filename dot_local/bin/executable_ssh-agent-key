@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Public-key fingerprint resolver; Python receives the agent's stdin unchanged.
+set -euo pipefail
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$script_dir/../lib/ssh_agent_key.py" "$@"
