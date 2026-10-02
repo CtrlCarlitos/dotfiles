@@ -1,9 +1,10 @@
 {{/* Helpers for round-tripping a machine-local table with aligned "=" columns.
      toml-value renders one scalar or list. emit-toml-table renders a table:
      scalar keys first (padded to the widest key in THIS table), then nested
-     tables, then arrays of tables. Input: dict path/table/depth/aot/first/
-     comments. Keys are written bare, so they must be valid bare TOML keys
-     (letters, digits, "_", "-"); values: strings, bools, numbers, lists. */}}
+     tables, then arrays of tables. Input: dict path/table/depth/aot. Keys are
+     written bare, so they must be valid bare TOML keys (letters, digits, "_",
+     "-"); values: strings, bools, numbers, lists. Comments are NOT emitted per
+     table: they live in one block above the tables (see remote_access). */}}
 {{- define "toml-value" -}}
 {{- if kindIs "string" . }}{{ . | quote }}
 {{- else if kindIs "slice" . }}[{{ range $i, $e := . }}{{ if $i }}, {{ end }}{{ if kindIs "string" $e }}{{ $e | quote }}{{ else }}{{ $e }}{{ end }}{{ end }}]
@@ -13,8 +14,6 @@
 {{- $path := .path -}}
 {{- $depth := .depth -}}
 {{- $aot := .aot -}}
-{{- $first := .first -}}
-{{- $comments := .comments -}}
 {{- $hdr := repeat (int (mul $depth 2)) " " -}}
 {{- $ind := repeat (int (mul (add $depth 1) 2)) " " -}}
 {{- $w := 0 -}}
@@ -27,11 +26,6 @@
 {{- $child := ternary (add $depth 1) $depth (gt $w 0) -}}
 {{- if gt $w 0 }}
 {{- "\n" }}
-{{- if and $first (hasKey $comments $path) }}
-{{-   range splitList "\n" (index $comments $path) }}
-{{- "\n" }}{{ $hdr }}# {{ . }}
-{{-   end }}
-{{- end }}
 {{- "\n" }}{{ $hdr }}{{ if $aot }}[[{{ $path }}]]{{ else }}[{{ $path }}]{{ end }}
 {{- range $k, $v := .table }}
 {{-   if and (not (kindIs "map" $v)) (or (not (kindIs "slice" $v)) (not $v) (not (kindIs "map" (index $v 0)))) }}
@@ -41,14 +35,14 @@
 {{- end }}
 {{- range $k, $v := .table }}
 {{-   if kindIs "map" $v }}
-{{- template "emit-toml-table" (dict "path" (printf "%s.%s" $path $k) "table" $v "depth" $child "aot" false "first" true "comments" $comments) }}
+{{- template "emit-toml-table" (dict "path" (printf "%s.%s" $path $k) "table" $v "depth" $child "aot" false) }}
 {{-   end }}
 {{- end }}
 {{- range $k, $v := .table }}
 {{-   if and (kindIs "slice" $v) $v }}
 {{-     if kindIs "map" (index $v 0) }}
-{{-       range $i, $e := $v }}
-{{- template "emit-toml-table" (dict "path" (printf "%s.%s" $path $k) "table" $e "depth" $child "aot" true "first" (eq $i 0) "comments" $comments) }}
+{{-       range $e := $v }}
+{{- template "emit-toml-table" (dict "path" (printf "%s.%s" $path $k) "table" $e "depth" $child "aot" true) }}
 {{-       end }}
 {{-     end }}
 {{-   end }}
@@ -350,24 +344,12 @@
      documented and ROUND-TRIPPED. `chezmoi init` regenerates this whole file,
      so any table not re-emitted here is destroyed. emit-toml-table writes every
      key present in ~/.config/chezmoi/chezmoi.toml, so new keys survive too.
-     $raComments maps a table path to the comment printed above its header
-     (arrays of tables: above the first entry only). */}}
-{{- $raComments := dict
-      "data.remote_access.windows" "Windows host: sshd + Remote Desktop, both Tailscale-scoped."
-      "data.remote_access.wsl" "WSL never joins the tailnet; its sshd is reached through the Windows\n:2222 portproxy."
-      "data.remote_access.login_keys" "Remote-LOGIN keys (separate namespace from Git identities).\ngenerate = false: the key pair already exists; its public half sits in\n~/.ssh/<name>.pub."
-      "data.remote_access.services.opencode_windows" "Loopback web services exposed privately. Windows and WSL are separate\nbackends, so each gets its own block with its own environment and port.\nPorts must not collide across environments (a Windows listener wins WSL2\nlocalhost forwarding on the same port): 4096 windows, 4097 wsl."
-      "data.remote_access.services.opencode_wsl" "Separate backend from opencode_windows: own environment and port."
-      "data.remote_access.tunnel" "cloudflared ingress, rendered by `dot remote tunnel render`."
--}}
+     All comments sit in ONE block above the live tables, like the accounts and
+     ssh_hosts sections; the tables themselves render bare. */}}
 # ==========================================================================
 # Remote Access (`dot remote`) - machine-local intent; see docs/remote-access.md
 # Names/targets only: no key material, tunnel credentials or Access policies.
 # ==========================================================================
-{{- if hasKey . "remote_access" }}
-{{- template "emit-toml-table" (dict "path" "data.remote_access" "table" .remote_access "depth" 0 "aot" false "first" true "comments" $raComments) }}
-{{- end }}
-
 # Reference (uncomment and customize in ~/.config/chezmoi/chezmoi.toml):
 #
 # [data.remote_access]
@@ -415,6 +397,9 @@
 #   [data.remote_access.tunnel.ingress.ssh]
 #     hostname = "<machine-local hostname>"
 #     service  = "ssh://127.0.0.1:22"
+{{- if hasKey . "remote_access" }}
+{{- template "emit-toml-table" (dict "path" "data.remote_access" "table" .remote_access "depth" 0 "aot" false) }}
+{{- end }}
 
 [add]
   secrets = "warning"
