@@ -163,4 +163,4 @@ versions:
   claude_install_ps1: "https://claude.ai/install.ps1"
 
 guardrail:
-  version: v0.23.31-dev
+  version: v0.23.32-dev
