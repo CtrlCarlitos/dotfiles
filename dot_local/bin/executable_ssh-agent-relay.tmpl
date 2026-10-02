@@ -355,7 +355,7 @@ cmd_use() { # $1 = alias
 }
 
 cmd_status() {
-    local alias record sock keys
+    local alias record sock keys label
     if is_wsl; then
         # Only relay mode has an upstream; native hosts would print "not
         # running" forever for a socket that is never created.
@@ -367,13 +367,17 @@ cmd_status() {
         fi
     fi
     for alias in "${RELAY_ALIASES[@]}"; do
+        label="$alias"
+        case "$alias" in
+            host-*) label="host-$(relay_field "$alias" keys)" ;;
+        esac
         record="$state_dir/$alias.sock"
         if [ -r "$record" ] && sock_reachable "$(cat "$record")"; then
             sock="$(cat "$record")"
             keys="$(SSH_AUTH_SOCK="$sock" ssh-add -l 2>/dev/null | grep -c '^[0-9]' || true)"
-            printf '%-24s %s  (%s key(s))\n' "$alias" "$sock" "$keys"
+            printf '%-24s %s  (%s key(s))\n' "$label" "$sock" "$keys"
         else
-            printf '%-24s not running\n' "$alias"
+            printf '%-24s not running\n' "$label"
         fi
     done
 }
