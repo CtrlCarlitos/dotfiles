@@ -750,6 +750,9 @@ function Test-LocalAdmin {
     # strict admins-only ACL) and the user's own authorized_keys. The tests
     # override this function, so no real group lookup ever runs in a test
     # host.
+    # The Windows twin's portable key/dispatcher fixtures also execute under
+    # pwsh on Unix; there is no local Windows Administrators group there.
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $false }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     # Group membership survives an unelevated (deny-only) UAC token. Elevation
     # controls whether writes succeed, not which login authorization file applies.
