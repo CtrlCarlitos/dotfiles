@@ -80,6 +80,20 @@ Host {{ $alias }}
 #     identity = "id_personal"
 #     comment  = "Bastion for the staging VPC - only reachable from office IP"
 #===============================================================================
+{{- /* WSL runs the ssh-agent relay: Windows holds the keys, and the relay's
+       UPSTREAM socket carries all of them. Detected like .chezmoi.toml.tmpl
+       does (kernel osrelease mentions "microsoft"); native Linux/macOS have no
+       upstream, so nothing is emitted there. The path mirrors the relay's own
+       (${XDG_RUNTIME_DIR:-/tmp/ssh-agent-relay-<uid>}/ssh-agent.upstream.sock):
+       ssh expands ${XDG_RUNTIME_DIR} itself, %i is the local uid. */}}
+{{- $wslRelay := false }}
+{{- if and (eq .chezmoi.os "linux") (hasKey .chezmoi "kernel") }}
+{{-   if hasKey .chezmoi.kernel "osrelease" }}
+{{-     if contains "microsoft" (.chezmoi.kernel.osrelease | lower) }}{{ $wslRelay = true }}{{ end }}
+{{-   end }}
+{{- end }}
+{{- $upstreamAgent := "/tmp/ssh-agent-relay-%i/ssh-agent.upstream.sock" }}
+{{- if env "XDG_RUNTIME_DIR" }}{{ $upstreamAgent = "${XDG_RUNTIME_DIR}/ssh-agent.upstream.sock" }}{{ end }}
 {{- if hasKey . "ssh_hosts" }}
 
 {{- range .ssh_hosts }}
@@ -108,6 +122,12 @@ Host {{ $name }}
     # the offer deterministic (exactly this key, no MaxAuthTries roulette).
     IdentityFile ~/.ssh/{{ .identity }}.pub
     IdentitiesOnly yes
+{{- if $wslRelay }}
+    # WSL: ask the relay's UPSTREAM agent (every Windows-agent key). The default
+    # SSH_AUTH_SOCK is a per-account filtered socket that holds Git keys only,
+    # so the .pub match above would find nothing there.
+    IdentityAgent {{ $upstreamAgent }}
+{{- end }}
 {{- end }}
 {{- if hasKey . "proxy" }}
     ProxyJump {{ .proxy }}

@@ -140,6 +140,30 @@ rather than assume it:
 SSH_AUTH_SOCK=$(ssh-agent-relay use github-work | cut -d= -f2) ssh-add -l
 ```
 
+## SSH to your own servers from WSL
+
+`[[data.ssh_hosts]]` entries with an `identity` pin the host to the key's **public**
+half (`IdentityFile ~/.ssh/<identity>.pub` + `IdentitiesOnly yes`); the private half
+stays in the Windows agent. Three steps make that work from a WSL distro:
+
+1. **Load the key into the Windows agent once** (a passphrase is typed once, ever):
+   `ssh-add $env:USERPROFILE\.ssh\<identity>` in PowerShell, then `ssh-add -l`.
+2. **Copy the `.pub` half into the distro**: `cp /mnt/c/Users/<you>/.ssh/<identity>.pub ~/.ssh/`.
+3. **`chezmoi apply` inside WSL.** On WSL the host block also gets
+   `IdentityAgent ${XDG_RUNTIME_DIR}/ssh-agent.upstream.sock` (or the relay's
+   `/tmp/ssh-agent-relay-<uid>/` fallback when `XDG_RUNTIME_DIR` is unset).
+
+Why the `IdentityAgent` line: your shell's `SSH_AUTH_SOCK` is the *per-account
+filtered* socket, which carries only that account's Git keys, so a server key can
+never match there. The **upstream** socket holds every Windows-agent key; pointing
+only these host blocks at it leaves the Git-account isolation untouched. Native
+Linux and macOS have no upstream, so nothing is added there.
+
+If `ssh` prints `Load key "...<identity>.pub": error in libcrypto`, the agent had no
+key matching that `.pub` half, so ssh fell back to reading the file as a private key.
+Check `ssh-add -l` on Windows (step 1) and that the host block carries the
+`IdentityAgent` line (step 3).
+
 ## Signing
 
 Signing needs the **public** key file plus the private key in an agent. On a host
