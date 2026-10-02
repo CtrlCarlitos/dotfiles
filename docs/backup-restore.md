@@ -33,10 +33,27 @@ The archive has a fixed allowlist:
 - `~/.config/chezmoi/chezmoi.toml`
 - Every regular file under `~/.ssh`, including non-standard private-key names, public keys, SSH config, known-host data, and signing data
 - A `manifest.json` describing the `dotfiles-backup-v1` archive format, creation time, and source platform
+- A `guardrail/` section, only when guardrail is configured on the machine (see [Guardrail operator state](#guardrail-operator-state))
 
 Git configuration, VS Code state, application data, installed packages, caches, and installed tools are excluded. Chezmoi recreates managed configuration after recovery.
 
 Before continuing, install `7z` or `7zz` and ensure `chezmoi.toml` exists. The scripts prompt for the passphrase without echoing it and never put it on the command line. Store the passphrase in a password-manager secure note named `Dotfiles backup passphrase`; do not store it in ChezMoi configuration, shell history, or the archive.
+
+### Guardrail operator state
+
+Operator decisions that nothing else can recreate. Windows splits them across three roots:
+
+| What | Windows | Linux / macOS / WSL | Captured |
+|---|---|---|---|
+| `waivers.toml`, `night.toml` | `%APPDATA%\guardrail` | `~/.config/guardrail` | Always, when present |
+| `operator-auth/` (passkey enrollment) | `%USERPROFILE%\.local\state\guardrail` | `~/.local/state/guardrail` | Only when `approval = "passkey"` |
+| `audit*.jsonl` | `%LOCALAPPDATA%\guardrail` | `~/.local/state/guardrail` | Only with `DOTBACKUP_AUDIT=1` |
+
+`waivers.toml` holds the approval mode, `web_research`, `web_hosts` and every per-repo grant and waiver, and no secrets. Review it before restoring: it re-applies every old grant. The audit log feeds `guardrail explain` and doctor's latency history only.
+
+Never captured, because each is regenerated, per machine, or must be proven again: `manifests\` (a stale copy against fresh settings causes false drift), `sessions\`, `coverage\`, `action-audit\`, `allowances\` (`auth.key` is a per-machine secret), `selftest-passed` (a trust record), the binary, the OpenCode plugin, guardrail's hook entries in each agent's settings, `plugin-timing.jsonl`, `plugin-failures.log`, `apply.log` and `%LOCALAPPDATA%\guardrail\backups\*.exe`.
+
+Restore puts these files back owner-only (mode 600/700, or a user-only ACL on Windows), **before** `dot up` runs `guardrail setup`, so setup sees the approval mode. Passkey enrollment is only useful on the same machine and authenticator: a cross-OS restore skips it and tells you to enroll again. Run the restore yourself as the operator, never inside an agent session: guardrail denies agents writing these directories (P5.self-config).
 
 ---
 

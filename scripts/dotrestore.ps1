@@ -55,6 +55,34 @@ function Test-DestinationParentsSafe {
     }
 }
 
+function Get-GuardrailDestination {
+    # Where a file under guardrail/ belongs on Windows, or $null for anything
+    # outside the fixed allowlist (a crafted archive cannot pick a destination).
+    # Three roots: %APPDATA% (operator config), %LOCALAPPDATA% (audit log) and
+    # %USERPROFILE%\.local\state (operator-auth).
+    param([string]$Relative)
+
+    $parts = @($Relative -split '[\\/]')
+    switch ($parts[0]) {
+        'config' {
+            if ($parts.Count -eq 2 -and @('waivers.toml', 'night.toml') -contains $parts[1]) {
+                return Join-Path (Join-Path $env:APPDATA 'guardrail') $parts[1]
+            }
+        }
+        'operator-auth' {
+            if ($parts.Count -ge 2) {
+                return Join-Path (Join-Path $env:USERPROFILE '.local\state\guardrail') ($parts -join '\')
+            }
+        }
+        'audit' {
+            if ($parts.Count -eq 2 -and $parts[1] -like 'audit*.jsonl') {
+                return Join-Path (Join-Path $env:LOCALAPPDATA 'guardrail') $parts[1]
+            }
+        }
+    }
+    return $null
+}
+
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
     throw "Archive is not readable: $Archive"
 }
@@ -82,9 +110,16 @@ try {
         throw "Archive contains a reparse point: $($stagedReparsePoint.FullName)"
     }
 
+    # 'guardrail' is the one optional entry (absent in older archives and when
+    # guardrail was never configured); the other four are required.
     $payloadEntries = @(Get-ChildItem -LiteralPath $payloadRoot -Force)
     $expectedPayloadEntries = 'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'
-    if ($payloadEntries.Count -ne 4 -or (($payloadEntries.Name | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
+    $payloadNames = @($payloadEntries.Name | Where-Object { $_ -ne 'guardrail' })
+    if ($payloadNames.Count -ne 4 -or (($payloadNames | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
+        throw 'Archive does not contain the dotfiles-backup-v1 layout.'
+    }
+    $guardrailSource = Join-Path $payloadRoot 'guardrail'
+    if ((Test-Path -LiteralPath $guardrailSource) -and -not (Test-Path -LiteralPath $guardrailSource -PathType Container)) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
 
@@ -133,6 +168,38 @@ try {
         }
     }
 
+    # source_platform is read through the property table: a manifest without it
+    # must not throw under StrictMode. Passkey enrollment is bound to the
+    # machine and authenticator it was made on, so a cross-OS restore skips it.
+    $sourcePlatformProperty = $manifestData.PSObject.Properties['source_platform']
+    $sourcePlatform = if ($null -ne $sourcePlatformProperty) { ([string]$sourcePlatformProperty.Value).ToLowerInvariant() } else { '' }
+    $crossOs = ($sourcePlatform -ne '' -and $sourcePlatform -ne 'windows')
+
+    $guardrailFiles = @()
+    $skippedAuth = 0
+    if (Test-Path -LiteralPath $guardrailSource -PathType Container) {
+        foreach ($source in @(Get-ChildItem -LiteralPath $guardrailSource -File -Recurse -Force)) {
+            $relative = $source.FullName.Substring($guardrailSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            $destination = Get-GuardrailDestination -Relative $relative
+            if ($null -eq $destination) {
+                throw 'Archive does not contain the dotfiles-backup-v1 layout.'
+            }
+            if ($crossOs -and $relative -like 'operator-auth*') {
+                $skippedAuth++
+                continue
+            }
+            Test-DestinationParentsSafe -Destination $destination -HomeDir $env:USERPROFILE
+            $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+            if ($null -ne $destinationItem) {
+                if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    throw "Refusing reparse-point destination: $destination"
+                }
+                throw "Refusing to overwrite existing guardrail file: $destination"
+            }
+            $guardrailFiles += [pscustomobject]@{ Source = $source.FullName; Destination = $destination }
+        }
+    }
+
     New-Item -ItemType Directory -Path (Split-Path -Parent $configDestination) -Force | Out-Null
     Copy-Item -LiteralPath $configSource -Destination $configDestination
     if ($sshFiles.Count -gt 0) {
@@ -149,8 +216,7 @@ try {
         # user (OpenSSH for Windows refuses identity files readable by broad
         # principals) and print the translation. Same-platform restores keep
         # current behavior.
-        $sourcePlatform = "$manifestData.source_platform"
-        if ($sourcePlatform -and $sourcePlatform -ne 'windows') {
+        if ($crossOs) {
             $normalized = @()
             foreach ($keyfile in (Get-ChildItem (Join-Path $sshDestinationRoot '.ssh') -Filter 'id_*' -File -ErrorAction SilentlyContinue)) {
                 & icacls $keyfile.FullName /grant:r "$($env:USERNAME):R" *> $null
@@ -159,6 +225,22 @@ try {
                 $normalized += $keyfile.Name
             }
             Write-Output "Cross-OS restore (source: $sourcePlatform, target: windows): normalized ACL on $($normalized.Count) key file(s)."
+        }
+    }
+
+    # guardrail operator state: user-only ACL (twin of the .sh 600/700), put
+    # back before `dot up` runs guardrail setup so setup sees the approval mode.
+    if (Test-Path -LiteralPath $guardrailSource -PathType Container) {
+        $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        foreach ($entry in $guardrailFiles) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $entry.Destination) -Force | Out-Null
+            Copy-Item -LiteralPath $entry.Source -Destination $entry.Destination
+            & icacls $entry.Destination /inheritance:r /grant:r "*${userSid}:(F)" *> $null
+        }
+        Write-Output "Restored $($guardrailFiles.Count) guardrail operator file(s), user-only."
+        Write-Output "  Review %APPDATA%\guardrail\waivers.toml: it re-applies every old grant."
+        if ($skippedAuth -gt 0) {
+            Write-Output "  Skipped $skippedAuth passkey enrollment file(s): enroll again on this machine."
         }
     }
 

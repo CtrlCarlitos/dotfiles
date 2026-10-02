@@ -28,6 +28,42 @@ if [ -d "$HOME/.ssh" ]; then
     done < <(find "$HOME/.ssh" -type f -print0)
 fi
 
+# guardrail operator state (optional section, absent when guardrail was never
+# configured). Only what cannot be recreated: waivers.toml / night.toml hold
+# the approval mode and per-repo grants. operator-auth/ is the passkey
+# enrollment and is captured only when approval = "passkey". The audit log is
+# history only, so it needs DOTBACKUP_AUDIT=1. manifests/, sessions/,
+# allowances/ (auth.key), selftest-passed and the binary are regenerated or
+# must be proven again per machine and are never captured.
+guardrail_config="$HOME/.config/guardrail"
+guardrail_state="$HOME/.local/state/guardrail"
+guardrail_count=0
+for name in waivers.toml night.toml; do
+    if [ -f "$guardrail_config/$name" ] && [ ! -L "$guardrail_config/$name" ]; then
+        mkdir -p "$root/guardrail/config"
+        cp "$guardrail_config/$name" "$root/guardrail/config/$name"
+        guardrail_count=$((guardrail_count + 1))
+    fi
+done
+if [ -f "$guardrail_config/waivers.toml" ] \
+    && grep -Eq '^[[:space:]]*approval[[:space:]]*=[[:space:]]*"passkey"' "$guardrail_config/waivers.toml" \
+    && [ -d "$guardrail_state/operator-auth" ]; then
+    while IFS= read -r -d '' source; do
+        relative="${source#"$guardrail_state/operator-auth/"}"
+        mkdir -p "$(dirname "$root/guardrail/operator-auth/$relative")"
+        cp "$source" "$root/guardrail/operator-auth/$relative"
+        guardrail_count=$((guardrail_count + 1))
+    done < <(find "$guardrail_state/operator-auth" -type f -print0)
+fi
+if [ "${DOTBACKUP_AUDIT:-}" = 1 ]; then
+    for source in "$guardrail_state"/audit*.jsonl; do
+        if [ ! -f "$source" ] || [ -L "$source" ]; then continue; fi
+        mkdir -p "$root/guardrail/audit"
+        cp "$source" "$root/guardrail/audit/${source##*/}"
+        guardrail_count=$((guardrail_count + 1))
+    done
+fi
+
 # source_platform: normalized to the canonical vocabulary the restore twins
 # compare against (windows / linux / darwin; uname -s gives Linux/Darwin).
 platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -49,6 +85,11 @@ cat > "$root/RESTORE.md" <<EOF
   different OS: paths and remote_access values are machine-specific.
 - \`ssh/\` - every regular file from this machine's \`~/.ssh\`: private keys,
   .pub halves, config, known_hosts.
+- \`guardrail/\` - present only if guardrail was configured: \`config/\`
+  (waivers.toml, night.toml: approval mode and every per-repo grant),
+  \`operator-auth/\` (passkey enrollment, same machine only) and \`audit/\`
+  (history). Review waivers.toml before restoring: it re-applies every old
+  grant.
 
 ## Restore on the same OS
 
@@ -90,6 +131,7 @@ fi
 
 printf 'Backup created: %s\n' "$archive"
 printf '  Contains %d private key file(s) from ~/.ssh. Treat this archive as key material.\n' "$keys"
+printf '  Contains %d guardrail operator file(s).\n' "$guardrail_count"
 printf '  This is disaster recovery for THIS machine, not a way to set up another one:\n'
 printf '  give an additional machine its own keys instead (docs/ssh-agents.md).\n'
 printf '  Re-run after rotating a key - older archives still hold the old ones.\n'

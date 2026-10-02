@@ -172,10 +172,29 @@ Set-Content -LiteralPath (Join-Path $homeSource '.ssh\custom_signing_key') -Valu
 Set-Content -LiteralPath (Join-Path $homeSource '.ssh\custom_signing_key.pub') -Value 'public key' -Encoding ascii
 Set-Content -LiteralPath (Join-Path $homeSource '.ssh\nested\deep_key') -Value 'nested private key' -Encoding ascii
 
+# Guardrail operator state in all three Windows roots, in passkey mode, plus
+# state that must never be captured. APPDATA/LOCALAPPDATA are pointed into the
+# temp home below: left alone, the scripts would read and collide with the real
+# operator's guardrail files.
+foreach ($d in @(
+    (Join-Path $homeSource 'AppData\Roaming\guardrail'),
+    (Join-Path $homeSource 'AppData\Local\guardrail'),
+    (Join-Path $homeSource '.local\state\guardrail\operator-auth\nested'),
+    (Join-Path $homeSource '.local\state\guardrail\manifests'))) {
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+}
+Set-Content -LiteralPath (Join-Path $homeSource 'AppData\Roaming\guardrail\waivers.toml') -Value 'approval = "passkey"' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $homeSource 'AppData\Roaming\guardrail\night.toml') -Value 'night = true' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $homeSource 'AppData\Local\guardrail\audit-2026.jsonl') -Value '{"event":1}' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $homeSource '.local\state\guardrail\operator-auth\nested\key') -Value 'credential' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $homeSource '.local\state\guardrail\manifests\claude.json') -Value 'regenerated' -Encoding ascii
+
 $Log = Join-Path $Tmp '7z.log'
 [IO.File]::WriteAllText($Log, '', $Utf8NoBom)
 $env:HOME = $homeSource
 $env:USERPROFILE = $homeSource
+$env:APPDATA = Join-Path $homeSource 'AppData\Roaming'
+$env:LOCALAPPDATA = Join-Path $homeSource 'AppData\Local'
 $env:PATH = "$bin;$env:PATH"
 $env:FAKE_7Z_LOG = $Log
 
@@ -200,6 +219,11 @@ $manifestHead = [IO.File]::ReadAllBytes((Join-Path $payload 'manifest.json')) | 
 if ($manifestHead.Count -ge 3 -and $manifestHead[0] -eq 0xEF) {
     Fail '[1] manifest was written with a BOM (5.1-safe no-BOM write regressed)'
 }
+foreach ($rel in @('guardrail\config\waivers.toml', 'guardrail\config\night.toml', 'guardrail\operator-auth\nested\key')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $payload $rel))) { Fail "[1] guardrail payload missing $rel" }
+}
+if (Test-Path -LiteralPath (Join-Path $payload 'guardrail\audit')) { Fail '[1] audit log captured without DOTBACKUP_AUDIT=1' }
+if (@(Get-ChildItem -LiteralPath $payload -Recurse -Force -Filter 'claude.json').Count -ne 0) { Fail '[1] regenerated manifests/ was captured' }
 Write-Host '  ok: 5.1 backup creates the encrypted v1 archive, no-BOM manifest, full payload'
 
 # --- [2] Restore into an empty home round-trips every staged file.
@@ -207,6 +231,8 @@ $homeRestore = Join-Path $Tmp 'home-restore'
 New-Item -ItemType Directory -Force -Path $homeRestore | Out-Null
 $env:HOME = $homeRestore
 $env:USERPROFILE = $homeRestore
+$env:APPDATA = Join-Path $homeRestore 'AppData\Roaming'
+$env:LOCALAPPDATA = Join-Path $homeRestore 'AppData\Local'
 $restoreOut = & $powerShell5 -NoProfile -ExecutionPolicy Bypass -File $Restore -Archive $archive 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { Fail "[2] restore failed under 5.1: $restoreOut" }
 foreach ($rel in @('.config\chezmoi\chezmoi.toml', '.ssh\custom_signing_key', '.ssh\custom_signing_key.pub', '.ssh\nested\deep_key')) {
@@ -215,7 +241,15 @@ foreach ($rel in @('.config\chezmoi\chezmoi.toml', '.ssh\custom_signing_key', '.
     if (-not (Test-Path -LiteralPath $dstPath)) { Fail "[2] restore did not produce $rel : $restoreOut" }
     if ([IO.File]::ReadAllText($dstPath) -ne $srcContent) { Fail "[2] content mismatch for $rel" }
 }
-Write-Host '  ok: backup -> restore round-trip preserves the payload'
+foreach ($rel in @('AppData\Roaming\guardrail\waivers.toml', 'AppData\Roaming\guardrail\night.toml', '.local\state\guardrail\operator-auth\nested\key')) {
+    $dstPath = Join-Path $homeRestore $rel
+    if (-not (Test-Path -LiteralPath $dstPath)) { Fail "[2] restore did not produce guardrail file $rel : $restoreOut" }
+    if ([IO.File]::ReadAllText($dstPath) -ne [IO.File]::ReadAllText((Join-Path $homeSource $rel))) { Fail "[2] content mismatch for $rel" }
+}
+$aclText = (& icacls (Join-Path $homeRestore 'AppData\Roaming\guardrail\waivers.toml') | Out-String)
+if ($aclText -match 'Everyone|BUILTIN\\Users|Authenticated Users') { Fail "[2] waivers.toml ACL is not user-only: $aclText" }
+if ($restoreOut -notmatch 'guardrail operator file') { Fail "[2] guardrail restore not reported: $restoreOut" }
+Write-Host '  ok: backup -> restore round-trip preserves the payload and guardrail state (user-only ACL)'
 
 # --- [3] A second restore into the populated home must be refused.
 # Drop EAP to Continue around the call: 5.1 promotes stderr lines of a native

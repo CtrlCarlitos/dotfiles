@@ -46,6 +46,11 @@ for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         manifest.json) [ -f "$entry" ] && manifest_entry=1 ;;
         chezmoi) [ -d "$entry" ] && chezmoi_entry=1 ;;
         ssh) [ -d "$entry" ] && ssh_entry=1 ;;
+        # guardrail/: optional operator state (absent in older archives)
+        guardrail) [ -d "$entry" ] || {
+            printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
+            exit 1
+        } ;;
         # RESTORE.md: human-only orientation, optional (older archives lack it)
         RESTORE.md) ;;
         *)
@@ -72,6 +77,38 @@ else
         exit 1
     }
 fi
+
+# source_platform comes from the manifest (windows / linux / darwin); empty
+# when absent. Used for the cross-OS notes and to skip passkey enrollment.
+target_platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$target_platform" in darwin*) target_platform="darwin" ;; esac
+source_platform=""
+if command -v jq >/dev/null 2>&1; then
+    source_platform="$(jq -r '.source_platform // empty' "$manifest" 2>/dev/null || true)"
+else
+    source_platform="$(sed -n 's/.*"source_platform"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$manifest" 2>/dev/null || true)"
+fi
+source_platform="$(printf '%s' "$source_platform" | tr '[:upper:]' '[:lower:]')"
+cross_os=0
+[ -z "$source_platform" ] || [ "$source_platform" = "$target_platform" ] || cross_os=1
+
+# guardrail_dest: where a file under guardrail/ belongs, or fail for anything
+# outside the fixed allowlist (so a crafted archive cannot pick a destination).
+guardrail_dest() { # $1 = path relative to guardrail/
+    local rest
+    case "$1" in
+        config/*)
+            rest="${1#config/}"
+            case "$rest" in waivers.toml | night.toml) printf '%s\n' "$HOME/.config/guardrail/$rest" ;; *) return 1 ;; esac
+            ;;
+        operator-auth/*) printf '%s\n' "$HOME/.local/state/guardrail/$1" ;;
+        audit/*)
+            rest="${1#audit/}"
+            case "$rest" in */*) return 1 ;; audit*.jsonl) printf '%s\n' "$HOME/.local/state/guardrail/$rest" ;; *) return 1 ;; esac
+            ;;
+        *) return 1 ;;
+    esac
+}
 
 reject_symlinked_parent() { # $1 = destination path
     local parent
@@ -109,6 +146,26 @@ if [ -d "$ssh_source" ]; then
     done < <(find "$ssh_source" -type f -print0)
 fi
 
+guardrail_source="$root/guardrail"
+skipped_auth=0
+if [ -d "$guardrail_source" ]; then
+    while IFS= read -r -d '' source; do
+        relative="${source#"$guardrail_source/"}"
+        destination="$(guardrail_dest "$relative")" || {
+            printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
+            exit 1
+        }
+        # Passkey enrollment is bound to the machine and authenticator it was
+        # made on: a cross-OS restore enrolls again instead.
+        case "$relative" in operator-auth/*) [ "$cross_os" -eq 0 ] || continue ;; esac
+        reject_symlinked_parent "$destination"
+        if [ -e "$destination" ] || [ -L "$destination" ]; then
+            printf 'ERROR: refusing to overwrite existing guardrail file: %s\n' "$destination" >&2
+            exit 1
+        fi
+    done < <(find "$guardrail_source" -type f -print0)
+fi
+
 mkdir -p "$(dirname "$config_destination")"
 cp "$config_source" "$config_destination"
 if [ -d "$ssh_source" ]; then
@@ -126,21 +183,34 @@ if [ -d "$ssh_source" ]; then
     done < <(find "$ssh_source" -type f -print0)
 fi
 
+# guardrail operator state: owner-only (files 600, directories 700), restored
+# before `dot up` runs guardrail setup so setup sees the approval mode.
+guardrail_restored=0
+if [ -d "$guardrail_source" ]; then
+    while IFS= read -r -d '' source; do
+        relative="${source#"$guardrail_source/"}"
+        destination="$(guardrail_dest "$relative")"
+        case "$relative" in operator-auth/*) [ "$cross_os" -eq 0 ] || { skipped_auth=$((skipped_auth + 1)); continue; } ;; esac
+        mkdir -p "$(dirname "$destination")"
+        chmod 700 "$(dirname "$destination")"
+        cp "$source" "$destination"
+        chmod 600 "$destination"
+        guardrail_restored=$((guardrail_restored + 1))
+    done < <(find "$guardrail_source" -type f -print0)
+    printf 'Restored %d guardrail operator file(s), owner-only.\n' "$guardrail_restored"
+    printf '  Review ~/.config/guardrail/waivers.toml: it re-applies every old grant.\n'
+    if [ "$skipped_auth" -gt 0 ]; then
+        printf '  Skipped %d passkey enrollment file(s): enroll again on this machine.\n' "$skipped_auth"
+    fi
+fi
+
 # Cross-OS normalization: when the archive was created on a different
 # platform, translate what translates and say what was done. source_platform
 # comes from the backup manifest (windows / linux / darwin). A Windows-origin
 # restore carries CRLF line endings that Unix OpenSSH refuses ("error in
 # libcrypto" before any auth) - stripped here; permissions are already
 # normalized to 600 above.
-target_platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
-case "$target_platform" in darwin*) target_platform="darwin" ;; esac
-source_platform=""
-if command -v jq >/dev/null 2>&1; then
-    source_platform="$(jq -r '.source_platform // empty' "$manifest" 2>/dev/null || true)"
-else
-    source_platform="$(sed -n 's/.*"source_platform"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$manifest" 2>/dev/null || true)"
-fi
-if [ -n "$source_platform" ] && [ "$source_platform" != "$target_platform" ]; then
+if [ "$cross_os" -eq 1 ]; then
     translated=0
     while IFS= read -r -d '' restored; do
         if [ -s "$restored" ] && grep -q "$(printf '\r')" "$restored" 2>/dev/null; then
