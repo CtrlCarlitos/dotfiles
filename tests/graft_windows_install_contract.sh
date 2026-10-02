@@ -39,10 +39,9 @@ iwt_end="$(awk -v s="$iwt_start" 'NR > s && $0 == "}"{print NR; exit}' "$rendere
 jqc_start="$(grep -nF 'function ConvertFrom-JsonC' "$rendered" | head -1 | cut -d: -f1)"
 jqc_end="$(awk -v s="$jqc_start" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
 chain_start="$(grep -nE '^if \(Get-Command graft -ErrorAction SilentlyContinue\) \{$' "$rendered" | head -1 | cut -d: -f1)"
-# End BEFORE the guardrail section that shares this gate: with packages.guardrail
-# unset its disabled branch would run against the HOST's real guardrail state
-# (observed: it reached for the live release). The chain must stay graft-only.
-chain_end="$(grep -nF '# guardrail-section: begin' "$rendered" | head -1 | cut -d: -f1)"
+# Stop at Graft's own boundary. The old guardrail anchor also extracted every
+# intervening installer block, potentially invoking real tools/network access.
+chain_end="$(grep -nF '# graft-install-section: end' "$rendered" | head -1 | cut -d: -f1)"
 chain_end=$((chain_end - 1))
 for v in "$iwt_start" "$iwt_end" "$jqc_start" "$jqc_end" "$chain_start" "$chain_end"; do
     [ -n "$v" ] || fail "rendered installer: extraction anchor missing"

@@ -45,18 +45,41 @@ failed=0
 skipped_names=""
 silent_names=""
 
+# Bound individual tests and identify the running test before capturing output.
+# GNU timeout is coreutils on Linux/Git Bash and gtimeout on Homebrew macOS.
+test_timeout="${TEST_TIMEOUT_SECONDS:-180}"
+if ! [[ "$test_timeout" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'TEST_TIMEOUT_SECONDS must be a positive integer\n' >&2
+    exit 2
+fi
+test_command=(bash --)
+for timer in timeout gtimeout; do
+    if command -v "$timer" >/dev/null 2>&1 && "$timer" --version 2>/dev/null | grep -q 'GNU coreutils'; then
+        test_command=("$timer" -k 5s "$test_timeout" bash --)
+        break
+    fi
+done
+if [ "${#test_command[@]}" -eq 2 ]; then
+    printf 'warning: GNU timeout unavailable; per-test time limits disabled\n' >&2
+fi
+
 shopt -s nullglob
 for f in "$tests_dir"/*.sh; do
     base="$(basename -- "$f")"
     [ "$base" = "run.sh" ] && continue
     [ "$base" = "lib.sh" ] && continue
 
-    out="$(bash -- "$f" 2>&1)"
+    printf 'RUN  %s\n' "$base"
+    started=$SECONDS
+    out="$("${test_command[@]}" "$f" 2>&1)"
     rc=$?
 
     if [ "$rc" -ne 0 ]; then
         failed=$((failed + 1))
         printf 'FAIL %s (exit %d)\n' "$base" "$rc"
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            printf '    test exceeded its %ss budget or was killed\n' "$test_timeout"
+        fi
         printf '%s\n' "$out" | tail -200 | sed 's/^/    /'
         continue
     fi
@@ -77,7 +100,7 @@ for f in "$tests_dir"/*.sh; do
         printf 'SKIP %s\n' "$base"
     else
         passed=$((passed + 1))
-        printf 'ok   %s\n' "$base"
+        printf 'ok   %s (%ss)\n' "$base" "$((SECONDS - started))"
     fi
 done
 

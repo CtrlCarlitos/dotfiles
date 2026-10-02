@@ -6,6 +6,7 @@
        and ssh signing would need a .pub that isn't present either. */ -}}
 {{- $envDev := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") | default "" -}}
 {{- $isDevcontainer := or (eq $envDev "true") (eq $envDev "1") (stat "/.dockerenv" | not | not) -}}
+{{- $isWsl := and (eq .chezmoi.os "linux") (contains "microsoft" (.chezmoi.kernel.osrelease | lower)) (not (env "SSH_AGENT_RELAY_NATIVE")) (not $isDevcontainer) -}}
 #!/usr/bin/env bash
 # Generate git identity files from accounts configuration
 # This script runs whenever the accounts list changes
@@ -40,6 +41,19 @@ mkdir -p "$HOME/{{ . }}"
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ end }}
 {{- if and (not $signKey) (hasKey . "signingkey") }}{{ $signKey = .signingkey }}{{ end }}
+{{- $signFingerprint := "missing-fingerprint-run-ssh-fingerprints" }}
+{{- if hasKey . "signing_fingerprint" }}{{ $signFingerprint = .signing_fingerprint }}
+{{- else if and (not $signKey) (hasKey . "auth_fingerprint") }}{{ $signFingerprint = .auth_fingerprint }}{{ end }}
+{{- if and $key $isWsl }}
+
+# An executable per account lets gpg.ssh.program select the socket too.
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/git-agent-{{ $alias }}" << 'AGENT_EOF'
+#!/usr/bin/env bash
+exec "$HOME/.local/bin/git-agent" {{ $alias | quote }} {{ $signFingerprint | quote }} "$@"
+AGENT_EOF
+chmod 700 "$HOME/.local/bin/git-agent-{{ $alias }}"
+{{- end }}
 
 # Generate ~/.gitconfig-{{ $alias }}
 cat > "$HOME/.gitconfig-{{ $alias }}" << 'IDENTITY_EOF'
@@ -49,7 +63,18 @@ cat > "$HOME/.gitconfig-{{ $alias }}" << 'IDENTITY_EOF'
 [user]
     name = {{ .name | quote }}
     email = {{ .email | quote }}
-{{- if and $key (not $isDevcontainer) }}
+{{- if and $key $isWsl }}
+
+[commit]
+    gpgsign = true
+[gpg]
+    format = ssh
+[gpg "ssh"]
+    program = {{ printf "%s/.local/bin/git-agent-%s" $.chezmoi.homeDir $alias | quote }}
+    defaultKeyCommand = {{ printf "\"%s/.local/bin/git-agent-%s\" key" $.chezmoi.homeDir $alias | quote }}
+[core]
+    sshCommand = {{ printf "\"%s/.local/bin/git-agent-%s\" ssh" $.chezmoi.homeDir $alias | quote }}
+{{- else if and $key (not $isDevcontainer) }}
     signingkey = ~/.ssh/{{ if $signKey }}{{ $signKey }}{{ else }}{{ $key }}{{ end }}.pub
 
 [commit]
@@ -199,7 +224,7 @@ echo "  ssh-agent relay: one agent per account -"
 {{- $relay_agents = add $relay_agents 1 }}
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ else if hasKey . "signingkey" }}{{ $signKey = .signingkey }}{{ end }}
-echo "    agent {{ .provider }}-{{ .username }}: holds {{ if hasKey . "key" }}{{ .key }}{{ else }}(no key declared){{ end }}{{ if $signKey }} + {{ $signKey }} (signing){{ end }}"
+echo "    agent {{ .provider }}-{{ .username }}: configured for {{ if hasKey . "key" }}{{ .key }}{{ else }}(no key declared){{ end }}{{ if $signKey }} + {{ $signKey }} (signing){{ end }}"
 {{- end }}
 {{- end }}
 echo "    total: {{ $relay_agents }} relay agent(s) - inspect with: ssh-agent-relay status"
@@ -245,6 +270,15 @@ signers_tmp="$WORK/allowed_signers.tmp"
 {{- if and (not $signKey) (hasKey . "signingkey") }}{{ $signKey = .signingkey }}{{ end }}
 {{- if and (not $signKey) (hasKey . "key") }}{{ $signKey = .key }}{{ end }}
 {{- if $signKey }}
+{{- if and $isWsl (hasKey . "username") .username }}
+{{- $provider := "github" }}{{ if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
+signer_email={{ .email | quote }}
+if signer_key="$("$HOME/.local/bin/git-agent-{{ $provider }}-{{ .username }}" key)"; then
+    printf '%s namespaces="git" %s\n' "$signer_email" "${signer_key#key::}" >> "$signers_tmp"
+else
+    echo "  ! Cannot resolve agent signing key for $signer_email; existing allowed_signers retained" >&2
+fi
+{{- else }}
 if [[ -f "$HOME/.ssh/{{ $signKey }}.pub" ]]; then
     # Keytype+keydata only (no comment) - matches the format the scan loop below
     # produces for the same file, so sort -u actually collapses the duplicate
@@ -256,6 +290,7 @@ if [[ -f "$HOME/.ssh/{{ $signKey }}.pub" ]]; then
 else
     echo "  ! Skipping {{ .email }} - {{ $signKey }}.pub not found yet" >&2
 fi
+{{- end }}
 {{- end }}
 {{- end }}
 

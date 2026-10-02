@@ -4,11 +4,9 @@
 # Auto-generated from chezmoi accounts configuration
 #===============================================================================
 
-# Note: IdentityFile names the key. For the git account aliases below the
-# private key lives on this machine and IdentitiesOnly=yes keeps the offer
-# deterministic. For the operator SSH HOSTS the .pub half is referenced
-# instead (see the block comment there) - the private half stays in the
-# Windows ssh-agent and is offered through the ssh-agent relay on WSL.
+# Native hosts use local identity selectors. WSL relay mode instead points
+# each alias at a fingerprint-filtered socket backed by the Windows agent;
+# no private keys or .pub selector files are needed in the distro.
 
 #-------------------------------------------------------------------------------
 # Global options (must come before any Host block to apply everywhere).
@@ -22,6 +20,12 @@
 {{- end }}
 #-------------------------------------------------------------------------------
 AddKeysToAgent yes
+{{- $relayWsl := and (eq .chezmoi.os "linux") (contains "microsoft" (.chezmoi.kernel.osrelease | lower)) (not (env "SSH_AGENT_RELAY_NATIVE")) }}
+{{- $relayDir := env "SSH_AGENT_RELAY_DIR" }}
+{{- if not $relayDir }}
+{{- $runtime := env "XDG_RUNTIME_DIR" | default "/tmp/ssh-agent-relay-%i" }}
+{{- $relayDir = printf "%s/ssh-agent-relay" $runtime }}
+{{- end }}
 {{- if eq .chezmoi.os "darwin" }}
 UseKeychain yes
 {{- end }}
@@ -40,8 +44,14 @@ UseKeychain yes
 Host {{ $alias }}
     HostName {{ $provider }}.com
     User git
+{{- if $relayWsl }}
+    IdentityAgent {{ printf "%s/%s.agent" $relayDir $alias | quote }}
+    IdentityFile none
+    IdentitiesOnly no
+{{- else }}
     IdentityFile ~/.ssh/{{ .key }}
     IdentitiesOnly yes
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -61,9 +71,9 @@ Host {{ $alias }}
 #   user     (optional)  login user
 #   port     (optional)  SSH port (default 22)
 #   identity (optional)  key NAME in ~/.ssh (e.g. "id_work") - its .pub half
-#                        is referenced and must be copied to every machine
-#                        that SSHes out from it; on Windows generate_identities
-#                        normalizes the private key's ACL
+#                        is used on native hosts. On WSL identity_fingerprint
+#                        selects a Windows-agent key without a local file.
+#   identity_fingerprint SHA256 fingerprint populated by dot ssh-fingerprints
 #   proxy    (optional)  ProxyJump target alias (e.g. a bastion `name`)
 #   comment  (optional)  free text - rendered as the block's header comment
 #                        so `grep ~/.ssh/config` answers "what was this host?"
@@ -100,14 +110,17 @@ Host {{ $name }}
 {{- if hasKey . "port" }}
     Port {{ .port }}
 {{- end }}
-{{- if hasKey . "identity" }}
-    # The PUBLIC half is referenced here (and deployed to every machine's
-    # ~/.ssh): ssh matches it against the ssh-agent relay upstream, which
-    # holds the private half on the Windows side - so the same line works
-    # everywhere without duplicating private keys. IdentitiesOnly then makes
-    # the offer deterministic (exactly this key, no MaxAuthTries roulette).
+{{- if and (hasKey . "identity") .identity }}
+{{- if $relayWsl }}
+    IdentityAgent {{ printf "%s/host-%s.agent" $relayDir (.identity | sha256sum | trunc 16) | quote }}
+    IdentityFile none
+    IdentitiesOnly no
+{{- else }}
+    # Native hosts match this public selector against their local agent.
+    # Load the corresponding private key into that agent before connecting.
     IdentityFile ~/.ssh/{{ .identity }}.pub
     IdentitiesOnly yes
+{{- end }}
 {{- end }}
 {{- if hasKey . "proxy" }}
     ProxyJump {{ .proxy }}
