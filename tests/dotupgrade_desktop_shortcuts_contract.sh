@@ -24,10 +24,12 @@ snapshot_line="$(grep -n 'Get-DesktopShortcut)' "$upgrade" | head -n1 | cut -d: 
 choco_line="$(grep -n '^    choco upgrade all' "$upgrade" | head -n1 | cut -d: -f1)"
 ai_line="$(grep -n "update_ai_tools.ps1')" "$upgrade" | head -n1 | cut -d: -f1)"
 cleanup_line="$(grep -n 'Remove-NewDesktopShortcut -Before' "$upgrade" | head -n1 | cut -d: -f1)"
-[ -n "$snapshot_line" ] && [ -n "$choco_line" ] && [ -n "$ai_line" ] && [ -n "$cleanup_line" ] ||
+if [ -z "$snapshot_line" ] || [ -z "$choco_line" ] || [ -z "$ai_line" ] || [ -z "$cleanup_line" ]; then
     fail 'could not locate the snapshot, sweep, and cleanup lines in dotupgrade.ps1'
-[ "$snapshot_line" -lt "$choco_line" ] || fail 'the shortcut snapshot must precede the choco sweep'
-[ "$cleanup_line" -gt "$ai_line" ] || fail 'the shortcut cleanup must follow the last sweep'
+else
+    [ "$snapshot_line" -lt "$choco_line" ] || fail 'the shortcut snapshot must precede the choco sweep'
+    [ "$cleanup_line" -gt "$ai_line" ] || fail 'the shortcut cleanup must follow the last sweep'
+fi
 
 # The template: a set value is re-emitted, an unset one leaves only a comment.
 empty_config="$(mktemp -d)/empty.toml"
