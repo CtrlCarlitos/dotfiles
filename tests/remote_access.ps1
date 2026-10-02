@@ -1311,7 +1311,16 @@ try {
     $publicLine = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4bGmSPbKDIX6g9uAAaf7UNuYF8b2TmXLamtGpiI6Cd contract@fixture'
     [IO.File]::WriteAllText((Join-Path $Home_ '.ssh/id_contract.pub'), ($publicLine + "`n"))
     Remove-Item -LiteralPath (Join-Path $Home_ '.ssh/authorized_keys') -ErrorAction SilentlyContinue
-    $out = Invoke-CheckedKeyCommand @('status')
+    $savedEncoding = $OutputEncoding
+    $savedPythonEncoding = $env:PYTHONIOENCODING
+    try {
+        $OutputEncoding = [Text.UTF8Encoding]::new($true)
+        $env:PYTHONIOENCODING = 'cp1252'
+        $out = Invoke-CheckedKeyCommand @('status')
+    } finally {
+        $OutputEncoding = $savedEncoding
+        $env:PYTHONIOENCODING = $savedPythonEncoding
+    }
     if (-not (Test-Path (Join-Path $Home_ '.ssh/authorized_keys'))) { Ok 'keys status: does not create authorization' } else { Fail 'keys status: does not create authorization' $out }
     $out = Invoke-CheckedKeyCommand @('sync')
     if ((Get-Content -Raw (Join-Path $Home_ '.ssh/authorized_keys')).Trim() -eq $publicLine) { Ok 'keys sync: real adapter authorizes the declared public-only key' } else { Fail 'keys sync: real adapter authorizes the declared public-only key' $out }

@@ -214,6 +214,15 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(path.read_text(), self.public['a'] + '\n')
 
+    def test_cli_accepts_utf8_bom_independent_of_python_console_encoding(self):
+        arguments = [sys.executable, '-B', str(ROOT / 'scripts/remote_keys.py'), 'status',
+            '--public-key-dir', str(self.directory), '--authorized-keys', str(self.directory / 'authorized_keys'),
+            '--platform', 'windows-user' if os.name == 'nt' else 'unix']
+        payload = b'\xef\xbb\xbf' + json.dumps({'ssh': {'login_keys': []}}).encode('utf-8')
+        result = subprocess.run(arguments, input=payload, capture_output=True,
+            env={**os.environ, 'PYTHONIOENCODING': 'cp1252'})
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
     def test_cli_remove_without_removed_public_file(self):
         path = self.directory / 'authorized_keys'
         path.write_text(self.public['a'] + '\n' + self.public['b'] + '\n')
@@ -278,7 +287,8 @@ class AuthorizationTests(unittest.TestCase):
             return loader(names, directory)
         arguments = ['remote_keys', 'sync', '--config', str(config), '--authorized-keys', str(path),
                      '--public-key-dir', str(self.directory), '--platform', self.policy().platform]
-        with patch.object(sys, 'argv', arguments), patch.object(sys, 'stdin', io.StringIO('{"ssh":{"login_keys":[]}}')), patch.object(cli, 'load_declared_keys', side_effect=changed):
+        stream = io.TextIOWrapper(io.BytesIO(b'{"ssh":{"login_keys":[]}}'), encoding='utf-8')
+        with patch.object(sys, 'argv', arguments), patch.object(sys, 'stdin', stream), patch.object(cli, 'load_declared_keys', side_effect=changed):
             with self.assertRaises((ValueError, OSError)):
                 cli.main()
         self.assertEqual(path.read_text(), before)

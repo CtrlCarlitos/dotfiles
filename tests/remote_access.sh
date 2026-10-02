@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Fixture wrappers isolate RA_SSHD_CONFIG; later tests deliberately replace it.
+# shellcheck disable=SC2031
 # Transport fixtures; the shared key engine has its own executed test suite.
 set -euo pipefail
 

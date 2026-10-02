@@ -800,11 +800,13 @@ function Invoke-RemoteKeys {
         $arguments += $Name
     } elseif ($Name) { throw 'Unexpected key argument' }
     $saved = $ErrorActionPreference
+    $savedEncoding = $OutputEncoding
     try {
         $ErrorActionPreference = 'Continue'
+        $OutputEncoding = [Text.UTF8Encoding]::new($false)
         $config | ConvertTo-Json -Depth 30 -Compress | & $python @arguments
         $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $saved }
+    } finally { $ErrorActionPreference = $saved; $OutputEncoding = $savedEncoding }
     if ($code -ne 0) { throw "SSH authorization command failed (exit $code)" }
 }
 

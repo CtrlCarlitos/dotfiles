@@ -35,7 +35,10 @@ def main():
     if args.action == "count":
         print(len(parse_authorized(current)))
         return
-    remote = json.load(sys.stdin)
+    # PowerShell 5.1 may emit a UTF-8 BOM; Python's console encoding varies
+    # between Windows installations. Treat the machine-readable boundary as
+    # UTF-8 bytes rather than decoding it through the ambient console codec.
+    remote = json.loads(sys.stdin.buffer.read().decode('utf-8-sig'))
     names = contract_names(remote)
     config_snapshot = None
     if args.action in ('sync', 'remove'):
