@@ -76,6 +76,10 @@ Documents/**
 # Windows Terminal settings + VS Code keybindings (modify_ merges under AppData)
 AppData/**
 .local/bin/*.ps1
+# python3 shims: Windows has python.exe but no python3; every other OS has a
+# real python3 that a shim would shadow.
+.local/bin/python3
+.local/bin/python3.cmd
 # psmux config: the Windows tmux twin (dot_config/psmux/psmux.conf). No psmux
 # outside Windows (ConPTY multiplexer).
 .config/psmux/**
