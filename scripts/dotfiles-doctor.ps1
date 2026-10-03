@@ -320,6 +320,68 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
     if ($crlfCount -eq 0) { Result 'ok' 'ssh-crlf' 'SSH text files are LF' }
 }
 
+# --- 9. python3 resolves to a real interpreter (Windows) ------------------------
+# The official Python installer ships python.exe, never python3, while this
+# repo's scripts and tests assume the POSIX name: dot_local/bin/python3(.cmd)
+# are the shims that forward to `python`. The Microsoft Store's python3.exe stub
+# (Settings > Apps > Advanced app settings > App execution aliases) lives in
+# WindowsApps, which comes EARLIER on PATH than ~/.local/bin, and shadows them:
+# it prints "Python was not found" instead of running. Judged by behaviour (does
+# `python3 --version` print Python 3.x?), so a genuine Store-installed Python,
+# which also lives in WindowsApps, is fine. Warn-only: an error here would fail
+# every apply. -Fix removes ONLY a WindowsApps python3 that does not run as
+# Python. Skipped in-apply: the apply is what deploys the shim, and it must
+# never touch the stub.
+if ($isWin) {
+    if ($InApply) {
+        Result 'skip' 'python3' 'in-apply mode - run standalone to check python3 / the Microsoft Store stub'
+    } else {
+        $windowsApps = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps' } else { '' }
+
+        function Get-Python3Probe {
+            # Scope-local: on Windows PowerShell 5.1 a native stderr line would
+            # otherwise throw under the script-wide 'Stop'.
+            $ErrorActionPreference = 'Continue'
+            $cmd = Get-Command python3 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $cmd) { return @{ State = 'missing' } }
+            $source = $cmd.Source
+            $output = ''
+            try { $output = (& $source --version 2>&1 | Out-String).Trim() } catch { $output = '' }
+            if ($output -match '^Python 3\.') { return @{ State = 'ok'; Source = $source; Version = $output } }
+            if ($windowsApps -and $source.StartsWith($windowsApps + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                return @{ State = 'stub'; Source = $source }
+            }
+            return @{ State = 'broken'; Source = $source; Output = $output }
+        }
+
+        $stubCure = 'turn it off: Settings > Apps > Advanced app settings > App execution aliases > python3.exe'
+        $probe = Get-Python3Probe
+        switch ($probe.State) {
+            'ok' { Result 'ok' 'python3' "$($probe.Version) via $($probe.Source)" }
+            'stub' {
+                if ($Fix) {
+                    # The alias is a zero-length reparse point; Remove-Item usually
+                    # deletes it (as the Settings toggle does), cmd's del is the fallback.
+                    try { Remove-Item -LiteralPath $probe.Source -Force -ErrorAction Stop }
+                    catch { & cmd.exe /c del /f /q ('"' + $probe.Source + '"') *> $null }
+                    $after = Get-Python3Probe
+                    if ($after.State -eq 'ok') {
+                        Result 'ok' 'python3' "removed the Microsoft Store stub; python3 is now $($after.Version) via $($after.Source)"
+                    } elseif ($after.State -eq 'stub') {
+                        Result 'warn' 'python3' "could not remove the Microsoft Store stub $($probe.Source) - $stubCure"
+                    } else {
+                        Result 'warn' 'python3' "removed the Microsoft Store stub, but python3 still does not resolve ($($after.State)) - run: chezmoi apply (deploys the shim)"
+                    }
+                } else {
+                    Result 'warn' 'python3' "resolves to the Microsoft Store stub $($probe.Source), which shadows the python3 shim and prints 'Python was not found' - $stubCure (or re-run with -Fix)"
+                }
+            }
+            'broken' { Result 'warn' 'python3' "$($probe.Source) does not run as Python 3 (it printed: $($probe.Output)) - fix or remove it; -Fix only ever removes the WindowsApps stub" }
+            default { Result 'warn' 'python3' 'not found - run: chezmoi apply (deploys the python3 shim to ~\.local\bin), or install Python: choco install python' }
+        }
+    }
+}
+
 if ($script:Errors -gt 0) {
     Write-Host ""
     Write-Host "$($script:Errors) error(s). $(if ($Fix) { '(-Fix applied where safe)' } else { 're-run with -Fix for auto-repairable items' })"

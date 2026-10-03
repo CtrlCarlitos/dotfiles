@@ -56,4 +56,12 @@ for target in '.local/bin/python3' '.local/bin/python3.cmd'; do
     fi
 done
 
+# The operator-facing explanation: why there is a shim, the stub that shadows it,
+# the cure, and the doctor check that finds it.
+doc="$repo_root/docs/windows.md"
+require "$doc" 'python3 on Windows'
+require "$doc" 'App execution aliases'
+require "$doc" 'dotfiles-doctor.ps1" -Fix'
+require "$doc" 'python3.cmd'
+
 finish
