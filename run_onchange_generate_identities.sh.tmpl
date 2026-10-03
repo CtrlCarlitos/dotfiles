@@ -222,9 +222,11 @@ echo "  ssh-agent relay: one agent per account -"
 {{- range .accounts }}
 {{- if and (hasKey . "username") .username }}
 {{- $relay_agents = add $relay_agents 1 }}
+{{- $provider := "github" }}
+{{- if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
 {{- $signKey := "" }}
 {{- if hasKey . "signingKey" }}{{ $signKey = .signingKey }}{{ else if hasKey . "signingkey" }}{{ $signKey = .signingkey }}{{ end }}
-echo "    agent {{ .provider }}-{{ .username }}: configured for {{ if hasKey . "key" }}{{ .key }}{{ else }}(no key declared){{ end }}{{ if $signKey }} + {{ $signKey }} (signing){{ end }}"
+echo "    agent {{ $provider }}-{{ .username }}: configured for {{ if hasKey . "key" }}{{ .key }}{{ else }}(no key declared){{ end }}{{ if $signKey }} + {{ $signKey }} (signing){{ end }}"
 {{- end }}
 {{- end }}
 echo "    total: {{ $relay_agents }} relay agent(s) - inspect with: ssh-agent-relay status"
