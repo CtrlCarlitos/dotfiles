@@ -235,6 +235,8 @@ The `dot` family is the daily interface (zsh and PowerShell both define it):
 ```sh
 dot up        # sync: pull the repo, apply changes. Never upgrades packages.
 dot upgrade   # upgrade ALL tooling (apt/brew/choco/winget + AI CLIs). The only thing that does.
+              # Run it with every agent session closed, or Graft/Serena/Codex/OpenCode are deferred
+              # (docs/windows.md, "When to run it").
 dot backup    # encrypted portable backup of config + SSH keys
 dot restore   # restore a backup: dot restore <archive.7z>
 dot doctor    # dotfiles health check; add --fix to repair what it can

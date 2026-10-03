@@ -244,8 +244,10 @@ install_node() {
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ .versions.node_major }}.x nodistro main" \
             nodejs || warn "Node.js install failed - continuing"
     fi
-    # Upgrade npm to latest
-    if command -v npm &>/dev/null; then
+    # Upgrade npm to latest - once per run (install_node is called by several
+    # groups; each repeat was a no-op costing 3-15s).
+    if [ -z "${NPM_UPGRADED:-}" ] && command -v npm &>/dev/null; then
+        NPM_UPGRADED=1
         info "Upgrading npm to latest..."
         $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
     fi
@@ -1287,7 +1289,7 @@ install_agent_toolkit() {
         # neither is present - so it's safe to reuse in the brew/macOS block too.
         # install-deps is apt-specific: the concept does not exist on macOS.
         if [ "$PKG_MANAGER" = apt ]; then
-            net_timeout 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+            net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
         fi
         net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
 

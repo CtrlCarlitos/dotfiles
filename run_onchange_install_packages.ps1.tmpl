@@ -95,6 +95,11 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
 # This does NOT reach Start-Job jobs or child powershell processes (separate
 # sessions): Invoke-WithTimeout and the `irm | iex` launches below set it again.
 $ProgressPreference = 'SilentlyContinue'
+# Native tools (agent-browser, guardrail) print UTF-8 (check marks, em dashes);
+# PowerShell decodes their output with the console's OEM code page, which
+# rendered "✓" as "Γ£ô" in the apply log. Process-local, so nothing outside
+# this run changes. try: a host without a console handle throws here.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { Write-Verbose "console encoding unchanged: $($_.Exception.Message)" }
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with
@@ -117,7 +122,8 @@ function Invoke-WithTimeout {
     # -InitializationScript: a job is a fresh process and does not inherit the
     # session's $ProgressPreference (see the note above); without this every
     # Invoke-WebRequest inside an Action still pays the progress-bar tax.
-    $job = Start-Job -InitializationScript { $ProgressPreference = 'SilentlyContinue' } -ScriptBlock $Action
+    # The same applies to the console encoding set above (a job is a fresh process).
+    $job = Start-Job -InitializationScript { $ProgressPreference = 'SilentlyContinue'; try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { $null = $_ } } -ScriptBlock $Action
     $deadline = $jobStarted.AddSeconds($Seconds)
     $collected = @()
     while ($job.State -eq 'Running' -and (Get-Date) -lt $deadline) {
@@ -304,8 +310,10 @@ function Install-Node {
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
-    # Upgrade npm to latest
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
+    # Upgrade npm to latest - once per run: four groups call Install-Node,
+    # and each repeat cost 8-40s for the same no-op.
+    if (-not $script:NpmUpgraded -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+        $script:NpmUpgraded = $true
         Write-Host "  Upgrading npm to latest..." -ForegroundColor Yellow
         Invoke-Quietly -Description "Failed to upgrade npm" -Action { npm install -g npm@latest --loglevel=error --fund=false --fetch-timeout=120000 --fetch-retries=2 2>$null }
     }
@@ -2106,6 +2114,36 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 {{- end }}
 
+# Meld: winget, not Chocolatey (see the catalog note). A copy left by the
+# old Chocolatey install blocks winget's upgrade (different installer
+# technology), so remove it first; user settings survive the reinstall.
+{{- if $dev_desktop }}
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "  Warning: winget not found - cannot install Meld" -ForegroundColor Red
+} else {
+    # Captured separately so 2>$null can't be misread as a comparison (PSScriptAnalyzer).
+    $chocoMeldList = ''
+    if (Get-Command choco -ErrorAction SilentlyContinue) { $chocoMeldList = (choco list --limit-output --exact meld 2>$null | Out-String) }
+    if ($chocoMeldList -match '(?m)^meld\|') {
+        Write-Host "  Removing Chocolatey Meld (moving to winget)..." -ForegroundColor Yellow
+        Invoke-WithTimeout -Description "Chocolatey Meld removal" -Seconds 300 -Action { choco uninstall meld -y --no-progress }
+    }
+    $meldList = (winget list --id Meld.Meld --exact 2>$null | Out-String)
+    if ($meldList -match 'Meld\.Meld') {
+        Write-Host "Meld already installed" -ForegroundColor Green
+    } else {
+        try {
+            Write-Host "Installing Meld (winget)..." -ForegroundColor Cyan
+            Invoke-WithTimeout -Description "Meld install" -Seconds 300 -Action {
+                winget install --id Meld.Meld --exact --source winget --accept-package-agreements --accept-source-agreements
+                if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+            }
+        } catch {
+            Write-Host "  Warning: Failed to install Meld - $_" -ForegroundColor Red
+        }
+    }
+}
+{{- end }}
 
 Write-Host "Package installation complete!" -ForegroundColor Green
 

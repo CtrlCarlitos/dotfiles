@@ -163,7 +163,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `obs-studio` | dev_desktop | `obs-studio` | — | `obs` | `obs-studio.install` |  |
 | `qbittorrent` | dev_desktop | `qbittorrent` | — | `qbittorrent` | `qbittorrent` |  |
 | `sharex` | dev_desktop | — | — | — | `sharex` |  |
-| `meld` | dev_desktop | `meld` | — | `meld` | `meld` | Replaces WinMerge (Windows-only): Meld is already the Linux/macOS diff/merge tool here and is on Chocolatey too, so one tool everywhere. |
+| `meld` | dev_desktop | `meld` | — | `meld` | — | Replaces WinMerge (Windows-only): Meld is already the Linux/macOS diff/merge tool here, so one tool everywhere. Windows installs it via winget (Meld.Meld) by procedure, not Chocolatey: the Chocolatey package lags (3.22.2 vs 3.24.0) and `winget upgrade --all` refuses to upgrade a Chocolatey-installed copy (different installer technology). |
 | `wiztree` | dev_desktop | — | — | — | `wiztree` |  |
 | `termius` | dev_desktop | procedure | — | `termius` | `termius` | Replaces FileZilla: one SSH/SFTP client on all three platforms. FileZilla's Homebrew cask was pulled outright (adware concerns). apt: vendor .deb download by procedure. |
 | `vlc` | dev_desktop | `vlc` | — | `vlc` | `vlc` |  |
@@ -206,7 +206,7 @@ A few rows the catalog deliberately does not carry, kept by hand:
 | **AI IDE (OpenCode Desktop)** | `.deb` (GitHub release, amd64) | `brew install --cask opencode-desktop` | `choco install opencode-desktop` | ❌ | ❌ | `opencode_desktop` group, host only - distinct from the OpenCode CLI (`opencode_cli`). Linux curls the latest `opencode-desktop-linux-amd64.deb` from the anomalyco/opencode releases (idempotence guard on the installed package/binary); all three platforms float on their package channel - no pin |
 | **ScreenRec** | `.deb` / Apt | `.dmg` | `.exe` | ❌ | ❌ | Host Only. The old Antigravity IDE row that used to sit here went with the IDE itself (2026-09-11); the 2.0 hub app has its own row above |
 | **Screenshot** | Flameshot | Flameshot | ShareX | ❌ | ❌ | Platform equivalents |
-| **Diff/Merge** | Meld | Meld | Meld | ❌ | ❌ | Standardized on one tool across all 3 platforms; WinMerge (Windows-only) dropped in favor of Meld, confirmed on Chocolatey |
+| **Diff/Merge** | Meld | Meld | Meld | ❌ | ❌ | Standardized on one tool across all 3 platforms; WinMerge (Windows-only) dropped in favor of Meld, installed via winget (Meld.Meld) on Windows |
 | **SFTP Client** | Termius | Termius | Termius | ❌ | ❌ | Standardized on one tool across all 3 platforms; replaced FileZilla after its Homebrew cask was pulled entirely on macOS (adware concerns) |
 | **Media** | VLC | VLC | VLC | ❌ | ❌ | |
 | **Streaming** | OBS Studio | OBS Studio | OBS Studio | ❌ | ❌ | |

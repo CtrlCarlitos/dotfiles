@@ -66,6 +66,27 @@ net_timeout() {
 }
 
 #-------------------------------------------------------------------------------
+# net_timeout_tty <seconds> <cmd...> - net_timeout for commands that need the
+# terminal (sudo). Plain `timeout` runs its command in a NEW process group, so
+# a sudo/pty that touches the tty from there is a background job and the
+# kernel can stop it (SIGTTIN/SIGTTOU). `--foreground` keeps the command in
+# the shell's foreground group. Seen: `sudo npx playwright install-deps` on
+# WSL sat in state T for the full timeout AFTER apt had finished (the cause is
+# a strong suspect, not reproduced: it needs a sudo password). Trade-off:
+# --foreground times out only the direct child, not its descendants.
+#-------------------------------------------------------------------------------
+net_timeout_tty() {
+    local secs="$1"; shift
+    if command -v timeout &>/dev/null; then
+        timeout --foreground -k 10 "$secs" "$@"
+    elif command -v gtimeout &>/dev/null; then
+        gtimeout --foreground -k 10 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+#-------------------------------------------------------------------------------
 # sha256_cmd - print the available SHA-256 tool ("shasum -a 256" included
 # verbatim: stock macOS ships shasum, not sha256sum), empty when none.
 #-------------------------------------------------------------------------------

@@ -107,7 +107,7 @@ chmod +x "$bin/claude"
 # graft: logs `upgrade` so the call (or its absence) is assertable.
 cat >"$bin/graft" <<'EOF'
 #!/bin/sh
-printf '%s\n' "$*" >> "${GRAFT_LOG:?}"
+printf '%s prefix=%s\n' "$*" "${NPM_CONFIG_PREFIX:-}" >> "${GRAFT_LOG:?}"
 exit 0
 EOF
 chmod +x "$bin/graft"
@@ -194,6 +194,26 @@ if [ -s "$tmp/agent-browser.log" ]; then
     fail "a missing agent-browser binary must skip browser setup"
 else
     pass
+fi
+
+# --- 6. graft installed under a non-default npm prefix -------------------------
+# `graft upgrade` runs `npm install -g` against npm's default prefix; a graft
+# living elsewhere (stale ~/.local install on WSL) failed EACCES and stayed
+# old. The updater must point npm at the prefix graft actually lives in.
+gprefix="$tmp/gprefix"
+mkdir -p "$gprefix/bin" "$gprefix/lib/node_modules/@nanonets/graft/dist"
+cp "$bin/graft" "$gprefix/lib/node_modules/@nanonets/graft/dist/cli.js"
+chmod +x "$gprefix/lib/node_modules/@nanonets/graft/dist/cli.js"
+if ln -s ../lib/node_modules/@nanonets/graft/dist/cli.js "$gprefix/bin/graft" 2>/dev/null &&
+    [ -L "$gprefix/bin/graft" ]; then
+    rm -f "$bin/graft"
+    ln -s "$gprefix/bin/graft" "$bin/graft"
+    : >"$tmp/graft.log"
+    run_updater "$tmp/run6.log" || true
+    grep -Fq "prefix=$gprefix" "$tmp/graft.log" ||
+        fail "graft under $gprefix must be upgraded with NPM_CONFIG_PREFIX pointing there; graft saw: $(cat "$tmp/graft.log")"
+else
+    skip "symlinks unavailable"
 fi
 
 finish

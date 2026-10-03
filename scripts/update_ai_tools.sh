@@ -20,6 +20,21 @@ echo "🤖 Updating AI Coding Tools..."
 # cannot be recreated while live agent sessions resolve from them.
 deferred() { case ",${DOTUPGRADE_DEFER:-}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
+# The npm sudo decision, once for every global npm step below. Same rule the
+# installer template makes (#114): sudo only for the system-owned /usr prefix -
+# a user-managed npm (nvm, homebrew) must never be sudo'd. The agent-browser
+# step used to skip it and failed EACCES on apt-Node (WSL, 2026-10-02), hidden
+# by its 2>/dev/null.
+npm_sudo=""
+if command -v npm &>/dev/null; then
+    npm_bin="$(command -v npm)"
+    npm_sudo="sudo"
+    if [[ "$npm_bin" != /usr* ]]; then
+        echo "   user-managed npm at $npm_bin - dropping sudo"
+        npm_sudo=""
+    fi
+fi
+
 # 1. NPM Packages (Codex)
 # Note: OpenCode is native on Linux/Mac, so it's not included here
 if command -v npm &>/dev/null; then
@@ -34,15 +49,6 @@ if command -v npm &>/dev/null; then
         if [ -z "$CODEX_PKG" ]; then
             echo "   codex package name unavailable from chezmoi data - skipping"
         else
-            # Same user-managed-npm decision the installer template makes
-            # (#114): sudo only for the system-owned /usr prefix - a
-            # user-managed npm (nvm, homebrew) must never be sudo'd.
-            npm_bin="$(command -v npm)"
-            npm_sudo="sudo"
-            if [[ "$npm_bin" != /usr* ]]; then
-                echo "   user-managed npm at $npm_bin - dropping sudo"
-                npm_sudo=""
-            fi
             $npm_sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
         fi
     fi
@@ -266,7 +272,7 @@ fi
 if command -v npm &>/dev/null; then
     NPM_BIN="$(command -v npm)"
     echo "🌐 Updating agent-browser..."
-    "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>/dev/null || echo "   agent-browser install failed - skipping"
+    $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress || echo "   agent-browser install failed - skipping"
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
         "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
@@ -288,7 +294,23 @@ if command -v graft &>/dev/null; then
     if deferred graft; then
         echo "  graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)."
     else
-        graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+        # `graft upgrade` runs `npm install -g` against npm's DEFAULT prefix.
+        # A graft living under another prefix (a stale ~/.local install,
+        # nvm) then fails EACCES on the system /usr prefix and was never
+        # upgraded (WSL: 0.18.0 stuck while 0.21.1 shipped). Point npm at the
+        # prefix graft actually lives in.
+        graft_real="$(readlink -f "$(command -v graft)" 2>/dev/null || true)"
+        graft_prefix=""
+        case "$graft_real" in
+            */lib/node_modules/@nanonets/graft/*) graft_prefix="${graft_real%/lib/node_modules/@nanonets/graft/*}" ;;
+        esac
+        if [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
+            echo "  Warning: graft is in $graft_prefix (not writable) - reinstall with: sudo npm install -g @nanonets/graft@latest"
+        elif [ -n "$graft_prefix" ]; then
+            NPM_CONFIG_PREFIX="$graft_prefix" graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+        else
+            graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+        fi
     fi
 fi
 # No Codex hook-path normalization here, unlike the .ps1 twin: graft writes
