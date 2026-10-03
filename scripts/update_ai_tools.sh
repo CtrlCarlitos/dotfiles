@@ -306,10 +306,23 @@ if command -v graft &>/dev/null; then
         esac
         if [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
             echo "  Warning: graft is in $graft_prefix (not writable) - reinstall with: sudo npm install -g @nanonets/graft@latest"
-        elif [ -n "$graft_prefix" ]; then
-            NPM_CONFIG_PREFIX="$graft_prefix" graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
         else
-            graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+            # npm 12 skips install scripts unless allow-listed, so a bare
+            # `graft upgrade` replaces graft with a build that crashes at
+            # startup ("No native build was found", tree-sitter parsers never
+            # compiled - seen on WSL 2026-10-02). Hand the installer's own
+            # allow-list to npm as NPM_CONFIG_ALLOW_SCRIPTS, read from the
+            # catalog like the codex package name (no literal copy here).
+            graft_allow="$(chezmoi execute-template '{{ join "," .agents.npm.graft_allow_scripts }}' 2>/dev/null || true)"
+            if [ -z "$graft_allow" ]; then
+                echo "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade"
+            else
+                NPM_CONFIG_ALLOW_SCRIPTS="$graft_allow" NPM_CONFIG_PREFIX="${graft_prefix:-$(npm prefix -g 2>/dev/null)}" \
+                    graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
+                # A graft that cannot start breaks every agent hook: say so now.
+                graft --version >/dev/null 2>&1 ||
+                    echo "  Warning: graft does not start after the upgrade - reinstall: NPM_CONFIG_ALLOW_SCRIPTS='$graft_allow' npm install -g @nanonets/graft@latest"
+            fi
         fi
     fi
 fi

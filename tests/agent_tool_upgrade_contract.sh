@@ -107,7 +107,7 @@ chmod +x "$bin/claude"
 # graft: logs `upgrade` so the call (or its absence) is assertable.
 cat >"$bin/graft" <<'EOF'
 #!/bin/sh
-printf '%s prefix=%s\n' "$*" "${NPM_CONFIG_PREFIX:-}" >> "${GRAFT_LOG:?}"
+printf '%s prefix=%s allow=%s\n' "$*" "${NPM_CONFIG_PREFIX:-}" "${NPM_CONFIG_ALLOW_SCRIPTS:-}" >> "${GRAFT_LOG:?}"
 exit 0
 EOF
 chmod +x "$bin/graft"
@@ -146,6 +146,12 @@ grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log"
     fail "agent-browser must be refreshed via npm -g with its allow-scripts list"
 grep -Fq 'upgrade' "$tmp/graft.log" ||
     fail "graft must use its own self-updater (graft upgrade)"
+# npm 12 skips install scripts unless allow-listed: without the catalog's list
+# the upgraded graft crashes at startup (no tree-sitter native builds).
+grep -Eq '^upgrade .*allow=.*tree-sitter-kotlin' "$tmp/graft.log" ||
+    fail "graft upgrade must run with NPM_CONFIG_ALLOW_SCRIPTS from the catalog; graft saw: $(cat "$tmp/graft.log")"
+grep -Fq -- '--version' "$tmp/graft.log" ||
+    fail "the updater must check that graft still starts after upgrading it"
 grep -Fq 'install' "$tmp/agent-browser.log" || fail "agent-browser browser setup (install) did not run"
 grep -Fq 'doctor --json' "$tmp/agent-browser.log" ||
     fail "agent-browser verification (doctor --json) did not run"
