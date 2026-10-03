@@ -2,16 +2,9 @@
   "remote_access": {
     "enabled": true,
     "macos": {
-      "ssh": true,
       "screen_sharing": true
     },
-    "login_keys": [
-      {
-        "name": "id_newcmelgar",
-        "targets": ["macos"],
-        "generate": true
-      }
-    ],
+    "ssh": {"enabled": true, "login_keys": []},
     "services": {
       "opencode_macos": {
         "enabled": true,

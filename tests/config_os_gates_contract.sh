@@ -46,12 +46,8 @@ done
 
 wsl_out="$(render_init "$wsl")"
 want wsl "$wsl_out" data.ssh_hosts
-refuse wsl "$wsl_out" data.remote_access
-if printf '%s\n' "$wsl_out" | grep -Fq 'Remote Access ('; then
-    fail 'wsl: the remote_access section (comments included) must be omitted'
-else
-    pass
-fi
+want wsl "$wsl_out" data.remote_access
+if printf '%s\n' "$wsl_out" | grep -Fq 'Remote Access ('; then pass; else fail 'explicit WSL remote_access must survive regeneration'; fi
 
 # interpreters.ps1: windows -> powershell, darwin -> pwsh, linux/wsl -> none.
 want windows "$(render_init "$win")" interpreters.ps1
@@ -64,5 +60,8 @@ fp_out="$(render_init "$fingerprints")"
 for value in SHA256:auth SHA256:sign SHA256:host; do
     if grep -Fq "$value" <<<"$fp_out"; then pass; else fail "WSL init dropped $value"; fi
 done
+
+contract='{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8-microsoft"}},"remote_access":{"enabled":true,"ssh":{"enabled":true,"login_keys":["id_phone","id_laptop"]},"rdp":{"enabled":true}}}'
+render_init "$contract" | python3 -c 'import sys,tomllib; d=tomllib.loads(sys.stdin.read())["data"]["remote_access"]; assert d["ssh"] == {"enabled": True, "login_keys": ["id_phone", "id_laptop"]}; assert d["rdp"]["enabled"] is True' || fail 'local SSH/RDP contract must survive WSL regeneration'
 
 finish

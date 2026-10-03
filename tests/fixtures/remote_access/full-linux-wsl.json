@@ -1,9 +1,7 @@
 {
   "remote_access": {
     "enabled": true,
-    "linux": {
-      "ssh": true
-    },
+    "ssh": {"enabled": true, "login_keys": []},
     "wsl": {
       "enabled": true
     }

@@ -60,6 +60,9 @@ subcommands:
   setup             idempotently configure this host's remote-access plumbing
   status            read-only doctor: report the current state
   fix               repair deterministic machine-local state only
+  keys status       compare declared and authorized incoming keys (read-only)
+  keys sync         enforce the local login_keys list, including revocation
+  keys remove NAME  remove the declaration and its local authorization
   harden-ssh        flip sshd to key-only (guarded; needs -Confirmed)
   wsl-reconcile     re-sync the :2222 portproxy to the current WSL IP
   tunnel render     write the machine-local cloudflared config.yml
@@ -319,8 +322,8 @@ function Get-RemoteStatusSsh {
     # sshd service. Screen Sharing-style macOS checks live in the bash twin.
     param($Config)
     Write-Host 'SSH:'
-    if ((Get-RemoteConfigValue $Config 'windows.ssh' $false) -ne $true) {
-        Write-RemoteStatusWarn 'ssh: not configured for this host (windows.ssh)'
+    if ((Get-RemoteConfigValue $Config 'ssh.enabled' $false) -ne $true) {
+        Write-RemoteStatusWarn 'ssh: not configured for this host (ssh.enabled)'
         return
     }
     switch (Get-SshdState) {
@@ -332,6 +335,7 @@ function Get-RemoteStatusSsh {
             Write-RemoteStatusWarn 'ssh: sshd not installed (manual: install the OpenSSH Server optional capability)'
         }
     }
+    try { Invoke-RemoteKeys -Action status } catch { Write-RemoteStatusFail "ssh keys: $($_.Exception.Message)" }
 }
 
 function Get-RemoteStatusRdp {
@@ -340,8 +344,8 @@ function Get-RemoteStatusRdp {
     # Windows - it is the macOS recovery path.
     param($Config)
     Write-Host 'RDP:'
-    if ((Get-RemoteConfigValue $Config 'windows.rdp' $false) -ne $true) {
-        Write-RemoteStatusWarn 'rdp: not configured for this host (windows.rdp)'
+    if ((Get-RemoteConfigValue $Config 'rdp.enabled' $false) -ne $true) {
+        Write-RemoteStatusWarn 'rdp: not configured for this host (rdp.enabled)'
         return
     }
     $deny = $null
@@ -619,7 +623,7 @@ function Set-RdpEnabled {
     # Set-SshdServiceDesired above.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt; the bash twin carries no confirm gate either (twin parity, invariant #10)')]
     param($Config)
-    if ((Get-RemoteConfigValue $Config 'windows.rdp' $false) -ne $true) { return }
+    if ((Get-RemoteConfigValue $Config 'rdp.enabled' $false) -ne $true) { return }
     $deny = $null
     $props = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
         -Name fDenyTSConnections -ErrorAction SilentlyContinue
@@ -661,23 +665,6 @@ function Remove-PortproxyRow {
     )
     $netshArgs = @('interface', 'portproxy', 'delete', 'v4tov4', "listenaddress=$ListenAddress", "listenport=$ListenPort")
     $null = Get-RemoteQuietOutput { & netsh @netshArgs }
-}
-
-function Enable-WslSsh {
-    # Best-effort sshd enable inside WSL through the wsl.exe -u root channel
-    # (systemd first, the SysV script as fallback, non-fatal inside the
-    # distro). Spec section 9 keeps the sshd configuration manual; setup
-    # only issues the enable. A failed channel is the manual-action WARN,
-    # never a crash.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
-    param()
-    $enable = 'systemctl enable --now ssh >/dev/null 2>&1 || service ssh start >/dev/null 2>&1 || true; echo wsl-ssh-enabled'
-    $out = (Get-RemoteQuietOutput { & wsl.exe -u root -e sh -c $enable })
-    if (($LASTEXITCODE -eq 0) -and ($out -eq 'wsl-ssh-enabled')) {
-        Write-RemoteStatusOk 'wsl: sshd enable issued inside WSL (best-effort)'
-    } else {
-        Write-RemoteStatusWarn 'wsl: sshd enable inside WSL failed (manual: wsl.exe -u root -e sh -c "systemctl enable --now ssh")'
-    }
 }
 
 function Invoke-WslReconcile {
@@ -763,236 +750,67 @@ function Test-LocalAdmin {
     # strict admins-only ACL) and the user's own authorized_keys. The tests
     # override this function, so no real group lookup ever runs in a test
     # host.
+    # The Windows twin's portable key/dispatcher fixtures also execute under
+    # pwsh on Unix; there is no local Windows Administrators group there.
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $false }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    # Group membership survives an unelevated (deny-only) UAC token. Elevation
+    # controls whether writes succeed, not which login authorization file applies.
+    return @($identity.Groups | ForEach-Object { $_.Value }) -contains 'S-1-5-32-544'
 }
 
-function Get-LoginKeyAclUser {
-    # The account the strict private-key ACL grants: the current Windows
-    # identity's name (DOMAIN\user - icacls accepts the qualified form).
-    # The tests override this function, so no real identity lookup ever
-    # runs in a (Linux) test host - the same seam discipline as
-    # Test-LocalAdmin above.
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    return $identity.Name
-}
-
-function Initialize-LoginKey {
-    # Initialize-LoginKey -Name <name> [-Generate <bool>]: the
-    # ra_login_key_materialize twin (spec section 5.1 steps 1-2) - ensure
-    # ~\.ssh\<name> exists, idempotent, only-if-missing, confirmation-gated.
-    # Both halves missing: confirm, then `ssh-keygen -t ed25519 -f` the key.
-    # Under the non-TTY confirm seam ($env:RA_CONFIRM_MATERIALIZE) the
-    # passphrase is empty (`-N ''` - no prompt can be answered in a
-    # redirected session, so the empty passphrase exists only in the seam);
-    # a real interactive run omits -N and lets ssh-keygen ask; a
-    # non-interactive run (RA_NONINTERACTIVE, or stdin redirected) WARNS
-    # `not created` and never generates. Only the .pub present: Pattern B -
-    # the public half was dropped here from the owning device; use as-is,
-    # inbound-only, no generation, no missing-private-key complaint.
-    # -Generate $false declares Pattern B up front: WARN to drop the public
-    # half, never generate. The strict private-key ACL rides the creation
-    # (the administrators_authorized_keys discipline: the grant sits beside
-    # the write, so an already-materialized key is verified present and its
-    # ACL is left exactly as the owner set it - a second run records no
-    # call). Key material is never read, never printed.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the creation is double-gated (confirm seam or TTY prompt); a non-interactive run must never prompt (twin parity, invariant #10)')]
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingReadHost', '', Justification = 'the TTY confirm prompt is the spec-mandated gate for key creation; the non-interactive gates (RA_NONINTERACTIVE / redirected stdin) return before it is ever reached')]
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        [bool]$Generate = $true
-    )
-    $sshDir = Join-Path (Get-RemoteHome) '.ssh'
-    $priv = Join-Path $sshDir $Name
-    $pub = "${priv}.pub"
-    if (-not (Test-Path -LiteralPath $sshDir -PathType Container)) {
-        $null = New-Item -ItemType Directory -Force -Path $sshDir
-    }
-    if (Test-Path -LiteralPath $priv -PathType Leaf) {
-        Write-RemoteStatusOk "login key ${Name}: present"
-        return
-    }
-    if (Test-Path -LiteralPath $pub -PathType Leaf) {
-        Write-RemoteStatusOk "login key ${Name}: public half present, inbound-only (no private half here)"
-        return
-    }
-    if (-not $Generate) {
-        Write-RemoteStatusWarn "login key ${Name}: generate=false and no public half dropped yet - drop the public half into ${pub} to authorize it"
-        return
-    }
-    if ($env:RA_CONFIRM_MATERIALIZE) {
-        # The non-TTY confirm seam: the empty passphrase exists only here.
-        $keygenArgs = @('-t', 'ed25519', '-f', $priv, '-N', '')
-    } elseif ($env:RA_NONINTERACTIVE -or [Console]::IsInputRedirected) {
-        Write-RemoteStatusWarn "login key ${Name}: not created (non-interactive run - confirm the prompt on a console, or set RA_CONFIRM_MATERIALIZE=1)"
-        return
-    } else {
-        $answer = Read-Host "create login key ${Name} (passphrase prompt follows)? [y/N]"
-        if (($answer -eq 'y') -or ($answer -eq 'Y') -or ($answer -eq 'yes') -or ($answer -eq 'Yes') -or ($answer -eq 'YES')) {
-            # A real run omits -N: ssh-keygen prompts for the passphrase.
-            $keygenArgs = @('-t', 'ed25519', '-f', $priv)
-        } else {
-            Write-RemoteStatusWarn "login key ${Name}: not created (declined)"
-            return
-        }
-    }
-    $null = Get-RemoteQuietOutput { & ssh-keygen @keygenArgs }
-    if ($LASTEXITCODE -ne 0) {
-        Write-RemoteStatusWarn "login key ${Name}: key generation failed (manual: ssh-keygen -t ed25519 -f `"$priv`")"
-        return
-    }
-    # The strict private-key ACL, riding the creation: inheritance disabled,
-    # the current user fully granted - the same icacls discipline the
-    # administrators_authorized_keys grant uses. A failed grant is the
-    # manual-action WARN, never a crash.
-    $user = Get-LoginKeyAclUser
-    $icaclsArgs = @($priv, '/inheritance:r', '/grant', "${user}:F")
-    $null = Get-RemoteQuietOutput { & icacls @icaclsArgs }
-    if ($LASTEXITCODE -ne 0) {
-        Write-RemoteStatusWarn "login key ${Name}: ACL hardening failed (manual: icacls `"$priv`" /inheritance:r /grant `"${user}:F`")"
-    }
-    Write-RemoteStatusOk "login key ${Name}: created"
-}
-
-function Initialize-LoginKeys {
-    # Drive Initialize-LoginKey for every [[data.remote_access.login_keys]]
-    # entry (spec section 5.1 steps 1-2). Setup runs this BEFORE
-    # Publish-LoginKeys - materialize-then-publish, so a just-created key is
-    # authorized in the same pass (the ra_setup_login_keys order). A missing
-    # generate flag defaults to true (Pattern A); the config resolver keeps
-    # a declared false three-state here (a JSON false is a real property
-    # value, not collapsed onto the default), so Pattern B is honored, not
-    # generated over.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Initialize-LoginKey call per entry; kept for twin parity with ra_setup_login_keys (invariant #10)')]
-    param($Config)
-    $keys = Get-RemoteConfigValue $Config 'login_keys' $null
-    if ($null -eq $keys) { return }
-    foreach ($entry in @($keys)) {
-        $name = Get-RemoteConfigValue $entry 'name' ''
-        if ([string]::IsNullOrEmpty($name)) { continue }
-        Initialize-LoginKey -Name $name -Generate ([bool](Get-RemoteConfigValue $entry 'generate' $true))
-    }
-}
-
-function Publish-LoginKey {
-    # Publish-LoginKey -Name <key> -Target <target>: authorize the PUBLIC
-    # half (~/.ssh/<name>.pub) for <target>. The private half is never
-    # read, never moved, never printed. The wsl target rides the
-    # wsl.exe -u root channel with an append-only heredoc: grep -Fxq guards
-    # the exact line, existing authorized_keys lines are never rewritten,
-    # and a second run is already-authorized (Review Focus #2; the
-    # ra_authorized_keys_install twin). The windows target (spec section 5.1)
-    # appends into %ProgramData%\ssh\administrators_authorized_keys for an
-    # admin account - the strict admins-only ACL sshd insists on is granted
-    # right beside the append (inheritance disabled, Administrators:F, via
-    # icacls; the group check is the Test-LocalAdmin seam) - or into the
-    # user's ~/.ssh/authorized_keys otherwise, the same append-only
-    # exact-line guard and no ACL call. Anything else is the unknown-target
-    # WARN skip. No prompt anywhere: a declared-but-missing key degrades to
-    # the no-public-half WARN.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'the setup subcommand is the explicit intent carrier and a non-interactive run must never prompt (twin parity, invariant #10)')]
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Target
-    )
-    if (($Target -ne 'wsl') -and ($Target -ne 'windows')) {
-        Write-RemoteStatusWarn "login key ${Name}: unknown target ${Target} - skipped"
-        return
-    }
-    $pub = Join-Path (Get-RemoteHome) ".ssh/${Name}.pub"
-    if (-not (Test-Path -LiteralPath $pub -PathType Leaf)) {
-        Write-RemoteStatusWarn "login key ${Name}: no public half at ${pub} - nothing to authorize into ${Target}"
-        return
-    }
-    $line = $null
-    foreach ($candidate in ((Get-Content -Raw -LiteralPath $pub) -split "`r?`n")) {
-        $trimmed = $candidate.Trim()
-        if (-not [string]::IsNullOrEmpty($trimmed)) { $line = $trimmed; break }
-    }
-    if ([string]::IsNullOrEmpty($line)) {
-        Write-RemoteStatusWarn "login key ${Name}: ${pub} is empty - nothing to authorize into ${Target}"
-        return
-    }
-    if ($Target -eq 'windows') {
-        # The Windows arm: append-only behind the same exact-line guard as
-        # the wsl arm - existing lines are never rewritten, a second run is
-        # already-authorized and records nothing (the ACL grant rides the
-        # append, so an already-correct file is verified, not rewritten).
-        $isAdmin = Test-LocalAdmin
-        $akPath = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys'
-        if (-not $isAdmin) {
-            $akPath = Join-Path (Get-RemoteHome) '.ssh/authorized_keys'
-        }
-        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $akPath)
-        $existing = @(Get-Content -LiteralPath $akPath -ErrorAction SilentlyContinue)
-        if (@($existing) -ccontains $line) {
-            Write-RemoteStatusOk "login key ${Name}: already authorized (windows)"
-            return
-        }
-        [IO.File]::AppendAllText($akPath, ($line + "`n"), [Text.UTF8Encoding]::new($false))
-        if ($isAdmin) {
-            # The ACL sshd requires for administrators_authorized_keys:
-            # inheritance disabled, Administrators fully granted - the
-            # %ProgramData% default ACL lets every user read the file, and
-            # sshd refuses the whole file when it is wider than
-            # admins-only. A failed grant is the manual-action WARN, never
-            # a crash.
-            $icaclsArgs = @($akPath, '/inheritance:r', '/grant', 'Administrators:F')
-            $null = Get-RemoteQuietOutput { & icacls @icaclsArgs }
-            if ($LASTEXITCODE -ne 0) {
-                Write-RemoteStatusWarn "login key ${Name}: ACL grant failed (manual: icacls `"$akPath`" /inheritance:r /grant `"Administrators:F`")"
+function Get-RemoteAuthorizedKeysPath {
+    $path = Join-Path (Get-RemoteHome) '.ssh/authorized_keys'
+    if (Test-LocalAdmin) { $path = Join-Path $env:ProgramData 'ssh/administrators_authorized_keys' }
+    $configPath = $env:RA_SSHD_CONFIG
+    if (-not $configPath) { $configPath = Join-Path $env:ProgramData 'ssh/sshd_config' }
+    if (Test-Path -LiteralPath $configPath) {
+        $adminRule = $false
+        $context = 'global'
+        foreach ($line in [IO.File]::ReadAllLines($configPath)) {
+            $active = ($line -split '#', 2)[0].Trim()
+            if ($active -match '^Match\s+(.+)$') { $context = $Matches[1].Trim(); continue }
+            if ($active -match '^(Include|AuthorizedKeysCommand|TrustedUserCAKeys)\s+(?!none\s*$)') {
+                throw 'Custom sshd authorization/Include requires manual review before managing login keys'
+            }
+            if ($active -match '^AuthorizedKeysFile\s+(.+)$') {
+                $value = $Matches[1].Trim('"')
+                if ($value -eq '__PROGRAMDATA__/ssh/administrators_authorized_keys' -and $context -eq 'Group administrators') { $adminRule = $true }
+                elseif ($value -ne '.ssh/authorized_keys' -or $context -notin @('global', 'all')) { throw 'Custom AuthorizedKeysFile/Match routing is not managed by dot remote' }
             }
         }
-        Write-RemoteStatusOk "login key ${Name}: authorized (windows)"
-        return
+        if ((Test-LocalAdmin) -and -not $adminRule) { $path = Join-Path (Get-RemoteHome) '.ssh/authorized_keys' }
     }
-    if ($line -match "'") {
-        # A single quote would break the sh single-quoted guard: refuse the
-        # publish instead of writing a mangled authorized_keys line.
-        Write-RemoteStatusWarn "login key ${Name}: unexpected character in the public half - skipped (verify ${pub})"
-        return
-    }
-    # Append-only heredoc through the wsl.exe channel: umask + mkdir first
-    # so a fresh authorized_keys lands 600, grep -Fxq makes the exact line
-    # idempotent, the quoted RAKEY delimiter keeps the key verbatim, and
-    # BOTH branches echo their verdict (present / authorized) - the real
-    # channel's stdout IS the protocol the verdict below parses, and a
-    # silent success would be indistinguishable from a failed channel.
-    $sh = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; if grep -Fxq '${line}' ~/.ssh/authorized_keys; then echo present; else cat >> ~/.ssh/authorized_keys <<'RAKEY'`n${line}`nRAKEY`necho authorized`nfi"
-    $out = (Get-RemoteQuietOutput { & wsl.exe -u root -e sh -c $sh })
-    if (($LASTEXITCODE -ne 0) -or [string]::IsNullOrEmpty($out)) {
-        Write-RemoteStatusWarn "login key ${Name}: wsl channel failed (manual: check WSL, then authorize ${pub} inside the distro)"
-        return
-    }
-    if ($out -eq 'present') {
-        Write-RemoteStatusOk "login key ${Name}: already authorized (wsl)"
-    } else {
-        Write-RemoteStatusOk "login key ${Name}: authorized (wsl)"
-    }
+    return $path
 }
 
-function Publish-LoginKeys {
-    # Drive Publish-LoginKey for every [[data.remote_access.login_keys]]
-    # entry and each of its declared targets (the ra_setup_login_keys
-    # authorize half, inverted): wsl through its channel, windows into
-    # administrators_authorized_keys / the user's authorized_keys, anything
-    # else the unknown-target WARN skip inside Publish-LoginKey. Key
-    # materialization is not this arm's job: a declared-but-missing key
-    # degrades to the no-public-half WARN, never a prompt (Review Focus
-    # #5's non-interactive shape).
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'the plural names the [data.remote_access.login_keys] collection the loop drives, one Publish-LoginKey call per target; kept for twin parity with ra_setup_login_keys (invariant #10)')]
-    param($Config)
-    $keys = Get-RemoteConfigValue $Config 'login_keys' $null
-    if ($null -eq $keys) { return }
-    foreach ($entry in @($keys)) {
-        $name = Get-RemoteConfigValue $entry 'name' ''
-        $targets = Get-RemoteConfigValue $entry 'targets' $null
-        if ([string]::IsNullOrEmpty($name) -or ($null -eq $targets)) { continue }
-        foreach ($target in @($targets)) {
-            Publish-LoginKey -Name $name -Target ([string]$target)
-        }
+function Invoke-RemoteKeys {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Keys names the public CLI collection, matching dot remote keys')]
+    param([ValidateSet('status', 'sync', 'remove', 'validate', 'count')][string]$Action, [string]$Name)
+    $config = Get-RemoteAccessConfig
+    $authorized = Get-RemoteAuthorizedKeysPath
+    $platform = if ($authorized -eq (Join-Path $env:ProgramData 'ssh/administrators_authorized_keys')) { 'windows-admin' } else { 'windows-user' }
+    $python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
+    $arguments = @((Join-Path $PSScriptRoot 'remote_keys.py'), $Action,
+        '--public-key-dir', (Join-Path (Get-RemoteHome) '.ssh'), '--authorized-keys', $authorized, '--platform', $platform)
+    if ($Action -in @('sync', 'remove')) {
+        $configPath = Get-RemoteQuietOutput { & chezmoi execute-template '{{ .chezmoi.configFile }}' }
+        if (-not $configPath) { throw 'Cannot resolve the local chezmoi config path' }
+        $arguments += @('--config', $configPath)
     }
+    if ($Action -eq 'remove') {
+        if (-not $Name) { throw 'keys remove requires NAME' }
+        $arguments += $Name
+    } elseif ($Name) { throw 'Unexpected key argument' }
+    $saved = $ErrorActionPreference
+    $savedEncoding = $OutputEncoding
+    try {
+        $ErrorActionPreference = 'Continue'
+        $OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $config | ConvertTo-Json -Depth 30 -Compress | & $python @arguments
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $saved; $OutputEncoding = $savedEncoding }
+    if ($code -ne 0) { throw "SSH authorization command failed (exit $code)" }
 }
 
 function Invoke-SshHardening {
@@ -1015,13 +833,8 @@ function Invoke-SshHardening {
     # (which sshd's StrictModes insists on).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'harden-ssh -Confirmed is the explicit, double-guarded intent carrier; a non-interactive run must never prompt (twin parity, invariant #10)')]
     param([switch]$Confirmed)
-    $ak = Join-Path (Get-RemoteHome) '.ssh/authorized_keys'
-    $keys = 0
-    if (Test-Path -LiteralPath $ak -PathType Leaf) {
-        foreach ($keyLine in (Get-Content -LiteralPath $ak)) {
-            if (-not [string]::IsNullOrWhiteSpace($keyLine)) { $keys++ }
-        }
-    }
+    $ak = Get-RemoteAuthorizedKeysPath
+    $keys = [int](Invoke-RemoteKeys -Action count)
     if ($keys -eq 0) {
         throw "harden-ssh: no authorized key in ${ak} - authorize at least one login key first (dot remote setup), then verify key login from another device"
     }
@@ -1206,6 +1019,7 @@ function Invoke-RemoteSetup {
         Write-Host 'not configured'
         return
     }
+    if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) { Invoke-RemoteKeys -Action validate }
     # Gate first: the state every Tailscale-dependent path below branches on.
     $tsState = Get-TailscaleState
     switch ($tsState) {
@@ -1232,7 +1046,7 @@ function Invoke-RemoteSetup {
     # Windows transport write independent of Tailscale: sshd (the
     # missing-service case inside is the capability presence check - never an
     # install from here).
-    if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+    if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) {
         Set-SshdServiceDesired
     }
     # Tailscale-dependent paths: the tailnet-scoped firewall rules and RDP
@@ -1240,13 +1054,13 @@ function Invoke-RemoteSetup {
     # the plan's surface table) run only behind the authenticated gate - the
     # bash twin's cmd_setup shape, where only `ok` proceeds.
     if ($tsState -eq 'ok') {
-        if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+        if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) {
             Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22
         }
         Set-RdpEnabled -Config $config
     } else {
         Write-RemoteStatusWarn "firewall: held while tailscale is ${tsState} (dependent paths held)"
-        if ((Get-RemoteConfigValue $config 'windows.rdp' $false) -eq $true) {
+        if ((Get-RemoteConfigValue $config 'rdp.enabled' $false) -eq $true) {
             Write-RemoteStatusWarn "rdp: held while tailscale is ${tsState} (dependent paths held)"
         }
     }
@@ -1264,7 +1078,6 @@ function Invoke-RemoteSetup {
         if (-not (Test-WslAvailable)) {
             Write-RemoteStatusWarn 'wsl: not available (manual: install WSL2, then re-run: dot remote setup)'
         } else {
-            Enable-WslSsh
             if ($null -eq (Get-ScheduledTask -TaskName 'dotfiles-wsl-reconcile' -ErrorAction SilentlyContinue)) {
                 Register-WslReconcileTask
             } else {
@@ -1278,17 +1091,8 @@ function Invoke-RemoteSetup {
             }
         }
     }
-    # Login keys (spec section 5.1), materialize-then-publish: steps 1-2
-    # (create only-if-missing behind the confirm gate, the strict ACL riding
-    # the creation) run BEFORE step 3 (authorize the declared targets), the
-    # ra_setup_login_keys order - so a just-created key is authorized in the
-    # same pass. Machine-local writes, independent of Tailscale and of the
-    # WSL gate (the bash twin's ra_setup_login_keys runs unconditionally; a
-    # failed channel degrades to the WARN inside Publish-LoginKey). A
-    # non-interactive run never prompts and never generates: a
-    # declared-but-missing key degrades to the WARN.
-    Initialize-LoginKeys -Config $config
-    Publish-LoginKeys -Config $config
+    # Reconcile the complete local authorization set; no cross-OS publication.
+    if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) { Invoke-RemoteKeys -Action sync }
     # Serve mappings (spec section 6): Tailscale-dependent like the firewall rules
     # and RDP - held unless the backend is authenticated.
     if ($tsState -eq 'ok') {
@@ -1407,17 +1211,19 @@ function Invoke-RemoteFix {
             Write-RemoteStatusWarn 'tailscale: not installed (manual: install Tailscale, then run: tailscale up)'
         }
     }
-    if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+    if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) {
+        Invoke-RemoteKeys -Action validate
         Invoke-WindowsSshFix
+        Invoke-RemoteKeys -Action sync
     }
     # Firewall re-ensure (spec section 8), Tailscale-gated exactly like
     # setup - the rules are Tailscale-dependent writes. Only the
     # capabilities the config declares are touched.
     if ($tsState -eq 'ok') {
-        if ((Get-RemoteConfigValue $config 'windows.ssh' $false) -eq $true) {
+        if ((Get-RemoteConfigValue $config 'ssh.enabled' $false) -eq $true) {
             Ensure-TailscaleFirewallRule -Name 'OpenSSH-Tailscale' -Port 22
         }
-        if ((Get-RemoteConfigValue $config 'windows.rdp' $false) -eq $true) {
+        if ((Get-RemoteConfigValue $config 'rdp.enabled' $false) -eq $true) {
             Ensure-TailscaleFirewallRule -Name 'RemoteDesktop-Tailscale' -Port 3389
         }
         if ((Get-RemoteConfigValue $config 'wsl.enabled' $false) -eq $true) {
@@ -1461,6 +1267,11 @@ function Invoke-RemoteAccess {
         [Parameter(Position = 1, ValueFromRemainingArguments = $true)][string[]]$Rest = @()
     )
     switch ($Sub) {
+        'keys' {
+            if ($Rest.Count -lt 1 -or $Rest.Count -gt 2 -or $Rest[0] -notin @('status', 'sync', 'remove')) { throw 'usage: dot remote keys {status|sync|remove NAME}' }
+            $name = if ($Rest.Count -eq 2) { $Rest[1] } else { '' }
+            Invoke-RemoteKeys -Action $Rest[0] -Name $name
+        }
         'setup' {
             Invoke-RemoteSetup
         }

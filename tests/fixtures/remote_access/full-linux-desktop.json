@@ -1,17 +1,8 @@
 {
   "remote_access": {
     "enabled": true,
-    "linux": {
-      "ssh": true,
-      "rdp": true
-    },
-    "login_keys": [
-      {
-        "name": "id_newcmelgar",
-        "targets": ["linux"],
-        "generate": true
-      }
-    ],
+    "ssh": {"enabled": true, "login_keys": []},
+    "rdp": {"enabled": true},
     "services": {
       "notes_linux": {
         "enabled": true,

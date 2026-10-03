@@ -223,12 +223,12 @@ dot() {
         remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;
         *)
             echo "dot - dotfiles command family"
-            echo "  dot up        sync state (pull + apply + config re-init; never upgrades)"
-            echo "  dot upgrade   upgrade ALL tooling (apt/brew + AI tools, session-gated)"
-            echo "  dot backup    encrypted portable backup"
-            echo "  dot restore   restore a backup"
-            echo "  dot doctor    dotfiles health check"
-            echo "  dot remote    remote-access setup/status/fix"
+            printf '  %-20s  %s\n' 'dot up' 'sync state (pull + apply + config re-init; never upgrades)'
+            printf '  %-20s  %s\n' 'dot upgrade' 'upgrade ALL tooling (apt/brew + AI tools, session-gated)'
+            printf '  %-20s  %s\n' 'dot backup' 'encrypted portable backup'
+            printf '  %-20s  %s\n' 'dot restore' 'restore a backup'
+            printf '  %-20s  %s\n' 'dot doctor' 'dotfiles health check'
+            printf '  %-20s  %s\n' 'dot remote' 'remote-access setup/status/fix/keys'
             ;;
     esac
 }

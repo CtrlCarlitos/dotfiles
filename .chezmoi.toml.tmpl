@@ -370,35 +370,30 @@
      so any table not re-emitted here is destroyed. emit-toml-table writes every
      key present in ~/.config/chezmoi/chezmoi.toml, so new keys survive too.
      All comments sit in ONE block above the live tables, like the accounts and
-     ssh_hosts sections; the tables themselves render bare. Not on WSL: its
-     sshd is reached through the Windows portproxy, so Windows owns this. */}}
-{{- if not $isWsl }}
+     ssh_hosts sections; each OS owns its local incoming authorization. */}}
+{{- if or (not $isWsl) (hasKey . "remote_access") }}
 # ==========================================================================
 # Remote Access (`dot remote`) - machine-local intent; see docs/remote-access.md
-# Names/targets only: no key material, tunnel credentials or Access policies.
+# Public-key names only: no private material, tunnel credentials or Access policies.
 # ==========================================================================
 # Reference (uncomment and customize in ~/.config/chezmoi/chezmoi.toml):
 #
 # [data.remote_access]
 #   enabled = true
 #
-#   # Windows host: sshd + Remote Desktop, both Tailscale-scoped.
-#   [data.remote_access.windows]
-#     ssh = true
-#     rdp = true
+#   [data.remote_access.ssh]
+#     enabled = true
+#     login_keys = ["id_phone", "id_laptop"] # existing local .pub files
+#   [data.remote_access.rdp]
+#     enabled = true # Windows RDP or native Linux xrdp
 #
-#   # WSL never joins the tailnet; its sshd is reached through the Windows
-#   # :2222 portproxy.
+#   # Optional Windows-side forwarding only. The distro owns its daemon/keys.
 #   [data.remote_access.wsl]
 #     enabled  = true
 #     ssh_port = 2222
 #
-#   # Remote-LOGIN keys (separate namespace from Git identities). generate = false:
-#   # the key pair already exists; its public half sits in ~/.ssh/<name>.pub.
-#   [[data.remote_access.login_keys]]
-#     name     = "id_<machine-local-key-name>"
-#     targets  = ["windows", "wsl"]
-#     generate = true
+#   # login_keys is authoritative: sync/fix revokes undeclared keys.
+#   # An explicit [] revokes all; missing/invalid desired keys refuse changes.
 #
 #   # Loopback web services exposed privately. Windows and WSL are separate
 #   # backends, so each gets its own block with its own environment and port.
