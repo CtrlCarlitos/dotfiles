@@ -66,4 +66,18 @@ if grep -nE '[&.|;(][[:space:]]*Add-MpPreference' "$script"; then
     fail "$script: Add-MpPreference must never be invoked (call operator, dot, pipe or subexpression)"
 fi
 
+# --- both PowerShell profiles carry the arm and the help row (invariant #10:
+# the two profiles are twins). Windows-only: the zsh dispatcher must NOT.
+ps1_profile="$repo_root/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
+ps1_profile5="$repo_root/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+for f in "$ps1_profile" "$ps1_profile5"; do
+    grep -Fq "'devtmp' { & (Join-Path \$repoScripts 'devtmp.ps1') @rest }" "$f" ||
+        fail "$f: no dot devtmp arm"
+    grep -Fq "'dot devtmp', 'build/test output folder for Defender (plan/apply/run)'" "$f" ||
+        fail "$f: dot help lacks the devtmp row"
+done
+if grep -Fq 'devtmp' "$repo_root/dot_aliases.zsh"; then
+    fail 'dot_aliases.zsh: devtmp is Windows-only, no zsh arm'
+fi
+
 finish
