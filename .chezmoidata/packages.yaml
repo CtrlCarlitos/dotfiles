@@ -379,10 +379,12 @@ catalog:
       group: dev_desktop
       apt: meld
       cask: meld
-      choco: meld
       note: >-
         Replaces WinMerge (Windows-only): Meld is already the Linux/macOS
-        diff/merge tool here and is on Chocolatey too, so one tool everywhere.
+        diff/merge tool here, so one tool everywhere. Windows installs it via
+        winget (Meld.Meld) by procedure, not Chocolatey: the Chocolatey package
+        lags (3.22.2 vs 3.24.0) and `winget upgrade --all` refuses to upgrade
+        a Chocolatey-installed copy (different installer technology).
     - id: wiztree
       group: dev_desktop
       choco: wiztree

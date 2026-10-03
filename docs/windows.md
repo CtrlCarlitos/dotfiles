@@ -43,6 +43,27 @@ currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
 quiet. Inside a devcontainer, upgrades ship via image rebuild and the
 script no-ops.
 
+#### When to run it: with every agent session closed
+
+Run `dot upgrade` from a plain elevated terminal with **no agent running** —
+Claude Code, Codex, OpenCode, `agy` and Serena all count, and so does the
+session you are reading this in. It scans for those processes and
+**defers** what a live session resolves its files from:
+
+| Live process | Deferred |
+|---|---|
+| `codex` | the Codex npm package |
+| `opencode`, `claude`, `codex` or `agy` | Graft (every hook event resolves its directory) |
+| `serena` | Serena (`uv tool upgrade` recreates its environment) |
+| `opencode` | OpenCode |
+
+Everything else (choco, winget, skills, Playwright, and the Claude Code
+binary itself) still upgrades, so a run with sessions open is safe, just
+incomplete: it ends with `Deferred (live sessions): ...`. Close the sessions
+and run `dot upgrade` again to pick those up. Expect to reopen apps as well:
+the sweep can replace the running Windows Terminal or Claude Code, and
+neither takes effect until restarted.
+
 #### Stop upgrades from recreating desktop shortcuts
 
 Installers drop a shortcut on the Desktop on every upgrade, and neither
