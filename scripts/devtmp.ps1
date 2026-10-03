@@ -34,6 +34,9 @@ $ErrorActionPreference = 'Stop'
 
 # Current `go env GOTMPDIR`; empty when unset or when Go is not installed.
 function Get-GoTmpDir {
+    # Scope-local: on Windows PowerShell 5.1 any native stderr line (e.g. a Go
+    # toolchain download notice) would otherwise throw under 'Stop'.
+    $ErrorActionPreference = 'Continue'
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) { return '' }
     $value = & go env GOTMPDIR 2>$null
     if ($value) { return ([string]$value).Trim() }
@@ -44,6 +47,7 @@ function Get-GoTmpDir {
 function Set-GoTmpDir {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$Path)
+    $ErrorActionPreference = 'Continue'
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
         Write-Host '  go not found - skipped GOTMPDIR (re-run after installing Go).' -ForegroundColor Yellow
         return
@@ -106,15 +110,33 @@ function Invoke-DevTmp {
     $path = $verdict.Path
 
     if ($sub -eq 'run') {
-        New-DevTmpDirectory -Path $path
         $command = $Arguments[1]
         $commandArgs = @($Arguments | Select-Object -Skip 2)
+        # Array-splatting passes every argument positionally, so a PowerShell
+        # script/cmdlet/function would silently mis-bind its -Named parameters.
+        # Only a native executable is run; resolve it before changing anything.
+        $resolved = Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $resolved) {
+            Write-Host "dot devtmp: could not find '$command'." -ForegroundColor Red
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if ($resolved.CommandType -ne 'Application') {
+            Write-Host "dot devtmp: run takes a native executable (go, pwsh, cmd, ...), not '$command' ($($resolved.CommandType))." -ForegroundColor Red
+            Write-Host '  For a PowerShell script: dot devtmp run pwsh -NoProfile -File <script> [args]'
+            $global:LASTEXITCODE = 2
+            return
+        }
+        New-DevTmpDirectory -Path $path
         $saved = @{ TMP = $env:TMP; TEMP = $env:TEMP }
         try {
             $env:TMP = $path
             $env:TEMP = $path
             $global:LASTEXITCODE = 0
-            & $command @commandArgs
+            # A child's stderr (go build/test errors) is output, not a PowerShell
+            # error: under 'Stop' Windows PowerShell 5.1 would throw on its first line.
+            $ErrorActionPreference = 'Continue'
+            & $resolved @commandArgs
         } catch {
             Write-Host "dot devtmp: could not run '$command': $($_.Exception.Message)" -ForegroundColor Red
             $global:LASTEXITCODE = 1

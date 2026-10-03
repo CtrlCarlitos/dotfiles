@@ -41,6 +41,11 @@ Then:
 | `dot devtmp apply` | Creates the folder and runs `go env -w GOTMPDIR=<path>` (persistent, no admin). |
 | `dot devtmp run go test ./...` | Runs the command with `TMP` and `TEMP` pointed at the folder **for that process only**. |
 
+`run` takes a **native executable** (`go`, `pwsh`, `cmd`, ...), not a PowerShell
+script, cmdlet or function: their `-Named` parameters would be passed
+positionally and silently mis-bound. To run a script use
+`dot devtmp run pwsh -NoProfile -File <script> [args]`.
+
 `run` exists because tests create temp directories through the standard
 temp-directory call, which follows `TMP`/`TEMP`, not `GOTMPDIR`. Setting them
 system-wide would move everything, so they are scoped to the one command.
@@ -76,6 +81,8 @@ It is not Go-only:
 The configured path is rejected, with the reason, when it is:
 
 - not an absolute drive path (relative, or UNC);
+- a path with `*`, `?`, `%`, `<`, `>`, `|` or `"` (Defender expands wildcards and
+  environment variables in an exclusion, so `C:\Users\*` would be a blanket one);
 - a drive root;
 - your user profile, or a parent of it;
 - `%TEMP%`, or a parent of it;

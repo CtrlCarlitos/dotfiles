@@ -104,6 +104,13 @@ Check '.. up to ancestor'    'C:\Users\u\x\..\..'                      $false 'c
 Check 'account dir itself'   'C:\Users\u\projects\personal'            $false 'account directory'
 Check 'account dir ancestor' 'C:\Users\u\projects'                     $false 'account directory'
 Check 'chezmoi source'       'C:\Users\u\.local\share\chezmoi'         $false 'account directory'
+# Final review: Defender reads * ? and %VAR% inside -ExclusionPath, so a path
+# carrying them is broader than any literal check can see.
+Check 'wildcard star'        'C:\Users\*'                              $false 'wildcard'
+Check 'wildcard question'    'C:\Users\u\AppData\Local\Tem?'           $false 'wildcard'
+Check 'env var'              'C:\%USERPROFILE%\x'                      $false 'wildcard'
+Check 'illegal chars'        'C:\dev\a|b'                              $false 'wildcard'
+Check 'embedded quote'       'C:\dev\"x"'                              $false 'wildcard'
 # Review Focus 2: a sibling that only shares a string prefix is NOT an ancestor.
 Check 'prefix sibling'       'C:\Users\u-dev\tmp'                      $true  ''
 Check 'inside home, not acct' 'C:\Users\u\devtmp'                      $true  ''
@@ -203,6 +210,26 @@ if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp') { Fail "[5]
 $null = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', 'exit 3')
 if ($global:LASTEXITCODE -ne 3) { Fail "[5] run must surface the child's exit code 3, got $global:LASTEXITCODE" }
 if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a failing child' }
+
+# Final review: a native child that writes to stderr (go test/build compile
+# errors) must not become a PowerShell error on 5.1; its exit code survives.
+$out = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', '[Console]::Error.WriteLine(''boom''); exit 5')
+if ($global:LASTEXITCODE -ne 5) { Fail "[5] a child writing stderr must keep its exit code 5, got $global:LASTEXITCODE (out: $out)" }
+if ($out -match 'could not run') { Fail "[5] child stderr was reported as a launch failure: $out" }
+
+# Final review: array-splatting passes args positionally, so a PowerShell
+# script/cmdlet/function would silently mis-bind -Named parameters. Refuse
+# non-native commands, with a hint, before changing anything.
+foreach ($nonNative in 'Get-ChildItem', 'Invoke-Dt') {
+    $out = Invoke-Dt @('run', $nonNative, '-LiteralPath', 'x')
+    if ($global:LASTEXITCODE -ne 2) { Fail "[5] run of non-native '$nonNative' must exit 2, got $global:LASTEXITCODE" }
+    if ($out -notmatch 'native') { Fail "[5] run of non-native '$nonNative' must explain (native executable), got:`n$out" }
+    if ($script:calls.Count -ne 0) { Fail "[5] run of non-native '$nonNative' must change nothing" }
+}
+$scriptFile = Join-Path $Tmp 'build.ps1'
+[IO.File]::WriteAllText($scriptFile, "param([string]`$Config)`n", $Utf8NoBom)
+$null = Invoke-Dt @('run', $scriptFile, '-Config', 'Release')
+if ($global:LASTEXITCODE -ne 2) { Fail "[5] run of a .ps1 must exit 2, got $global:LASTEXITCODE" }
 
 $null = Invoke-Dt @('run', 'devtmp-no-such-command-xyz')
 if ($global:LASTEXITCODE -eq 0) { Fail '[5] run of a missing command must not exit 0' }

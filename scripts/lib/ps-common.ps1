@@ -184,6 +184,9 @@ function Test-DevTmpPathSafe {
         [pscustomobject]@{ Safe = $false; Path = $norm; Reason = $why }
     }
     if (-not $norm) { return & $refuse 'must be an absolute drive path such as C:\dev\tmp' }
+    # Defender expands wildcards and environment variables inside -ExclusionPath,
+    # so `C:\Users\*` is a blanket exclusion no literal check below could see.
+    if ($norm -match '[*?%<>|"]') { return & $refuse 'it contains a wildcard or variable character (* ? % < > | ") that Defender expands' }
     if ($norm.Length -eq 3) { return & $refuse 'a drive root would exclude the whole drive' }
     $homeNorm = ConvertTo-DevTmpNormalPath -Path $HomeDir
     if ($homeNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $homeNorm)) {
