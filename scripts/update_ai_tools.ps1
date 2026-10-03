@@ -440,11 +440,29 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
         Write-Host "🌱 Graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
         Write-Host "🌱 Updating Graft..." -ForegroundColor Yellow
-        try {
-            graft upgrade 2>$null
-            if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
-        } catch {
-            Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+        # npm 12 skips install scripts unless allow-listed, so a bare
+        # `graft upgrade` leaves a graft whose tree-sitter parsers were never
+        # compiled (crashes at startup; seen on WSL 2026-10-02). Hand npm the
+        # installer's allow-list, read from the catalog like the codex package.
+        $graftAllow = ''
+        try { $graftAllow = (chezmoi execute-template '{{ join "," .agents.npm.graft_allow_scripts }}' | Out-String).Trim() } catch { Write-Verbose "graft allow-scripts probe failed: $($_.Exception.Message)" }
+        if (-not $graftAllow) {
+            Write-Host "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade" -ForegroundColor Red
+        } else {
+            $env:NPM_CONFIG_ALLOW_SCRIPTS = $graftAllow
+            try {
+                graft upgrade 2>$null
+                if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+            } catch {
+                Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
+            } finally {
+                Remove-Item Env:\NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue
+            }
+            # A graft that cannot start breaks every agent hook: say so now.
+            graft --version *> $null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  Warning: graft does not start after the upgrade - reinstall with NPM_CONFIG_ALLOW_SCRIPTS set to the installer's allow-list: npm install -g @nanonets/graft@latest" -ForegroundColor Red
+            }
         }
         # graft writes its Codex hook entries with backslash paths and no
         # commandWindows fallback - git bash (Codex's shell here) eats the
