@@ -80,4 +80,16 @@ if grep -Fq 'devtmp' "$repo_root/dot_aliases.zsh"; then
     fail 'dot_aliases.zsh: devtmp is Windows-only, no zsh arm'
 fi
 
+# --- docs: the page exists, states the contract, and is linked.
+doc="$repo_root/docs/devtmp.md"
+[ -f "$doc" ] || fail "$doc missing"
+require "$doc" 'build and test output only'
+require "$doc" 'Add-MpPreference -ExclusionPath'
+require "$doc" 'admin shell'
+require "$doc" 'Dev Drive'
+require "$doc" 'New-MpPerformanceRecording'
+require "$doc" '8.3'
+require "$repo_root/docs/README.md" '(devtmp.md)'
+require "$repo_root/docs/windows.md" 'devtmp.md'
+
 finish
