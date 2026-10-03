@@ -158,7 +158,7 @@ function ConvertTo-DevTmpNormalPath {
 
 # $Ancestor equals $Path or contains it. Compared on whole segments, so
 # C:\Users\u is NOT an ancestor of C:\Users\u-dev (a bare StartsWith says it is).
-function Test-DevTmpContains {
+function Test-DevTmpAncestor {
     param([string]$Ancestor, [string]$Path)
     $a = if ($Ancestor.EndsWith('\')) { $Ancestor } else { $Ancestor + '\' }
     $p = if ($Path.EndsWith('\')) { $Path } else { $Path + '\' }
@@ -186,17 +186,17 @@ function Test-DevTmpPathSafe {
     if (-not $norm) { return & $refuse 'must be an absolute drive path such as C:\dev\tmp' }
     if ($norm.Length -eq 3) { return & $refuse 'a drive root would exclude the whole drive' }
     $homeNorm = ConvertTo-DevTmpNormalPath -Path $HomeDir
-    if ($homeNorm -and (Test-DevTmpContains -Ancestor $norm -Path $homeNorm)) {
+    if ($homeNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $homeNorm)) {
         return & $refuse 'it contains your user profile (a blanket exclusion)'
     }
     $tempNorm = ConvertTo-DevTmpNormalPath -Path $TempDir
-    if ($tempNorm -and (Test-DevTmpContains -Ancestor $norm -Path $tempNorm)) {
+    if ($tempNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $tempNorm)) {
         return & $refuse 'it contains %TEMP% (a blanket exclusion)'
     }
     foreach ($dir in $AccountDir) {
         $full = if ($dir -match '^[A-Za-z]:[\\/]') { $dir } elseif ($homeNorm) { "$homeNorm\$dir" } else { $null }
         $dirNorm = ConvertTo-DevTmpNormalPath -Path $full
-        if ($dirNorm -and (Test-DevTmpContains -Ancestor $norm -Path $dirNorm)) {
+        if ($dirNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $dirNorm)) {
             return & $refuse "it contains the account directory '$dir' (your source checkouts)"
         }
     }

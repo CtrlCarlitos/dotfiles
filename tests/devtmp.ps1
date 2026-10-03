@@ -112,5 +112,103 @@ $r = Test-DevTmpPathSafe -Path 'C:/dev//tmp/' -HomeDir $home_ -TempDir $temp_
 if ($r.Path -ne 'C:\dev\tmp') { Fail "[4] result must carry the normalised path, got '$($r.Path)'" }
 Write-Host '  ok: Test-DevTmpPathSafe refuses blanket paths and accepts look-alikes'
 
+# --- [5] Invoke-DevTmp. Every side effect is a seam; Add-MpPreference is a
+# recording trap that must NEVER be hit (the dotfiles never run a Defender change).
+$env:DEVTMP_NO_MAIN = '1'
+. (Join-Path $RepoRoot 'scripts/devtmp.ps1')
+$script:calls = New-Object System.Collections.Generic.List[string]
+function Add-MpPreference { $script:calls.Add("Add-MpPreference $($args -join ' ')") }
+function Set-MpPreference { [CmdletBinding(SupportsShouldProcess)] param() if ($PSCmdlet.ShouldProcess('defender')) { $script:calls.Add('Set-MpPreference') } }
+function Get-GoTmpDir { 'C:\old\gotmp' }
+function Set-GoTmpDir { [CmdletBinding(SupportsShouldProcess)] param([string]$Path) if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("Set-GoTmpDir $Path") } }
+function New-DevTmpDirectory { [CmdletBinding(SupportsShouldProcess)] param([string]$Path) if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("New-DevTmpDirectory $Path") } }
+
+$cfgBody = "[data]`n  [data.devtmp]`n    path = `"C:/dev/tmp`"`n[[data.accounts]]`n  dirs = [`"projects/personal`"]`n"
+$cfg = Get-ScratchConfig $cfgBody
+function Invoke-Dt([string[]]$Cmd, [string]$Config = $cfg) {
+    $script:calls.Clear()
+    $global:LASTEXITCODE = $null
+    $out = & { Invoke-DevTmp -Arguments $Cmd -ConfigPath $Config -HomeDir 'C:\Users\u' -TempDir 'C:\Users\u\AppData\Local\Temp' } *>&1 | Out-String
+    return $out
+}
+
+# plan (also the default): prints, changes nothing, exit 0.
+foreach ($args_ in @(@(), @('plan'))) {
+    $out = Invoke-Dt $args_
+    if ($global:LASTEXITCODE -ne 0) { Fail "[5] plan exit code $global:LASTEXITCODE" }
+    if ($script:calls.Count -ne 0) { Fail "[5] plan must change nothing, did: $($script:calls -join '; ')" }
+    if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail "[5] plan must print the exclusion command, got:`n$out" }
+    if ($out -notmatch 'ADMIN') { Fail '[5] plan must say the exclusion is run from an admin shell' }
+    if ($out -notmatch [regex]::Escape('C:\old\gotmp')) { Fail '[5] plan must show the current GOTMPDIR' }
+}
+Write-Host '  ok: plan prints the plan and the admin command, changes nothing'
+
+# apply: creates the folder and sets GOTMPDIR, still only PRINTS the exclusion.
+$out = Invoke-Dt @('apply')
+if ($global:LASTEXITCODE -ne 0) { Fail "[5] apply exit code $global:LASTEXITCODE" }
+if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp; Set-GoTmpDir C:\dev\tmp') { Fail "[5] apply calls: $($script:calls -join '; ')" }
+if ($script:calls -match 'MpPreference') { Fail '[5] apply must NEVER run a Defender change' }
+if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail '[5] apply must still print the exclusion command' }
+Write-Host '  ok: apply sets up the folder and GOTMPDIR; the exclusion is only printed'
+
+# Review Focus 3: nothing configured -> one helpful line, exit 1, no side effects.
+foreach ($bad in @((Join-Path $Tmp 'missing.toml'), (Get-ScratchConfig "[data.packages]`ncore = true`n"), (Get-ScratchConfig "[data.devtmp]`npath = `"`"`n"))) {
+    foreach ($sub in 'plan', 'apply') {
+        $out = Invoke-Dt @($sub) $bad
+        if ($global:LASTEXITCODE -ne 1) { Fail "[5] unconfigured $sub must exit 1, got $global:LASTEXITCODE" }
+        if ($out -notmatch 'data\.devtmp') { Fail "[5] unconfigured $sub must name [data.devtmp], got:`n$out" }
+        if ($script:calls.Count -ne 0) { Fail "[5] unconfigured $sub must change nothing" }
+    }
+}
+Write-Host '  ok: unset or unreadable config is a one-line message and exit 1'
+
+# Unsafe configured path: refused with the rule, nothing changed, nothing printed to paste.
+foreach ($unsafe in 'C:\', 'C:\Users\u', 'C:\Users\u\AppData\Local\Temp', 'C:\Users\u\projects') {
+    $c = Get-ScratchConfig "[data.devtmp]`npath = '$unsafe'`n[[data.accounts]]`ndirs = [`"projects/personal`"]`n"
+    foreach ($sub in 'plan', 'apply', 'run') {
+        $out = Invoke-Dt @($sub, 'whatever') $c
+        if ($global:LASTEXITCODE -ne 1) { Fail "[5] unsafe '$unsafe' $sub must exit 1, got $global:LASTEXITCODE" }
+        if ($script:calls.Count -ne 0) { Fail "[5] unsafe '$unsafe' $sub must change nothing" }
+        if ($out -match 'Add-MpPreference') { Fail "[5] unsafe '$unsafe' $sub must not print an exclusion command" }
+    }
+}
+Write-Host '  ok: unsafe configured paths are refused by plan, apply and run'
+
+# Review Focus 4: a quote in the path stays one literal in the printed command.
+$q = Get-ScratchConfig "[data.devtmp]`npath = `"D:/it's/tmp`"`n"
+$out = Invoke-Dt @('plan') $q
+if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'D:\it''s\tmp'")) { Fail "[5] quote in path must be doubled, got:`n$out" }
+Write-Host '  ok: single quotes in the path are doubled in the printed command'
+
+# usage: unknown subcommand -> usage + exit 2, nothing changed.
+$out = Invoke-Dt @('frobnicate')
+if ($global:LASTEXITCODE -ne 2) { Fail "[5] unknown subcommand must exit 2, got $global:LASTEXITCODE" }
+if ($out -notmatch 'usage') { Fail '[5] unknown subcommand must print usage' }
+if ($script:calls.Count -ne 0) { Fail '[5] unknown subcommand must change nothing' }
+$out = Invoke-Dt @('run')
+if ($global:LASTEXITCODE -ne 2) { Fail "[5] run with no command must exit 2, got $global:LASTEXITCODE" }
+Write-Host '  ok: unknown subcommand and bare run print usage and exit 2'
+
+# run: child sees TMP/TEMP; the parent does not keep them (Review Focus 5).
+$pwshExe = (Get-Process -Id $PID).Path
+$env:TMP = 'KEEP-TMP'
+$env:TEMP = 'KEEP-TEMP'
+$probe = '[Console]::Out.Write([Environment]::GetEnvironmentVariable(''TMP'') + ''|'' + [Environment]::GetEnvironmentVariable(''TEMP''))'
+$out = (Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', $probe)).Trim()
+if ($out -notmatch [regex]::Escape('C:\dev\tmp|C:\dev\tmp')) { Fail "[5] child must see TMP/TEMP = the folder, got '$out'" }
+if ($global:LASTEXITCODE -ne 0) { Fail "[5] run success exit code $global:LASTEXITCODE" }
+if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail "[5] run leaked TMP/TEMP into the parent: TMP=$env:TMP TEMP=$env:TEMP" }
+if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp') { Fail "[5] run must only ensure the folder: $($script:calls -join '; ')" }
+
+$null = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', 'exit 3')
+if ($global:LASTEXITCODE -ne 3) { Fail "[5] run must surface the child's exit code 3, got $global:LASTEXITCODE" }
+if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a failing child' }
+
+$null = Invoke-Dt @('run', 'devtmp-no-such-command-xyz')
+if ($global:LASTEXITCODE -eq 0) { Fail '[5] run of a missing command must not exit 0' }
+if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a missing command' }
+Write-Host '  ok: run scopes TMP/TEMP to the child, restores them, and keeps the exit code'
+
+Remove-Item Env:\DEVTMP_NO_MAIN -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host 'PASS: devtmp helpers' -ForegroundColor Green
+Write-Host 'PASS: devtmp helpers and Invoke-DevTmp' -ForegroundColor Green

@@ -49,4 +49,21 @@ if printf '%s\n' "$lin_out" | grep -Fq 'data.devtmp'; then
     fail 'linux: [data.devtmp] must be Windows-only (neither live nor commented)'
 fi
 
+# --- the script never EXECUTES a Defender change: Add-MpPreference exists only
+# as a string assigned to $exclusionCommand and printed. (tests/devtmp.ps1 adds
+# the behavioral trap: a recording Add-MpPreference that must never be called.)
+script="$repo_root/scripts/devtmp.ps1"
+[ -f "$script" ] || fail "$script missing"
+require "$script" '$exclusionCommand = '
+forbid "$script" 'Set-MpPreference'
+forbid "$script" 'Remove-MpPreference'
+forbid "$script" 'Invoke-Expression'
+forbid "$script" '-Verb RunAs'
+if grep -nE '^[[:space:]]*Add-MpPreference' "$script"; then
+    fail "$script: Add-MpPreference must be printed text, never a statement"
+fi
+if grep -nE '[&.|;(][[:space:]]*Add-MpPreference' "$script"; then
+    fail "$script: Add-MpPreference must never be invoked (call operator, dot, pipe or subexpression)"
+fi
+
 finish
