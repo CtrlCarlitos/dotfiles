@@ -26,7 +26,7 @@ indent_style = space
 indent_size = 2
 
 # Windows-native scripts: CRLF here and in .gitattributes.
-[*.{ps1,ps1.tmpl}]
+[*.{ps1,ps1.tmpl},*.bat,*.cmd]
 end_of_line = crlf
 indent_style = space
 indent_size = 4
