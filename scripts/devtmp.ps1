@@ -44,17 +44,40 @@ function Get-GoTmpDir {
 }
 
 # Persistent, per-user, no admin: writes Go's own env file (go env -w).
+# Returns $true only when GOTMPDIR was really written, so the caller never
+# reports a setting that was skipped.
 function Set-GoTmpDir {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$Path)
     $ErrorActionPreference = 'Continue'
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
         Write-Host '  go not found - skipped GOTMPDIR (re-run after installing Go).' -ForegroundColor Yellow
-        return
+        return $false
     }
     if ($PSCmdlet.ShouldProcess("GOTMPDIR=$Path", 'go env -w')) {
         & go env -w "GOTMPDIR=$Path"
+        return ($LASTEXITCODE -eq 0)
     }
+    return $false
+}
+
+# 8.3 short name -> long name (C:\Users\CARLIT~1 -> C:\Users\carlitos), so the
+# profile/TEMP rules compare like with like. Only for paths that exist on
+# Windows; anything else comes back unchanged, which keeps the string rules in
+# ps-common.ps1 identical on every runner.
+function Resolve-DevTmpLongPath {
+    param([string]$Path)
+    if (-not $Path -or $env:OS -ne 'Windows_NT' -or -not (Test-Path -LiteralPath $Path)) { return $Path }
+    if (-not ('DevTmp.NativeMethods' -as [type])) {
+        Add-Type -Namespace DevTmp -Name NativeMethods -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+public static extern uint GetLongPathName(string shortPath, System.Text.StringBuilder longPath, uint bufferSize);
+'@
+    }
+    $buffer = New-Object System.Text.StringBuilder 32768
+    $length = [DevTmp.NativeMethods]::GetLongPathName($Path, $buffer, [uint32]$buffer.Capacity)
+    if ($length -gt 0 -and $length -lt $buffer.Capacity) { return $buffer.ToString() }
+    return $Path
 }
 
 function New-DevTmpDirectory {
@@ -62,6 +85,20 @@ function New-DevTmpDirectory {
     param([Parameter(Mandatory)][string]$Path)
     if ($PSCmdlet.ShouldProcess($Path, 'create directory')) {
         New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+}
+
+# A folder that cannot be created (missing drive, ACL) is a one-line refusal,
+# not a raw terminating error; the caller stops when this returns $false.
+function Initialize-DevTmpDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        New-DevTmpDirectory -Path $Path
+        return $true
+    } catch {
+        Write-Host "dot devtmp: could not create '$Path': $($_.Exception.Message)" -ForegroundColor Red
+        $global:LASTEXITCODE = 1
+        return $false
     }
 }
 
@@ -77,7 +114,7 @@ function Invoke-DevTmp {
         [string[]]$Arguments = @(),
         [string]$ConfigPath = (Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'),
         [string]$HomeDir = $env:USERPROFILE,
-        [string]$TempDir = $env:TEMP
+        [string[]]$TempDir = @($env:TEMP, $env:TMP)
     )
     $sub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { 'plan' }
     if ($sub -notin 'plan', 'apply', 'run') {
@@ -100,7 +137,12 @@ function Invoke-DevTmp {
         $global:LASTEXITCODE = 1
         return
     }
-    $verdict = Test-DevTmpPathSafe -Path $configured -HomeDir $HomeDir -TempDir $TempDir -AccountDir @(Get-AccountDir -ConfigPath $ConfigPath)
+    # Compare long names with long names: %TEMP% and the profile are often 8.3
+    # short paths (C:\Users\CARLIT~1) for long user names.
+    $verdict = Test-DevTmpPathSafe -Path (Resolve-DevTmpLongPath $configured) `
+        -HomeDir (Resolve-DevTmpLongPath $HomeDir) `
+        -TempDir @($TempDir | ForEach-Object { Resolve-DevTmpLongPath $_ }) `
+        -AccountDir @(Get-AccountDir -ConfigPath $ConfigPath)
     if (-not $verdict.Safe) {
         Write-Host "dot devtmp: refusing '$configured': $($verdict.Reason)" -ForegroundColor Red
         Write-Host '  Pick a dedicated folder that holds build/test output only (docs/devtmp.md).'
@@ -127,7 +169,7 @@ function Invoke-DevTmp {
             $global:LASTEXITCODE = 2
             return
         }
-        New-DevTmpDirectory -Path $path
+        if (-not (Initialize-DevTmpDirectory -Path $path)) { return }
         $saved = @{ TMP = $env:TMP; TEMP = $env:TEMP }
         try {
             $env:TMP = $path
@@ -154,10 +196,14 @@ function Invoke-DevTmp {
     $current = Get-GoTmpDir
 
     if ($sub -eq 'apply') {
-        New-DevTmpDirectory -Path $path
-        Set-GoTmpDir -Path $path
+        if (-not (Initialize-DevTmpDirectory -Path $path)) { return }
+        $goSet = Set-GoTmpDir -Path $path
         Write-Host "  Folder ready: $path" -ForegroundColor Green
-        Write-Host "  GOTMPDIR set to $path (was: $(if ($current) { $current } else { '(unset)' }))" -ForegroundColor Green
+        if ($goSet) {
+            Write-Host "  GOTMPDIR set to $path (was: $(if ($current) { $current } else { '(unset)' }))" -ForegroundColor Green
+        } else {
+            Write-Host "  GOTMPDIR was NOT set (is Go installed? it stays $(if ($current) { $current } else { '(unset)' }))." -ForegroundColor Yellow
+        }
     } else {
         Write-Host "dot devtmp plan  (nothing is changed; 'dot devtmp apply' does the no-admin part)"
         Write-Host "  folder     $path  $(if (Test-Path -LiteralPath $path) { '(exists)' } else { '(will be created)' })"

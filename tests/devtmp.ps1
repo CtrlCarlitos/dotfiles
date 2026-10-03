@@ -111,6 +111,14 @@ Check 'wildcard question'    'C:\Users\u\AppData\Local\Tem?'           $false 'w
 Check 'env var'              'C:\%USERPROFILE%\x'                      $false 'wildcard'
 Check 'illegal chars'        'C:\dev\a|b'                              $false 'wildcard'
 Check 'embedded quote'       'C:\dev\"x"'                              $false 'wildcard'
+# Deferred minors: %TMP% counts as well as %TEMP%, and an unknown profile or
+# temp refuses instead of silently dropping its rule.
+$r = Test-DevTmpPathSafe -Path 'D:\scratch' -HomeDir $home_ -TempDir @($temp_, 'D:\scratch\tmp')
+if ($r.Safe -or $r.Reason -notlike '*contains %TEMP%*') { Fail "[4] an ancestor of %TMP% must be refused, got Safe=$($r.Safe) ($($r.Reason))" }
+$r = Test-DevTmpPathSafe -Path 'C:\Users' -HomeDir '' -TempDir $temp_
+if ($r.Safe -or $r.Reason -notlike '*user profile*') { Fail "[4] an unknown profile must refuse, got Safe=$($r.Safe) ($($r.Reason))" }
+$r = Test-DevTmpPathSafe -Path 'C:\Users\u\AppData' -HomeDir $home_ -TempDir @('', $null)
+if ($r.Safe -or $r.Reason -notlike '*%TEMP%*') { Fail "[4] an unknown %TEMP% must refuse, got Safe=$($r.Safe) ($($r.Reason))" }
 # Review Focus 2: a sibling that only shares a string prefix is NOT an ancestor.
 Check 'prefix sibling'       'C:\Users\u-dev\tmp'                      $true  ''
 Check 'inside home, not acct' 'C:\Users\u\devtmp'                      $true  ''
@@ -127,8 +135,15 @@ $script:calls = New-Object System.Collections.Generic.List[string]
 function Add-MpPreference { $script:calls.Add("Add-MpPreference $($args -join ' ')") }
 function Set-MpPreference { [CmdletBinding(SupportsShouldProcess)] param() if ($PSCmdlet.ShouldProcess('defender')) { $script:calls.Add('Set-MpPreference') } }
 function Get-GoTmpDir { 'C:\old\gotmp' }
-function Set-GoTmpDir { [CmdletBinding(SupportsShouldProcess)] param([string]$Path) if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("Set-GoTmpDir $Path") } }
-function New-DevTmpDirectory { [CmdletBinding(SupportsShouldProcess)] param([string]$Path) if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("New-DevTmpDirectory $Path") } }
+$script:goSet = $true       # what Set-GoTmpDir reports: $false = Go absent, nothing set
+$script:mkdirFails = $false # New-DevTmpDirectory throws, like a missing drive or an ACL
+function Set-GoTmpDir { [CmdletBinding(SupportsShouldProcess)] param([string]$Path) if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("Set-GoTmpDir $Path"); return $script:goSet } }
+function New-DevTmpDirectory {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Path)
+    if ($script:mkdirFails) { throw 'access denied' }
+    if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("New-DevTmpDirectory $Path") }
+}
 
 $cfgBody = "[data]`n  [data.devtmp]`n    path = `"C:/dev/tmp`"`n[[data.accounts]]`n  dirs = [`"projects/personal`"]`n"
 $cfg = Get-ScratchConfig $cfgBody
@@ -156,7 +171,17 @@ if ($global:LASTEXITCODE -ne 0) { Fail "[5] apply exit code $global:LASTEXITCODE
 if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp; Set-GoTmpDir C:\dev\tmp') { Fail "[5] apply calls: $($script:calls -join '; ')" }
 if ($script:calls -match 'MpPreference') { Fail '[5] apply must NEVER run a Defender change' }
 if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail '[5] apply must still print the exclusion command' }
+if ($out -notmatch 'GOTMPDIR set to') { Fail "[5] apply must report GOTMPDIR set, got:`n$out" }
 Write-Host '  ok: apply sets up the folder and GOTMPDIR; the exclusion is only printed'
+
+# Deferred minor: apply must not claim GOTMPDIR was set when it was skipped (no Go).
+$script:goSet = $false
+$out = Invoke-Dt @('apply')
+$script:goSet = $true
+if ($out -match 'GOTMPDIR set to') { Fail "[5] apply claimed GOTMPDIR set though Go skipped it:`n$out" }
+if ($out -notmatch 'NOT set') { Fail "[5] apply must say GOTMPDIR was NOT set, got:`n$out" }
+if ($global:LASTEXITCODE -ne 0) { Fail "[5] a skipped GOTMPDIR is a warning, exit 0, got $global:LASTEXITCODE" }
+Write-Host '  ok: apply does not claim GOTMPDIR when Go skipped it'
 
 # Review Focus 3: nothing configured -> one helpful line, exit 1, no side effects.
 foreach ($bad in @((Join-Path $Tmp 'missing.toml'), (Get-ScratchConfig "[data.packages]`ncore = true`n"), (Get-ScratchConfig "[data.devtmp]`npath = `"`"`n"))) {
@@ -235,6 +260,42 @@ $null = Invoke-Dt @('run', 'devtmp-no-such-command-xyz')
 if ($global:LASTEXITCODE -eq 0) { Fail '[5] run of a missing command must not exit 0' }
 if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a missing command' }
 Write-Host '  ok: run scopes TMP/TEMP to the child, restores them, and keeps the exit code'
+
+# Deferred minor: a folder that cannot be created is a one-line refusal and exit 1,
+# not a raw terminating error; nothing else runs afterwards.
+$script:mkdirFails = $true
+$out = Invoke-Dt @('apply')
+if ($global:LASTEXITCODE -ne 1) { Fail "[5] apply with an uncreatable folder must exit 1, got $global:LASTEXITCODE" }
+if ($out -notmatch 'could not create') { Fail "[5] apply must say it could not create the folder, got:`n$out" }
+if ($script:calls.Count -ne 0) { Fail "[5] apply must not set GOTMPDIR after a failed mkdir: $($script:calls -join '; ')" }
+$out = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', 'Write-Output RAN')
+$script:mkdirFails = $false
+if ($global:LASTEXITCODE -ne 1) { Fail "[5] run with an uncreatable folder must exit 1, got $global:LASTEXITCODE" }
+if ($out -notmatch 'could not create') { Fail "[5] run must say it could not create the folder, got:`n$out" }
+if ($out -match 'RAN') { Fail '[5] run must not start the command when the folder cannot be created' }
+if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a failed mkdir' }
+Write-Host '  ok: an uncreatable folder is refused with exit 1 before anything runs'
+
+# Deferred minor: an 8.3 short-name spelling of the profile must be recognised
+# as the same place as its long form. Windows only (needs real 8.3 names).
+if ($env:OS -eq 'Windows_NT') {
+    $longHome = Join-Path $Tmp 'home-with-a-long-name-for-eight-dot-three'
+    New-Item -ItemType Directory -Force -Path $longHome | Out-Null
+    $expected = Resolve-DevTmpLongPath $longHome
+    $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($longHome).ShortPath
+    if ($short -ieq $expected) {
+        Write-Host '  skip: 8.3 short names are disabled on this volume'
+    } else {
+        if ((Resolve-DevTmpLongPath $short) -ine $expected) { Fail "[5] Resolve-DevTmpLongPath '$short' expected '$expected'" }
+        $c8 = Get-ScratchConfig "[data.devtmp]`npath = '$expected'`n"
+        $script:calls.Clear()
+        $global:LASTEXITCODE = $null
+        $out = & { Invoke-DevTmp -Arguments @('plan') -ConfigPath $c8 -HomeDir $short -TempDir @('C:\nowhere\tmp') } *>&1 | Out-String
+        if ($global:LASTEXITCODE -ne 1 -or $out -notmatch 'user profile') { Fail "[5] a profile given in 8.3 form must still be refused, got exit $global:LASTEXITCODE`n$out" }
+        Write-Host '  ok: 8.3 short names resolve to their long form before the rules run'
+    }
+}
+if ((Resolve-DevTmpLongPath 'C:\devtmp-no-such\dir') -ne 'C:\devtmp-no-such\dir') { Fail '[5] a nonexistent path must come back unchanged' }
 
 Remove-Item Env:\DEVTMP_NO_MAIN -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue

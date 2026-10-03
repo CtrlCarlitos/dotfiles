@@ -38,13 +38,16 @@ Then:
 | Command | What it does |
 |---|---|
 | `dot devtmp` | Prints the plan. Changes nothing. |
-| `dot devtmp apply` | Creates the folder and runs `go env -w GOTMPDIR=<path>` (persistent, no admin). |
+| `dot devtmp apply` | Creates the folder and runs `go env -w GOTMPDIR=<path>` (persistent, no admin). Says so plainly if Go is missing and `GOTMPDIR` was not set. |
 | `dot devtmp run go test ./...` | Runs the command with `TMP` and `TEMP` pointed at the folder **for that process only**. |
 
 `run` takes a **native executable** (`go`, `pwsh`, `cmd`, ...), not a PowerShell
 script, cmdlet or function: their `-Named` parameters would be passed
 positionally and silently mis-bound. To run a script use
 `dot devtmp run pwsh -NoProfile -File <script> [args]`.
+
+The `dot` function swallows a bare `--`, so write it **quoted** to pass it on to
+the command: `dot devtmp run go run . '--' -flag`.
 
 `run` exists because tests create temp directories through the standard
 temp-directory call, which follows `TMP`/`TEMP`, not `GOTMPDIR`. Setting them
@@ -85,16 +88,25 @@ The configured path is rejected, with the reason, when it is:
   environment variables in an exclusion, so `C:\Users\*` would be a blanket one);
 - a drive root;
 - your user profile, or a parent of it;
-- `%TEMP%`, or a parent of it;
+- `%TEMP%` or `%TMP%`, or a parent of either;
 - one of your `accounts[].dirs` (your source checkouts), or a parent of one.
 
 These are the blanket exclusions you do not want: the whole drive, your whole
 profile, the whole temp folder, or every repository you clone. `accounts.dirs`
 exist for git identity only and are never used as an exclusion list.
 
-Known limit: paths are compared literally. An **8.3** short-name spelling of
-`%TEMP%` or your profile (for example `C:\Users\CARLIT~1`) is not recognised as
-the same place, so write `path` in its long form.
+If it cannot tell where your profile or `%TEMP%` is, it refuses too, rather than
+skipping that rule.
+
+**8.3 short names are resolved.** For long user names `%TEMP%` and the profile
+are often short paths such as `C:\Users\CARLIT~1\AppData\Local\Temp`. Existing
+paths are expanded to their long form before the rules run, so the two spellings
+count as the same place.
+
+Known limit: aliases are not followed. A `subst` drive, a junction or a symlink
+that points at your profile or `%TEMP%` looks like a different place to the
+rules. If you set one up on purpose, pick a `path` that is not an alias of
+anything you would not want unscanned.
 
 ## 5. Measuring it
 

@@ -167,15 +167,15 @@ function Test-DevTmpAncestor {
 
 # The refusal rules for a Defender-excluded folder: it must be an absolute drive
 # path, and must not be a drive root, the user profile or an ancestor of it,
-# %TEMP% or an ancestor of it, or an account directory or an ancestor of one.
-# Home is checked before TEMP: TEMP normally lives under the profile, so
-# C:\Users must report the profile. -AccountDir entries are home-relative (as in
-# chezmoi.toml) or absolute.
+# %TEMP% / %TMP% or an ancestor of either, or an account directory or an ancestor
+# of one. Home is checked before TEMP: TEMP normally lives under the profile, so
+# C:\Users must report the profile. An unknown profile or temp refuses.
+# -AccountDir entries are home-relative (as in chezmoi.toml) or absolute.
 function Test-DevTmpPathSafe {
     param(
         [string]$Path,
         [string]$HomeDir,
-        [string]$TempDir,
+        [string[]]$TempDir,
         [string[]]$AccountDir = @()
     )
     $norm = ConvertTo-DevTmpNormalPath -Path $Path
@@ -188,16 +188,21 @@ function Test-DevTmpPathSafe {
     # so `C:\Users\*` is a blanket exclusion no literal check below could see.
     if ($norm -match '[*?%<>|"]') { return & $refuse 'it contains a wildcard or variable character (* ? % < > | ") that Defender expands' }
     if ($norm.Length -eq 3) { return & $refuse 'a drive root would exclude the whole drive' }
+    # A rule that cannot be evaluated refuses; it never silently passes.
     $homeNorm = ConvertTo-DevTmpNormalPath -Path $HomeDir
-    if ($homeNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $homeNorm)) {
+    if (-not $homeNorm) { return & $refuse 'cannot tell where your user profile is, so a blanket exclusion cannot be ruled out' }
+    $tempNorms = @($TempDir | ForEach-Object { ConvertTo-DevTmpNormalPath -Path $_ } | Where-Object { $_ })
+    if ($tempNorms.Count -eq 0) { return & $refuse 'cannot tell where %TEMP% is, so a blanket exclusion cannot be ruled out' }
+    if (Test-DevTmpAncestor -Ancestor $norm -Path $homeNorm) {
         return & $refuse 'it contains your user profile (a blanket exclusion)'
     }
-    $tempNorm = ConvertTo-DevTmpNormalPath -Path $TempDir
-    if ($tempNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $tempNorm)) {
-        return & $refuse 'it contains %TEMP% (a blanket exclusion)'
+    foreach ($tempNorm in $tempNorms) {
+        if (Test-DevTmpAncestor -Ancestor $norm -Path $tempNorm) {
+            return & $refuse 'it contains %TEMP% (a blanket exclusion)'
+        }
     }
     foreach ($dir in $AccountDir) {
-        $full = if ($dir -match '^[A-Za-z]:[\\/]') { $dir } elseif ($homeNorm) { "$homeNorm\$dir" } else { $null }
+        $full = if ($dir -match '^[A-Za-z]:[\\/]') { $dir } else { "$homeNorm\$dir" }
         $dirNorm = ConvertTo-DevTmpNormalPath -Path $full
         if ($dirNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $dirNorm)) {
             return & $refuse "it contains the account directory '$dir' (your source checkouts)"
