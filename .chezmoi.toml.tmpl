@@ -215,7 +215,9 @@
   # [data.upgrade]
   #   desktop_shortcuts = false   # remove shortcuts new installers drop on the Desktop
 {{- end }}
-{{- if and (hasKey . "devtmp") (hasKey .devtmp "path") .devtmp.path }}
+{{/* No left trim on this `if`: the newline it keeps is the one blank line that
+     sets this section off from the table above (set or commented). */ -}}
+{{ if and (hasKey . "devtmp") (hasKey .devtmp "path") .devtmp.path }}
   # `dot devtmp`: ONE folder for build/test output (Defender cost; #227).
   # Build output only: once excluded, nothing in it is scanned.
   [data.devtmp]

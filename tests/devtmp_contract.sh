@@ -44,6 +44,20 @@ if printf '%s\n' "$empty_out" | grep -Eq '^[[:space:]]*\[data\.devtmp\]$'; then
     fail 'windows: an empty path must not render a live [data.devtmp]'
 fi
 
+# The devtmp section is set off from the table above it by one blank line. The
+# `{{-` trim markers once swallowed it, so `desktop_shortcuts = false` ran
+# straight into the comment (every other table in the file is separated).
+line_before() { # $1 = rendered config, $2 = ERE: exactly ONE blank line above its first match?
+    printf '%s\n' "$1" | PAT="$2" awk '
+        $0 ~ ENVIRON["PAT"] { found = 1; exit (NR > 2 && prev == "" && prev2 != "") ? 0 : 1 }
+        { prev2 = prev; prev = $0 }
+        END { if (!found) exit 1 }'
+}
+line_before "$set_out" '^  # `dot devtmp`:' ||
+    fail 'windows: no blank line between [data.upgrade] and the [data.devtmp] section'
+line_before "$unset_out" '^  # \[data\.devtmp\]' ||
+    fail 'windows: no blank line before the commented [data.devtmp] example'
+
 lin_out="$(render_init "{$lin,\"devtmp\":{\"path\":\"/tmp/x\"}}")"
 if printf '%s\n' "$lin_out" | grep -Fq 'data.devtmp'; then
     fail 'linux: [data.devtmp] must be Windows-only (neither live nor commented)'
