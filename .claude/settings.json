@@ -10,8 +10,22 @@
   ],
   "permissions": {
     "allow": [
-      "Bash(graft:*)",
-      "Bash(npx graft:*)"
+      "Bash(graft ask:*)",
+      "Bash(graft skeleton:*)",
+      "Bash(graft callers:*)",
+      "Bash(graft grep:*)",
+      "Bash(graft map:*)",
+      "Bash(graft check:*)",
+      "Bash(graft stats:*)",
+      "Bash(graft blast:*)",
+      "Bash(npx graft ask:*)",
+      "Bash(npx graft skeleton:*)",
+      "Bash(npx graft callers:*)",
+      "Bash(npx graft grep:*)",
+      "Bash(npx graft map:*)",
+      "Bash(npx graft check:*)",
+      "Bash(npx graft stats:*)",
+      "Bash(npx graft blast:*)"
     ]
   }
 }
