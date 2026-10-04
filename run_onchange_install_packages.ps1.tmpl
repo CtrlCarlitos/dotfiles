@@ -309,7 +309,7 @@ $script:NpmUpgraded = $false
 # Upgrade npm to latest - once per run (four groups call Install-Node, and each repeat
 # cost 8-40s for the same no-op), and only when the registry has something newer. An
 # unreachable registry answers empty, which falls through to the install as before.
-function Update-NpmOnce {
+function Invoke-NpmUpgradeOnce {
     if ($script:NpmUpgraded -or -not (Get-Command npm -ErrorAction SilentlyContinue)) { return }
     $script:NpmUpgraded = $true
     # Native stderr throws under Stop on Windows PowerShell 5.1; probe under Continue.
@@ -336,7 +336,7 @@ function Install-Node {
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
-    Update-NpmOnce
+    Invoke-NpmUpgradeOnce
 }
 
 {{- if $core }}

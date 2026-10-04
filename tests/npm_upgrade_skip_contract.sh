@@ -52,15 +52,15 @@ sh_installs() { # $1 = latest the registry reports ("" = unreachable); prints th
 
 # --- PowerShell twin -----------------------------------------------------------------------
 if command -v pwsh >/dev/null 2>&1; then
-    tr -d '\r' <"$tmp/install.ps1" | awk '/^function Update-NpmOnce \{/{f=1} f{print} f && /^\}$/{exit}' >"$tmp/fn.ps1"
-    [ -s "$tmp/fn.ps1" ] || fail "Update-NpmOnce not found in the rendered PowerShell installer"
+    tr -d '\r' <"$tmp/install.ps1" | awk '/^function Invoke-NpmUpgradeOnce \{/{f=1} f{print} f && /^\}$/{exit}' >"$tmp/fn.ps1"
+    [ -s "$tmp/fn.ps1" ] || fail "Invoke-NpmUpgradeOnce not found in the rendered PowerShell installer"
     ps_installs() {
         {
             printf '%s\n' 'Set-StrictMode -Version Latest' '$ErrorActionPreference = "Stop"' "\$global:latest = '$1'" '$global:installs = 0' '$script:NpmUpgraded = $false'
             printf '%s\n' 'function Invoke-Quietly { param([string]$Description, [scriptblock]$Action) & $Action }'
             printf '%s\n' 'function npm { if ($args[0] -eq "-v") { "10.9.0" } elseif ($args[0] -eq "view") { if ($global:latest) { $global:latest } } elseif ($args[0] -eq "install") { $global:installs++ } }'
             cat "$tmp/fn.ps1"
-            printf '%s\n' 'Update-NpmOnce | Out-Null; Update-NpmOnce | Out-Null' 'Write-Output "installs=$global:installs"'
+            printf '%s\n' 'Invoke-NpmUpgradeOnce | Out-Null; Invoke-NpmUpgradeOnce | Out-Null' 'Write-Output "installs=$global:installs"'
         } >"$tmp/run.ps1"
         pwsh -NoProfile -File "$(winpath "$tmp/run.ps1")" 2>&1 | tr -d '\r' | grep -o 'installs=[0-9]*' | tail -1
     }
