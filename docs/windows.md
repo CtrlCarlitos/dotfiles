@@ -253,6 +253,12 @@ WSL2 has its own network adapter. To access services:
 
 ## Troubleshooting
 
+### Antimalware Service Executable busy during Go builds
+
+Defender rescans every freshly built test binary. See [devtmp.md](devtmp.md)
+(`dot devtmp`) for a single build-output folder and the exclusion it prints for
+you to run.
+
 ### SSH agent
 
 Windows and WSL each run their own agent. Nothing is shared between them, by design:

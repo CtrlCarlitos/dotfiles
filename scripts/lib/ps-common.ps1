@@ -99,3 +99,114 @@ function Remove-NewDesktopShortcut {
         }
     }
 }
+
+# --- dot devtmp (#227) -------------------------------------------------------
+# Config reads are plain line scans, like Test-DesktopShortcutsDisabled:
+# `chezmoi data` would resolve its own config path (docs/invariants.md #5).
+
+# [data.devtmp] path = "C:/dev/tmp" (basic or literal string) -> the string, or
+# $null when the table, the key, or a non-empty value is absent.
+function Get-DevTmpPath {
+    param([string]$ConfigPath = (Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'))
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return $null }
+    $inTable = $false
+    foreach ($line in [IO.File]::ReadAllLines($ConfigPath)) {
+        if ($line -match '^\s*\[data\.devtmp\]\s*$') { $inTable = $true; continue }
+        if ($inTable -and $line -match '^\s*\[') { $inTable = $false }
+        if ($inTable -and $line -match '^\s*path\s*=\s*(?:"((?:[^"\\]|\\.)*)"|''([^'']*)'')\s*(#.*)?$') {
+            $value = if ($Matches[1]) { $Matches[1] -replace '\\\\', '\' } else { $Matches[2] }
+            if ($value) { return $value }
+            return $null
+        }
+    }
+    return $null
+}
+
+# Every entry of every `dirs = [...]` line inside a [[data.accounts]] block
+# (the template emits dirs on ONE line). Home-relative as written.
+function Get-AccountDir {
+    param([string]$ConfigPath = (Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'))
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return }
+    $inAccount = $false
+    foreach ($line in [IO.File]::ReadAllLines($ConfigPath)) {
+        if ($line -match '^\s*\[\[data\.accounts\]\]\s*$') { $inAccount = $true; continue }
+        if ($inAccount -and $line -match '^\s*\[') { $inAccount = $false }
+        if ($inAccount -and $line -match '^\s*dirs\s*=\s*\[(.*)\]\s*(#.*)?$') {
+            foreach ($m in [regex]::Matches($Matches[1], '"((?:[^"\\]|\\.)*)"')) { $m.Groups[1].Value }
+        }
+    }
+}
+
+# Absolute drive path -> canonical `X:\a\b`; anything else -> $null. Pure string
+# logic on purpose: [IO.Path]::GetFullPath treats `C:\x` as relative on Linux,
+# and tests/devtmp.ps1 must give the same verdict on every runner.
+function ConvertTo-DevTmpNormalPath {
+    param([string]$Path)
+    if (-not $Path) { return $null }
+    $p = $Path.Trim().Trim('"') -replace '/', '\'
+    if ($p -notmatch '^[A-Za-z]:\\') { return $null }
+    $drive = $p.Substring(0, 2).ToUpperInvariant()
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($seg in $p.Substring(2).Split('\')) {
+        if ($seg -eq '' -or $seg -eq '.') { continue }
+        if ($seg -eq '..') { if ($parts.Count -gt 0) { $parts.RemoveAt($parts.Count - 1) }; continue }
+        $parts.Add($seg)
+    }
+    if ($parts.Count -eq 0) { return "$drive\" }
+    return "$drive\" + ($parts -join '\')
+}
+
+# $Ancestor equals $Path or contains it. Compared on whole segments, so
+# C:\Users\u is NOT an ancestor of C:\Users\u-dev (a bare StartsWith says it is).
+function Test-DevTmpAncestor {
+    param([string]$Ancestor, [string]$Path)
+    $a = if ($Ancestor.EndsWith('\')) { $Ancestor } else { $Ancestor + '\' }
+    $p = if ($Path.EndsWith('\')) { $Path } else { $Path + '\' }
+    return $p.StartsWith($a, [StringComparison]::OrdinalIgnoreCase)
+}
+
+# The refusal rules for a Defender-excluded folder: it must be an absolute drive
+# path, and must not be a drive root, the user profile or an ancestor of it,
+# %TEMP% / %TMP% or an ancestor of either, or an account directory or an ancestor
+# of one. Home is checked before TEMP: TEMP normally lives under the profile, so
+# C:\Users must report the profile. An unknown profile or temp refuses.
+# -AccountDir entries are home-relative (as in chezmoi.toml) or absolute.
+function Test-DevTmpPathSafe {
+    param(
+        [string]$Path,
+        [string]$HomeDir,
+        [string[]]$TempDir,
+        [string[]]$AccountDir = @()
+    )
+    $norm = ConvertTo-DevTmpNormalPath -Path $Path
+    $refuse = {
+        param([string]$why)
+        [pscustomobject]@{ Safe = $false; Path = $norm; Reason = $why }
+    }
+    if (-not $norm) { return & $refuse 'must be an absolute drive path such as C:\dev\tmp' }
+    # Defender expands wildcards and environment variables inside -ExclusionPath,
+    # so `C:\Users\*` is a blanket exclusion no literal check below could see.
+    if ($norm -match '[*?%<>|"]') { return & $refuse 'it contains a wildcard or variable character (* ? % < > | ") that Defender expands' }
+    if ($norm.Length -eq 3) { return & $refuse 'a drive root would exclude the whole drive' }
+    # A rule that cannot be evaluated refuses; it never silently passes.
+    $homeNorm = ConvertTo-DevTmpNormalPath -Path $HomeDir
+    if (-not $homeNorm) { return & $refuse 'cannot tell where your user profile is, so a blanket exclusion cannot be ruled out' }
+    $tempNorms = @($TempDir | ForEach-Object { ConvertTo-DevTmpNormalPath -Path $_ } | Where-Object { $_ })
+    if ($tempNorms.Count -eq 0) { return & $refuse 'cannot tell where %TEMP% is, so a blanket exclusion cannot be ruled out' }
+    if (Test-DevTmpAncestor -Ancestor $norm -Path $homeNorm) {
+        return & $refuse 'it contains your user profile (a blanket exclusion)'
+    }
+    foreach ($tempNorm in $tempNorms) {
+        if (Test-DevTmpAncestor -Ancestor $norm -Path $tempNorm) {
+            return & $refuse 'it contains %TEMP% (a blanket exclusion)'
+        }
+    }
+    foreach ($dir in $AccountDir) {
+        $full = if ($dir -match '^[A-Za-z]:[\\/]') { $dir } else { "$homeNorm\$dir" }
+        $dirNorm = ConvertTo-DevTmpNormalPath -Path $full
+        if ($dirNorm -and (Test-DevTmpAncestor -Ancestor $norm -Path $dirNorm)) {
+            return & $refuse "it contains the account directory '$dir' (your source checkouts)"
+        }
+    }
+    [pscustomobject]@{ Safe = $true; Path = $norm; Reason = '' }
+}

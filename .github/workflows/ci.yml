@@ -253,6 +253,10 @@ jobs:
       - name: Test desktop-shortcut cleanup (pwsh)
         run: pwsh -NoProfile -File tests/desktop_shortcuts.ps1
 
+      # `dot devtmp` helpers and dispatcher (Windows paths as strings; no Defender/Go/disk).
+      - name: Test dot devtmp (pwsh)
+        run: pwsh -NoProfile -File tests/devtmp.ps1
+
       - name: Doctor dispatch and SSH LF policy
         run: pwsh -NoProfile -File tests/dot_doctor_windows.ps1
 
@@ -348,6 +352,10 @@ jobs:
       - name: Test dot remote (5.1)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\remote_access.ps1
+
+      - name: Test dot devtmp (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\devtmp.ps1
 
       - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
         shell: pwsh
