@@ -55,7 +55,9 @@ for f in "$up_ps1" "$up_sh"; do
     [ -f "$f" ] || fail "$f: dotupgrade script missing"
 done
 grep -Fq 'choco upgrade all' "$up_ps1" || fail "$up_ps1: no choco sweep"
-grep -Fq 'Get-Process opencode, claude, codex, agy, serena' "$up_ps1" ||
+# The scan is path-aware (Codex's app-server daemon and Claude Desktop are not sessions);
+# tests/dotupgrade_live_sessions_contract.sh executes it. Here: it is still wired in.
+grep -Fq 'Get-LiveAgentProcess -Name opencode, claude, codex, agy, serena' "$up_ps1" ||
     fail "$up_ps1: no live-session scan"
 grep -Fq 'pgrep -x' "$up_sh" || fail "$up_sh: no live-session scan (pgrep)"
 grep -Fq 'brew upgrade' "$up_sh" || fail "$up_sh: no macOS sweep"

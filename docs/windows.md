@@ -43,6 +43,14 @@ currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
 quiet. Inside a devcontainer, upgrades ship via image rebuild and the
 script no-ops.
 
+What counts as a live session is decided by process name **and** executable path.
+Codex's shared app-server daemon (it runs its own copy under
+`~\.codex\packages\app-server-daemon\`, not the npm-global CLI the upgrade replaces) and
+Claude Desktop (under `AnthropicClaude\`, not Claude Code) do not defer anything. A
+process whose path cannot be read (an elevated process seen from a normal shell) still
+counts. The Unix twin applies the same rule for the Codex daemon. If Codex still reports
+as live, `codex app-server daemon stop` closes the daemon; it restarts on demand.
+
 #### When to run it: with every agent session closed
 
 Run `dot upgrade` from a plain elevated terminal with **no agent running** —

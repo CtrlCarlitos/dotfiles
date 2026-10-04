@@ -13,7 +13,22 @@ fi
 echo "dot upgrade - sweeping all tooling..."
 
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run. ---
-live() { for p in "$@"; do pgrep -x "$p" >/dev/null 2>&1 && return 0; done; return 1; }
+# A name match is not always a session: Codex's shared app-server daemon runs its OWN
+# release copy under ~/.codex/packages/app-server-daemon/, not the CLI the upgrade
+# replaces, so it does not defer anything. Everything else counts.
+live() {
+    local p pid args
+    for p in "$@"; do
+        for pid in $(pgrep -x "$p" 2>/dev/null); do
+            args="$(ps -o args= -p "$pid" 2>/dev/null)"
+            case "$p:$args" in
+                codex:*"/.codex/packages/app-server-daemon/"*) continue ;;
+            esac
+            return 0
+        done
+    done
+    return 1
+}
 DEFER=""
 live codex && DEFER="codex"
 live opencode claude codex agy && DEFER="${DEFER:+$DEFER,}graft"
@@ -21,7 +36,7 @@ live serena && DEFER="${DEFER:+$DEFER,}serena"
 live opencode && DEFER="${DEFER:+$DEFER,}opencode"
 export DOTUPGRADE_DEFER="$DEFER"
 if [ -n "$DEFER" ]; then
-    LIVE_NAMES="$(for p in opencode claude codex agy serena; do pgrep -x "$p" >/dev/null 2>&1 && echo "$p"; done | sort -u | tr '\n' ' ')"
+    LIVE_NAMES="$(for p in opencode claude codex agy serena; do live "$p" && echo "$p"; done | sort -u | tr '\n' ' ')"
     echo "  Live agent session(s): ${LIVE_NAMES}- deferring: $DEFER"
 else
     echo "  No live agent sessions - full sweep."

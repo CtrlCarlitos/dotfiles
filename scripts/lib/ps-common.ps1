@@ -210,3 +210,39 @@ function Test-DevTmpPathSafe {
     }
     [pscustomobject]@{ Safe = $true; Path = $norm; Reason = '' }
 }
+
+# --- Live agent sessions (dot upgrade) ---------------------------------------------------
+# `dot upgrade` defers upgrades that delete and recreate package directories a running
+# agent session resolves from. It used to match process NAMES only, so two things that are
+# not sessions kept deferring codex and graft: Codex's shared app-server daemon (it runs
+# its OWN release copy under ~\.codex\packages\app-server-daemon\, not the npm-global CLI
+# the upgrade replaces) and Claude Desktop (an Electron app, ~10 claude.exe processes under
+# AnthropicClaude\; it is not Claude Code). A process whose path cannot be read (an
+# elevated process seen from a normal shell) still counts: when in doubt, defer.
+$script:NonSessionPathPattern = @{
+    claude = @('\\AnthropicClaude\\')
+    codex  = @('\\\.codex\\packages\\app-server-daemon\\')
+}
+
+function Get-LiveAgentProcess {
+    param([string[]]$Name)
+    foreach ($n in $Name) {
+        foreach ($process in @(Get-Process $n -ErrorAction SilentlyContinue)) {
+            $path = $null
+            try { $path = $process.Path } catch { $path = $null }
+            if ($path -and $script:NonSessionPathPattern.ContainsKey($n)) {
+                $ignored = $false
+                foreach ($pattern in $script:NonSessionPathPattern[$n]) {
+                    if ($path -match $pattern) { $ignored = $true }
+                }
+                if ($ignored) { continue }
+            }
+            $process
+        }
+    }
+}
+
+function Test-LiveProcess {
+    param([string[]]$Names)
+    return [bool](@(Get-LiveAgentProcess -Name $Names).Count -gt 0)
+}
