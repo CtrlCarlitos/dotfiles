@@ -1882,26 +1882,17 @@ $guardrailRepo    = "CtrlCarlitos/agent-guardrails"
 $guardrailExe     = "$env:USERPROFILE\.local\bin\guardrail.exe"
 function Invoke-GuardrailInstaller {
     param([Parameter(Mandatory)][string]$State)
-    # Unique per run (like agent-guardrails' own install.ps1), so a stale or
-    # A running guardrail (agents spawn it per call, plus the approval daemon)
-    # locks guardrail.exe, so the installer's replace step would fail and -
-    # deliberately - fail this whole script, over and over, whenever any agent
-    # session is live. Windows allows RENAMING an in-use executable: set the
-    # old binary aside first so the installer writes a fresh one; the running
-    # copy keeps enforcing until it exits. Stale .old binaries are swept below.
+    # Replacing a RUNNING guardrail.exe is guardrail's own job, and the installer run below
+    # does it right: with a binary already installed it runs the binary's own update
+    # command, which changes nothing when the tag already matches, renames a running image aside
+    # itself (Windows allows renaming an in-use executable, not overwriting it) and keeps
+    # the previous binary for `guardrail rollback`. This function used to move guardrail.exe
+    # aside first. The upstream installer then found no binary, took its fresh-download
+    # path and fetched the SAME release again every run, which also reset guardrail's
+    # evidence window ("hook registered but NEVER OBSERVED FIRING" after each dot up) and
+    # skipped the rollback copy. Leave the installed binary alone.
     $grBin = Join-Path $HOME ".local\bin\guardrail.exe"
-    $grOld = ""
-    if (Test-Path $grBin) {
-        $stamp = Get-Date -Format 'yyyyMMddHHmmss'
-        try {
-            Move-Item -LiteralPath $grBin -Destination "$grBin.old-$stamp" -Force -ErrorAction Stop
-            $grOld = "$grBin.old-$stamp"
-            Write-Host "  guardrail.exe was in use - set it aside as $(Split-Path $grOld -Leaf); the running copy keeps enforcing until it exits" -ForegroundColor Yellow
-        } catch {
-            Write-Host "  Warning: guardrail.exe is in use and could not be set aside - skipping the update; the current version keeps enforcing. Remedy: quit agent sessions (the approval daemon exits after 10 idle minutes) or reboot, then re-run chezmoi apply." -ForegroundColor Yellow
-            return
-        }
-    }
+    # Unique per run (like agent-guardrails' own install.ps1), so a stale or
     # concurrent run's files can never be picked up; every path below removes it.
     $guardrailTmp = Join-Path $env:TEMP ("guardrail-installer-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $guardrailTmp | Out-Null
@@ -1967,12 +1958,8 @@ function Invoke-GuardrailInstaller {
         throw "guardrail installer could not be started: $_"
     }
     Remove-Item $guardrailTmp -Recurse -Force -ErrorAction SilentlyContinue
-    # If the installer failed and left no binary on disk (the rename-aside
-    # freed the path), restore the set-aside copy so the enforcing guardrail
-    # survives on disk too, then surface the failure as before.
-    if ($code -ne 0 -and $grOld -and -not (Test-Path $grBin)) {
-        Move-Item -LiteralPath $grOld -Destination $grBin -Force -ErrorAction SilentlyContinue
-    }
+    # Copies the previous scheme left beside the binary (guardrail.exe.old-<stamp>) are
+    # swept; upstream's own single guardrail.exe.old slot is its to manage, not ours.
     Get-ChildItem -Path (Split-Path -Parent $grBin) -Filter "guardrail.exe.old-*" -File -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
     # Exit-code contract (see the section header above):
