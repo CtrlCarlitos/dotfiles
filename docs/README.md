@@ -9,6 +9,7 @@ are reference.
 - [Package Groups](package-groups.md) — the 16 groups, presets, and how to change your selection
 - [Menu Demo](menu-demo.md) — what the selection menu actually looks like
 - [Backup & Restore](backup-restore.md) — `dot backup` / `dot restore`, the encrypted portable archive
+- [Versioning & releases](versioning.md) — `dot version`, the date-based tags, the generated `CHANGELOG.md`, cutting a release, rolling back
 
 ## Daily reference
 
