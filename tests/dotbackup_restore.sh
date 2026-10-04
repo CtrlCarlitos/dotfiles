@@ -84,7 +84,7 @@ run_restore() { # $1 = home, $2 = archive
 }
 
 run_restore_without_jq() { # $1 = home, $2 = archive
-    HOME="$1" PATH="$no_jq_bin" FAKE_7Z_LOG="$tmp/7z.log" /bin/bash "$restore" "$2"
+    env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$1" PATH="$no_jq_bin" FAKE_7Z_LOG="$tmp/7z.log" /bin/bash "$restore" "$2"
 }
 
 make_source_home() { # $1 = home
@@ -321,7 +321,7 @@ for never in manifests allowances selftest-passed; do
     [ -z "$(find "$pk_payload" -name "$never" -print -quit)" ] || fail "[9] $never must never be captured"
 done
 rm -rf "$pk_home/.dot_backups"
-HOME="$pk_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$pk_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
 [ -f "$(backup_payload "$pk_home")/guardrail/audit/audit-2026.jsonl" ] || fail '[9] audit log not captured with DOTBACKUP_AUDIT=1'
 echo "  ok: guardrail backup captures operator state, skips regenerated state"
 
@@ -401,7 +401,7 @@ printf 'fingerprint\n' > "$pm_home/.local/state/guardrail/session-checks/repo.js
 printf '{"sha256":"x"}\n' > "$pm_home/.local/state/guardrail/previous.json"
 printf 'binary\n' > "$pm_home/.local/bin/guardrail.previous"
 printf 'binary\n' > "$pm_home/.local/bin/guardrail.previous.exe"
-HOME="$pm_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$pm_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
 pm_payload="$(backup_payload "$pm_home")"
 for never in session-checks previous.json 'guardrail.previous*'; do
     [ -z "$(find "$pm_payload" -name "$never" -print -quit)" ] || fail "[16] $never must never be captured"
@@ -431,7 +431,7 @@ XDG_CONFIG_HOME="$xdg_restore/xcfg" XDG_STATE_HOME="$xdg_restore/xst" HOME="$xdg
 [ ! -e "$xdg_restore/.config/guardrail" ] || fail '[17] restore also wrote the default config root'
 xdg_out="$tmp/home-xdg-outside"
 mkdir -p "$xdg_out"
-if xdg_err="$(XDG_CONFIG_HOME="$tmp/outside-home-cfg" HOME="$xdg_out" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "${xdg_archive[0]}" 2>&1 >/dev/null)"; then
+if xdg_err="$(env -u XDG_STATE_HOME XDG_CONFIG_HOME="$tmp/outside-home-cfg" HOME="$xdg_out" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "${xdg_archive[0]}" 2>&1 >/dev/null)"; then
     fail '[17] a guardrail root outside HOME must be refused'
 fi
 printf '%s' "$xdg_err" | grep -q 'outside HOME' || fail "[17] the refusal must say the root is outside HOME (got: $xdg_err)"
@@ -478,7 +478,7 @@ echo "  ok: restore names repo grants that will not apply here"
 # [19] The audit log can be huge: say how big before the operator hands the archive around.
 audit_home="$tmp/home-audit-size"
 make_guardrail_home "$audit_home" prompt
-audit_out="$(HOME="$audit_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup")"
+audit_out="$(env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$audit_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup")"
 printf '%s' "$audit_out" | grep -Eq 'Audit log: 1 segment\(s\), ' || fail "[19] audit size not reported (got: $audit_out)"
 rm -rf "$audit_home/.dot_backups"
 quiet_out="$(run_backup "$audit_home")"

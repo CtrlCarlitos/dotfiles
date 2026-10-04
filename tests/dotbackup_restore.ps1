@@ -197,6 +197,7 @@ $env:APPDATA = Join-Path $homeSource 'AppData\Roaming'
 $env:LOCALAPPDATA = Join-Path $homeSource 'AppData\Local'
 $env:PATH = "$bin;$env:PATH"
 $env:FAKE_7Z_LOG = $Log
+Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue   # hermetic: only scenario [10] sets it
 
 # --- [1] Backup: timestamped archive, bare -p, header encryption, full payload.
 $backupOut = & $powerShell5 -NoProfile -ExecutionPolicy Bypass -File $Backup 2>&1 | Out-String
