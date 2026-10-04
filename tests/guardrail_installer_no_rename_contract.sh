@@ -6,9 +6,9 @@ set -euo pipefail
 # (guardrail.exe.old-<stamp>) and then let the upstream installer download the same
 # release again. Two costs: the swap resets guardrail's evidence window ("hook registered
 # but NEVER OBSERVED FIRING" after every dot up), and because the binary was gone the
-# upstream installer took its fresh-download path instead of `guardrail update`, which is
+# upstream installer took its fresh-download path instead of its update path, which is
 # the sanctioned replacement (it does nothing when the tag already matches, replaces a
-# running binary itself, and keeps the previous one for `guardrail rollback`).
+# running binary itself, and keeps the previous one for rollback).
 #
 # Invoke-GuardrailInstaller is extracted from the rendered template and EXECUTED with the
 # network and the upstream installer stubbed. Left alone, an installed binary must stay
@@ -39,13 +39,17 @@ $end = $start
 while ($lines[$end] -ne '}') { $end++ }
 Invoke-Expression (($lines[$start..$end]) -join "`n")
 
+# Windows always has %TEMP%; Linux pwsh does not.
+if (-not $env:TEMP) { $env:TEMP = [IO.Path]::GetTempPath() }
 $guardrailVersion = 'v9.9.9-test'
 $guardrailRepo = 'example/guardrail'
-$binDir = Join-Path $HomeDir '.local\bin'
+# The installer builds this path with a backslash literal; build it the same way here so
+# the harness agrees with it on every platform (on Linux that is one file name in $HOME).
+$bin = Join-Path $HOME ".local\bin\guardrail.exe"
+$binDir = Split-Path -Parent $bin
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$bin = Join-Path $binDir 'guardrail.exe'
 Set-Content -LiteralPath $bin -Value 'installed-binary' -Encoding ascii
-$legacy = Join-Path $binDir 'guardrail.exe.old-20260101000000'
+$legacy = "$bin.old-20260101000000"
 Set-Content -LiteralPath $legacy -Value 'legacy set-aside copy' -Encoding ascii
 
 # The download job is replaced by a stub that "downloads" a fake upstream installer and
@@ -62,17 +66,19 @@ function powershell { $script:seen = ($args -join ' '); $global:LASTEXITCODE = 0
 
 Invoke-GuardrailInstaller -State enabled | Out-Null
 
+$siblings = @(Get-ChildItem -LiteralPath $binDir -File -Force | Where-Object { $_.Name -like '*guardrail.exe.old-*' -and $_.FullName -ne $legacy })
 Write-Output ("binary-in-place=" + (Test-Path -LiteralPath $bin))
 Write-Output ("binary-content=" + ((Get-Content -LiteralPath $bin) -join ''))
-Write-Output ("moved-aside=" + @(Get-ChildItem -LiteralPath $binDir -Filter 'guardrail.exe.old-*' -File | Where-Object { $_.Name -ne 'guardrail.exe.old-20260101000000' }).Count)
+Write-Output ("moved-aside=" + $siblings.Count)
 Write-Output ("upstream-called=" + ($script:seen -match '-Version v9\.9\.9-test' -and $script:seen -match '-State enabled'))
 Write-Output ("legacy-swept=" + (-not (Test-Path -LiteralPath $legacy)))
 PSEOF
 
 home="$tmp/home"
 mkdir -p "$home"
-out="$(HOME="$home" USERPROFILE="$home" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r')"
-expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
+# `|| true`: a harness that throws must show its output in the failure, not end the test silently.
+out="$(HOME="$home" USERPROFILE="$home" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r' || true)"
+expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500))"; }
 
 expect 'binary-in-place=True'
 expect 'binary-content=installed-binary'
