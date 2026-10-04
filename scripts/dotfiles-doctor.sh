@@ -173,6 +173,18 @@ fi
 fi
 
 #-------------------------------------------------------------------------------
+# 4b. Which version of the dotfiles repo is this? (informational, never warns)
+#-------------------------------------------------------------------------------
+# The same line as `dot version`, computed from git by dotversion.sh. A copy of
+# the repo without git metadata reports skip: there is nothing to check.
+if ver="$(bash "$repo_root/scripts/dotversion.sh" 2>/dev/null)"; then
+    result ok dotfiles-version "${ver#dotfiles }"
+else
+    result skip dotfiles-version "${ver:-dotversion.sh could not run}"
+fi
+
+
+#-------------------------------------------------------------------------------
 # 5. Installed chezmoi vs the repo's .chezmoi-version pin
 #-------------------------------------------------------------------------------
 if [ -n "$IN_APPLY" ]; then

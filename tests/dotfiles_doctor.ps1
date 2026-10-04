@@ -72,6 +72,9 @@ New-ValidConfig $h
 $r = Invoke-Doctor $h
 if ($r.Code -ne 0) { Fail "[1] valid config should pass: $($r.Out)" }
 if ($r.Out -notmatch 'config-utf8') { Fail "[1] utf-8 check not reported: $($r.Out)" }
+# The repo version rides along with every doctor run (same line as `dot version`),
+# informational only: never a warn/error, so it cannot fail a valid config.
+if ($r.Out -notmatch '(?m)^(ok|skip)\s+dotfiles-version\s') { Fail "[1] dotfiles-version not reported: $($r.Out)" }
 Write-Host '  ok: valid config passes'
 
 # [2] cp1252: detected, -Fix converts, re-run passes.

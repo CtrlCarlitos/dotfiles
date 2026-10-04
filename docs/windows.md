@@ -146,7 +146,7 @@ What the PowerShell 7 profile sets up:
 | Modern tools | `ls`→eza (`ll`, `la`, `lt`, `lta`), `cat`→bat, `vim`/`vi`/`v`→nvim |
 | Git | OMZ-style `gst`, `gd`, `gl`, `gp`, `gco`, `ga`, `gcam`, `gb` |
 | Parity with `dot_aliases.zsh` | `c`, `h`, `py`, `nr`/`nrd`/`nrb`, `serve`, `ff`, `path`, `prof`, `get`/`post`, docker `d`/`dc*` |
-| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor`), `devprofile` / `dp` |
+| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor` / `dot version`), `devprofile` / `dp` |
 | Windows Terminal | reports the current folder (OSC 9;9), so splits open where you are (the 5.1 profile does too) |
 | SSH agent | tops up the Windows ssh-agent with your declared keys (only adds, never removes) |
 

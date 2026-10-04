@@ -173,6 +173,7 @@ function dot {
         }
         'remote' { & (Join-Path $repoScripts 'remote-access.ps1') @rest }
         'devtmp' { & (Join-Path $repoScripts 'devtmp.ps1') @rest }
+        'version' { & (Join-Path $repoScripts 'dotversion.ps1') @rest }
         'ssh-fingerprints' { python (Join-Path $repoScripts 'ssh_fingerprints.py') @rest }
         default {
             Write-Host "dot - dotfiles command family"
@@ -184,6 +185,7 @@ function dot {
             Write-Host ("  {0,-20}  {1}" -f 'dot doctor', 'dotfiles health check')
             Write-Host ("  {0,-20}  {1}" -f 'dot remote', 'remote-access setup/status/fix')
             Write-Host ("  {0,-20}  {1}" -f 'dot devtmp', 'build/test output folder for Defender (plan/apply/run)')
+            Write-Host ("  {0,-20}  {1}" -f 'dot version', 'which version of the dotfiles repo this is')
         }
     }
 }
