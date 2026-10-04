@@ -26,8 +26,14 @@
 $script:SkillsPendingKey = ''
 $script:SkillsPendingHead = ''
 
+# USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
+function Get-SkillsHome {
+    if ($env:USERPROFILE) { return $env:USERPROFILE }
+    return $HOME
+}
+
 function Get-SkillsSourceStatePath {
-    $base = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path $env:USERPROFILE '.local\state' }
+    $base = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path (Get-SkillsHome) '.local\state' }
     return Join-Path (Join-Path $base 'dotfiles') 'skills-sources'
 }
 
@@ -62,8 +68,8 @@ function Test-SkillsUpToDate {
     $script:SkillsPendingHead = Get-SkillsRemoteHead -Repo $Repo
     if ($env:DOT_SKILLS_FORCE -eq '1') { return $false }
     foreach ($skill in $Skills) {
-        if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE ".claude\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
-        if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE ".agents\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
+        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".claude\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
+        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".agents\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
     }
     if (-not $script:SkillsPendingHead) { return $false }
     $state = Get-SkillsSourceStatePath
