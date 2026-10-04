@@ -9,6 +9,8 @@ re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 # received chunk, throttling downloads to a crawl. Script-scoped; the child
 # `irm | iex` below is a separate process and sets it itself.
 $ProgressPreference = 'SilentlyContinue'
+# Shared helpers (the current-version checks below); the file sits next to this script.
+if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-common.ps1') }
 Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
@@ -35,7 +37,11 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         if (-not $codexPkg) {
             Write-Host "  codex package name unavailable from chezmoi data - skipping" -ForegroundColor Red
         } else {
-            npm install -g "$($codexPkg)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+            if (Test-NpmGlobalCurrent $codexPkg) {
+                Write-Host "  codex is current ($script:NpmCurrentVersion)"
+            } else {
+                npm install -g "$($codexPkg)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+            }
         }
     }
 } else {
@@ -476,7 +482,12 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
         # installer's allow-list, read from the catalog like the codex package.
         $graftAllow = ''
         try { $graftAllow = (chezmoi execute-template '{{ join "," .agents.npm.graft_allow_scripts }}' | Out-String).Trim() } catch { Write-Verbose "graft allow-scripts probe failed: $($_.Exception.Message)" }
-        if (-not $graftAllow) {
+        # Only upgrade when the installed graft is not already the latest published one.
+        $graftCurrent = ''
+        try { $graftCurrent = Get-GraftCurrentVersion -VersionOutput ((graft version 2>$null) | Out-String) } catch { Write-Verbose "graft version probe failed: $($_.Exception.Message)" }
+        if ($graftCurrent) {
+            Write-Host "  graft is current ($graftCurrent)"
+        } elseif (-not $graftAllow) {
             Write-Host "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade" -ForegroundColor Red
         } else {
             $env:NPM_CONFIG_ALLOW_SCRIPTS = $graftAllow

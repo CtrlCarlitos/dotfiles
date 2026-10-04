@@ -20,6 +20,17 @@ echo "🤖 Updating AI Coding Tools..."
 # cannot be recreated while live agent sessions resolve from them.
 deferred() { case ",${DOTUPGRADE_DEFER:-}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
+# npm_global_current <pkg>: 0 when the globally installed <pkg> is already the registry's
+# latest, so the reinstall (9 s for codex on WSL) can be skipped. Unknown - no jq, not
+# installed, registry unreachable - returns 1 and the caller installs as before.
+npm_global_current() {
+    local pkg="$1" have want
+    command -v jq &>/dev/null || return 1
+    have="$(npm ls -g "$pkg" --depth=0 --json 2>/dev/null | jq -b -r --arg p "$pkg" '.dependencies[$p].version // empty' 2>/dev/null)" || have=""
+    want="$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]')" || want=""
+    [ -n "$have" ] && [ "$have" = "$want" ] && CURRENT_NPM_VERSION="$have"
+}
+
 # The npm sudo decision, once for every global npm step below. Same rule the
 # installer template makes (#114): sudo only for the system-owned /usr prefix -
 # a user-managed npm (nvm, homebrew) must never be sudo'd. The agent-browser
@@ -49,7 +60,11 @@ if command -v npm &>/dev/null; then
         if [ -z "$CODEX_PKG" ]; then
             echo "   codex package name unavailable from chezmoi data - skipping"
         else
-            $npm_sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+            if npm_global_current "$CODEX_PKG"; then
+                echo "   codex is current ($CURRENT_NPM_VERSION)"
+            else
+                $npm_sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
+            fi
         fi
     fi
 else
@@ -306,7 +321,15 @@ if command -v graft &>/dev/null; then
         case "$graft_real" in
             */lib/node_modules/@nanonets/graft/*) graft_prefix="${graft_real%/lib/node_modules/@nanonets/graft/*}" ;;
         esac
-        if [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
+        # `graft upgrade` reinstalls even when nothing changed (0.21.1 -> 0.21.1 took 41 s on
+        # WSL). `graft version` prints the installed version and the latest published one;
+        # equal means nothing to do. "unreachable" or no answer still upgrades.
+        graft_version_out="$(graft version 2>/dev/null || true)"
+        graft_have="$(printf '%s\n' "$graft_version_out" | sed -n 's/^graft \([0-9][^ ]*\).*/\1/p' | head -n 1)"
+        graft_latest="$(printf '%s\n' "$graft_version_out" | sed -n 's/^latest: \([0-9][^ ]*\).*/\1/p' | head -n 1)"
+        if [ -n "$graft_have" ] && [ "$graft_have" = "$graft_latest" ]; then
+            echo "  graft is current ($graft_have)"
+        elif [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
             echo "  Warning: graft is in $graft_prefix (not writable) - reinstall with: sudo npm install -g @nanonets/graft@latest"
         else
             # npm 12 skips install scripts unless allow-listed, so a bare
