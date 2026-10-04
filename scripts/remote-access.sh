@@ -583,6 +583,14 @@ ra_keys() {
     elif [ -n "$name" ]; then
         ra_die 'unexpected key argument'
     fi
+    # `count` reads only authorized_keys and exits without touching stdin. Piping
+    # the data into it lets the writer die of SIGPIPE (rc 141), which under
+    # `set -o pipefail` turns a plain count into a silent failure. It needs no
+    # data, so it gets none.
+    if [ "$action" = count ]; then
+        python3 "${args[@]}" </dev/null
+        return
+    fi
     ra_data_json | python3 "${args[@]}"
 }
 

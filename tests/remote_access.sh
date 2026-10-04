@@ -913,6 +913,30 @@ if [ -e "$scratch/calls" ]; then
 fi
 pass
 
+# 33b. The key count must not depend on the data pipe. `remote_keys.py count`
+#      exits without reading stdin, so when the producer is still writing (a
+#      payload past the pipe buffer, forced here with 1 MB) it dies of SIGPIPE
+#      and, under `set -o pipefail`, harden-ssh exited 1 with NO message. Small
+#      payloads only passed by winning a race: reliably lost on Git Bash,
+#      intermittent under load elsewhere.
+cp "$scratch/bin/chezmoi" "$scratch/chezmoi.saved"
+big="$scratch/big-remote-access.json"
+{ printf '{"remote_access":{"padding":"'; head -c 1000000 /dev/zero | tr '\0' 'a'; printf '"}}'; } >"$big"
+ra_stub "$scratch/bin" chezmoi "case \"\$1\" in
+    data) cat '$big' ;;
+esac"
+printf 'Port 22\n' >"$scratch/home/sshd_config"
+rm -rf "$scratch/home/.ssh"
+export RA_SSHD_CONFIG="$scratch/home/sshd_config"
+rc=0
+out="$(ra_run harden-ssh --confirmed 2>&1)" || rc=$?
+unset RA_SSHD_CONFIG
+cp "$scratch/chezmoi.saved" "$scratch/bin/chezmoi"
+[ "$rc" -eq 1 ] || fail "33b: harden-ssh with zero keys and a large data payload must exit 1 (got $rc)"
+printf '%s' "$out" | grep -Fq 'no authorized key' ||
+    fail "33b: the refusal must name the missing key even when the data pipe is large (got: $out)"
+pass
+
 # 34. Both guards met: the config gains exactly one active
 #     `PasswordAuthentication no` (the commented default line goes), the
 #     unrelated lines survive, the restart is the only systemctl call - and
