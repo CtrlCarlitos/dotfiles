@@ -65,7 +65,7 @@ if [ "$manifest_entry" -ne 1 ] || [ "$chezmoi_entry" -ne 1 ] || [ "$ssh_entry" -
 fi
 
 if command -v jq >/dev/null 2>&1; then
-    jq -e '.format_version == "dotfiles-backup-v1"' "$manifest" >/dev/null || {
+    jq -b -e '.format_version == "dotfiles-backup-v1"' "$manifest" >/dev/null || {
         printf 'ERROR: invalid backup manifest\n' >&2
         exit 1
     }
@@ -84,7 +84,7 @@ target_platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$target_platform" in darwin*) target_platform="darwin" ;; esac
 source_platform=""
 if command -v jq >/dev/null 2>&1; then
-    source_platform="$(jq -r '.source_platform // empty' "$manifest" 2>/dev/null || true)"
+    source_platform="$(jq -b -r '.source_platform // empty' "$manifest" 2>/dev/null || true)"
 else
     source_platform="$(sed -n 's/.*"source_platform"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$manifest" 2>/dev/null || true)"
 fi

@@ -59,7 +59,7 @@ ra_data_json() {
     local data
     data="$(chezmoi data --format json)"
     if command -v jq >/dev/null 2>&1; then
-        printf '%s' "$data" | jq -c '.remote_access // {}'
+        printf '%s' "$data" | jq -b -c '.remote_access // {}'
     elif command -v python3 >/dev/null 2>&1; then
         printf '%s' "$data" | python3 -c '
 import json, sys
@@ -87,7 +87,7 @@ ra_cfg() {
     if command -v jq >/dev/null 2>&1; then
         # The leading dot matters: without it jq reads ["a"]["b"] as array
         # construction, not indexing, and every lookup returns the path.
-        printf '%s' "$json" | jq -r --arg default "$default" ".${jqpath} // \$default"
+        printf '%s' "$json" | jq -b -r --arg default "$default" ".${jqpath} // \$default"
     elif command -v python3 >/dev/null 2>&1; then
         printf '%s' "$json" | python3 -c '
 import json, sys
@@ -143,7 +143,7 @@ ra_json_str() {
     done
     if command -v jq >/dev/null 2>&1; then
         # Leading dot: see the note in ra_cfg.
-        out="$(printf '%s' "$json" | jq -r --arg default "$default" ".${jqpath} // \$default" 2>/dev/null)" || out=""
+        out="$(printf '%s' "$json" | jq -b -r --arg default "$default" ".${jqpath} // \$default" 2>/dev/null)" || out=""
         [ -n "$out" ] || out="$default"
     elif command -v python3 >/dev/null 2>&1; then
         out="$(printf '%s' "$json" | python3 -c '
@@ -185,7 +185,7 @@ ra_cfg_keys() {
     done
     if command -v jq >/dev/null 2>&1; then
         # Leading dot: see the note in ra_cfg.
-        printf '%s' "$json" | jq -r ".${jqpath} // {} | keys[]?" 2>/dev/null || true
+        printf '%s' "$json" | jq -b -r ".${jqpath} // {} | keys[]?" 2>/dev/null || true
     elif command -v python3 >/dev/null 2>&1; then
         printf '%s' "$json" | python3 -c '
 import json, sys
