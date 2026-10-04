@@ -306,6 +306,24 @@ function Invoke-Quietly {
 # not been set". tests/ps_script_scope_vars_contract.sh holds the whole class.
 $script:NpmUpgraded = $false
 
+# Upgrade npm to latest - once per run (four groups call Install-Node, and each repeat
+# cost 8-40s for the same no-op), and only when the registry has something newer. An
+# unreachable registry answers empty, which falls through to the install as before.
+function Update-NpmOnce {
+    if ($script:NpmUpgraded -or -not (Get-Command npm -ErrorAction SilentlyContinue)) { return }
+    $script:NpmUpgraded = $true
+    # Native stderr throws under Stop on Windows PowerShell 5.1; probe under Continue.
+    $ErrorActionPreference = 'Continue'
+    $current = "$(npm -v 2>$null)".Trim()
+    $latest = "$(npm view npm version 2>$null)".Trim()
+    if ($latest -and $latest -eq $current) {
+        Write-Host "  npm is current ($current)" -ForegroundColor DarkGray
+        return
+    }
+    Write-Host "  Upgrading npm to latest..." -ForegroundColor Yellow
+    Invoke-Quietly -Description "Failed to upgrade npm" -Action { npm install -g npm@latest --loglevel=error --fund=false --fetch-timeout=120000 --fetch-retries=2 2>$null }
+}
+
 function Install-Node {
     # The pins come from .chezmoidata.yaml versions.* (#125): the major gate
     # and the full Chocolatey package version. The major is bound to a
@@ -318,13 +336,7 @@ function Install-Node {
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
-    # Upgrade npm to latest - once per run: four groups call Install-Node,
-    # and each repeat cost 8-40s for the same no-op.
-    if (-not $script:NpmUpgraded -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-        $script:NpmUpgraded = $true
-        Write-Host "  Upgrading npm to latest..." -ForegroundColor Yellow
-        Invoke-Quietly -Description "Failed to upgrade npm" -Action { npm install -g npm@latest --loglevel=error --fund=false --fetch-timeout=120000 --fetch-retries=2 2>$null }
-    }
+    Update-NpmOnce
 }
 
 {{- if $core }}

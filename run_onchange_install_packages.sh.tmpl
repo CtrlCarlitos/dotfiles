@@ -227,6 +227,24 @@ install_fonts() {
     fi
 }
 
+# Upgrade npm to latest - once per run (install_node is called by several groups; each
+# repeat was a no-op costing 3-15s), and only when the registry has something newer:
+# an npm that is already current used to be reinstalled on every run. An unreachable
+# registry answers empty, which falls through to the install as before.
+npm_upgrade_once() {
+    [ -z "${NPM_UPGRADED:-}" ] && command -v npm &>/dev/null || return 0
+    NPM_UPGRADED=1
+    local current latest
+    current="$(npm -v 2>/dev/null)" || current=""
+    latest="$(npm view npm version 2>/dev/null)" || latest=""
+    if [ -n "$latest" ] && [ "$latest" = "$current" ]; then
+        info "npm is current ($current)"
+        return 0
+    fi
+    info "Upgrading npm to latest..."
+    $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
+}
+
 install_node() {
     # The major comes from .chezmoidata.yaml versions.node_major (#125).
     # Bound to a variable first: the lint strips template actions to nothing,
@@ -244,13 +262,7 @@ install_node() {
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ .versions.node_major }}.x nodistro main" \
             nodejs || warn "Node.js install failed - continuing"
     fi
-    # Upgrade npm to latest - once per run (install_node is called by several
-    # groups; each repeat was a no-op costing 3-15s).
-    if [ -z "${NPM_UPGRADED:-}" ] && command -v npm &>/dev/null; then
-        NPM_UPGRADED=1
-        info "Upgrading npm to latest..."
-        $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
-    fi
+    npm_upgrade_once
 }
 
 # Curated third-party agent skills use the skills CLI's shared destination for
