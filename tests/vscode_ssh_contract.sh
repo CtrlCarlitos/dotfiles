@@ -55,7 +55,7 @@ if command -v chezmoi >/dev/null; then
     trap 'rm -rf "$tmp"' EXIT
     : >"$tmp/chezmoi.toml"
     rendered=$(chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
-        --override-data '{"chezmoi":{"os":"linux"},"accounts":[],"ssh_hosts":[{"name":"first","hostname":"first.example"},{"name":"second","hostname":"second.example"}]}' \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"accounts":[],"ssh_hosts":[{"name":"first","hostname":"first.example"},{"name":"second","hostname":"second.example"}]}' \
         <"$ssh_tmpl")
     expected=$'Host first\n    HostName first.example\n\nHost second\n    HostName second.example'
     [[ "$rendered" == *"$expected"* ]] ||

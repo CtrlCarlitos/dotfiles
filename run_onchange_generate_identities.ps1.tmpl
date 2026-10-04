@@ -314,7 +314,9 @@ try {
     $identityEmails = [ordered]@{}
 {{- range .accounts }}
 {{- if and (hasKey . "username") .username }}
-    $identityEmails['{{ .provider }}-{{ .username }}'] = '{{ .email }}'
+{{- $provider := "github" }}
+{{- if hasKey . "provider" }}{{ $provider = .provider }}{{ end }}
+    $identityEmails['{{ $provider }}-{{ .username }}'] = '{{ .email }}'
 {{- end }}
 {{- end }}
 
