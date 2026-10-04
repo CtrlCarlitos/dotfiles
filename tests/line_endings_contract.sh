@@ -58,7 +58,9 @@ ec_crlf="$(awk '/^\[/{h=$0} /^end_of_line[[:space:]]*=[[:space:]]*crlf/{print h}
 if [ "$attr_crlf" = "$ec_crlf" ]; then
     pass
 else
-    fail ".editorconfig CRLF section ($(echo $ec_crlf)) must match .gitattributes CRLF types ($(echo $attr_crlf)); an editor would write the wrong ending for the difference"
+    ec_list="$(printf '%s' "$ec_crlf" | tr '\n' ' ')"
+    attr_list="$(printf '%s' "$attr_crlf" | tr '\n' ' ')"
+    fail ".editorconfig CRLF section (${ec_list% }) must match .gitattributes CRLF types (${attr_list% }); an editor would write the wrong ending for the difference"
 fi
 grep -Eq '^end_of_line[[:space:]]*=[[:space:]]*lf' .editorconfig || fail '.editorconfig: the [*] default must be end_of_line = lf'
 
