@@ -298,6 +298,14 @@ function Invoke-Quietly {
     }
 }
 
+# Install-Node's once-per-run npm upgrade guard reads this. The script runs under
+# Set-StrictMode -Version Latest (top of file), where reading a variable that was
+# never set is a terminating error, so it must exist before the first call. #231
+# shipped the guard without it and the first Windows `dot up` to reach Install-Node
+# died with "The variable '$script:NpmUpgraded' cannot be retrieved because it has
+# not been set". tests/ps_script_scope_vars_contract.sh holds the whole class.
+$script:NpmUpgraded = $false
+
 function Install-Node {
     # The pins come from .chezmoidata.yaml versions.* (#125): the major gate
     # and the full Chocolatey package version. The major is bound to a
