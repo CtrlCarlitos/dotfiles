@@ -1,9 +1,14 @@
 # Chezmoi Ignore File
 # Files listed here will not be applied to the target directory
 
-# Documentation (never apply)
+# Documentation (never apply). CHANGELOG.md is generated release history and
+# SECURITY.md is GitHub's policy file: repo metadata, not dotfiles. (SECURITY.md
+# was being copied into ~ until tests/home_scope_contract.sh gained the general
+# "no plain-named file at the repo root" rule.)
 README.md
 LICENSE
+CHANGELOG.md
+SECURITY.md
 docs/**
 
 # Installers (bootstrap only)

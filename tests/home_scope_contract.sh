@@ -97,6 +97,19 @@ if command -v chezmoi >/dev/null; then
         '.config/psmux/psmux.conf'; do
         grep -Fxq "$p" "$tmp/lin-managed.txt" && fail "linux: managed lists '$p'"
     done
+    # The general rule, not a fixed list: every legitimate target at the root of
+    # $HOME is a dotfile (.gitconfig, .zshrc ...), so a file with a plain name at
+    # the root of the REPO (SECURITY.md, CHANGELOG.md, ...) is repo metadata that
+    # .chezmoiignore forgot, and chezmoi would copy it into $HOME on the next
+    # apply. A fixed list of names only ever catches the files already known:
+    # ~/SECURITY.md sat in a real home from 2026-09-25, and CHANGELOG.md was about
+    # to join it, with this test green.
+    for target in 'windows:' 'linux:6.8.0-generic'; do
+        chezmoi managed --include files --config "$tmp/chezmoi.toml" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"${target%%:*}\",\"kernel\":{\"osrelease\":\"${target#*:}\"},\"homeDir\":\"/nonexistent\"}}" >"$tmp/root-files.txt"
+        stray="$(grep -v '/' "$tmp/root-files.txt" | grep -v '^\.' || true)"
+        [ -z "$stray" ] || fail "${target%%:*}: repo-root files would be deployed to \$HOME: $(tr '\n' ' ' <<<"$stray")- add them to .chezmoiignore"
+    done
     # Positive controls: the fixtures must not be ignoring the world.
     grep -Fxq '.local/bin/ssh-agent-relay' "$tmp/lin-managed.txt" ||
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
