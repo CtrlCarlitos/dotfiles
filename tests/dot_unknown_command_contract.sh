@@ -56,7 +56,10 @@ check zsh run_zsh
 if command -v pwsh >/dev/null 2>&1; then
     for profile in Documents/PowerShell Documents/WindowsPowerShell; do
         file="$repo_root/$profile/Microsoft.PowerShell_profile.ps1"
-        tr -d '\r' <"$file" | awk '/^function dot \{/{f=1} f{print} f && /^\}$/{exit}' >"$tmp/dot.ps1"
+        # awk reads a FILE, not a pipe: an awk that exits early on a pipe makes the writer
+        # die of SIGPIPE, which pipefail turns into a failure on any large enough input.
+        tr -d '\r' <"$file" >"$tmp/profile.ps1"
+        awk '/^function dot \{/{f=1} f{print} f && /^\}$/{exit}' "$tmp/profile.ps1" >"$tmp/dot.ps1"
         [ -s "$tmp/dot.ps1" ] || { fail "could not extract the dot function from $profile"; continue; }
         {
             cat "$tmp/dot.ps1"
