@@ -170,6 +170,11 @@ function dot {
         'version' { & (Join-Path $repoScripts 'dotversion.ps1') @rest }
         'ssh-fingerprints' { python (Join-Path $repoScripts 'ssh_fingerprints.py') @rest }
         default {
+            $unknown = $sub -ne '' -and $sub -notin @('help', '-h', '--help')
+            if ($unknown) {
+                Write-Host "dot: unknown command '$sub'"
+                Write-Host "  (a command added by a recent 'dot up' needs a new shell: this one loaded an older dot)"
+            }
             Write-Host "dot - dotfiles command family"
             Write-Host ("  {0,-20}  {1}" -f 'dot ssh-fingerprints', 'preview agent fingerprint sync (--write to save)')
             Write-Host ("  {0,-20}  {1}" -f 'dot up', 'sync state (pull + apply + config re-init; never upgrades)')
@@ -180,6 +185,7 @@ function dot {
             Write-Host ("  {0,-20}  {1}" -f 'dot remote', 'remote-access setup/status/fix')
             Write-Host ("  {0,-20}  {1}" -f 'dot devtmp', 'build/test output folder for Defender (plan/apply/run)')
             Write-Host ("  {0,-20}  {1}" -f 'dot version', 'which version of the dotfiles repo this is')
+            if ($unknown) { $global:LASTEXITCODE = 2 }
         }
     }
 }

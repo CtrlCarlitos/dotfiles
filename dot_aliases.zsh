@@ -223,6 +223,13 @@ dot() {
         remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;
         version)  shift; bash "$repo_scripts/dotversion.sh" "$@" ;;
         *)
+            local unknown=0
+            case "$sub" in ''|help|-h|--help) ;; *)
+                unknown=1
+                echo "dot: unknown command '$sub'" >&2
+                echo "  (a command added by a recent 'dot up' needs a new shell: this one loaded an older dot)" >&2
+                ;;
+            esac
             echo "dot - dotfiles command family"
             printf '  %-20s  %s\n' 'dot up' 'sync state (pull + apply + config re-init; never upgrades)'
             printf '  %-20s  %s\n' 'dot upgrade' 'upgrade ALL tooling (apt/brew + AI tools, session-gated)'
@@ -231,6 +238,7 @@ dot() {
             printf '  %-20s  %s\n' 'dot doctor' 'dotfiles health check'
             printf '  %-20s  %s\n' 'dot remote' 'remote-access setup/status/fix/keys'
             printf '  %-20s  %s\n' 'dot version' 'which version of the dotfiles repo this is'
+            return $((unknown * 2))
             ;;
     esac
 }

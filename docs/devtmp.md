@@ -65,6 +65,12 @@ Add-MpPreference -ExclusionPath 'C:\dev\tmp'
 Defender settings are changed by you, from an admin shell. The dotfiles, and any
 agent working in them, do not touch Defender.
 
+To confirm the exclusion took effect (no admin needed):
+
+```powershell
+(Get-MpPreference).ExclusionPath -contains 'C:\dev	mp'   # True once added
+```
+
 ## 3. The contract: build and test output only
 
 Once the folder is excluded, **nothing in it is scanned**. Keep it to build and
