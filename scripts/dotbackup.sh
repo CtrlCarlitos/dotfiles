@@ -35,9 +35,13 @@ fi
 # history only, so it needs DOTBACKUP_AUDIT=1. manifests/, sessions/,
 # allowances/ (auth.key), selftest-passed and the binary are regenerated or
 # must be proven again per machine and are never captured.
-guardrail_config="$HOME/.config/guardrail"
-guardrail_state="$HOME/.local/state/guardrail"
+# Roots follow guardrail itself: XDG_CONFIG_HOME / XDG_STATE_HOME when set (absolute),
+# else ~/.config and ~/.local/state. dotrestore.sh resolves them the same way.
+guardrail_config="${XDG_CONFIG_HOME:-$HOME/.config}/guardrail"
+guardrail_state="${XDG_STATE_HOME:-$HOME/.local/state}/guardrail"
 guardrail_count=0
+audit_segments=0
+audit_bytes=0
 for name in waivers.toml night.toml; do
     if [ -f "$guardrail_config/$name" ] && [ ! -L "$guardrail_config/$name" ]; then
         mkdir -p "$root/guardrail/config"
@@ -61,6 +65,8 @@ if [ "${DOTBACKUP_AUDIT:-}" = 1 ]; then
         mkdir -p "$root/guardrail/audit"
         cp "$source" "$root/guardrail/audit/${source##*/}"
         guardrail_count=$((guardrail_count + 1))
+        audit_segments=$((audit_segments + 1))
+        audit_bytes=$((audit_bytes + $(wc -c < "$source")))
     done
 fi
 
@@ -132,6 +138,11 @@ fi
 printf 'Backup created: %s\n' "$archive"
 printf '  Contains %d private key file(s) from ~/.ssh. Treat this archive as key material.\n' "$keys"
 printf '  Contains %d guardrail operator file(s).\n' "$guardrail_count"
+if [ "$audit_segments" -gt 0 ]; then
+    # Rotated segments pile up on a long-lived machine: say how big before it is handed around.
+    printf '  Audit log: %d segment(s), %d MiB (DOTBACKUP_AUDIT=1; unset it to leave the history out).\n' \
+        "$audit_segments" "$((audit_bytes / 1048576))"
+fi
 printf '  This is disaster recovery for THIS machine, not a way to set up another one:\n'
 printf '  give an additional machine its own keys instead (docs/ssh-agents.md).\n'
 printf '  Re-run after rotating a key - older archives still hold the old ones.\n'

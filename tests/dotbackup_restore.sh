@@ -73,16 +73,18 @@ for tool in chmod cp dirname find grep mkdir mktemp rm uname tr perl; do
 done
 ln -s "$bin/7z" "$no_jq_bin/7z"
 
+# XDG_* are stripped so a developer's own environment cannot move the guardrail roots under
+# test; scenario [17] sets them explicitly.
 run_backup() { # $1 = home
-    HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$backup"
+    env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$backup"
 }
 
 run_restore() { # $1 = home, $2 = archive
-    HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "$2"
+    env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$1" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "$2"
 }
 
 run_restore_without_jq() { # $1 = home, $2 = archive
-    HOME="$1" PATH="$no_jq_bin" FAKE_7Z_LOG="$tmp/7z.log" /bin/bash "$restore" "$2"
+    env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$1" PATH="$no_jq_bin" FAKE_7Z_LOG="$tmp/7z.log" /bin/bash "$restore" "$2"
 }
 
 make_source_home() { # $1 = home
@@ -319,7 +321,7 @@ for never in manifests allowances selftest-passed; do
     [ -z "$(find "$pk_payload" -name "$never" -print -quit)" ] || fail "[9] $never must never be captured"
 done
 rm -rf "$pk_home/.dot_backups"
-HOME="$pk_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$pk_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
 [ -f "$(backup_payload "$pk_home")/guardrail/audit/audit-2026.jsonl" ] || fail '[9] audit log not captured with DOTBACKUP_AUDIT=1'
 echo "  ok: guardrail backup captures operator state, skips regenerated state"
 
@@ -386,5 +388,101 @@ mkdir -p "$gr_bad"
 run_restore "$gr_bad" "$gr_bad_archive" >/dev/null 2>&1 && fail '[15] archive with a stale manifest was restored'
 [ ! -e "$gr_bad/.config/chezmoi/chezmoi.toml" ] || fail '[15] rejected archive wrote config'
 echo "  ok: guardrail allowlist enforced on restore"
+
+
+# [16] Per-machine guardrail state added since the section was designed is never captured,
+# not even with DOTBACKUP_AUDIT=1: a restored session-checks fingerprint would skip checks
+# a restored tree has not passed, and the rollback record plus the set-aside binary name
+# THIS machine's binary and hash (rollback would fail or roll back to the wrong build).
+pm_home="$tmp/home-guardrail-permachine"
+make_guardrail_home "$pm_home" passkey
+mkdir -p "$pm_home/.local/state/guardrail/session-checks" "$pm_home/.local/bin"
+printf 'fingerprint\n' > "$pm_home/.local/state/guardrail/session-checks/repo.json"
+printf '{"sha256":"x"}\n' > "$pm_home/.local/state/guardrail/previous.json"
+printf 'binary\n' > "$pm_home/.local/bin/guardrail.previous"
+printf 'binary\n' > "$pm_home/.local/bin/guardrail.previous.exe"
+env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$pm_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+pm_payload="$(backup_payload "$pm_home")"
+for never in session-checks previous.json 'guardrail.previous*'; do
+    [ -z "$(find "$pm_payload" -name "$never" -print -quit)" ] || fail "[16] $never must never be captured"
+done
+echo "  ok: per-machine guardrail state (session-checks, rollback record, set-aside binary) never captured"
+
+# [17] XDG overrides: guardrail resolves config under XDG_CONFIG_HOME and state under
+# XDG_STATE_HOME when set. Backup reads there, restore writes there, and a root outside
+# HOME is refused with a clear message instead of silently capturing nothing.
+xdg_home="$tmp/home-xdg"
+make_source_home "$xdg_home"
+mkdir -p "$xdg_home/xcfg/guardrail" "$xdg_home/xst/guardrail/operator-auth"
+printf 'approval = "passkey"\n' > "$xdg_home/xcfg/guardrail/waivers.toml"
+printf 'credential\n' > "$xdg_home/xst/guardrail/operator-auth/enrollment.json"
+printf '{"event":1}\n' > "$xdg_home/xst/guardrail/audit.jsonl"
+XDG_CONFIG_HOME="$xdg_home/xcfg" XDG_STATE_HOME="$xdg_home/xst" HOME="$xdg_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup" >/dev/null
+xdg_payload="$(backup_payload "$xdg_home")"
+[ -f "$xdg_payload/guardrail/config/waivers.toml" ] || fail '[17] backup ignored XDG_CONFIG_HOME'
+[ -f "$xdg_payload/guardrail/operator-auth/enrollment.json" ] || fail '[17] backup ignored XDG_STATE_HOME (operator-auth)'
+[ -f "$xdg_payload/guardrail/audit/audit.jsonl" ] || fail '[17] backup ignored XDG_STATE_HOME (audit)'
+xdg_archive=("$xdg_home"/.dot_backups/dotfiles-*.7z)
+xdg_restore="$tmp/home-xdg-restore"
+mkdir -p "$xdg_restore"
+XDG_CONFIG_HOME="$xdg_restore/xcfg" XDG_STATE_HOME="$xdg_restore/xst" HOME="$xdg_restore" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "${xdg_archive[0]}" >/dev/null
+[ -f "$xdg_restore/xcfg/guardrail/waivers.toml" ] || fail '[17] restore ignored XDG_CONFIG_HOME'
+[ -f "$xdg_restore/xst/guardrail/operator-auth/enrollment.json" ] || fail '[17] restore ignored XDG_STATE_HOME'
+[ ! -e "$xdg_restore/.config/guardrail" ] || fail '[17] restore also wrote the default config root'
+xdg_out="$tmp/home-xdg-outside"
+mkdir -p "$xdg_out"
+if xdg_err="$(env -u XDG_STATE_HOME XDG_CONFIG_HOME="$tmp/outside-home-cfg" HOME="$xdg_out" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" bash "$restore" "${xdg_archive[0]}" 2>&1 >/dev/null)"; then
+    fail '[17] a guardrail root outside HOME must be refused'
+fi
+printf '%s' "$xdg_err" | grep -q 'outside HOME' || fail "[17] the refusal must say the root is outside HOME (got: $xdg_err)"
+[ ! -e "$xdg_out/.config/chezmoi/chezmoi.toml" ] || fail '[17] refused restore wrote config first'
+echo "  ok: XDG_CONFIG_HOME / XDG_STATE_HOME honored; a root outside HOME is refused"
+
+# [18] Repo grants in waivers.toml are keyed by absolute repo path. After a cross-OS or
+# cross-path restore they match nothing, silently: the restore must name them.
+inert_archive="$tmp/guardrail-inert.7z"
+mkdir -p "${inert_archive}.contents"
+cp -R "$(backup_payload "$pk_home")" "${inert_archive}.contents/"
+: > "$inert_archive"
+cat > "${inert_archive}.contents/dotfiles-backup-v1/guardrail/config/waivers.toml" <<TOML
+approval = "passkey"
+
+["/definitely/missing/repo"]
+  secret_allow = false
+
+["C:\\\\Users\\\\gone\\\\repo"]
+  secret_allow = false
+
+["$tmp/real-repo"]
+  secret_allow = false
+
+[web_hosts]
+  "example.com" = true
+TOML
+mkdir -p "$tmp/real-repo"
+inert_home="$tmp/home-inert"
+mkdir -p "$inert_home"
+inert_out="$(run_restore "$inert_home" "$inert_archive")"
+printf '%s' "$inert_out" | grep -Fq '/definitely/missing/repo' || fail '[18] a grant for a missing path must be listed'
+printf '%s' "$inert_out" | grep -Fq 'C:\Users\gone\repo' || fail "[18] a Windows-path grant on Linux must be listed (got: $inert_out)"
+printf '%s' "$inert_out" | grep -Fq '2 repo grant(s)' || fail "[18] the count must be 2 (got: $inert_out)"
+if printf '%s' "$inert_out" | grep -Fq "$tmp/real-repo"; then fail '[18] a grant whose path exists must not be listed'; fi
+if printf '%s' "$inert_out" | grep -Fq 'web_hosts'; then fail '[18] a non-path table must not be listed'; fi
+# no repo grants at all -> no warning
+inert_clean="$tmp/home-inert-clean"
+mkdir -p "$inert_clean"
+clean_out="$(run_restore "$inert_clean" "${pk_archive[0]}")"
+if printf '%s' "$clean_out" | grep -Fq 'grant(s)'; then fail '[18] no warning expected when there are no repo grants'; fi
+echo "  ok: restore names repo grants that will not apply here"
+
+# [19] The audit log can be huge: say how big before the operator hands the archive around.
+audit_home="$tmp/home-audit-size"
+make_guardrail_home "$audit_home" prompt
+audit_out="$(env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$audit_home" PATH="$bin:$PATH" FAKE_7Z_LOG="$tmp/7z.log" DOTBACKUP_AUDIT=1 bash "$backup")"
+printf '%s' "$audit_out" | grep -Eq 'Audit log: 1 segment\(s\), ' || fail "[19] audit size not reported (got: $audit_out)"
+rm -rf "$audit_home/.dot_backups"
+quiet_out="$(run_backup "$audit_home")"
+if printf '%s' "$quiet_out" | grep -Fq 'Audit log'; then fail '[19] audit size reported without DOTBACKUP_AUDIT=1'; fi
+echo "  ok: audit log size reported when captured"
 
 finish
