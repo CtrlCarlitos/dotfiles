@@ -60,6 +60,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history and tags: tests/changelog_committed_contract.sh compares
+          # CHANGELOG.md with the release tags, and passes vacuously without them.
+          fetch-depth: 0
 
       # zsh: without it, the zshrc contract's `zsh -n` syntax check silently
       # took its SKIP branch here (this runner image has no zsh - the other two
