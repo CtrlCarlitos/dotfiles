@@ -207,8 +207,9 @@ pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix   # repair 
 ```
 
 It checks config encoding/parseability, prompted-key completeness, source
-dir, chezmoi version drift vs `.chezmoi-version`, and the guardrail pin —
-the failure classes `chezmoi doctor` can't see. Unix twin:
+dir, chezmoi version drift vs `.chezmoi-version`, the guardrail pin, and that
+`python3` resolves to a real interpreter (see [python3 on
+Windows](#python3-on-windows)) — the failure classes `chezmoi doctor` can't see. Unix twin:
 `bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh" [--fix]`.
 
 Existing keys without passphrases:
@@ -258,6 +259,33 @@ WSL2 has its own network adapter. To access services:
 Defender rescans every freshly built test binary. See [devtmp.md](devtmp.md)
 (`dot devtmp`) for a single build-output folder and the exclusion it prints for
 you to run.
+
+### python3 on Windows
+
+POSIX has `python3`; the official Windows Python installer ships only
+`python.exe` (plus the `py` launcher). The repo's scripts and tests assume the
+POSIX name, so `chezmoi apply` deploys two tiny Windows-only shims to
+`~\.local\bin`: `python3` (bash, for Git Bash) and `python3.cmd` (cmd and
+PowerShell). Both forward every argument to `python`.
+
+Windows also ships a **Microsoft Store `python3.exe` stub** (an "App execution
+alias"). It lives in `WindowsApps`, which comes earlier on PATH than
+`~\.local\bin`, so it shadows the shim and answers `Python was not found; run
+without arguments to install from the Microsoft Store`. Turning the alias off
+only removes the stub; it does not create a `python3`, which is why the shim is
+needed either way.
+
+`dotfiles-doctor.ps1` checks this by behaviour: does `python3 --version` print
+`Python 3.x`? It only ever warns (an error would fail every apply). A genuine
+Store-installed Python also lives in `WindowsApps` and passes.
+
+- **Turn the stub off yourself:** Settings > Apps > Advanced app settings >
+  App execution aliases > `python3.exe`.
+- **Or let the doctor do it:**
+  `pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix`
+  removes the `python3.exe` stub in `WindowsApps` and nothing else. It never
+  runs during `chezmoi apply`. A Store update can re-create the stub; re-run the
+  doctor if `python3` breaks again.
 
 ### SSH agent
 

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# python3 -> python, for Git Bash on Windows (Windows-only: see .chezmoiignore).
+# The official Python installer ships python.exe and the `py` launcher, never
+# python3, while the repo's scripts and tests assume the POSIX name. Forwards to
+# `python`, so a Python upgrade never leaves a stale copy behind.
+# `dot doctor` checks that python3 resolves here and not to the Microsoft Store
+# stub (WindowsApps\python3.exe), which sits earlier on PATH.
+exec python "$@"
