@@ -52,7 +52,7 @@ sh_installs() { # $1 = latest the registry reports ("" = unreachable); prints th
 
 # --- PowerShell twin -----------------------------------------------------------------------
 if command -v pwsh >/dev/null 2>&1; then
-    tr -d '\r' <"$tmp/install.ps1" | awk '/^function Invoke-NpmUpgradeOnce \{/{f=1} f{print} f && /^\}$/{exit}' >"$tmp/fn.ps1"
+    tr -d '\r' <"$tmp/install.ps1" | awk '/^function Invoke-NpmUpgradeOnce \{/{f=1} f{print} f && /^\}$/{f=0}' >"$tmp/fn.ps1"
     [ -s "$tmp/fn.ps1" ] || fail "Invoke-NpmUpgradeOnce not found in the rendered PowerShell installer"
     ps_installs() {
         {

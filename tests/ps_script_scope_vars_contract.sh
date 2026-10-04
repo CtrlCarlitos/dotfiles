@@ -126,15 +126,22 @@ fi
 cat >"$tmp/run-install-node.ps1" <<'PSEOF'
 param([string]$Rendered)
 $lines = Get-Content -LiteralPath $Rendered
+function Get-FunctionText($name) {
+    $start = ($lines | Select-String -Pattern "^function $name \{" | Select-Object -First 1).LineNumber - 1
+    $end = $start
+    while ($lines[$end] -ne '}') { $end++ }
+    ($lines[$start..$end]) -join "`n"
+}
 $start = ($lines | Select-String -Pattern '^function Install-Node \{' | Select-Object -First 1).LineNumber - 1
-$end = $start
-while ($lines[$end] -ne '}') { $end++ }
-$fn = ($lines[$start..$end]) -join "`n"
+# Install-Node delegates the once-per-run npm upgrade to Invoke-NpmUpgradeOnce.
+$fn = (Get-FunctionText 'Invoke-NpmUpgradeOnce') + "`n" + (Get-FunctionText 'Install-Node')
 $init = ($lines[0..$start] | Where-Object { $_ -match '^\$script:NpmUpgraded\s*=' }) -join "`n"
 Set-StrictMode -Version Latest
 $script:calls = 0
 function Get-Command { $true }
 function node { 'v99.0.0' }
+# npm reports an older version than the registry, so the upgrade is due (once).
+function npm { if ($args[0] -eq 'view') { '99.0.0' } else { '1.0.0' } }
 function Invoke-Quietly { param($Description, $Action) $script:calls++ }
 if ($init) { Invoke-Expression $init }
 Invoke-Expression $fn
