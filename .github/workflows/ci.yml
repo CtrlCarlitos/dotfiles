@@ -305,6 +305,25 @@ jobs:
       - name: Test chezmoi apply (dry-run)
         run: ~/.local/bin/chezmoi apply --dry-run --verbose --source="${GITHUB_WORKSPACE}"
 
+  # Required status checks are matched by NAME, and a skipped matrix job records
+  # ONE check literally named "Test (${{ matrix.os }})": the per-OS names the
+  # `main branch protection` ruleset requires are never created, so a docs-only PR
+  # could not merge (the first CHANGELOG-only PR, #243, sat BLOCKED with every
+  # check green). In exactly that case this job creates those names, cheaply: one
+  # Ubuntu runner, one echo. Kept in step with test-unix (same name, same OS list)
+  # by tests/ci_docs_only_checks_contract.sh.
+  test-unix-skipped:
+    name: Test (${{ matrix.os }})
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.heavy != 'true'
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - run: echo "Docs-only change - the apply matrix is skipped; reported as passed so the required check exists."
+
   test-windows:
     name: Test (Windows)
     runs-on: windows-latest
