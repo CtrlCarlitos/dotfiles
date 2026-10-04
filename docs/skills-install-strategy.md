@@ -102,6 +102,23 @@ nothing to do it is cheap (3.5 s, writes nothing), but it takes no `--copy` or
 `add --copy`. The check is therefore done here, per source commit (coarser than
 the CLI's per-skill folder hash, but it needs no tree hash and no API quota).
 
+### Retiring a skill (2026-10-04)
+
+`resolving-merge-conflicts` was added on 2026-09-02 (no Superpowers equivalent), then
+removed from `mattpocock/skills` on 2026-09-24. The `skills` CLI does not fail on a
+missing name, it just installs the rest (the log said "Selected 10 skills" for the 11
+we asked for), so the dead entry went unnoticed and a stale local copy kept the
+verify pass green. It is now out of the catalog and the install lists (10 Matt
+Pocock skills, 18 curated in total).
+
+To stop a skill lingering on machines that already have it, list it in
+`scripts/retired-agent-skills.txt` as `<skill> <source>`. The installers and
+`dot upgrade` remove it from `~/.claude/skills`, `~/.agents/skills`, the Antigravity copy,
+the OpenCode command shim we generated, and the skills CLI lock, but only when the lock
+records that exact source: a skill of the same name you wrote yourself is never
+touched. Helpers: `skills_remove_retired` (`scripts/lib/agent-skills.sh`) and
+`Invoke-RetiredSkillsCleanup` (`scripts/lib/ps-skills.ps1`).
+
 ### npm 12 + `npx` gotchas (live-confirmed 2026-08-30, first real deploy)
 
 - **npm 12's npx prints a benign two-line hint to STDERR on every

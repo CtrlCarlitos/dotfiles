@@ -166,6 +166,39 @@ fetch_and_verify() {
 # SKILLS_PENDING_HEAD, so skills_record_source (called after the add succeeds)
 # stores exactly the commit that was checked.
 #-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# skills_remove_retired <list-file> - remove skills listed in
+# scripts/retired-agent-skills.txt (`<skill> <source>` per line) from every agent
+# directory, the OpenCode command shim we generated, and the skills CLI lock.
+#
+# Only when the lock records that exact source for the skill: a skill of the same
+# name written by hand (no lock entry, or another source) is never touched. The
+# name is restricted to [a-z0-9-] so a malformed list cannot reach another path.
+# Best effort and idempotent; needs jq (without it nothing is removed).
+#-------------------------------------------------------------------------------
+skills_remove_retired() {
+    local list="${1:-}" lock="$HOME/.agents/.skill-lock.json" name source shim tmp
+    [ -r "$list" ] && [ -r "$lock" ] && command -v jq &>/dev/null || return 0
+    while read -r name source _; do
+        case "$name" in '' | '#'*) continue ;; esac
+        [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
+        [ "$(jq -b -r --arg n "$name" '.skills[$n].source // empty' "$lock" 2>/dev/null)" = "$source" ] || continue
+        rm -rf "${HOME:?}/.claude/skills/$name" "${HOME:?}/.agents/skills/$name" "${HOME:?}/.gemini/antigravity-cli/skills/$name"
+        shim="$HOME/.config/opencode/commands/$name.md"
+        if [ -f "$shim" ] && grep -Fq 'managed-by: chezmoi-curated-skills' "$shim" 2>/dev/null; then
+            rm -f "$shim"
+        fi
+        tmp="$lock.tmp.$$"
+        if jq --arg n "$name" 'del(.skills[$n])' "$lock" >"$tmp" 2>/dev/null; then
+            mv "$tmp" "$lock"
+        else
+            rm -f "$tmp"
+        fi
+        info "Removed retired skill: $name"
+    done <"$list"
+    return 0
+}
+
 skills_source_state() {
     printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/skills-sources"
 }
@@ -205,23 +238,23 @@ skills_add_all() {
     # uses it owns the definition (it used to sit in each consumer and drift).
     local -a SK=(npx --yes --loglevel=error skills@latest)
 
-    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
+    # Matt Pocock's engineering/productivity skills - 10 installed as-is.
     # teach + writing-for-agents live under skills/productivity/, the rest under
     # skills/engineering/; the CLI resolves by skill name, not path (grilling and
     # handoff are already productivity/ skills that resolve fine here).
     local -a mp_skills=(codebase-design domain-modeling grill-with-docs improve-codebase-architecture
-        prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts)
+        prototype research grilling handoff teach writing-for-agents)
     info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
     if skills_up_to_date mattpocock/skills "${mp_skills[@]}"; then
         info "Matt Pocock's skills are up to date"
-        record_cli_result installed 11
+        record_cli_result installed 10
     elif net_timeout 300 "${SK[@]}" add mattpocock/skills \
         -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 11
+        record_cli_result installed 10
         skills_record_source
     else
-        record_cli_result failed 11
+        record_cli_result failed 10
         warn "Matt Pocock skills install failed or timed out - continuing"
     fi
 

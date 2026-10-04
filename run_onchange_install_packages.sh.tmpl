@@ -322,6 +322,8 @@ install_agent_skills() {
     # (scripts/lib/agent-skills.sh - issue #123), verbatim: same argument
     # vector (tests/install_agent_skills_arguments.sh pins it), same
     # net_timeout walls, same </dev/null guard.
+    # Skills dropped upstream are removed first (scripts/retired-agent-skills.txt).
+    skills_remove_retired "${catalog%/*}/retired-agent-skills.txt"
     skills_add_all
 
     if [[ ! -r "$catalog" ]]; then

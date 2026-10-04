@@ -1616,11 +1616,13 @@ function Write-CuratedSkillsSkippedSummary {
 
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-    Invoke-SkillsSource -Label "Matt Pocock skills" -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'resolving-merge-conflicts') -Agents $skAgents -Install {
+    # Skills dropped upstream are removed here (scripts/retired-agent-skills.txt).
+    Invoke-RetiredSkillsCleanup -ListPath (Join-Path '{{ .chezmoi.sourceDir | replace "'" "''" }}' 'scripts\retired-agent-skills.txt')
+    Invoke-SkillsSource -Label "Matt Pocock skills" -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents') -Agents $skAgents -Install {
         Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
         @(Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -NoStream -Action {
             $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-            npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
+            npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
             '__SKILLS_OK__'
         }) -contains '__SKILLS_OK__'
