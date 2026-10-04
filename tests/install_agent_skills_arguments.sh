@@ -22,6 +22,7 @@ EOF
 cat > "$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+[ "${1:-}" != ls-remote ] || exit 2 # no network in tests: the skills version check reads this as "unknown"
 dest="${!#}"
 mkdir -p "$dest/skills/engineering/code-review"
 printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"

@@ -72,6 +72,36 @@ Use `--copy`. The default symlinks the agent dirs at a cache/clone location
 that isn't guaranteed to persist, and this repo already fights symlink
 fragility on Windows (see `run_onchange_generate_identities.ps1.tmpl`).
 
+### Skipping sources that have not changed (2026-10-04)
+
+`skills add` re-fetches every skill, and a cold `npx skills@latest` costs 30+ s
+even when nothing moved upstream, so `dot upgrade` used to pay that on every
+run. Each source is now skipped when **all** of these hold:
+
+- `DOT_SKILLS_FORCE` is not `1`;
+- every skill of the source is present for Claude (`~/.claude/skills`) and for
+  OpenCode/Codex (`~/.agents/skills`);
+- upstream `HEAD` (one `git ls-remote`) equals the commit recorded after the
+  last successful install of that exact source + skill list + agent list
+  (`$XDG_STATE_HOME/dotfiles/skills-sources`, default
+  `~/.local/state/dotfiles/skills-sources`; `%USERPROFILE%\.local\state\...` on
+  Windows).
+
+Anything unknown (offline, no state, a failed add) installs as before; a failed
+add is never recorded. `mp-code-review`, which is staged from a clone, is
+skipped on the same rule against `mattpocock/skills`. Helpers:
+`skills_up_to_date` / `skills_record_source` in `scripts/lib/agent-skills.sh`,
+`Invoke-SkillsSource` in `scripts/lib/ps-skills.ps1`. To force a refetch:
+`DOT_SKILLS_FORCE=1 dot upgrade`. `dot up` is unaffected: it never upgrades, and
+the installer only runs when its rendered content changes.
+
+**Why not `skills update`?** Measured on skills 1.7.0 in a throwaway HOME: with
+nothing to do it is cheap (3.5 s, writes nothing), but it takes no `--copy` or
+`-a` flags, and on a real update it re-linked the Claude copy as a symlink into
+`~/.agents/skills`. These installs are deliberately copies, so it cannot replace
+`add --copy`. The check is therefore done here, per source commit (coarser than
+the CLI's per-skill folder hash, but it needs no tree hash and no API quota).
+
 ### npm 12 + `npx` gotchas (live-confirmed 2026-08-30, first real deploy)
 
 - **npm 12's npx prints a benign two-line hint to STDERR on every

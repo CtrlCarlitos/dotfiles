@@ -1604,6 +1604,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # (stderr alone wouldn't, in the job's default EAP).
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
+{{ include "scripts/lib/ps-skills.ps1" }}
 function Write-CuratedSkillsSkippedSummary {
     # Rendered from scripts/curated-agent-skills.txt's line count - never a
     # literal, which drifted every time the catalog gained a skill.
@@ -1615,78 +1616,99 @@ function Write-CuratedSkillsSkippedSummary {
 
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-    Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "Matt Pocock skills" -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'resolving-merge-conflicts') -Agents $skAgents -Install {
+        Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "Matt Pocock skills install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # code-review -> mp-code-review: no rename flag in the CLI, so stage a
     # renamed copy with its name: frontmatter patched and install that dir.
     # "mp-" keeps it distinct from this repo's own /code-review command.
-    $skRepo  = "$env:TEMP\mp-skills-repo"
-    $skStage = "$env:TEMP\mp-skills-stage"
-    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-    # --quiet: git's "Cloning into..." is on stderr even on success and
-    # would pollute the job's output; timeout-wrapped like every other clone.
-    Invoke-WithTimeout -Description "mattpocock/skills clone" -Seconds 60 -Action {
-        git clone --quiet --depth 1 https://github.com/mattpocock/skills "$env:TEMP\mp-skills-repo" 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "git clone exited with code $LASTEXITCODE" }
-    }
-    $cr = Join-Path $skRepo "skills\engineering\code-review"
-    if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
-    if (Test-Path $cr) {
-        New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
-        Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
-        $skf = "$skStage\mp-code-review\SKILL.md"
-        if (Test-Path $skf) {
-            $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
-            [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
-        }
-        Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -Action {
-            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-            npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-        }
+    if (Test-SkillsUpToDate -Repo 'mattpocock/skills' -Skills @('mp-code-review') -Agents $skAgents) {
+        Write-Host "  mp-code-review is up to date"
     } else {
-        Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
+        $skRepo  = "$env:TEMP\mp-skills-repo"
+        $skStage = "$env:TEMP\mp-skills-stage"
+        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
+        # --quiet: git's "Cloning into..." is on stderr even on success and
+        # would pollute the job's output; timeout-wrapped like every other clone.
+        Invoke-WithTimeout -Description "mattpocock/skills clone" -Seconds 60 -Action {
+            git clone --quiet --depth 1 https://github.com/mattpocock/skills "$env:TEMP\mp-skills-repo" 2>$null
+            if ($LASTEXITCODE -ne 0) { throw "git clone exited with code $LASTEXITCODE" }
+        }
+        $cr = Join-Path $skRepo "skills\engineering\code-review"
+        if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
+        if (Test-Path $cr) {
+            New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
+            Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
+            $skf = "$skStage\mp-code-review\SKILL.md"
+            if (Test-Path $skf) {
+                $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
+                [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $mpInstalled = @(Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -NoStream -Action {
+                $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+                npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+                '__SKILLS_OK__'
+            }) -contains '__SKILLS_OK__'
+            if ($mpInstalled) { Save-SkillsSource }
+        } else {
+            Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
+        }
+        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
 
-    Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "frontend-design skill" -Repo 'anthropics/skills' -Skills @('frontend-design') -Agents $skAgents -Install {
+        Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "frontend-design skill install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
     # agent search and install skills from skills.sh mid-session.
-    Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "find-skills skill" -Repo 'vercel-labs/skills' -Skills @('find-skills') -Agents $skAgents -Install {
+        Write-Host "  Installing find-skills skill..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "find-skills skill install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
     # automation: navigate, click, fill, scrape, screenshot.
-    Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "agent-browser skill" -Repo 'vercel-labs/agent-browser' -Skills @('agent-browser') -Agents $skAgents -Install {
+        Write-Host "  Installing agent-browser skill..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "agent-browser skill install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands.
     # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
-    Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "skill-creator skill" -Repo 'CtrlCarlitos/skills' -Skills @('skill-creator') -Agents $skAgents -Install {
+        Write-Host "  Installing Anthropic's skill-creator skill..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "skill-creator skill install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend (new-page
@@ -1694,11 +1716,14 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # redesign-existing-projects (audit + targeted fixes for existing UI).
     # Chosen 2026-09-24 for function, not popularity; presets, image-gen,
     # GPT/Stitch variants and v1 left out (docs/skills-install-strategy.md).
-    Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "taste skills" -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
+        Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
@@ -1708,11 +1733,14 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # one empty result. Added 2026-09-24 after graft's "graph first for ANY
     # task" block cost every session in this repo two empty queries (the graph
     # covers one Lua file here) - docs/skills-install-strategy.md.
-    Write-Host "  Installing code-search skill..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "code-search skill install" -Seconds 300 -Action {
-        $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+    Invoke-SkillsSource -Label "code-search skill" -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {
+        Write-Host "  Installing code-search skill..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "code-search skill install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
     }
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
