@@ -67,6 +67,9 @@ H="$TMP/home-valid"; valid_config "$H"
 out="$(env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor")" ||
     fail "[1] valid config should pass; got: $out"
 grep -q 'config-utf8' <<<"$out" || fail "[1] utf-8 check not reported: $out"
+# The repo version rides along with every doctor run (same line as `dot version`),
+# informational only: never a warn/error, so it cannot fail a valid config.
+grep -Eq '^(ok|skip) +dotfiles-version ' <<<"$out" || fail "[1] dotfiles-version not reported: $out"
 echo "  ok: valid config passes"
 
 # [2] cp1252 config: detected, --fix converts, re-run passes.

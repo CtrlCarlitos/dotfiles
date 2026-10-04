@@ -62,6 +62,7 @@ dot up          # sync: pull the repo, apply changes. Never upgrades packages.
 dot upgrade     # upgrade ALL tooling (apt/brew + AI CLIs). The only thing that does.
 dot doctor      # health check: config parses, keys present, versions match the pins
 dot doctor --fix # same check, repairing what it safely can (e.g. a mangled config encoding)
+dot version     # which version of this repo is installed (also the dotfiles-version line of dot doctor)
 devprofile      # which git identity is active in this folder?  (alias: dp)
 ```
 

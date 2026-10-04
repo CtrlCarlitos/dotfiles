@@ -172,6 +172,21 @@ if ($src -and (Test-Path -LiteralPath $src)) {
 
 } # end not-in-apply (source-dir)
 
+# --- 4b. Which version of the dotfiles repo is this? (informational) -----------
+# The same line as `dot version`, computed from git by dotversion.ps1. Never
+# warns: a copy of the repo without git metadata reports skip.
+$verText = ''
+$verOk = $false
+try {
+    $verText = (& (Join-Path $PSScriptRoot 'dotversion.ps1') 2>&1 | Out-String).Trim()
+    $verOk = ($LASTEXITCODE -eq 0)
+} catch {
+    $verText = "dotversion.ps1 could not run: $($_.Exception.Message)"
+}
+$verText = $verText -replace '^dotfiles ', ''
+if ($verOk) { Result 'ok' 'dotfiles-version' $verText } else { Result 'skip' 'dotfiles-version' $verText }
+
+
 # --- 5. Installed chezmoi vs the repo's .chezmoi-version pin ------------------
 
 if ($InApply) {

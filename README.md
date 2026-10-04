@@ -240,6 +240,7 @@ dot upgrade   # upgrade ALL tooling (apt/brew/choco/winget + AI CLIs). The only 
 dot backup    # encrypted portable backup of config + SSH keys
 dot restore   # restore a backup: dot restore <archive.7z>
 dot doctor    # dotfiles health check; add --fix to repair what it can
+dot version   # which version of this repo is installed: tag, commits past it, short sha
 ```
 
 `dot` with no arguments prints this list. Underneath, it is still chezmoi —

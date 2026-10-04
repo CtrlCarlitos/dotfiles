@@ -221,6 +221,7 @@ dot() {
         restore)  shift; bash "$repo_scripts/dotrestore.sh" "$@" ;;
         doctor)   shift; bash "$repo_scripts/dotfiles-doctor.sh" "$@" ;;
         remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;
+        version)  shift; bash "$repo_scripts/dotversion.sh" "$@" ;;
         *)
             echo "dot - dotfiles command family"
             printf '  %-20s  %s\n' 'dot up' 'sync state (pull + apply + config re-init; never upgrades)'
@@ -229,6 +230,7 @@ dot() {
             printf '  %-20s  %s\n' 'dot restore' 'restore a backup'
             printf '  %-20s  %s\n' 'dot doctor' 'dotfiles health check'
             printf '  %-20s  %s\n' 'dot remote' 'remote-access setup/status/fix/keys'
+            printf '  %-20s  %s\n' 'dot version' 'which version of the dotfiles repo this is'
             ;;
     esac
 }
