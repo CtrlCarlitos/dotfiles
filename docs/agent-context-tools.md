@@ -104,12 +104,21 @@ npm page) for setup; everything above works without a key.
 
 The MCP server definitions the installers register for OpenCode and agy
 (Serena's `start-mcp-server --context ide-assistant`, Graft's
-`npx -y @nanonets/graft mcp`), Graft's npm `--allow-scripts` list, the Codex
+`graft mcp`, the installed binary), Graft's npm `--allow-scripts` list, the Codex
 package name and the list of agent CLIs the curated skills are installed for
 all come from one file: `.chezmoidata/agents.yaml`. Both installers render
 from it and `scripts/update_ai_tools.{sh,ps1}` read it at runtime, so a change
 is one edit; `tests/agent_catalog_contract.sh` fails if any value reappears as
 a literal elsewhere.
+
+OpenCode's entries **converge** on that catalog on every apply (#230). A server
+whose binary is installed is added when absent, and an existing entry has its
+`command` repaired if it differs: an older `npx -y @nanonets/graft mcp` entry,
+which made OpenCode wait about 46 s for npx on every start, becomes `graft mcp`.
+Your `enabled` flag and every other key you set are kept, and the file is only
+written when something actually changes. If a tool rewrites an entry in another
+form, the next apply repairs it. `tests/opencode_mcp_sync_contract.sh` runs both
+installers' registration code against these cases.
 
 ## Serena dashboard auto-open
 

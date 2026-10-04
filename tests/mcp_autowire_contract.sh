@@ -29,10 +29,12 @@ for f in "$ps1_installer" "$sh_installer"; do
 done
 grep -Fq 'command: graft' "$repo_root/.chezmoidata/agents.yaml" ||
     fail ".chezmoidata/agents.yaml: graft MCP server entry missing"
-grep -Fq 'Registering graft MCP in opencode' "$ps1_installer" ||
-    fail "$ps1_installer: no graft registration step for opencode global"
-grep -Fq 'Registering MCP in opencode' "$sh_installer" ||
-    fail "$sh_installer: no graft-aware registration step for opencode global"
+# The registration CONVERGES (a stale `npx -y` entry is repaired, #230); what it
+# does is asserted by executing it: tests/opencode_mcp_sync_contract.sh.
+grep -Fq 'function Sync-OpenCodeMcp' "$ps1_installer" ||
+    fail "$ps1_installer: no registration step for opencode global (Sync-OpenCodeMcp)"
+grep -Fq 'opencode_mcp_sync()' "$sh_installer" ||
+    fail "$sh_installer: no registration step for opencode global (opencode_mcp_sync)"
 
 # 2. agy: TOP-LEVEL mcp_config.json with forceAllToolsEager, both twins
 #    (#175). The dotfiles-mcp plugin bundle is retired (plugin-prefixed

@@ -1358,28 +1358,54 @@ install_agent_toolkit() {
     # key). opencode loads MCP ONLY from this global block - graft needs an
     # entry here too, or every fresh session starts with serena only
     # (surveyed live 2026-09-20).
-    if command -v opencode &>/dev/null; then
-        OC_GLOBAL="$HOME/.config/opencode/opencode.json"
-        mkdir -p "$(dirname "$OC_GLOBAL")"
-        OC_WANT=""
-        command -v serena &>/dev/null && ! grep -q '"serena"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="serena"
-        command -v graft &>/dev/null && ! grep -q '"graft"' "$OC_GLOBAL" 2>/dev/null && OC_WANT="${OC_WANT:+$OC_WANT,}graft"
-        if [ -n "$OC_WANT" ]; then
-            info "Registering MCP in opencode ($OC_WANT)..."
-            python3 - "$OC_GLOBAL" <<'PYEOF' 2>/dev/null || warn "opencode MCP registration failed - continuing"
+    # The registration CONVERGES on the catalog (#230): a server whose binary is
+    # present is added when absent, and an existing entry has only its `command`
+    # repaired - a stale `npx -y @nanonets/graft mcp` kept OpenCode's graft at a
+    # ~46 s npx cold start (and free to drift from the installed graft) long
+    # after the catalog said `graft mcp`. `enabled` and every other key the user
+    # set survive, and nothing is written when nothing differs. Prints the names
+    # it changed. Tested by executing it: tests/opencode_mcp_sync_contract.sh.
+    opencode_mcp_sync() {
+        python3 - "$@" <<'PYEOF'
 import json, os, sys
-p = sys.argv[1]
+p, want = sys.argv[1], sys.argv[2:]
 cfg = {}
-if os.path.exists(p):
-    with open(p) as f:
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    with open(p, encoding="utf-8-sig") as f:
         cfg = json.load(f)
 # MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
 # JSON's own escapes intact. OpenCode wants command + args as one list.
-for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
-    cfg.setdefault("mcp", {})[name] = {"type": "local", "command": [srv["command"]] + srv["args"], "enabled": True}
-with open(p, "w") as f:
-    json.dump(cfg, f, indent=2)
+catalog = json.loads(r"""{{ .agents.mcp | toJson }}""")
+mcp = cfg.setdefault("mcp", {})
+changed = []
+for name in sorted(n for n in want if n in catalog):
+    cmd = [catalog[name]["command"]] + catalog[name]["args"]
+    entry = mcp.get(name)
+    if not isinstance(entry, dict):
+        mcp[name] = {"type": "local", "command": cmd, "enabled": True}
+        changed.append(name)
+    elif entry.get("command") != cmd:
+        entry["command"] = cmd
+        changed.append(name)
+if changed:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+print("\n".join(changed))
 PYEOF
+    }
+    if command -v opencode &>/dev/null; then
+        OC_GLOBAL="$HOME/.config/opencode/opencode.json"
+        OC_PRESENT=()
+{{- range $name, $srv := .agents.mcp }}
+        command -v {{ $srv.command | quote }} &>/dev/null && OC_PRESENT+=({{ $name | quote }})
+{{- end }}
+        if [ "${#OC_PRESENT[@]}" -gt 0 ]; then
+            if OC_CHANGED="$(opencode_mcp_sync "$OC_GLOBAL" "${OC_PRESENT[@]}" 2>/dev/null)"; then
+                [ -z "$OC_CHANGED" ] || info "Registered/updated MCP in opencode ($(printf '%s' "$OC_CHANGED" | tr '\n' ' '))"
+            else
+                warn "opencode MCP registration failed - continuing"
+            fi
         fi
     fi
     # agy: MCP via the TOP-LEVEL mcp_config.json, each server with
