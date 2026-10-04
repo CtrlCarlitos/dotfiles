@@ -147,6 +147,16 @@ function New-DevTmpDirectory {
 
 $cfgBody = "[data]`n  [data.devtmp]`n    path = `"C:/dev/tmp`"`n[[data.accounts]]`n  dirs = [`"projects/personal`"]`n"
 $cfg = Get-ScratchConfig $cfgBody
+
+# The `run` scenarios start REAL child processes with TMP/TEMP = the configured
+# folder, and a PowerShell child writes (and deletes) startup files there. Never
+# aim that at a real path such as C:\dev\tmp, a developer's actual build folder:
+# on Windows use a scratch dir under $Tmp. Elsewhere the path is only an env
+# value (the validator is string logic), so the fixture spelling is harmless.
+$runDir = if ($env:OS -eq 'Windows_NT') { Join-Path $Tmp 'run-out' } else { 'C:/dev/tmp' }
+if ($env:OS -eq 'Windows_NT') { New-Item -ItemType Directory -Force -Path $runDir | Out-Null }
+$cfgRun = Get-ScratchConfig "[data.devtmp]`npath = '$runDir'`n"
+$runExpected = ConvertTo-DevTmpNormalPath (Resolve-DevTmpLongPath $runDir)
 function Invoke-Dt([string[]]$Cmd, [string]$Config = $cfg) {
     $script:calls.Clear()
     $global:LASTEXITCODE = $null
@@ -226,19 +236,19 @@ $pwshExe = (Get-Process -Id $PID).Path
 $env:TMP = 'KEEP-TMP'
 $env:TEMP = 'KEEP-TEMP'
 $probe = '[Console]::Out.Write([Environment]::GetEnvironmentVariable(''TMP'') + ''|'' + [Environment]::GetEnvironmentVariable(''TEMP''))'
-$out = (Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', $probe)).Trim()
-if ($out -notmatch [regex]::Escape('C:\dev\tmp|C:\dev\tmp')) { Fail "[5] child must see TMP/TEMP = the folder, got '$out'" }
+$out = (Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', $probe) $cfgRun).Trim()
+if ($out -notmatch [regex]::Escape("$runExpected|$runExpected")) { Fail "[5] child must see TMP/TEMP = the folder, got '$out'" }
 if ($global:LASTEXITCODE -ne 0) { Fail "[5] run success exit code $global:LASTEXITCODE" }
 if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail "[5] run leaked TMP/TEMP into the parent: TMP=$env:TMP TEMP=$env:TEMP" }
-if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp') { Fail "[5] run must only ensure the folder: $($script:calls -join '; ')" }
+if (($script:calls -join '; ') -ne "New-DevTmpDirectory $runExpected") { Fail "[5] run must only ensure the folder: $($script:calls -join '; ')" }
 
-$null = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', 'exit 3')
+$null = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', 'exit 3') $cfgRun
 if ($global:LASTEXITCODE -ne 3) { Fail "[5] run must surface the child's exit code 3, got $global:LASTEXITCODE" }
 if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a failing child' }
 
 # Final review: a native child that writes to stderr (go test/build compile
 # errors) must not become a PowerShell error on 5.1; its exit code survives.
-$out = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', '[Console]::Error.WriteLine(''boom''); exit 5')
+$out = Invoke-Dt @('run', $pwshExe, '-NoProfile', '-Command', '[Console]::Error.WriteLine(''boom''); exit 5') $cfgRun
 if ($global:LASTEXITCODE -ne 5) { Fail "[5] a child writing stderr must keep its exit code 5, got $global:LASTEXITCODE (out: $out)" }
 if ($out -match 'could not run') { Fail "[5] child stderr was reported as a launch failure: $out" }
 
