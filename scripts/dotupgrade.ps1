@@ -20,10 +20,8 @@ Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
 # npm -g / uv tool / choco opencode all delete+recreate package directories
 # that live sessions resolve from at runtime (2026-09-20 live incidents:
 # graft hook resolution, opencode lib-bkp, codex banner drift).
-function Test-LiveProcess([string[]]$Names) {
-    foreach ($n in $Names) { if (Get-Process $n -ErrorAction SilentlyContinue) { return $true } }
-    return $false
-}
+# Test-LiveProcess / Get-LiveAgentProcess: scripts/lib/ps-common.ps1 (path-aware: Codex's
+# app-server daemon and Claude Desktop are not sessions).
 $defer = @()
 if (Test-LiveProcess @('codex'))  { $defer += 'codex' }
 if (Test-LiveProcess @('opencode','claude','codex','agy')) { $defer += 'graft' }
@@ -31,7 +29,7 @@ if (Test-LiveProcess @('serena')) { $defer += 'serena' }
 if (Test-LiveProcess @('opencode')) { $defer += 'opencode' }
 $env:DOTUPGRADE_DEFER = ($defer -join ',')
 if ($defer.Count -gt 0) {
-    $__liveNames = (@(Get-Process opencode, claude, codex, agy, serena -ErrorAction SilentlyContinue) | ForEach-Object { $_.ProcessName } | Select-Object -Unique) -join ', '
+    $__liveNames = (@(Get-LiveAgentProcess -Name opencode, claude, codex, agy, serena) | ForEach-Object { $_.ProcessName } | Select-Object -Unique) -join ', '
     Write-Host "  Live agent session(s): $__liveNames - deferring: $($defer -join ', ')" -ForegroundColor Yellow
 } else {
     Write-Host "  No live agent sessions - full sweep." -ForegroundColor Green
