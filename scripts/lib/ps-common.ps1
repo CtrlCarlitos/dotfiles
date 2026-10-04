@@ -246,3 +246,52 @@ function Test-LiveProcess {
     param([string[]]$Names)
     return [bool](@(Get-LiveAgentProcess -Name $Names).Count -gt 0)
 }
+
+# --- "Is it already current?" (dot upgrade) ----------------------------------------------
+# `graft upgrade` ran every time (0.21.1 -> 0.21.1 took 41 s on WSL) and the codex
+# `npm install -g` another ~9 s. Ask first; anything unknown (empty answers, an unreachable
+# registry) means "not current", so the install still happens exactly as before.
+$script:NpmCurrentVersion = ''
+
+# True when the globally installed <Package> is already the registry's latest. On True,
+# $script:NpmCurrentVersion holds the version.
+function Test-NpmGlobalCurrent {
+    param([Parameter(Mandatory)][string]$Package)
+
+    $script:NpmCurrentVersion = ''
+    $previous = $ErrorActionPreference
+    # PS 5.1 promotes native stderr to a terminating error under Stop; the answer is the signal.
+    $ErrorActionPreference = 'Continue'
+    try {
+        $have = ''
+        $listing = ((npm ls -g $Package --depth=0 --json 2>$null) | Out-String).Trim()
+        if ($listing) {
+            $parsed = $listing | ConvertFrom-Json
+            $deps = $parsed.PSObject.Properties['dependencies']
+            if ($null -ne $deps -and $null -ne $deps.Value -and $null -ne $deps.Value.PSObject.Properties[$Package]) {
+                $have = "$($deps.Value.PSObject.Properties[$Package].Value.version)"
+            }
+        }
+        $want = ((npm view $Package version 2>$null) | Out-String).Trim()
+        if ($have -and $have -eq $want) {
+            $script:NpmCurrentVersion = $have
+            return $true
+        }
+        return $false
+    }
+    catch { return $false }
+    finally { $ErrorActionPreference = $previous }
+}
+
+# `graft version` prints "graft <installed>" and "latest: <published>" (or "latest:
+# unreachable (offline?)"). Returns the version when both agree, else ''.
+function Get-GraftCurrentVersion {
+    param([string]$VersionOutput)
+
+    $installed = ''
+    $latest = ''
+    if ($VersionOutput -match '(?m)^graft (\d[^\s]*)') { $installed = $Matches[1] }
+    if ($VersionOutput -match '(?m)^latest: (\d[^\s]*)') { $latest = $Matches[1] }
+    if ($installed -and $installed -eq $latest) { return $installed }
+    return ''
+}

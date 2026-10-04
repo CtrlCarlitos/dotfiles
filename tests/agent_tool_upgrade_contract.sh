@@ -68,6 +68,17 @@ if [ "${1:-}" = prefix ] && [ "${2:-}" = -g ]; then
     printf '%s\n' "${NPM_FAKE_PREFIX:?}"
     exit 0
 fi
+# `npm ls -g <pkg> --depth=0 --json` / `npm view <pkg> version`: the installed and the
+# registry version the updater compares before reinstalling (NPM_LS_VERSION /
+# NPM_VIEW_VERSION; unset = unknown, which must mean "install").
+if [ "${1:-}" = ls ] && [ -n "${NPM_LS_VERSION:-}" ]; then
+    printf '{"dependencies":{"%s":{"version":"%s"}}}\n' "${3:-}" "$NPM_LS_VERSION"
+    exit 0
+fi
+if [ "${1:-}" = view ] && [ -n "${NPM_VIEW_VERSION:-}" ]; then
+    printf '%s\n' "$NPM_VIEW_VERSION"
+    exit 0
+fi
 [ "${NPM_FAIL:-0}" = 1 ] && exit 1
 exit 0
 EOF
@@ -108,6 +119,8 @@ chmod +x "$bin/claude"
 cat >"$bin/graft" <<'EOF'
 #!/bin/sh
 printf '%s prefix=%s allow=%s\n' "$*" "${NPM_CONFIG_PREFIX:-}" "${NPM_CONFIG_ALLOW_SCRIPTS:-}" >> "${GRAFT_LOG:?}"
+# `graft version` prints the installed and the latest published version.
+[ "${1:-}" = version ] && [ -n "${GRAFT_VERSION_OUT:-}" ] && printf '%b' "$GRAFT_VERSION_OUT"
 exit 0
 EOF
 chmod +x "$bin/graft"
@@ -201,6 +214,29 @@ if [ -s "$tmp/agent-browser.log" ]; then
 else
     pass
 fi
+
+# --- 5b. graft and codex that are already current are not reinstalled ---------
+# `graft upgrade` ran every time (0.21.1 -> 0.21.1 cost 41 s) and the codex
+# `npm install -g` another ~9 s. `graft version` prints installed + latest; for npm
+# packages the installed (`npm ls -g`) and registry (`npm view`) versions are compared.
+# Anything unknown - offline, no answer - still installs.
+make_agent_browser
+: >"$tmp/npm.log"; : >"$tmp/graft.log"
+GRAFT_VERSION_OUT='graft 1.2.3\nlatest: 1.2.3\n' NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b.log" || true
+grep -Fq 'graft is current (1.2.3)' "$tmp/run5b.log" || fail "current graft must be reported, not upgraded: $(grep -i graft "$tmp/run5b.log" | head -3)"
+if grep -Eq '^upgrade ' "$tmp/graft.log"; then fail "graft 1.2.3 == latest must not run graft upgrade"; else pass; fi
+grep -Fq 'codex is current (9.9.9)' "$tmp/run5b.log" || fail "current codex must be reported, not reinstalled"
+if grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log"; then fail "codex 9.9.9 == latest must not reinstall"; else pass; fi
+
+: >"$tmp/npm.log"; : >"$tmp/graft.log"
+GRAFT_VERSION_OUT='graft 1.2.2\nlatest: 1.2.3\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
+grep -Eq '^upgrade ' "$tmp/graft.log" || fail "a stale graft must be upgraded"
+grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "a stale codex must be reinstalled"
+
+: >"$tmp/npm.log"; : >"$tmp/graft.log"
+GRAFT_VERSION_OUT='graft 1.2.3\nlatest: unreachable (offline?)\n' run_updater "$tmp/run5d.log" || true
+grep -Eq '^upgrade ' "$tmp/graft.log" || fail "an unreachable registry must not skip the graft upgrade"
+grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "unknown codex versions must not skip the reinstall"
 
 # --- 6. graft installed under a non-default npm prefix -------------------------
 # `graft upgrade` runs `npm install -g` against npm's default prefix; a graft
