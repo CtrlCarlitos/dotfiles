@@ -17,7 +17,11 @@ done
 host1="$(awk '$1 == "identityagent" {print $2}' "$tmp/server1")"
 host2="$(awk '$1 == "identityagent" {print $2}' "$tmp/server2")"
 [ "$host1" = "$host2" ]
-grep -Fq "identityagent $tmp/state/github-fixture.agent" "$tmp/github-fixture"
+# Git Bash's ssh resolves the MSYS path (/tmp/...) to its native spelling
+# (C:/Users/...) in `ssh -G`; cygpath -m gives the same form. A no-op elsewhere.
+state_dir="$tmp/state"
+if command -v cygpath >/dev/null 2>&1; then state_dir="$(cygpath -m "$tmp/state")"; fi
+grep -Fq "identityagent $state_dir/github-fixture.agent" "$tmp/github-fixture"
 chezmoi execute-template --config "$tmp/empty.toml" --source "$root" --override-data "$data" < "$root/dot_local/bin/executable_ssh-agent-relay.tmpl" > "$tmp/relay"
 [ "$(grep -c 'RELAY_ALIASES+=("host-' "$tmp/relay")" -eq 1 ]
 conflict="$(printf '%s' "$data" | jq '.ssh_hosts[1].identity_fingerprint="SHA256:other"')"
