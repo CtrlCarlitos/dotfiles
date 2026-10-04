@@ -157,7 +157,7 @@ vscode:
 versions:
   node_major: 24
   node_choco: "24.19.0"
-  antigravity_hub: "2.17.0-5217732355031040"
+  antigravity_hub: "2.19.1-6046815158665216"
   gum: "2.0.1"
   claude_install_sh: "https://claude.ai/install.sh"
   claude_install_ps1: "https://claude.ai/install.ps1"
