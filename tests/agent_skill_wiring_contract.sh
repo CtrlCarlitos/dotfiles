@@ -136,6 +136,7 @@ verify_unix_supported_target_counts() {
     printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$tmp/bin/npx"
     cat > "$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
+[ "${1:-}" != ls-remote ] || exit 2 # no network in tests: the skills version check reads this as "unknown"
 dest="${!#}"
 mkdir -p "$dest/skills/engineering/code-review"
 printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"
@@ -228,6 +229,7 @@ exit 0
 EOF
     cat > "$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
+[ "${1:-}" != ls-remote ] || exit 2 # no network in tests: the skills version check reads this as "unknown"
 dest="${!#}"
 mkdir -p "$dest/skills/engineering/code-review"
 printf '%s\n' '---' 'name: code-review' '---' > "$dest/skills/engineering/code-review/SKILL.md"
@@ -567,6 +569,7 @@ verify_windows_summary_fallbacks() {
     rendered="$render_dir/installer.ps1"
     cp "$repo_root/.chezmoidata.yaml" "$render_dir/"   # sourceDir stays the scratch dir (catalog-unavailable mode) but data must resolve
     cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$render_dir/"   # catalog + fragments the installers include
+    mkdir -p "$render_dir/scripts" && cp -r "$repo_root/scripts/lib" "$render_dir/scripts/"   # the installer inlines scripts/lib/ps-skills.ps1
     : > "$config"
     chezmoi execute-template --config "$config" --source "$render_dir" \
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"agent_toolkit":true}}' \
@@ -619,6 +622,12 @@ function Invoke-Lifecycle {
         & $Action
     }
 
+    # The region is evaluated as a bare scriptblock (no $PSScriptRoot), so the shared
+    # skills helpers come from here; the remote lookup is replaced so the fixture never
+    # touches the network (empty = unknown = install, the behaviour under test).
+    . (Join-Path $env:SKILLS_REPO_ROOT 'scripts/lib/ps-skills.ps1')
+    function Get-SkillsRemoteHead { param([string]$Repo) return '' }
+
     $output = & ([scriptblock]::Create($match.Value)) 6>&1 | ForEach-Object {
         if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
     }
@@ -641,7 +650,7 @@ try {
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }
 POWERSHELL
-    pwsh -NoProfile -File "$fixture" "$repo_root/scripts/update_ai_tools.ps1" "$rendered"
+    SKILLS_REPO_ROOT="$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$repo_root"; else printf %s "$repo_root"; fi)" pwsh -NoProfile -File "$fixture" "$repo_root/scripts/update_ai_tools.ps1" "$rendered"
     rm -rf "$render_dir"
     rm -f "$fixture"
 }

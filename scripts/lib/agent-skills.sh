@@ -145,23 +145,81 @@ fetch_and_verify() {
 # blocks the whole run; confirmed live 2026-08-30). net_timeout stays as the
 # wall-clock backstop.
 #-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# skills_up_to_date <owner/repo> <skill>... - 0 when this source need not be
+# fetched again, 1 when it must be (or when anything is unknown).
+#
+# `skills add` re-fetches every skill on every run, and a cold `npx
+# skills@latest` costs 30+ s even when nothing moved upstream. A source is
+# skipped only when ALL of these hold:
+#   - DOT_SKILLS_FORCE is not 1,
+#   - every named skill is present for Claude (~/.claude/skills) and for
+#     OpenCode/Codex (~/.agents/skills),
+#   - upstream HEAD (one `git ls-remote`) equals the commit recorded after the
+#     last successful install of this exact source + skill list + agent list.
+# An unreachable remote never skips. Why not `skills update`: it takes no
+# --copy / -a flags and re-links the Claude copy as a symlink into
+# ~/.agents (measured on skills 1.7.0), but these installs are deliberately
+# copies. This is the version check instead.
+#
+# Side effect: remembers the key and the HEAD it saw in SKILLS_PENDING_KEY /
+# SKILLS_PENDING_HEAD, so skills_record_source (called after the add succeeds)
+# stores exactly the commit that was checked.
+#-------------------------------------------------------------------------------
+skills_source_state() {
+    printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/skills-sources"
+}
+
+skills_up_to_date() {
+    local repo="$1"; shift
+    local skill recorded
+    SKILLS_PENDING_KEY="$repo|$*|${AGENTS[*]}"
+    SKILLS_PENDING_HEAD="$(net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1)" || SKILLS_PENDING_HEAD=""
+    [ "${DOT_SKILLS_FORCE:-}" != 1 ] || return 1
+    for skill in "$@"; do
+        [ -f "$HOME/.claude/skills/$skill/SKILL.md" ] && [ -f "$HOME/.agents/skills/$skill/SKILL.md" ] || return 1
+    done
+    [ -n "$SKILLS_PENDING_HEAD" ] || return 1
+    recorded="$(awk -F'\t' -v k="$SKILLS_PENDING_KEY" '$1 == k { print $2 }' "$(skills_source_state)" 2>/dev/null || true)"
+    [ "$recorded" = "$SKILLS_PENDING_HEAD" ]
+}
+
+# skills_record_source - after a successful add: store the HEAD that
+# skills_up_to_date saw for the same key. Best effort (state is only a cache).
+skills_record_source() {
+    [ -n "${SKILLS_PENDING_HEAD:-}" ] || return 0
+    local state tmp
+    state="$(skills_source_state)"
+    mkdir -p "${state%/*}" 2>/dev/null || return 0
+    tmp="$state.tmp.$$"
+    {
+        awk -F'\t' -v k="$SKILLS_PENDING_KEY" '$1 != k' "$state" 2>/dev/null || true
+        printf '%s\t%s\n' "$SKILLS_PENDING_KEY" "$SKILLS_PENDING_HEAD"
+    } >"$tmp"
+    mv "$tmp" "$state" 2>/dev/null || rm -f "$tmp"
+    return 0
+}
+
 skills_add_all() {
     # The npx wrapper is identical for every consumer, so the function that
     # uses it owns the definition (it used to sit in each consumer and drift).
     local -a SK=(npx --yes --loglevel=error skills@latest)
 
     # Matt Pocock's engineering/productivity skills - 11 installed as-is.
-    # Matt Pocock's engineering/productivity skills - 11 installed as-is.
     # teach + writing-for-agents live under skills/productivity/, the rest under
     # skills/engineering/; the CLI resolves by skill name, not path (grilling and
     # handoff are already productivity/ skills that resolve fine here).
+    local -a mp_skills=(codebase-design domain-modeling grill-with-docs improve-codebase-architecture
+        prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts)
     info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
-    if net_timeout 300 "${SK[@]}" add mattpocock/skills \
-        -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture \
-           prototype research grilling handoff teach writing-for-agents \
-           resolving-merge-conflicts \
+    if skills_up_to_date mattpocock/skills "${mp_skills[@]}"; then
+        info "Matt Pocock's skills are up to date"
+        record_cli_result installed 11
+    elif net_timeout 300 "${SK[@]}" add mattpocock/skills \
+        -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 11
+        skills_record_source
     else
         record_cli_result failed 11
         warn "Matt Pocock skills install failed or timed out - continuing"
@@ -171,46 +229,56 @@ skills_add_all() {
     # stage a renamed copy with its `name:` frontmatter patched and install
     # that local directory. "mp-" keeps it distinct from this repo's own
     # /code-review command and Superpowers' receiving-code-review skill.
-    local sk_tmp; sk_tmp="$(mktemp -d)"
-    # net_timeout: same wall-clock contract as every other network fetch here
-    # (docs/tool-parity.md's Network-step timeouts section includes git clones).
-    if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
-        local src="$sk_tmp/repo/skills/engineering/code-review"
-        [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
-        if [[ -d "$src" ]]; then
-            mkdir -p "$sk_tmp/stage/mp-code-review"
-            cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
-            local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
-            if [[ -f "$skf" ]]; then
-                # portable in-place edit (GNU and BSD sed differ on -i).
-                # Guarded: a bare failing `sed ... && mv` here would trip
-                # set -e and abort the whole run - frontend-design, Playwright,
-                # act, desktop apps and shell setup all come after this.
-                sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-                    record_cli_result installed 1
+    if skills_up_to_date mattpocock/skills mp-code-review; then
+        info "mp-code-review is up to date"
+        record_cli_result installed 1
+    else
+        local sk_tmp; sk_tmp="$(mktemp -d)"
+        # net_timeout: same wall-clock contract as every other network fetch here
+        # (docs/tool-parity.md's Network-step timeouts section includes git clones).
+        if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
+            local src="$sk_tmp/repo/skills/engineering/code-review"
+            [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
+            if [[ -d "$src" ]]; then
+                mkdir -p "$sk_tmp/stage/mp-code-review"
+                cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
+                local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
+                if [[ -f "$skf" ]]; then
+                    # portable in-place edit (GNU and BSD sed differ on -i).
+                    # Guarded: a bare failing `sed ... && mv` here would trip
+                    # set -e and abort the whole run - frontend-design, Playwright,
+                    # act, desktop apps and shell setup all come after this.
+                    sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
+                    if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+                        record_cli_result installed 1
+                        skills_record_source
+                    else
+                        record_cli_result failed 1
+                        warn "mp-code-review skill install failed - continuing"
+                    fi
                 else
-                    record_cli_result failed 1
-                    warn "mp-code-review skill install failed - continuing"
+                    record_cli_result skipped 1
+                    warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
                 fi
             else
                 record_cli_result skipped 1
-                warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
+                warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
             fi
         else
-            record_cli_result skipped 1
-            warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
+            record_cli_result failed 1
+            warn "mp-code-review skill source clone failed or timed out - continuing"
         fi
-    else
-        record_cli_result failed 1
-        warn "mp-code-review skill source clone failed or timed out - continuing"
+        rm -rf "$sk_tmp"
     fi
-    rm -rf "$sk_tmp"
 
     # Anthropic's frontend-design skill - distinctive visual direction for new UI.
     info "Installing Anthropic's frontend-design skill..."
-    if net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date anthropics/skills frontend-design; then
+        info "frontend-design up to date"
         record_cli_result installed 1
+    elif net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+        skills_record_source
     else
         record_cli_result failed 1
         warn "frontend-design skill install failed or timed out - continuing"
@@ -219,8 +287,12 @@ skills_add_all() {
     # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
     # agent search and install skills from skills.sh mid-session.
     info "Installing find-skills skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date vercel-labs/skills find-skills; then
+        info "find-skills up to date"
         record_cli_result installed 1
+    elif net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+        skills_record_source
     else
         record_cli_result failed 1
         warn "find-skills skill install failed or timed out - continuing"
@@ -229,8 +301,12 @@ skills_add_all() {
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
     # automation: navigate, click, fill, scrape, screenshot.
     info "Installing agent-browser skill..."
-    if net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date vercel-labs/agent-browser agent-browser; then
+        info "agent-browser up to date"
         record_cli_result installed 1
+    elif net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+        skills_record_source
     else
         record_cli_result failed 1
         warn "agent-browser skill install failed or timed out - continuing"
@@ -240,8 +316,12 @@ skills_add_all() {
     # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
     info "Installing Anthropic's skill-creator skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date CtrlCarlitos/skills skill-creator; then
+        info "skill-creator up to date"
         record_cli_result installed 1
+    elif net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+        skills_record_source
     else
         record_cli_result failed 1
         warn "skill-creator skill install failed or timed out - continuing"
@@ -256,8 +336,12 @@ skills_add_all() {
     # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
     # purpose; drop one if they double-trigger.
     info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..."
-    if net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date Leonxlnx/taste-skill design-taste-frontend redesign-existing-projects; then
+        info "design-taste-frontend redesign-existing-projects up to date"
         record_cli_result installed 2
+    elif net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 2
+        skills_record_source
     else
         record_cli_result failed 2
         warn "taste skills install failed or timed out - continuing"
@@ -271,8 +355,12 @@ skills_add_all() {
     # task" block cost every session in this repo two empty queries (the graph
     # covers one Lua file here) - docs/skills-install-strategy.md.
     info "Installing code-search skill..."
-    if net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    if skills_up_to_date CtrlCarlitos/skills code-search; then
+        info "code-search up to date"
         record_cli_result installed 1
+    elif net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
+        skills_record_source
     else
         record_cli_result failed 1
         warn "code-search skill install failed or timed out - continuing"

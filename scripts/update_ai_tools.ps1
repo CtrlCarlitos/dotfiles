@@ -93,46 +93,75 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
     # From .chezmoidata/agents.yaml, read at runtime (see $codexPkg above).
     try { $skAgents = @(((chezmoi execute-template '{{ join "," .agents.skills.agents }}' | Out-String).Trim()) -split ',') } catch { $skAgents = @() }
-    npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
-
-    $skRepo  = "$env:TEMP\mp-skills-repo"
-    $skStage = "$env:TEMP\mp-skills-stage"
-    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-    git clone --quiet --depth 1 https://github.com/mattpocock/skills $skRepo 2>$null
-    $cr = Join-Path $skRepo "skills\engineering\code-review"
-    if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
-    if (Test-Path $cr) {
-        New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
-        Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
-        $skf = "$skStage\mp-code-review\SKILL.md"
-        if (Test-Path $skf) {
-            $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
-            [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
-        }
-        npx --yes --loglevel=error skills@latest add "$skStage" -s mp-code-review -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    # Shared with the installer (inlined there at render time): the "already installed from this
+    # upstream commit?" check, so an unchanged source costs one git ls-remote instead of an npx fetch.
+    if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+    Invoke-SkillsSource -Label 'Matt Pocock skills' -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'resolving-merge-conflicts') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents resolving-merge-conflicts -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
     }
-    Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
 
-    npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  frontend-design update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    if (Test-SkillsUpToDate -Repo 'mattpocock/skills' -Skills @('mp-code-review') -Agents $skAgents) {
+        Write-Host "  mp-code-review is up to date"
+    } else {
+        $skRepo  = "$env:TEMP\mp-skills-repo"
+        $skStage = "$env:TEMP\mp-skills-stage"
+        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
+        git clone --quiet --depth 1 https://github.com/mattpocock/skills $skRepo 2>$null
+        $cr = Join-Path $skRepo "skills\engineering\code-review"
+        if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
+        if (Test-Path $cr) {
+            New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
+            Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
+            $skf = "$skStage\mp-code-review\SKILL.md"
+            if (Test-Path $skf) {
+                $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
+                [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
+            }
+            npx --yes --loglevel=error skills@latest add "$skStage" -s mp-code-review -a $skAgents -g -y --copy 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+            if ($LASTEXITCODE -eq 0) { Save-SkillsSource }
+        }
+        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Invoke-SkillsSource -Label 'frontend-design' -Repo 'anthropics/skills' -Skills @('frontend-design') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  frontend-design update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
 
     # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
-    npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  find-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    Invoke-SkillsSource -Label 'find-skills' -Repo 'vercel-labs/skills' -Skills @('find-skills') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  find-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
-    npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  agent-browser update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    Invoke-SkillsSource -Label 'agent-browser' -Repo 'vercel-labs/agent-browser' -Skills @('agent-browser') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  agent-browser update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
     # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands
-    npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    Invoke-SkillsSource -Label 'skill-creator' -Repo 'CtrlCarlitos/skills' -Skills @('skill-creator') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
     # taste skills (Leonxlnx/taste-skill) - design-taste-frontend (new-page visual direction) + redesign-existing-projects (audit + fix existing UI)
-    npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    Invoke-SkillsSource -Label 'taste skills' -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
     # code-search (CtrlCarlitos/skills) - search-tool escalation: graft > serena > rg > grep, probed once per session
-    npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+    Invoke-SkillsSource -Label 'code-search' -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)

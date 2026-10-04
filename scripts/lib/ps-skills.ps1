@@ -1,0 +1,113 @@
+# scripts/lib/ps-skills.ps1 - the "is this skills source already installed?" check,
+# the PowerShell twin of skills_up_to_date / skills_record_source in
+# scripts/lib/agent-skills.sh.
+#
+# Consumers:
+#   - run_onchange_install_packages.ps1.tmpl: inlined at RENDER time via
+#     `{{ include "scripts/lib/ps-skills.ps1" }}` (a run_onchange script must be
+#     self-contained, so it cannot dot-source at runtime).
+#   - scripts/update_ai_tools.ps1: dot-sources this file.
+#
+# Template-free on purpose: both consumers load it byte-for-byte.
+#
+# `skills add` re-fetches every skill on every run and a cold `npx skills@latest` costs
+# 30+ s even when nothing moved upstream. A source is skipped only when ALL hold:
+#   - DOT_SKILLS_FORCE is not 1,
+#   - every named skill is present for Claude (~\.claude\skills) and for OpenCode/Codex
+#     (~\.agents\skills),
+#   - upstream HEAD (one `git ls-remote`) equals the commit recorded after the last
+#     successful install of this exact source + skill list + agent list.
+# An unreachable remote never skips. Why not `skills update`: it takes no --copy / -a
+# flags and re-links the Claude copy as a symlink into ~\.agents (measured on skills
+# 1.7.0), but these installs are deliberately copies.
+
+# Read under Set-StrictMode in the consumers: initialised here, before any function reads
+# them (tests/ps_script_scope_vars_contract.sh holds the class).
+$script:SkillsPendingKey = ''
+$script:SkillsPendingHead = ''
+
+# USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
+function Get-SkillsHome {
+    if ($env:USERPROFILE) { return $env:USERPROFILE }
+    return $HOME
+}
+
+function Get-SkillsSourceStatePath {
+    $base = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path (Get-SkillsHome) '.local\state' }
+    return Join-Path (Join-Path $base 'dotfiles') 'skills-sources'
+}
+
+# Upstream HEAD of owner/repo, or '' when unknown. A separate function so tests can
+# replace it; a process with a hard wait, because git has no timeout of its own.
+function Get-SkillsRemoteHead {
+    param([string]$Repo)
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'git'
+        $psi.Arguments = "ls-remote https://github.com/$Repo.git HEAD"
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $process = [System.Diagnostics.Process]::Start($psi)
+        if (-not $process.WaitForExit(20000)) {
+            try { $process.Kill() } catch { $null = $_ }
+            return ''
+        }
+        $line = ($process.StandardOutput.ReadToEnd() -split "`r?`n" | Select-Object -First 1)
+        if ($process.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($line)) { return '' }
+        return ($line -split "\s+")[0]
+    }
+    catch { return '' }
+}
+
+function Test-SkillsUpToDate {
+    param([string]$Repo, [string[]]$Skills, [string[]]$Agents)
+
+    $script:SkillsPendingKey = "$Repo|$($Skills -join ' ')|$($Agents -join ' ')"
+    $script:SkillsPendingHead = Get-SkillsRemoteHead -Repo $Repo
+    if ($env:DOT_SKILLS_FORCE -eq '1') { return $false }
+    foreach ($skill in $Skills) {
+        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".claude\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
+        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".agents\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
+    }
+    if (-not $script:SkillsPendingHead) { return $false }
+    $state = Get-SkillsSourceStatePath
+    if (-not (Test-Path -LiteralPath $state -PathType Leaf)) { return $false }
+    foreach ($line in @(Get-Content -LiteralPath $state)) {
+        $parts = $line -split "`t"
+        if ($parts.Count -eq 2 -and $parts[0] -ceq $script:SkillsPendingKey) {
+            return ($parts[1] -ceq $script:SkillsPendingHead)
+        }
+    }
+    return $false
+}
+
+# After a SUCCESSFUL install: store the HEAD Test-SkillsUpToDate saw for the same key.
+# Best effort - the state is only a cache.
+function Save-SkillsSource {
+    if (-not $script:SkillsPendingHead) { return }
+    try {
+        $state = Get-SkillsSourceStatePath
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $state) | Out-Null
+        $kept = @()
+        if (Test-Path -LiteralPath $state -PathType Leaf) {
+            $kept = @(Get-Content -LiteralPath $state | Where-Object { ($_ -split "`t")[0] -cne $script:SkillsPendingKey })
+        }
+        $kept += "$($script:SkillsPendingKey)`t$($script:SkillsPendingHead)"
+        [IO.File]::WriteAllLines($state, [string[]]$kept, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    catch { Write-Verbose "skills state not saved: $($_.Exception.Message)" }
+}
+
+# Install one source unless it is up to date. $Install returns $true on success; only
+# then is the source recorded.
+function Invoke-SkillsSource {
+    param([string]$Label, [string]$Repo, [string[]]$Skills, [string[]]$Agents, [scriptblock]$Install)
+
+    if (Test-SkillsUpToDate -Repo $Repo -Skills $Skills -Agents $Agents) {
+        Write-Host "  $Label is up to date"
+        return
+    }
+    if ((& $Install) -eq $true) { Save-SkillsSource }
+}
