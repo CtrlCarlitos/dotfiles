@@ -55,6 +55,39 @@ function Test-DestinationParentsSafe {
     }
 }
 
+function Write-InertGrantReport {
+    # waivers.toml keys a repo grant by its ABSOLUTE path (a table named
+    # ["C:\\abs\\path"] or ["/abs/path"]). After a cross-OS, cross-user or
+    # cross-drive restore those match nothing and the grants silently never
+    # apply, so name them. A path key is inert when it is the other OS's form or
+    # its directory does not exist here. Non-path tables ([web_hosts]) are not
+    # repo grants and are ignored. Twin of report_inert_grants in dotrestore.sh.
+    param([string]$Waivers)
+
+    if (-not (Test-Path -LiteralPath $Waivers -PathType Leaf)) { return }
+    $inert = @()
+    foreach ($line in @(Get-Content -LiteralPath $Waivers)) {
+        if ($line -notmatch '^\["(.*)"\]\s*$') { continue }
+        $path = $Matches[1].Replace('\\', '\')   # TOML basic string: \\ is one backslash
+        if ($path -match '^[A-Za-z]:[\\/]') {
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) { $inert += "    - $path (directory not found here)" }
+        }
+        elseif ($path.StartsWith('/')) {
+            $inert += "    - $path (a Unix path)"
+        }
+    }
+    if ($inert.Count -eq 0) { return }
+    Write-Output "  WARNING: $($inert.Count) repo grant(s) in waivers.toml will not apply on this machine:"
+    $inert | Select-Object -First 10 | ForEach-Object { Write-Output $_ }
+    if ($inert.Count -gt 10) { Write-Output "    ... and $($inert.Count - 10) more" }
+    Write-Output '  Re-grant them from the repos that still matter (they are keyed by absolute path).'
+}
+
+# operator-auth follows XDG_STATE_HOME even on Windows (guardrail's own rule);
+# a root outside USERPROFILE is refused by Test-DestinationParentsSafe before
+# anything is written. Twin of the root resolution in dotbackup.ps1.
+$guardrailStateBase = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path $env:USERPROFILE '.local\state' }
+
 function Get-GuardrailDestination {
     # Where a file under guardrail/ belongs on Windows, or $null for anything
     # outside the fixed allowlist (a crafted archive cannot pick a destination).
@@ -71,7 +104,7 @@ function Get-GuardrailDestination {
         }
         'operator-auth' {
             if ($parts.Count -ge 2) {
-                return Join-Path (Join-Path $env:USERPROFILE '.local\state\guardrail') ($parts -join '\')
+                return Join-Path (Join-Path $guardrailStateBase 'guardrail') ($parts -join '\')
             }
         }
         'audit' {
@@ -239,6 +272,7 @@ try {
         }
         Write-Output "Restored $($guardrailFiles.Count) guardrail operator file(s), user-only."
         Write-Output "  Review %APPDATA%\guardrail\waivers.toml: it re-applies every old grant."
+        Write-InertGrantReport -Waivers (Join-Path (Join-Path $env:APPDATA 'guardrail') 'waivers.toml')
         if ($skippedAuth -gt 0) {
             Write-Output "  Skipped $skippedAuth passkey enrollment file(s): enroll again on this machine."
         }

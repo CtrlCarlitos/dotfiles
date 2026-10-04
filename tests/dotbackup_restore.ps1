@@ -267,6 +267,208 @@ if ($LASTEXITCODE -eq 0) { Fail '[3] second restore into a populated home succee
 if ($secondOut -notmatch 'Refusing to overwrite') { Fail "[3] refusal not reported: $secondOut" }
 Write-Host '  ok: restore refuses to overwrite an existing payload'
 
+
+# ===== Parity with tests/dotbackup_restore.sh [9]-[19] ============================
+# One helper runs a script under 5.1 with EAP=Continue (stderr from a child that
+# deliberately fails must not become a NativeCommandError) and returns output + exit.
+function Invoke-Script51 {
+    param([string]$Script, [string[]]$ScriptArgs = @())
+    $prev = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $out = & $powerShell5 -NoProfile -ExecutionPolicy Bypass -File $Script @ScriptArgs 2>&1 | Out-String
+        return [pscustomobject]@{ Out = $out; Code = $LASTEXITCODE }
+    }
+    finally { $ErrorActionPreference = $prev }
+}
+
+function Use-Home([string]$Dir) {
+    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+    $env:HOME = $Dir
+    $env:USERPROFILE = $Dir
+    $env:APPDATA = Join-Path $Dir 'AppData\Roaming'
+    $env:LOCALAPPDATA = Join-Path $Dir 'AppData\Local'
+    Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue
+}
+
+# A backup-able home: allowlisted payload plus guardrail state in the given approval mode.
+function Build-GuardrailHome([string]$Dir, [string]$Mode, [switch]$NoGuardrail) {
+    foreach ($d in @((Join-Path $Dir '.config\chezmoi'), (Join-Path $Dir '.ssh\nested'))) {
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+    }
+    Set-Content -LiteralPath (Join-Path $Dir '.config\chezmoi\chezmoi.toml') -Value 'source = "fixture"' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $Dir '.ssh\custom_signing_key') -Value 'private key' -Encoding ascii
+    if ($NoGuardrail) { return }
+    foreach ($d in @(
+        (Join-Path $Dir 'AppData\Roaming\guardrail'),
+        (Join-Path $Dir 'AppData\Local\guardrail'),
+        (Join-Path $Dir '.local\state\guardrail\operator-auth\nested'),
+        (Join-Path $Dir '.local\state\guardrail\manifests'))) {
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+    }
+    Set-Content -LiteralPath (Join-Path $Dir 'AppData\Roaming\guardrail\waivers.toml') -Value "approval = `"$Mode`"" -Encoding ascii
+    Set-Content -LiteralPath (Join-Path $Dir 'AppData\Roaming\guardrail\night.toml') -Value 'night = true' -Encoding ascii
+    Set-Content -LiteralPath (Join-Path $Dir 'AppData\Local\guardrail\audit-2026.jsonl') -Value '{"event":1}' -Encoding ascii
+    Set-Content -LiteralPath (Join-Path $Dir '.local\state\guardrail\operator-auth\nested\key') -Value 'credential' -Encoding ascii
+    Set-Content -LiteralPath (Join-Path $Dir '.local\state\guardrail\manifests\claude.json') -Value 'regenerated' -Encoding ascii
+}
+
+function Get-OnlyArchive([string]$Dir) {
+    $found = @(Get-ChildItem -LiteralPath (Join-Path $Dir '.dot_backups') -Filter 'dotfiles-*.7z' -File)
+    if ($found.Count -ne 1) { Fail "expected exactly one archive in $Dir, got $($found.Count)" }
+    return $found[0].FullName
+}
+
+# Copy an archive's staged payload into a new archive, optionally rewriting the manifest
+# platform and adding extra files (relative path -> content) under guardrail\.
+function Copy-ArchiveWith([string]$Source, [string]$Dest, [string]$Platform, [hashtable]$Extra = @{}) {
+    New-Item -ItemType Directory -Force -Path "$Dest.contents" | Out-Null
+    Copy-Item -LiteralPath (Join-Path "$Source.contents" 'dotfiles-backup-v1') -Destination "$Dest.contents" -Recurse -Force
+    [IO.File]::WriteAllText($Dest, '')
+    $payloadCopy = Join-Path "$Dest.contents" 'dotfiles-backup-v1'
+    if ($Platform) {
+        $m = Join-Path $payloadCopy 'manifest.json'
+        $text = [IO.File]::ReadAllText($m) -replace '"source_platform"\s*:\s*"[A-Za-z]*"', "`"source_platform`": `"$Platform`""
+        [IO.File]::WriteAllText($m, $text, $Utf8NoBom)
+    }
+    foreach ($k in $Extra.Keys) {
+        $p = Join-Path (Join-Path $payloadCopy 'guardrail') $k
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $p) | Out-Null
+        [IO.File]::WriteAllText($p, [string]$Extra[$k], $Utf8NoBom)
+    }
+}
+
+# --- [4] Prompt mode (the default) does not use the passkey, so it is not captured.
+$promptHome = Join-Path $Tmp 'home-prompt'
+Build-GuardrailHome $promptHome 'prompt'
+Use-Home $promptHome
+$r = Invoke-Script51 $Backup
+if ($r.Code -ne 0) { Fail "[4] backup failed: $($r.Out)" }
+$promptArchive = Get-OnlyArchive $promptHome
+$promptPayload = Join-Path "$promptArchive.contents" 'dotfiles-backup-v1'
+if (-not (Test-Path -LiteralPath (Join-Path $promptPayload 'guardrail\config\waivers.toml'))) { Fail '[4] waivers.toml not captured in prompt mode' }
+if (Test-Path -LiteralPath (Join-Path $promptPayload 'guardrail\operator-auth')) { Fail '[4] passkey enrollment captured outside passkey mode' }
+if ($r.Out -match 'Audit log') { Fail "[4] audit size reported without DOTBACKUP_AUDIT=1: $($r.Out)" }
+Write-Host '  ok: passkey enrollment captured only in passkey mode'
+
+# --- [5] DOTBACKUP_AUDIT=1 captures the audit log and says how big it is; per-machine
+# state added since the section was designed is never captured, not even then.
+$auditHome = Join-Path $Tmp 'home-audit'
+Build-GuardrailHome $auditHome 'passkey'
+foreach ($d in @((Join-Path $auditHome '.local\state\guardrail\session-checks'), (Join-Path $auditHome '.local\bin'))) {
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+}
+Set-Content -LiteralPath (Join-Path $auditHome '.local\state\guardrail\session-checks\repo.json') -Value 'fingerprint' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $auditHome '.local\state\guardrail\previous.json') -Value '{"sha256":"x"}' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $auditHome '.local\bin\guardrail.previous.exe') -Value 'binary' -Encoding ascii
+Use-Home $auditHome
+$env:DOTBACKUP_AUDIT = '1'
+try { $r = Invoke-Script51 $Backup } finally { Remove-Item Env:DOTBACKUP_AUDIT -ErrorAction SilentlyContinue }
+if ($r.Code -ne 0) { Fail "[5] backup failed: $($r.Out)" }
+$auditPayload = Join-Path "$(Get-OnlyArchive $auditHome).contents" 'dotfiles-backup-v1'
+if (-not (Test-Path -LiteralPath (Join-Path $auditPayload 'guardrail\audit\audit-2026.jsonl'))) { Fail '[5] audit log not captured with DOTBACKUP_AUDIT=1' }
+if ($r.Out -notmatch 'Audit log: 1 segment\(s\), ') { Fail "[5] audit size not reported: $($r.Out)" }
+foreach ($never in @('session-checks', 'previous.json', 'guardrail.previous.exe', 'claude.json')) {
+    if (@(Get-ChildItem -LiteralPath $auditPayload -Recurse -Force -Filter $never).Count -ne 0) { Fail "[5] $never must never be captured" }
+}
+Write-Host '  ok: audit opt-in captured and sized; per-machine state never captured'
+
+# --- [6] No guardrail state at all: no guardrail\ entry.
+$plainHome = Join-Path $Tmp 'home-plain'
+Build-GuardrailHome $plainHome 'prompt' -NoGuardrail
+Use-Home $plainHome
+$r = Invoke-Script51 $Backup
+if ($r.Code -ne 0) { Fail "[6] backup failed: $($r.Out)" }
+if (Test-Path -LiteralPath (Join-Path "$(Get-OnlyArchive $plainHome).contents" 'dotfiles-backup-v1\guardrail')) { Fail '[6] guardrail\ present without guardrail state' }
+Write-Host '  ok: no guardrail section when guardrail was never configured'
+
+# --- [7] Cross-OS: config restored, passkey enrollment skipped with a notice.
+$passkeyArchive = $archive   # the round-trip archive from [1]: passkey mode, enrollment captured
+$crossArchive = Join-Path $Tmp 'cross-os.7z'
+Copy-ArchiveWith $passkeyArchive $crossArchive 'linux'
+$crossHome = Join-Path $Tmp 'home-cross'
+Use-Home $crossHome
+$r = Invoke-Script51 $Restore @('-Archive', $crossArchive)
+if ($r.Code -ne 0) { Fail "[7] cross-OS restore failed: $($r.Out)" }
+if (-not (Test-Path -LiteralPath (Join-Path $crossHome 'AppData\Roaming\guardrail\waivers.toml'))) { Fail '[7] cross-OS restore dropped waivers.toml' }
+if (Test-Path -LiteralPath (Join-Path $crossHome '.local\state\guardrail\operator-auth')) { Fail '[7] cross-OS restore wrote passkey enrollment' }
+if ($r.Out -notmatch 'enroll again') { Fail "[7] skipped enrollment not reported: $($r.Out)" }
+Write-Host '  ok: cross-OS restore skips passkey enrollment'
+
+# --- [8] An existing guardrail file is never overwritten, and nothing is written first.
+$collideHome = Join-Path $Tmp 'home-collide'
+Use-Home $collideHome
+New-Item -ItemType Directory -Force -Path (Join-Path $collideHome 'AppData\Roaming\guardrail') | Out-Null
+Set-Content -LiteralPath (Join-Path $collideHome 'AppData\Roaming\guardrail\waivers.toml') -Value 'keep' -Encoding ascii
+$r = Invoke-Script51 $Restore @('-Archive', $passkeyArchive)
+if ($r.Code -eq 0) { Fail '[8] existing waivers.toml was overwritten' }
+if ($r.Out -notmatch 'Refusing to overwrite existing guardrail file') { Fail "[8] refusal not reported: $($r.Out)" }
+if ((Get-Content -LiteralPath (Join-Path $collideHome 'AppData\Roaming\guardrail\waivers.toml')) -ne 'keep') { Fail '[8] collision changed waivers.toml' }
+if (Test-Path -LiteralPath (Join-Path $collideHome '.config\chezmoi\chezmoi.toml')) { Fail '[8] collision rejection wrote config first' }
+Write-Host '  ok: restore refuses to overwrite guardrail files'
+
+# --- [9] Anything outside the fixed guardrail allowlist is rejected.
+$badArchive = Join-Path $Tmp 'bad-allowlist.7z'
+Copy-ArchiveWith $passkeyArchive $badArchive '' @{ 'manifests\claude.json' = 'stale' }
+$badHome = Join-Path $Tmp 'home-bad'
+Use-Home $badHome
+$r = Invoke-Script51 $Restore @('-Archive', $badArchive)
+if ($r.Code -eq 0) { Fail '[9] archive with a stale manifest was restored' }
+if (Test-Path -LiteralPath (Join-Path $badHome '.config\chezmoi\chezmoi.toml')) { Fail '[9] rejected archive wrote config' }
+Write-Host '  ok: guardrail allowlist enforced on restore'
+
+# --- [10] XDG_STATE_HOME moves operator-auth (guardrail's rule, even on Windows); a root
+# outside USERPROFILE is refused before anything is written.
+$xdgHome = Join-Path $Tmp 'home-xdg'
+Build-GuardrailHome $xdgHome 'passkey'
+Move-Item -LiteralPath (Join-Path $xdgHome '.local\state\guardrail') -Destination (Join-Path $xdgHome 'xst-root') -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $xdgHome 'xst') | Out-Null
+Move-Item -LiteralPath (Join-Path $xdgHome 'xst-root') -Destination (Join-Path $xdgHome 'xst\guardrail') -Force
+Use-Home $xdgHome
+$env:XDG_STATE_HOME = Join-Path $xdgHome 'xst'
+try { $r = Invoke-Script51 $Backup } finally { Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue }
+if ($r.Code -ne 0) { Fail "[10] backup failed: $($r.Out)" }
+$xdgArchive = Get-OnlyArchive $xdgHome
+if (-not (Test-Path -LiteralPath (Join-Path "$xdgArchive.contents" 'dotfiles-backup-v1\guardrail\operator-auth\nested\key'))) { Fail '[10] backup ignored XDG_STATE_HOME' }
+$xdgRestore = Join-Path $Tmp 'home-xdg-restore'
+Use-Home $xdgRestore
+$env:XDG_STATE_HOME = Join-Path $xdgRestore 'xst'
+try { $r = Invoke-Script51 $Restore @('-Archive', $xdgArchive) } finally { Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue }
+if ($r.Code -ne 0) { Fail "[10] restore failed: $($r.Out)" }
+if (-not (Test-Path -LiteralPath (Join-Path $xdgRestore 'xst\guardrail\operator-auth\nested\key'))) { Fail '[10] restore ignored XDG_STATE_HOME' }
+if (Test-Path -LiteralPath (Join-Path $xdgRestore '.local\state\guardrail')) { Fail '[10] restore also wrote the default state root' }
+$outsideHome = Join-Path $Tmp 'home-xdg-outside'
+Use-Home $outsideHome
+$env:XDG_STATE_HOME = Join-Path $Tmp 'outside-profile-state'
+try { $r = Invoke-Script51 $Restore @('-Archive', $xdgArchive) } finally { Remove-Item Env:XDG_STATE_HOME -ErrorAction SilentlyContinue }
+if ($r.Code -eq 0) { Fail '[10] a state root outside USERPROFILE must be refused' }
+if ($r.Out -notmatch 'outside USERPROFILE') { Fail "[10] the refusal must say the root is outside USERPROFILE: $($r.Out)" }
+if (Test-Path -LiteralPath (Join-Path $outsideHome '.config\chezmoi\chezmoi.toml')) { Fail '[10] refused restore wrote config first' }
+Write-Host '  ok: XDG_STATE_HOME honored for operator-auth; a root outside USERPROFILE is refused'
+
+# --- [11] Repo grants keyed by absolute path that will not apply here are named.
+$realRepo = Join-Path $Tmp 'real-repo'
+New-Item -ItemType Directory -Force -Path $realRepo | Out-Null
+$escapedReal = $realRepo.Replace('\', '\\')
+$waiverText = "approval = `"passkey`"`n`n[`"/home/gone/repo`"]`n  secret_allow = false`n`n[`"C:\\Users\\gone\\repo`"]`n  secret_allow = false`n`n[`"$escapedReal`"]`n  secret_allow = false`n`n[web_hosts]`n  `"example.com`" = true`n"
+$inertArchive = Join-Path $Tmp 'inert.7z'
+Copy-ArchiveWith $passkeyArchive $inertArchive '' @{ 'config\waivers.toml' = $waiverText }
+$inertHome = Join-Path $Tmp 'home-inert'
+Use-Home $inertHome
+$r = Invoke-Script51 $Restore @('-Archive', $inertArchive)
+if ($r.Code -ne 0) { Fail "[11] restore failed: $($r.Out)" }
+if ($r.Out -notmatch '2 repo grant\(s\)') { Fail "[11] the count must be 2: $($r.Out)" }
+if (-not $r.Out.Contains('/home/gone/repo')) { Fail "[11] a Unix-path grant must be listed: $($r.Out)" }
+if (-not $r.Out.Contains('C:\Users\gone\repo')) { Fail "[11] a missing Windows-path grant must be listed: $($r.Out)" }
+if ($r.Out.Contains($realRepo)) { Fail "[11] a grant whose directory exists must not be listed: $($r.Out)" }
+if ($r.Out.Contains('web_hosts')) { Fail "[11] a non-path table must not be listed: $($r.Out)" }
+$cleanHome = Join-Path $Tmp 'home-inert-clean'
+Use-Home $cleanHome
+$r = Invoke-Script51 $Restore @('-Archive', $passkeyArchive)
+if ($r.Code -ne 0) { Fail "[11] clean restore failed: $($r.Out)" }
+if ($r.Out.Contains('grant(s)')) { Fail "[11] no warning expected when there are no repo grants: $($r.Out)" }
+Write-Host '  ok: restore names repo grants that will not apply here'
+
 Remove-Item Env:FAKE_7Z_LOG -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 Write-Host 'PASS: dotbackup_restore.ps1 (backup -> restore -> refuse round-trip under 5.1)'

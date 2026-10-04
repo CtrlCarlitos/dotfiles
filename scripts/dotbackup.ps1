@@ -60,8 +60,13 @@ try {
     # only with DOTBACKUP_AUDIT=1. manifests, sessions, allowances (auth.key),
     # selftest-passed, the binary and backups\*.exe are never captured.
     $guardrailCount = 0
+    $auditSegments = 0
+    $auditBytes = 0L
     $guardrailConfig = Join-Path $env:APPDATA 'guardrail'
-    $guardrailState = Join-Path $env:USERPROFILE '.local\state\guardrail'
+    # operator-auth follows XDG_STATE_HOME even on Windows (guardrail's own rule);
+    # the config (%APPDATA%) and audit (%LOCALAPPDATA%) roots ignore XDG there.
+    $stateBase = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path $env:USERPROFILE '.local\state' }
+    $guardrailState = Join-Path $stateBase 'guardrail'
     $guardrailRoot = Join-Path $payloadRoot 'guardrail'
     foreach ($name in 'waivers.toml', 'night.toml') {
         $item = Get-Item -LiteralPath (Join-Path $guardrailConfig $name) -Force -ErrorAction SilentlyContinue
@@ -95,6 +100,8 @@ try {
                     New-Item -ItemType Directory -Path (Join-Path $guardrailRoot 'audit') -Force | Out-Null
                     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $guardrailRoot "audit\$($_.Name)")
                     $guardrailCount++
+                    $auditSegments++
+                    $auditBytes += $_.Length
                 }
         }
     }
@@ -177,6 +184,10 @@ machines, and Host blocks reference the .pub.
     Write-Output "Backup created: $archive"
     Write-Output "  Contains $keyCount private key file(s) from ~/.ssh. Treat this archive as key material."
     Write-Output "  Contains $guardrailCount guardrail operator file(s)."
+    if ($auditSegments -gt 0) {
+        # Rotated segments pile up on a long-lived machine: say how big before it is handed around.
+        Write-Output ("  Audit log: {0} segment(s), {1} MiB (DOTBACKUP_AUDIT=1; unset it to leave the history out)." -f $auditSegments, [math]::Floor($auditBytes / 1MB))
+    }
     Write-Output "  This is disaster recovery for THIS machine, not a way to set up another one:"
     Write-Output "  give an additional machine its own keys instead (docs/ssh-agents.md)."
     Write-Output "  Re-run after rotating a key - older archives still hold the old ones."

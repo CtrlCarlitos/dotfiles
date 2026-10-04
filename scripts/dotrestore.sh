@@ -92,6 +92,12 @@ source_platform="$(printf '%s' "$source_platform" | tr '[:upper:]' '[:lower:]')"
 cross_os=0
 [ -z "$source_platform" ] || [ "$source_platform" = "$target_platform" ] || cross_os=1
 
+# The guardrail roots follow guardrail itself (and dotbackup.sh): XDG_CONFIG_HOME /
+# XDG_STATE_HOME when set, else ~/.config and ~/.local/state. A root outside HOME is
+# refused below by reject_symlinked_parent, before anything is written.
+guardrail_config_root="${XDG_CONFIG_HOME:-$HOME/.config}/guardrail"
+guardrail_state_root="${XDG_STATE_HOME:-$HOME/.local/state}/guardrail"
+
 # guardrail_dest: where a file under guardrail/ belongs, or fail for anything
 # outside the fixed allowlist (so a crafted archive cannot pick a destination).
 guardrail_dest() { # $1 = path relative to guardrail/
@@ -99,15 +105,44 @@ guardrail_dest() { # $1 = path relative to guardrail/
     case "$1" in
         config/*)
             rest="${1#config/}"
-            case "$rest" in waivers.toml | night.toml) printf '%s\n' "$HOME/.config/guardrail/$rest" ;; *) return 1 ;; esac
+            case "$rest" in waivers.toml | night.toml) printf '%s\n' "$guardrail_config_root/$rest" ;; *) return 1 ;; esac
             ;;
-        operator-auth/*) printf '%s\n' "$HOME/.local/state/guardrail/$1" ;;
+        operator-auth/*) printf '%s\n' "$guardrail_state_root/$1" ;;
         audit/*)
             rest="${1#audit/}"
-            case "$rest" in */*) return 1 ;; audit*.jsonl) printf '%s\n' "$HOME/.local/state/guardrail/$rest" ;; *) return 1 ;; esac
+            case "$rest" in */*) return 1 ;; audit*.jsonl) printf '%s\n' "$guardrail_state_root/$rest" ;; *) return 1 ;; esac
             ;;
         *) return 1 ;;
     esac
+}
+
+# report_inert_grants: waivers.toml keys a repo grant by its ABSOLUTE path (a table named
+# ["/abs/path"] or ["C:\\abs\\path"]). After a cross-OS, cross-user or cross-drive restore
+# those match nothing and the grants silently never apply, so name them. A path key
+# counts as inert when it is the other OS's form, or its directory does not exist here.
+# Non-path tables ([web_hosts]) are not repo grants and are ignored.
+report_inert_grants() { # $1 = restored waivers.toml
+    [ -f "$1" ] || return 0
+    local key path inert=0 listed=0 reason
+    local -a lines=()
+    while IFS= read -r key; do
+        path="${key//\\\\/\\}" # TOML basic string: \\ is one backslash
+        case "$path" in
+            /*) [ -d "$path" ] && continue; reason='directory not found here' ;;
+            [A-Za-z]:[\\/]*) reason='a Windows path' ;;
+            *) continue ;;
+        esac
+        inert=$((inert + 1))
+        if [ "$listed" -lt 10 ]; then
+            lines+=("    - $path ($reason)")
+            listed=$((listed + 1))
+        fi
+    done < <(sed -n 's/^\["\(.*\)"\][[:space:]]*$/\1/p' "$1" | tr -d '\r')
+    [ "$inert" -gt 0 ] || return 0
+    printf '  WARNING: %d repo grant(s) in waivers.toml will not apply on this machine:\n' "$inert"
+    printf '%s\n' "${lines[@]}"
+    [ "$inert" -le 10 ] || printf '    ... and %d more\n' "$((inert - 10))"
+    printf '  Re-grant them from the repos that still matter (they are keyed by absolute path).\n'
 }
 
 reject_symlinked_parent() { # $1 = destination path
@@ -198,7 +233,8 @@ if [ -d "$guardrail_source" ]; then
         guardrail_restored=$((guardrail_restored + 1))
     done < <(find "$guardrail_source" -type f -print0)
     printf 'Restored %d guardrail operator file(s), owner-only.\n' "$guardrail_restored"
-    printf '  Review ~/.config/guardrail/waivers.toml: it re-applies every old grant.\n'
+    printf '  Review %s/waivers.toml: it re-applies every old grant.\n' "$guardrail_config_root"
+    report_inert_grants "$guardrail_config_root/waivers.toml"
     if [ "$skipped_auth" -gt 0 ]; then
         printf '  Skipped %d passkey enrollment file(s): enroll again on this machine.\n' "$skipped_auth"
     fi
