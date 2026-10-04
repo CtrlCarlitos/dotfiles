@@ -111,3 +111,40 @@ function Invoke-SkillsSource {
     }
     if ((& $Install) -eq $true) { Save-SkillsSource }
 }
+
+# Remove the skills listed in scripts/retired-agent-skills.txt (`<skill> <source>` per line)
+# from every agent directory, the OpenCode command shim we generated and the skills CLI
+# lock - twin of skills_remove_retired in scripts/lib/agent-skills.sh. Only when the lock
+# records that exact source: a skill of the same name written by hand is never touched.
+function Invoke-RetiredSkillsCleanup {
+    param([string]$ListPath)
+
+    $userHome = Get-SkillsHome
+    $lockPath = Join-Path (Join-Path $userHome '.agents') '.skill-lock.json'
+    if (-not $ListPath -or -not (Test-Path -LiteralPath $ListPath -PathType Leaf) -or -not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return }
+    try { $lock = Get-Content -Raw -LiteralPath $lockPath | ConvertFrom-Json } catch { return }
+    if ($null -eq $lock.PSObject.Properties['skills']) { return }
+    $changed = $false
+    foreach ($line in @(Get-Content -LiteralPath $ListPath)) {
+        $parts = @(($line.Trim()) -split '\s+')
+        if ($parts.Count -lt 2 -or $parts[0].StartsWith('#')) { continue }
+        $name = $parts[0]
+        $source = $parts[1]
+        if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { continue }
+        $entry = $lock.skills.PSObject.Properties[$name]
+        if ($null -eq $entry -or "$($entry.Value.source)" -cne $source) { continue }
+        foreach ($relative in @(".claude\skills\$name", ".agents\skills\$name", ".gemini\antigravity-cli\skills\$name")) {
+            Remove-Item -LiteralPath (Join-Path $userHome $relative) -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $shim = Join-Path $userHome ".config\opencode\commands\$name.md"
+        if ((Test-Path -LiteralPath $shim -PathType Leaf) -and (Select-String -LiteralPath $shim -SimpleMatch 'managed-by: chezmoi-curated-skills' -Quiet)) {
+            Remove-Item -LiteralPath $shim -Force -ErrorAction SilentlyContinue
+        }
+        $lock.skills.PSObject.Properties.Remove($name)
+        $changed = $true
+        Write-Host "  Removed retired skill: $name"
+    }
+    if ($changed) {
+        [IO.File]::WriteAllText($lockPath, ($lock | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
+    }
+}

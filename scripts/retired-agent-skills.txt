@@ -1,0 +1,10 @@
+# Curated skills that were dropped (upstream removed them, or we did). One per line:
+#   <skill-name> <source as recorded in the skills CLI lock, e.g. owner/repo>
+# The installers (run_onchange_install_packages.* and scripts/update_ai_tools.*) remove a
+# listed skill from every agent directory and from the lock - but only when the lock says
+# it came from the listed source, so a skill of the same name you wrote yourself is never
+# touched. Blank lines and #-comment lines are skipped. Names must be [a-z0-9-].
+#
+# resolving-merge-conflicts: removed from mattpocock/skills on 2026-09-24 (the CLI quietly
+# installs 10 of the 11 names we asked for; the local copy would never update again).
+resolving-merge-conflicts mattpocock/skills

@@ -111,6 +111,8 @@ if command -v npx &>/dev/null; then
             esac
         done
     }
+    # Skills dropped upstream are removed first (retired-agent-skills.txt, next to the catalog).
+    skills_remove_retired "${catalog%/*}/retired-agent-skills.txt"
     skills_add_all
     if [[ ! -r "$catalog" ]]; then
         echo "   Warning: curated skill catalog is not readable: $catalog"

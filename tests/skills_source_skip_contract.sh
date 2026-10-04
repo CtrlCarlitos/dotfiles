@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2317  # AGENTS / record_cli_result are consumed by the sourced library
+# shellcheck disable=SC2030,SC2031,SC2034,SC2317  # AGENTS / record_cli_result are consumed by the sourced library
 set -euo pipefail
 
 # `skills add` re-fetches every curated skill on every `dot upgrade`, and a cold `npx
@@ -90,19 +90,19 @@ run_all() {
 }
 
 export FAKE_HEAD=aaaaaaa
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=18' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
 
-[ "$(run_all)" = 'adds=0 installed=19' ] || fail "b: unchanged head must install nothing and still report 19 (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=18' ] || fail "b: unchanged head must install nothing and still report 18 (got $(run_all))"
 
 FAKE_HEAD=bbbbbbb
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=18' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
 
 rm -rf "$home/.claude/skills/code-search"
-[ "$(run_all)" = 'adds=1 installed=19' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
-[ "$(run_all)" = 'adds=0 installed=19' ] || fail "d: and be quiet again afterwards"
+[ "$(run_all)" = 'adds=1 installed=18' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=18' ] || fail "d: and be quiet again afterwards"
 
 rm -rf "$home/.claude/skills/mp-code-review"
-[ "$(run_all)" = 'adds=1 installed=19' ] || fail "i: a missing mp-code-review must reinstall only it (got $(run_all))"
+[ "$(run_all)" = 'adds=1 installed=18' ] || fail "i: a missing mp-code-review must reinstall only it (got $(run_all))"
 
 DOT_SKILLS_FORCE=1 run_all | grep -q '^adds=8 ' || fail "f: DOT_SKILLS_FORCE=1 must install everything"
 
@@ -120,7 +120,7 @@ run_all | grep -q '^adds=8 ' || fail "e: unreachable head must keep installing (
 home="$tmp/home-failing"
 FAKE_HEAD=ccccccc
 FAKE_NPX_FAIL=1 run_all >/dev/null
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "g: failed adds must not be recorded (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=18' ] || fail "g: failed adds must not be recorded (got $(run_all))"
 
 # --- the PowerShell twin (scripts/lib/ps-skills.ps1), same scenarios, run under pwsh ------
 if command -v pwsh >/dev/null 2>&1; then

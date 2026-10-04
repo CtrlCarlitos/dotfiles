@@ -68,7 +68,6 @@ grilling
 handoff
 teach
 writing-for-agents
-resolving-merge-conflicts
 mp-code-review
 frontend-design
 find-skills
