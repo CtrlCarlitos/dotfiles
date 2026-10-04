@@ -154,13 +154,17 @@ else:
 # the sh embeds the table as JSON inside its python heredocs. #124: the two
 # registration blocks live in the shared install_agent_toolkit now, so the
 # table renders twice (opencode + agy), not four times (was 2 blocks x
-# apt/brew). Anchor on the `srv in` loop/comprehension: the VS Code tiers
-# (phase B) are also json.loads(r"""{...}""") blocks and must not be counted.
+# apt/brew). Count by CONTENT, not by the shape of the consuming code (#230:
+# the OpenCode registration assigns the table to `catalog` now, where it used
+# to loop `for name, srv in`): the VS Code tiers (phase B) are also
+# json.loads(r"""{...}""") blocks, and are told apart by not being the catalog.
 sh_json = json.dumps(mcp, separators=(",", ":"), sort_keys=True)
-found = [json.loads(x) for x in re.findall(r'srv in json\.loads\(r"""(\{.*?\})"""\)', sh)]
+blobs = [json.loads(x) for x in re.findall(r'json\.loads\(r"""(\{.*?\})"""\)', sh)]
+found = [d for d in blobs if json.dumps(d, separators=(",", ":"), sort_keys=True) == sh_json]
 if len(found) != 2: err("sh render: expected the MCP table embedded 2 times (shared toolkit), found %d" % len(found))
-for d in found:
-    if json.dumps(d, separators=(",", ":"), sort_keys=True) != sh_json: err("sh render: an embedded MCP table differs from the catalog")
+for d in blobs:
+    # a copy that names the same servers but is not the catalog has drifted
+    if set(d) == set(mcp) and json.dumps(d, separators=(",", ":"), sort_keys=True) != sh_json: err("sh render: an embedded MCP table differs from the catalog")
 
 print("  catalog: %d MCP servers, %d allow-scripts entries, codex=%s, agents=%s" % (len(mcp), len(allow), codex, ",".join(agents)))
 print("  rendered .ps1: $mcpCatalog + 4 consumers, allow-scripts, codex, %d agent-list sites" % ps1.count("$skAgents = @("))

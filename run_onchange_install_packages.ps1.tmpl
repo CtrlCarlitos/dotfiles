@@ -1014,60 +1014,69 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 }
 
 # opencode: global config mcp keys (merge, never clobber the plugin key -
-#     the Superpowers-for-OpenCode wiring above owns it). Raw-content
-#     pre-checks per server ('"serena"' / '"graft"'), same cheap idempotence
-#     guard as the sh side's grep, so a registered config is never
-#     re-serialized. opencode loads MCP ONLY from this global mcp block
-#     (surveyed live 2026-09-20): without a graft entry here, every fresh
-#     opencode session starts with serena only.
+#     the Superpowers-for-OpenCode wiring above owns it). The registration
+#     converges on the catalog (Sync-OpenCodeMcp below, #230) and writes only
+#     when something differs, so a registered config is never re-serialized.
+#     opencode loads MCP ONLY from this global mcp block (surveyed live
+#     2026-09-20): without a graft entry here, every fresh opencode session
+#     starts with serena only.
 # MCP servers, from .chezmoidata/agents.yaml (see #83): command + args per
 # server, consumed by the OpenCode registration and the agy plugin bundle.
 {{ includeTemplate "mcp-servers-ps1" .agents.mcp }}
-if (Get-Command opencode -ErrorAction SilentlyContinue) {
-    $ocConfig = "$env:USERPROFILE\.config\opencode\opencode.json"
-    # Pre-check read in its own try/catch, failing OPEN: under EAP=Stop a
-    # locked/unreadable opencode.json would otherwise terminate the script
-    # here (WT settings read idiom); on read failure fall through to the
-    # merge path, which re-reads inside its own try/catch.
-    $ocRawCfg = ""
-    if (Test-Path $ocConfig) {
-        try { $ocRawCfg = Get-Content $ocConfig -Raw } catch {
+# Registers the catalog's MCP servers in OpenCode's GLOBAL config and CONVERGES
+# them (#230): a server whose binary is present (-Present) is added when absent,
+# and an existing entry has only its `command` repaired to the catalog's - a
+# stale `npx -y @nanonets/graft mcp` kept OpenCode's graft at a ~46 s npx cold
+# start, and free to drift from the installed graft, long after the catalog said
+# `graft mcp`. `enabled` and every other key the user set survive, the file is
+# written BOM-less only when something differs (a registered config is never
+# re-serialized), and the names it changed are returned.
+# Tested by executing it: tests/opencode_mcp_sync_contract.sh.
+function Sync-OpenCodeMcp {
+    param([string]$ConfigPath, [hashtable]$Catalog, [string[]]$Present)
+    $raw = ''
+    if (Test-Path -LiteralPath $ConfigPath) {
+        # Own try/catch, failing OPEN: under EAP=Stop a locked/unreadable
+        # opencode.json would terminate the script here.
+        try { $raw = Get-Content -LiteralPath $ConfigPath -Raw } catch {
             Write-Host "  Warning: opencode.json unreadable - attempting merge anyway" -ForegroundColor Yellow
         }
     }
+    $json = if ($raw) { $raw | ConvertFrom-Json } else { New-Object PSObject }
+    $changed = @()
+    foreach ($name in @($Present | Where-Object { $Catalog.ContainsKey($_) } | Sort-Object)) {
+        $want = @($Catalog[$name].command) + @($Catalog[$name].args)
+        $def = [pscustomobject]@{ type = 'local'; command = $want; enabled = $true }
+        if (-not $json.PSObject.Properties['mcp']) {
+            $json | Add-Member -MemberType NoteProperty -Name mcp -Value (New-Object PSObject)
+        }
+        $entry = $json.mcp.PSObject.Properties[$name]
+        if (-not $entry -or $entry.Value -isnot [System.Management.Automation.PSCustomObject]) {
+            # absent (or not an object at all): the whole definition
+            $json.mcp | Add-Member -MemberType NoteProperty -Name $name -Value $def -Force
+            $changed += $name
+        } else {
+            $have = if ($entry.Value.PSObject.Properties['command']) { @($entry.Value.command) } else { @() }
+            if (($have -join [char]0) -ne ($want -join [char]0)) {
+                $entry.Value | Add-Member -MemberType NoteProperty -Name command -Value $want -Force
+                $changed += $name
+            }
+        }
+    }
+    if ($changed.Count -gt 0) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ConfigPath) | Out-Null
+        # BOM-less UTF-8 (PS 5.1's Set-Content -Encoding utf8 prepends a BOM that
+        # Go JSON consumers reject); the round-trip keeps every existing key.
+        [System.IO.File]::WriteAllLines($ConfigPath, ($json | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+    }
+    return $changed
+}
+if (Get-Command opencode -ErrorAction SilentlyContinue) {
     try {
-        New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig) | Out-Null
-        $ocJson = if ($ocRawCfg) { $ocRawCfg | ConvertFrom-Json } else { New-Object PSObject }
-        $ocDirty = $false
-        if ((Get-Command serena -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"serena"')) {
-            Write-Host "  Registering Serena MCP in opencode..." -ForegroundColor Yellow
-            $serenaDef = @{ type = "local"; command = @($mcpCatalog.serena.command) + $mcpCatalog.serena.args; enabled = $true }
-            if (-not $ocJson.PSObject.Properties["mcp"]) {
-                $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ serena = $serenaDef }
-            } else {
-                # mcp already holds other servers - add serena beside them
-                $ocJson.mcp | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef -Force
-            }
-            $ocDirty = $true
-        }
-        if ((Get-Command graft -ErrorAction SilentlyContinue) -and ($ocRawCfg -notmatch '"graft"')) {
-            Write-Host "  Registering graft MCP in opencode..." -ForegroundColor Yellow
-            # Same npx form graft's own host-writer uses: OS-agnostic,
-            # registry-resolved, no global-binary coupling (npx resolves the
-            # graft index from cwd at spawn, so one global entry works per repo).
-            $graftDef = @{ type = "local"; command = @($mcpCatalog.graft.command) + $mcpCatalog.graft.args; enabled = $true }
-            if (-not $ocJson.PSObject.Properties["mcp"]) {
-                $ocJson | Add-Member -MemberType NoteProperty -Name mcp -Value @{ graft = $graftDef }
-            } else {
-                $ocJson.mcp | Add-Member -MemberType NoteProperty -Name graft -Value $graftDef -Force
-            }
-            $ocDirty = $true
-        }
-        if ($ocDirty) {
-            # BOM-less UTF-8 write (PS 5.1's Set-Content -Encoding utf8 prepends
-            # a BOM that Go JSON consumers reject - see block 5's note); the
-            # round-trip preserves every existing key, plugin included.
-            [System.IO.File]::WriteAllLines($ocConfig, ($ocJson | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+        $ocPresent = @($mcpCatalog.Keys | Where-Object { Get-Command $mcpCatalog[$_].command -ErrorAction SilentlyContinue })
+        $ocChanged = @(Sync-OpenCodeMcp -ConfigPath "$env:USERPROFILE\.config\opencode\opencode.json" -Catalog $mcpCatalog -Present $ocPresent)
+        if ($ocChanged.Count -gt 0) {
+            Write-Host "  Registered/updated MCP in opencode ($($ocChanged -join ', '))" -ForegroundColor Yellow
         }
     } catch {
         Write-Host "  Warning: opencode MCP registration failed - $_" -ForegroundColor Red
