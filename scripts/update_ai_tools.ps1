@@ -402,7 +402,7 @@ if ($guardrailState -and -not $guardrailVersion) {
 # 2. Claude Code (Native)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host "🧠 Updating Claude Code..." -ForegroundColor Yellow
-    # `claude update` first, the strict native installer only if that fails. URL from .chezmoidata.yaml
+    # Re-run strict native installer. URL from .chezmoidata.yaml
     # versions.claude_install_ps1 (#125) - the same key the installer template
     # renders - read at runtime like the guardrail pin below, so `dot upgrade`
     # can never install a different Claude than the installer did (the old
@@ -410,7 +410,15 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # exactly that drift).
     $claudeInstallUrl = ''
     try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
-    Invoke-ClaudeCodeUpdate -InstallerUrl $claudeInstallUrl
+    # Deliberately NOT `claude update`: dot upgrade is meant to run with every agent and
+    # harness closed (graft, codex and the others cannot be replaced while a session
+    # runs, and Claude Code should not be replaced under one either), and with nothing
+    # running the full installer is the simple, predictable path.
+    if ($claudeInstallUrl) {
+        & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex"
+    } else {
+        Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall" -ForegroundColor Red
+    }
 
     # Superpowers skills plugin
     Write-Host "✨ Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
