@@ -52,7 +52,7 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
         Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
     } else {
         Write-Host "📦 Updating OpenCode (choco)..." -ForegroundColor Yellow
-        choco upgrade opencode -y --no-progress 2>$null
+        $null = Invoke-ChocoUpgradeAll -Arguments @('upgrade', 'opencode', '-y', '--no-progress')
     }
     # Remove any legacy npm-global opencode-ai shim (dead binary) so it can't
     # shadow choco's binary - the PS profile prepends %APPDATA%\npm to PATH.

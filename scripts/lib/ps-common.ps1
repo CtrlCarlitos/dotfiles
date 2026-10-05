@@ -436,3 +436,68 @@ function Invoke-ClaudeCodeUpdate {
     Write-Host "  claude update did not succeed - running the installer..." -ForegroundColor Yellow
     & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $InstallerUrl | iex"
 }
+
+# --- choco, summarised --------------------------------------------------------------------
+# `choco upgrade all` printed ~100 lines of "<package> vX is the latest version available"
+# on every run, burying the two or three packages that changed. --limit-output prints one
+# machine-readable line per package (name|installed|available|pinned): those are collected
+# instead of echoed, everything a package's own installer says still streams live (a hung
+# or prompting installer stays visible), the FULL output goes to the log, and the sweep
+# ends with a summary. A non-zero exit prints the tail so the failing package is on screen.
+function Invoke-ChocoUpgradeAll {
+    param([Parameter(Mandatory)][string[]]$Arguments, [string]$LogPath)
+
+    if (-not $LogPath) { $LogPath = Join-Path $HOME '.local\state\dotfiles\upgrade.log' }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
+        # keep one previous generation instead of growing without bound
+        if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath $LogPath).Length -gt 2MB) {
+            Move-Item -LiteralPath $LogPath -Destination "$LogPath.1" -Force
+        }
+        Add-Content -LiteralPath $LogPath -Value ("=== {0} choco {1}" -f (Get-Date -Format s), ($Arguments -join ' '))
+    }
+    catch { $LogPath = $null; Write-Verbose "upgrade log unavailable: $($_.Exception.Message)" }
+
+    $packageLines = New-Object System.Collections.Generic.List[string]
+    $allLines = New-Object System.Collections.Generic.List[string]
+    & choco @Arguments --limit-output 2>&1 | ForEach-Object {
+        $line = "$_"
+        $allLines.Add($line)
+        if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
+        if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) } else { Write-Host $line }
+    }
+    $code = [int]$LASTEXITCODE
+
+    $summary = Get-ChocoUpgradeSummary -Lines $packageLines
+    if ($summary.Upgraded.Count -gt 0) {
+        Write-Host ("  Upgraded {0} of {1}: {2}" -f $summary.Upgraded.Count, $summary.Checked, ($summary.Upgraded -join ', ')) -ForegroundColor Green
+    }
+    elseif ($summary.Checked -gt 0) {
+        Write-Host ("  Nothing to upgrade ({0} packages checked)" -f $summary.Checked)
+    }
+    # 1641 / 3010: success, a restart is needed
+    if ($code -eq 1641 -or $code -eq 3010) {
+        Write-Host "  A restart is needed to finish one of the upgrades." -ForegroundColor Yellow
+    }
+    elseif ($code -ne 0) {
+        Write-Host "  Warning: choco exited $code - the last lines of its output:" -ForegroundColor Red
+        $allLines | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
+    }
+    if ($LogPath) { Write-Host "  (full output: $LogPath)" -ForegroundColor DarkGray }
+    return $code
+}
+
+# name|installed|available|pinned lines -> how many were checked and which changed.
+function Get-ChocoUpgradeSummary {
+    param([string[]]$Lines)
+
+    $upgraded = @()
+    $checked = 0
+    foreach ($line in @($Lines)) {
+        $parts = $line -split '\|'
+        if ($parts.Count -lt 3) { continue }
+        $checked++
+        if ($parts[1] -and $parts[2] -and $parts[1] -ne $parts[2]) { $upgraded += ("{0} ({1} -> {2})" -f $parts[0], $parts[1], $parts[2]) }
+    }
+    return [pscustomobject]@{ Checked = $checked; Upgraded = @($upgraded) }
+}
