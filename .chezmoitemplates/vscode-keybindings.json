@@ -28,6 +28,10 @@
 {{-   $mine = append $mine (dict "key" (printf "ctrl+alt+%s" (index $a 0)) "command" $send.command "args" $send.args "when" "terminalFocus") }}
 {{-   $mine = append $mine (dict "key" (printf "ctrl+alt+shift+%s" (index $a 0)) "command" "runCommands" "args" (dict "commands" (list "workbench.action.terminal.split" $send)) "when" "terminalFocus") }}
 {{- end -}}
+{{- /* Ctrl+Enter = line feed (the byte Ctrl+J is): a newline in claude, codex,
+      opencode and agy, whatever extended-key reporting the terminal offers.
+      Twin of the Windows Terminal User.newline action. */ -}}
+{{- $mine = append $mine (dict "key" "ctrl+enter" "command" "workbench.action.terminal.sendSequence" "args" (dict "text" "\n") "when" "terminalFocus") }}
 {{- /* Terminal-app parity chords (modify_settings.json is the Windows
       Terminal twin): splits, pane focus, kill, rename and terminal font
       zoom - all scoped to a focused integrated terminal so the workbench

@@ -61,6 +61,12 @@
   Alt+Enter is unbound ("id": null) so it reaches the agent CLIs as a newline
   (OpenCode, agy); full screen stays on F11.
 
+  Ctrl+Enter sends a line feed (0x0A, the byte Ctrl+J is), so it is a newline in
+  claude, codex, opencode and agy alike, inside psmux too. Left alone, Terminal
+  reports Ctrl+Enter as its own key to a CLI that asks for extended keys, and
+  Claude Code (2.1.275+) binds that to chat:sendNow - it SENDS. Same rule: VS Code
+  (.chezmoitemplates/vscode-keybindings.json) and Ghostty (dot_config/ghostty).
+
   tmux = true (or a session name) on an ssh_hosts entry makes its profile run
   `ssh -t <host> "tmux new-session -A -s main"`: every tab re-attaches to the
   same remote session, so an agent keeps running across disconnects.
@@ -150,6 +156,7 @@
     { "command": { "action": "splitPane", "split": "down", "splitMode": "duplicate" }, "id": "User.splitDown" },
     { "command": "togglePaneZoom", "id": "User.togglePaneZoom" },
     { "command": "closePane", "id": "User.closePane" },
+    { "command": { "action": "sendInput", "input": "\n" }, "id": "User.newline" },
     { "command": { "action": "moveFocus", "direction": "left" }, "id": "User.focusLeft" },
     { "command": { "action": "moveFocus", "direction": "right" }, "id": "User.focusRight" },
     { "command": { "action": "moveFocus", "direction": "up" }, "id": "User.focusUp" },
@@ -192,6 +199,7 @@
     { "id": "User.splitDown", "keys": "alt+shift+minus" },
     { "id": "User.togglePaneZoom", "keys": "alt+shift+z" },
     { "id": "User.closePane", "keys": "ctrl+shift+w" },
+    { "id": "User.newline", "keys": "ctrl+enter" },
     { "id": "User.focusLeft", "keys": "alt+left" },
     { "id": "User.focusRight", "keys": "alt+right" },
     { "id": "User.focusUp", "keys": "alt+up" },

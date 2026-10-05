@@ -1,0 +1,43 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Claude Code keybindings (~/.claude/keybindings.json, every OS). Hot-reloaded by
+  Claude Code, no restart.
+
+  Why: since Claude Code 2.1.275 Ctrl+Enter is bound by default to chat:sendNow
+  ("send your queued messages, and your draft with them, right away"). Before that
+  a terminal delivered Ctrl+Enter as a plain line feed - Ctrl+J, a newline - which
+  is how it behaved for months. A terminal that reports extended keys now hands
+  Claude Code a distinct Ctrl+Enter, and it SENDS. OpenCode, agy and Codex all treat
+  Ctrl+Enter as a newline (Codex via dot_codex/modify_config.toml), so this forces
+  the same here. Ctrl+X Ctrl+S stays the chat:sendNow chord.
+
+  MERGE, not own: only "ctrl+enter" in the first "Chat" context block is forced;
+  every other binding, block and top-level key you keep is passed through. A
+  missing file or block is created. Full-line // comments and trailing commas are
+  stripped before parsing, like the other merge templates in this repo.
+  tests/claude_keybindings_contract.sh renders it.
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "﻿" -}}
+{{- $raw = regexReplaceAll "(?m)^\\s*//.*$" $raw "" -}}
+{{- $raw = regexReplaceAll ",(\\s*[}\\]])" $raw "${1}" | trim -}}
+{{- $cur := dict -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+{{- if not (hasKey $cur "$schema") }}{{ $_ := set $cur "$schema" "https://www.schemastore.org/claude-code-keybindings.json" }}{{ end -}}
+{{- if not (hasKey $cur "$docs") }}{{ $_ := set $cur "$docs" "https://code.claude.com/docs/en/keybindings" }}{{ end -}}
+{{- $found := false -}}
+{{- $blocks := list -}}
+{{- if kindIs "slice" (get $cur "bindings") }}
+{{-   range $b := get $cur "bindings" }}
+{{-     if and (not $found) (kindIs "map" $b) (eq (toString (get $b "context")) "Chat") }}
+{{-       $inner := dict }}
+{{-       if kindIs "map" (get $b "bindings") }}{{ $inner = get $b "bindings" }}{{ end }}
+{{-       $_ := set $inner "ctrl+enter" "chat:newline" }}
+{{-       $_ := set $b "bindings" $inner }}
+{{-       $found = true }}
+{{-     end }}
+{{-     $blocks = append $blocks $b }}
+{{-   end }}
+{{- end -}}
+{{- if not $found }}{{ $blocks = append $blocks (dict "context" "Chat" "bindings" (dict "ctrl+enter" "chat:newline")) }}{{ end -}}
+{{- $_ := set $cur "bindings" $blocks -}}
+{{- toPrettyJson $cur }}
