@@ -29,7 +29,6 @@ are reference.
 - [Skills Install Strategy](skills-install-strategy.md) — the as-built curated-skills wiring (status: implemented)
 - [Agent Skill Wiring Design](agent-skill-wiring-design.md) — the original design spec behind it (implemented; rationale record)
 - [Dot Repo Baseline Design](superpowers/specs/2026-09-25-dot-repo-baseline-design.md) — the repository baseline audit/apply handover spec
-- Design specs behind the CLI: [`dot`](superpowers/specs/2026-09-20-dot-cli-design.md), [`dot remote`](superpowers/specs/2026-09-27-dot-remote-design.md), [`dot devtmp`](superpowers/specs/2026-10-02-dot-devtmp-design.md)
 - [agent-browser install](agent-browser-install.md) — install requirements for the browser-automation CLI
 - [Guardrail Install](guardrail-install.md) — how the dotfiles call the agent-guardrails installer, and the config they ship
 - [Secrets & SSH Hosts](secrets.md) — machine-local config, SSH aliases, safe handling
