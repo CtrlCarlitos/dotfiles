@@ -46,7 +46,8 @@ fi
 # 3. Child `powershell -c "irm ... | iex"` installers are separate processes:
 #    the preference must be set inside the command string (backtick-escaped
 #    so the parent does not expand it).
-for f in run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
+# The updater's installer call lives in scripts/lib/ps-common.ps1 (Invoke-ClaudeCodeUpdate).
+for f in run_onchange_install_packages.ps1.tmpl scripts/lib/ps-common.ps1; do
     # Any child powershell whose -c/-Command starts straight with irm is unprefixed.
     if grep -nE 'powershell[^|]*(-c|-Command) "irm ' "$repo_root/$f" >/dev/null; then
         fail "$f: a child powershell runs 'irm ... | iex' without setting ProgressPreference first"
@@ -58,5 +59,12 @@ for f in run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
         fail "$f: no prefixed 'irm | iex' child installer found (pattern drifted?)"
     fi
 done
+
+# ...and the updater itself must not grow an unprefixed one of its own.
+if grep -nE 'powershell[^|]*(-c|-Command) "irm ' "$repo_root/scripts/update_ai_tools.ps1" >/dev/null; then
+    fail "scripts/update_ai_tools.ps1: a child powershell runs 'irm ... | iex' without setting ProgressPreference first"
+else
+    pass
+fi
 
 finish

@@ -402,7 +402,7 @@ if ($guardrailState -and -not $guardrailVersion) {
 # 2. Claude Code (Native)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host "🧠 Updating Claude Code..." -ForegroundColor Yellow
-    # Re-run strict native installer. URL from .chezmoidata.yaml
+    # `claude update` first, the strict native installer only if that fails. URL from .chezmoidata.yaml
     # versions.claude_install_ps1 (#125) - the same key the installer template
     # renders - read at runtime like the guardrail pin below, so `dot upgrade`
     # can never install a different Claude than the installer did (the old
@@ -410,11 +410,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # exactly that drift).
     $claudeInstallUrl = ''
     try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
-    if ($claudeInstallUrl) {
-        & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex"
-    } else {
-        Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall (claude update owns in-place updates)" -ForegroundColor Red
-    }
+    Invoke-ClaudeCodeUpdate -InstallerUrl $claudeInstallUrl
 
     # Superpowers skills plugin
     Write-Host "✨ Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
@@ -448,8 +444,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             $env:AGENT_BROWSER = $agentBrowser
             & $env:AGENT_BROWSER install
             if ($LASTEXITCODE -ne 0) { Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red }
-            & $env:AGENT_BROWSER doctor --json
-            if ($LASTEXITCODE -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
+            $doctorOutput = @(& $env:AGENT_BROWSER doctor --json)
+            $doctorExit = $LASTEXITCODE
+            Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
+            if ($doctorExit -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
             Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
         }
     }

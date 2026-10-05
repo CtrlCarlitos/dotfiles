@@ -47,7 +47,9 @@ awk '
 ' "$sh_rendered" >"$tmp/block.sh"
 grep -Fq 'net_timeout 300' "$tmp/block.sh" ||
     fail "sh block extraction lost the install step (source shape changed?)"
-grep -Fq 'doctor --json' "$tmp/block.sh" ||
+# The verification now goes through agent_browser_doctor (scripts/lib/agent-skills.sh runs
+# `doctor --json` and prints a summary); the runtime assertion below still proves it ran.
+grep -Fq 'agent_browser_doctor' "$tmp/block.sh" ||
     fail "sh block extraction lost the verification step (source shape changed?)"
 grep -Fq '[[ -x "$AGENT_BROWSER_BIN" ]]' "$tmp/block.sh" ||
     fail "sh block extraction lost the presence branch (source shape changed?)"
@@ -145,6 +147,16 @@ function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To -
 $block = Slice $lines $start $end
 
 function Fail([string]$m) { Write-Host "FAIL: $m"; exit 1 }
+
+# The block calls helpers the rendered installer defines earlier (inlined from
+# scripts/lib/ps-skills.ps1); bring in the one it uses.
+function Get-Fn([string]$name) {
+    $from = ($lines | Select-String -Pattern "^function $name \{" | Select-Object -First 1).LineNumber - 1
+    $to = $from
+    while ($lines[$to] -ne '}') { $to++ }
+    ($lines[$from..$to]) -join "`n"
+}
+Invoke-Expression (Get-Fn 'Write-AgentBrowserDoctorSummary')
 
 # Jobs would need a live PowerShell job infrastructure per call; the contract
 # under test is the ACTIONS, so Invoke-WithTimeout runs them inline (and logs).

@@ -1314,7 +1314,7 @@ install_agent_toolkit() {
             # Playwright Chromium is already available above; agent-browser
             # discovers it before downloading another browser.
             net_timeout 600 "$AGENT_BROWSER_BIN" install || warn "agent-browser browser setup failed or timed out - continuing"
-            net_timeout 60 "$AGENT_BROWSER_BIN" doctor --json || warn "agent-browser verification failed - continuing"
+            agent_browser_doctor "$AGENT_BROWSER_BIN" || warn "agent-browser verification failed - continuing"
         else
             warn "agent-browser command was not installed - skipping browser setup"
         fi
