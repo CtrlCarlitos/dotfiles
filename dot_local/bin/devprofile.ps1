@@ -370,6 +370,42 @@ function Use-Account {
 #-------------------------------------------------------------------------------
 # INIT NEW ACCOUNT
 #-------------------------------------------------------------------------------
+# Passphrase decision for `devprofile init`: an explicit flag wins; DEVPROFILE_PASSPHRASE
+# applies only when neither flag was given (the bash twin pins this in
+# tests/devprofile_contract.sh; this function used to apply the variable AFTER the flags,
+# so DEVPROFILE_PASSPHRASE=1 silently beat -NoPassphrase). Returns "prompt", "none" or
+# "ask" (undecided: the caller asks on a terminal).
+# tests/devprofile_passphrase_precedence_contract.sh executes it.
+function Resolve-PassphraseMode {
+    param(
+        [switch]$PassphraseFlag,
+        [switch]$NoPassphraseFlag,
+        [string[]]$ExtraArgs,
+        [string]$EnvValue
+    )
+
+    $mode = "ask"
+    if ($PassphraseFlag) { $mode = "prompt" }
+    if ($NoPassphraseFlag) { $mode = "none" }
+
+    foreach ($arg in ($ExtraArgs | Where-Object { $_ })) {
+        if ($arg -eq "--passphrase") { $mode = "prompt" }
+        elseif ($arg -eq "--no-passphrase") { $mode = "none" }
+    }
+
+    if ($mode -eq "ask" -and $EnvValue) {
+        switch ($EnvValue.ToLower()) {
+            "1" { $mode = "prompt" }
+            "true" { $mode = "prompt" }
+            "yes" { $mode = "prompt" }
+            "0" { $mode = "none" }
+            "false" { $mode = "none" }
+            "no" { $mode = "none" }
+        }
+    }
+    return $mode
+}
+
 function Initialize-Account {
     param(
         [string]$Name,
@@ -384,25 +420,7 @@ function Initialize-Account {
         exit 1
     }
 
-    $passphraseMode = "ask"
-    if ($PassphraseFlag) { $passphraseMode = "prompt" }
-    if ($NoPassphraseFlag) { $passphraseMode = "none" }
-
-    foreach ($arg in ($ExtraArgs | Where-Object { $_ })) {
-        if ($arg -eq "--passphrase") { $passphraseMode = "prompt" }
-        elseif ($arg -eq "--no-passphrase") { $passphraseMode = "none" }
-    }
-
-    if ($env:DEVPROFILE_PASSPHRASE) {
-        switch ($env:DEVPROFILE_PASSPHRASE.ToLower()) {
-            "1" { $passphraseMode = "prompt" }
-            "true" { $passphraseMode = "prompt" }
-            "yes" { $passphraseMode = "prompt" }
-            "0" { $passphraseMode = "none" }
-            "false" { $passphraseMode = "none" }
-            "no" { $passphraseMode = "none" }
-        }
-    }
+    $passphraseMode = Resolve-PassphraseMode -PassphraseFlag:$PassphraseFlag -NoPassphraseFlag:$NoPassphraseFlag -ExtraArgs $ExtraArgs -EnvValue $env:DEVPROFILE_PASSPHRASE
 
     if ($passphraseMode -eq "ask") {
         if ([Environment]::UserInteractive) {

@@ -1044,7 +1044,8 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 #     2026-09-20): without a graft entry here, every fresh opencode session
 #     starts with serena only.
 # MCP servers, from .chezmoidata/agents.yaml (see #83): command + args per
-# server, consumed by the OpenCode registration and the agy plugin bundle.
+# server, consumed by the OpenCode registration and the Antigravity (agy) global
+# mcp_config.json registration (the dotfiles-mcp plugin bundle was retired).
 {{ includeTemplate "mcp-servers-ps1" .agents.mcp }}
 # Registers the catalog's MCP servers in OpenCode's GLOBAL config and CONVERGES
 # them (#230): a server whose binary is present (-Present) is added when absent,
