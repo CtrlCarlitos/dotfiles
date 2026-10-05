@@ -43,6 +43,12 @@ currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
 quiet. Inside a devcontainer, upgrades ship via image rebuild and the
 script no-ops.
 
+The `choco upgrade all` sweep prints a one-line summary (`Nothing to upgrade (101 packages
+checked)` or `Upgraded 2 of 101: antigravity (2.18.1 -> 2.19.1), ...`) instead of one line per
+package. What a package's own installer says still streams live, so a hung or prompting installer
+stays visible, and the full output is kept in `~\.local\state\dotfiles\upgrade.log` (one previous
+generation is kept past 2 MB). A non-zero exit prints the last lines of the output.
+
 What counts as a live session is decided by process name **and** executable path.
 Codex's shared app-server daemon (it runs its own copy under
 `~\.codex\packages\app-server-daemon\`, not the npm-global CLI the upgrade replaces) and
