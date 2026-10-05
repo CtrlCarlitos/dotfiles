@@ -9,9 +9,8 @@ set -euo pipefail
 #      warn/fail check. Output that is not the expected JSON is printed raw, never dropped.
 #   2. fetch_and_verify's curl printed two progress tables per run (WSL log). Now -sS: quiet,
 #      still reports errors.
-#   3. Windows reinstalled Claude Code with the full installer on every `dot upgrade`,
-#      although `claude update` exists and the Unix twin already tries it first.
-# Both languages are EXECUTED.
+# Both languages are EXECUTED. (Claude Code is deliberately NOT updated with `claude update`:
+# dot upgrade is meant to run with every agent closed, so the installer is the one path.)
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
@@ -55,7 +54,7 @@ else
     printf 'SKIP (doctor summary, bash): jq not installed\n'
 fi
 
-# --- PowerShell: summary, skills messages, Claude Code update ----------------------------------
+# --- PowerShell: summary and skills messages ----------------------------------
 if command -v pwsh >/dev/null 2>&1; then
     cat >"$tmp/harness.ps1" <<'PSEOF'
 param([string]$SkillsLib, [string]$CommonLib, [string]$UserDir)
@@ -91,20 +90,6 @@ Write-Output ('skills-installed-line=' + ($o -match 'my skill: installed'))
 $o = Capture { Invoke-SkillsSource -Label 'my skill' -Repo 'o/r' -Skills 's1' -Agents @('claude-code') -Install { $script:ranInstall++; $true } }
 Write-Output ('skills-uptodate-line=' + ($o -match 'my skill: up to date'))
 Write-Output ('skills-uptodate-no-install=' + ($script:ranInstall -eq 1))
-
-# --- Invoke-ClaudeCodeUpdate: claude update first, the full installer only when it fails ---
-$script:claudeExit = 0
-$script:installerRuns = 0
-function claude { param() $global:LASTEXITCODE = $script:claudeExit }
-function powershell { $script:installerRuns++; $global:LASTEXITCODE = 0 }
-Invoke-ClaudeCodeUpdate -InstallerUrl 'https://example.test/install.ps1' | Out-Null
-Write-Output ('claude-update-ok-no-installer=' + ($script:installerRuns -eq 0))
-$script:claudeExit = 1
-Invoke-ClaudeCodeUpdate -InstallerUrl 'https://example.test/install.ps1' | Out-Null
-Write-Output ('claude-update-failed-runs-installer=' + ($script:installerRuns -eq 1))
-$script:installerRuns = 0
-$o = Capture { Invoke-ClaudeCodeUpdate -InstallerUrl '' }
-Write-Output ('claude-update-failed-no-url=' + ($script:installerRuns -eq 0 -and $o -match 'installer URL unavailable'))
 PSEOF
     mkdir -p "$tmp/home"
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -SkillsLib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" -CommonLib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" -UserDir "$(winpath "$tmp/home")" 2>&1 | tr -d '\r' || true)"
@@ -118,9 +103,6 @@ PSEOF
     expect 'skills-installed-line=True'
     expect 'skills-uptodate-line=True'
     expect 'skills-uptodate-no-install=True'
-    expect 'claude-update-ok-no-installer=True'
-    expect 'claude-update-failed-runs-installer=True'
-    expect 'claude-update-failed-no-url=True'
 else
     printf 'SKIP (PowerShell part): pwsh not installed\n'
 fi
