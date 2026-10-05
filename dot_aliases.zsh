@@ -180,7 +180,8 @@ alias dp='devprofile'
 alias agy='agy --dangerously-skip-permissions'
 
 #-------------------------------------------------------------------------------
-# Management - the dot command family (`dot init` / `dot up` / `dot upgrade`;
+# Management - the dot command family (`dot up` / `dot upgrade` / `dot doctor` /
+# `dot backup` / `dot restore` / `dot remote` / `dot version`;
 # wiring lives in dot_zshrc and scripts/dotupgrade.*)
 #-------------------------------------------------------------------------------
 # `dot up` NEVER upgrades: chezmoi update owns the pull; init re-runs the
