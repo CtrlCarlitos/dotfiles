@@ -277,7 +277,9 @@ function Test-InteractiveConsole {
 # server children behind otherwise). Console agents have no window, so they go straight to
 # the tree kill.
 function Stop-AgentProcess {
+    [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)]$Process, [int]$GraceSeconds = 5)
+    if (-not $PSCmdlet.ShouldProcess("$($Process.ProcessName) (pid $($Process.Id))", 'Stop process tree')) { return $false }
     $closing = $false
     try { $closing = [bool]$Process.CloseMainWindow() } catch { $closing = $false }
     if ($closing -and $Process.WaitForExit($GraceSeconds * 1000)) { return $true }
