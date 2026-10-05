@@ -28,7 +28,9 @@ create CRLF files on Windows in repos that have no `.gitattributes` of their own
 So `~/.gitconfig` on Windows has CRLF while the same file on Linux has LF, from one
 LF source file — chezmoi converts on write (verified: an LF source applied on Windows
 lands as CRLF; `~/.zshrc` in WSL is LF). Nothing in the git config is OS-conditional
-except `core.longpaths`.
+except `core.longpaths`. (WSL and devcontainers differ for another reason: no key
+files, so signing and `core.sshCommand` go through the agent; see
+[SSH agents](ssh-agents.md).)
 
 On a **fresh Windows machine** this holds even before `~/.gitconfig` exists: Git for
 Windows ships `core.autocrlf = true` at the system level, but an `eol` attribute
@@ -44,9 +46,15 @@ For another repo, `scripts/init-line-endings.{sh,ps1}` writes a matching
 `.gitattributes` + `.editorconfig` pair from what the repo contains, then runs
 `git add --renormalize .`.
 
+**Checking it.** `git diff` normalises on read and hides a line-ending problem; use
+`git ls-files --eol` (index form `i/` next to worktree form `w/`). This repo enforces
+the policy on its own files with `tests/line_endings_contract.sh` (index LF, worktree
+matches the `eol` attribute, `.editorconfig` agrees, `core.autocrlf` stays false); see
+[invariants](invariants.md).
+
 ### A checkout from before `.gitattributes` existed
 
-A clone made before `.gitattributes` was added (2026-09-19) on Windows has **CRLF on
+A clone made before the full `.gitattributes` was added (2026-09-19) on Windows has **CRLF on
 disk**: Git for Windows' system `autocrlf = true` applied at clone time, and Git never
 rewrites unchanged files. The repository itself is fine (LF). `--renormalize` fixes
 only the repository side, so it doesn't help here. What goes wrong: shellcheck and
@@ -67,8 +75,11 @@ A fresh clone never needs this.
 | Setting | Value | Why |
 |---|---|---|
 | `init.defaultBranch` | `main` | |
+| `core.autocrlf` | `false` | `.gitattributes` decides (see above) |
+| `core.hooksPath` | `~/.config/git/hooks` | Shared hooks, see [Hooks](#hooks) |
+| `color.ui` | `auto` | |
 | `user.useConfigOnly` | `true` | Never guess an identity; see [devprofile](devprofile.md) |
-| `commit.gpgsign`, `gpg.format` | `true`, `ssh` | Signed commits with the account's SSH key (when an account has a key) |
+| `commit.gpgsign`, `gpg.format` | `true`, `ssh` | Signed commits with the SSH key of the first account (set only when it has a key, and not in devcontainers, where the identity generator enables signing per account once the forwarded agent holds the key). `gpg.ssh.allowedSignersFile` makes `git log --show-signature` verify them locally |
 | `pull.rebase` | `true` | Linear history on pull |
 | `rebase.autoStash` | `true` | Pull/rebase with local changes |
 | `rebase.updateRefs` | `true` | Stacked branches move together in a rebase |
@@ -82,7 +93,7 @@ A fresh clone never needs this.
 | `tag.sort` | `version:refname` | `v1.10` sorts after `v1.9` |
 | `help.autocorrect` | `prompt` | Typos offer the right command |
 | `apply.whitespace` | `fix` | Patches applied with `git apply` / `am` get trailing whitespace stripped |
-| `core.editor` | `code --wait` or `vim` | VS Code when it's available |
+| `core.editor` | `code --wait` or `vim` | `code --wait` on WSL, in devcontainers, with the `dev_desktop` group, or when `code` is on PATH at apply time; otherwise `vim` |
 | `core.longpaths` | `true` (Windows only) | Deep trees exceed the 260-character path limit |
 
 Requires Git 2.38 or newer (`rebase.updateRefs`, `zdiff3`). Ubuntu 24.04 and current
@@ -106,6 +117,12 @@ The global `core.sshCommand` (and each account's include file) uses that account
 key with `IdentitiesOnly=yes`, so Git never offers the wrong key to GitHub. On
 Windows that's Git's bundled `ssh`, which reads key files directly. See
 [Windows](windows.md#git-for-windows) for what that means for passphrases.
+
+Devcontainers and WSL in relay mode have no key files, so `core.sshCommand` is plain
+`ssh` there and keys come through the forwarded agent; on WSL each account's
+include (`~/.gitconfig-<provider>-<username>`) routes transport and signing through a
+generated `git-agent-…` wrapper. See [SSH agents](ssh-agents.md#signing) and
+[devcontainer](devcontainer.md).
 
 `[url "git@github-<user>:<org>/"] insteadOf` rules rewrite HTTPS GitHub URLs for your
 accounts and organizations to the matching SSH alias. Cloning

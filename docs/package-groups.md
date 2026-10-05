@@ -46,8 +46,9 @@ line goes in that vendor's group (Claude Code → `claude_cli`, Claude Desktop
 Playwright Chromium). Something a *human* uses → `dev_desktop` (e.g. Chrome).
 
 **Wiring keys off CLI groups only.** The superpowers plugins and the curated
-skills pass gate on `claude_cli`, `opencode_cli`, `antigravity_cli`, and
-`agent_toolkit` — never on the desktop groups. The guardrail planes are
+skills pass (18 curated skills, `scripts/curated-agent-skills.txt`) gate on
+`claude_cli`, `opencode_cli`, `antigravity_cli`, and `agent_toolkit` — never on
+the desktop groups. The guardrail planes are
 registered by the agent-guardrails installer (`guardrail setup`) for each agent
 CLI it detects. Desktop groups are pure installs: the app lands, nothing gets
 wired into it.
@@ -88,6 +89,12 @@ config template. The flow by entry point:
 - **CI:** workflow configs are pre-seeded with all 16 keys and the menu
   self-skips (no TTY / `$env:CI` set / no gum → prints "skipping menu",
   exits 0, never prompts).
+
+**`vscode_settings` is not a group.** `[data.packages]` also carries a
+`vscode_settings` flag (default `true`, no prompt, not in the menu) that gates
+VS Code settings and extension management; see [VS Code](vscode.md). It is not
+one of the 16, no preset touches it, and the menu preserves an existing value
+when it rewrites the section.
 
 ## Presets
 

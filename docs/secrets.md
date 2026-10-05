@@ -13,6 +13,7 @@ intentionally tracked; real host names, aliases, and credentials are not.
 | Git accounts (name/email/keys/dirs) | `[[data.accounts]]` in chezmoi.toml |
 | SSH host aliases (bastions, servers) | `[[data.ssh_hosts]]` in chezmoi.toml |
 | Remote-access login keys (names + targets only) | `[[data.remote_access.login_keys]]` in chezmoi.toml |
+| Per-machine tool behavior (`dot upgrade` desktop shortcuts, `dot devtmp` folder) | `[data.upgrade]`, `[data.devtmp]` in chezmoi.toml (Windows) |
 | Genuine secret file payloads (keys, tokens) | chezmoi `encrypted_` prefix with age/gpg — future; overkill for aliases |
 
 Nothing in this table is ever committed. If you can `git grep` it, it is in
@@ -29,6 +30,7 @@ table survives only if the template re-emits it for that machine:
 | `[[data.ssh_hosts]]` | yes | yes | yes, outgoing aliases and fingerprint selectors |
 | `[data.remote_access]` | yes | yes | preserved when explicitly configured; local incoming access |
 | `[data.upgrade]` | yes | no | no |
+| `[data.devtmp]` | yes ([`dot devtmp`](devtmp.md)) | no | no |
 | `[interpreters.ps1]` | yes | macOS only | no |
 
 So a table you hand-add on WSL that the template does not emit there is
@@ -72,7 +74,8 @@ Add hosts, run `chezmoi apply`, done. Remove the entry and apply to retire
 the alias.
 
 `~/.ssh/config` is the only SSH config. The installers unset VS Code's
-`remote.SSH.configFile` on every run, so Remote-SSH, `ssh`, and the Windows
+`remote.SSH.configFile` when present (the UNSET tier in [VS Code](vscode.md); exclude it
+there to keep your own), so Remote-SSH, `ssh`, and the Windows
 Terminal `SSH: <name>` profiles all read the same file. Hosts from a hand-kept
 config (the old OneDrive `Documents\_ssh\config`) go into `[[data.ssh_hosts]]`
 by hand.

@@ -22,6 +22,8 @@
 | **Open Explorer** | `Space` `e` | Toggle file tree on the left |
 | **Find File** | `Space` `f` `f` | Fuzzy search files by name (Telescope) |
 | **Search Text** | `Space` `f` `g` | Search text inside any file (Live Grep) |
+| **Find Buffer** | `Space` `f` `b` | Pick among open buffers |
+| **Help Tags** | `Space` `f` `h` | Search Neovim help |
 | **Save File** | `Space` `w` | Write (save) buffer |
 | **Quit** | `Space` `q` | Quit current window |
 
@@ -45,9 +47,11 @@
 | **Auto-Indent** | `=` |
 | **Move Line(s) Down/Up** | `J` / `K` in visual mode (auto re-indents) |
 | **Clear Search Highlight** | `Esc` (after a `/` search) |
+| **Paste over a selection** | `p` in visual mode keeps your yank (the replaced text is not copied over it) |
+| **Half-page scroll** | `Ctrl + d` / `Ctrl + u` (cursor stays centred); `n` / `N` also centre the match |
 
 **On save:** trailing whitespace is stripped from the whole buffer
-(`BufWritePre`), and yanks flash briefly (`TextYankPost` highlight).
+(`BufWritePre`), and yanks flash briefly (`TextYankPost` highlight). Reopening a file puts the cursor back where you left it.
 
 ## 🔌 Plugins Included
 

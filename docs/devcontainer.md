@@ -252,6 +252,11 @@ ssh-agent -a "$XDG_RUNTIME_DIR/ssh-agent.personal.sock" >/dev/null 2>&1
 export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.work.sock"
 ```
 
+On a host with these dotfiles you do not hand-roll this: `ssh-agent-relay start` (run
+from your zsh startup) creates the per-account agents and `ssh-agent-relay use <alias>`
+selects one; see [SSH Agents](ssh-agents.md). The snippet above is the manual
+equivalent.
+
 `${localEnv:SSH_AUTH_SOCK}` in `devcontainer.json` then resolves to whichever
 agent is active in the directory you launch from.
 
@@ -264,10 +269,16 @@ git config --global user.signingkey ~/.ssh/signing.pub
 git config --global commit.gpgsign true
 ```
 
-Chezmoi leaves signing off in containers by default (`commit.gpgsign` and the
-`-i <key> -o IdentitiesOnly=yes` pin are host-only), because a container has no
+Chezmoi's base `~/.gitconfig` leaves signing off in containers (`commit.gpgsign` and
+the `-i <key> -o IdentitiesOnly=yes` pin are host-only), because a container has no
 key files: `IdentitiesOnly` with a missing identity refuses the agent's keys, and
-ssh signing needs a public key file present.
+ssh signing needs a public key file present. The identity generator
+(`run_onchange_generate_identities`) then does the steps above for you, per
+account: if the forwarded agent holds exactly one key (or one matching the account's
+email or key name) it writes the `.pub` from the agent and enables signing for that
+account, printing `commit signing enabled … (agent-backed)`. With no matching key
+it leaves signing off and says so. Start the container with the agent already
+loaded, as the mount above assumes.
 
 ### Where the code lives, and where the agents run
 
@@ -283,12 +294,27 @@ You do not SSH into the container.
 
 ### What happens on container start
 
-The dotfiles `install.sh` detects the devcontainer environment (`DEVCONTAINER=true` or `REMOTE_CONTAINERS=true`) and:
-1. Skips the consent prompt (non-interactive)
+VS Code runs the repo's root `install.sh` (`dotfiles.installCommand`). The repo also
+ships `devcontainer/install.sh`, a thin wrapper that delegates to that same
+`install.sh`. The installer detects the devcontainer environment (`DEVCONTAINER` or
+`REMOTE_CONTAINERS` set; the chezmoi templates also treat `/.dockerenv` as a container) and:
+1. Skips the consent prompt (it only asks on an interactive terminal)
 2. Skips the gum bootstrap and package menu (saves bandwidth — tools come from features)
 3. Runs `chezmoi init --apply` — applies your shell config, git identities, aliases, and profiles
 
 No packages are installed. Only configuration is applied. This runs on every container start (fast — it's file copies, not package downloads).
+
+Two shell differences from a host: `.zshrc` leaves out the host-only Oh-My-Zsh plugins
+(`docker`, `docker-compose`, `ssh`, `ubuntu`, `ssh-agent`), so the `dco`/`dcupd`
+shortcuts do not exist in a container; and `dot upgrade` is a no-op there, because
+image rebuilds own upgrades.
+
+**How CI checks this.** The `Test Devcontainer` job in `.github/workflows/ci.yml` runs with
+`DEVCONTAINER=true`, syntax-checks `devcontainer/install.sh`, runs `chezmoi init --apply`
+with no pre-seeded config, and asserts the placeholder account
+(`Devcontainer User <devcontainer@local>`) and that the package groups defaulted to
+false. `tests/devcontainer_docs_contract.sh` keeps this guide's JSON examples valid
+and the base and complete examples free of heavy features.
 
 ## Troubleshooting
 
@@ -304,6 +330,8 @@ Make sure `common-utils` feature has `"installOhMyZsh": true`.
 
 Features add ~30-60 seconds on first build. Subsequent rebuilds are faster (Docker layer caching). The dotfiles config application adds < 5 seconds on each start.
 
-### zsh-z not working
+### `z` (jump to directory) not working
 
-`zsh-z` is a SHA-pinned dotfiles external, installed when the dotfiles configuration is applied. Make sure the `dotfiles.repository` configuration above is present, then rebuild the container.
+`z` comes from **zoxide**, initialised in `.zshrc` only when the `zoxide` binary is on
+`PATH` (the old `zsh-z` plugin was removed on 2026-09-24). Install zoxide in the image,
+and make sure the `dotfiles.repository` configuration above is present so `.zshrc` is applied.

@@ -132,9 +132,11 @@ on any skip and prints the accounting explicitly:
 suite: 33 passed, 0 skipped, 0 failed
 ```
 
-Run the suite in **WSL or Linux**, not Git Bash, before claiming it passes.
-Skip guards are legitimate for genuinely absent tooling; they are not a way to
-make a failing test quiet.
+Run the suite in **WSL or Linux**, not Git Bash, before claiming it passes: on
+Windows `run.sh` tolerates skips (it prints a note) because POSIX modes, symlinks
+and `gum` are absent there, so a clean Windows run proves less than a clean Linux
+one. Skip guards are legitimate for genuinely absent tooling; they are not a way
+to make a failing test quiet.
 
 ---
 
@@ -157,17 +159,31 @@ own `ci.yml` steps; add one in the same commit that adds the file.
 
 ## 8. Line endings come from `.gitattributes`, not from your editor
 
-`* text=auto eol=lf` with `*.ps1 text eol=crlf` is the whole policy. chezmoi
-writes each OS's native endings on apply; the repo stores one canonical form.
+`.gitattributes` is the single authority: `* text=auto eol=lf`, so the **index
+always holds LF**; `*.sh`, `*.sh.tmpl`, `*.zsh` and `*.bash` stay LF; and
+`*.ps1`, `*.ps1.tmpl`, `*.bat` and `*.cmd` check out as **CRLF on every OS**
+(still LF in the index). `core.autocrlf` is false everywhere. chezmoi writes each
+OS's native endings on apply; the repo stores one canonical form.
 
 **The incidents.** A CRLF `.zshrc` tripped shellcheck SC1017. A test's fake `gum`
 stub inherited CRLF from its heredoc, so its shebang carried a literal `\r` and
-the stub could not execute — in a test that had never run.
+the stub could not execute — in a test that had never run. Later, two tracked
+files drifted unnoticed because `git diff` normalises on read (living issue #233).
 
-**Obey it.** Write files with LF (`newline='\n'` if generating them). Check with
+**Obey it.** Write files with LF (`newline='
+'` if generating them); the CRLF
+types are the only exception, and they are CRLF only in the worktree. Check with
 `git ls-files --eol`, which shows the index and worktree forms side by side.
 Do not trust `git diff` here: it normalises on read, so a line-ending problem can
-be invisible in a diff and still be real.
+be invisible in a diff and still be real. `tests/line_endings_contract.sh` checks
+the index, the worktree against each file's `eol` attribute, `.editorconfig`'s
+CRLF section, and `core.autocrlf`.
+
+**A native executable's output is out of reach of that policy.** A Windows
+`jq.exe` opens stdout in text mode, so under Git Bash every line it prints ends in
+CRLF and a stray `\r` rides into variables (`"opencode\r"` missed a lookup).
+Every `jq` call in `scripts/*.sh` therefore carries `-b` (`--binary`; a no-op on
+Linux/macOS). `tests/jq_binary_contract.sh` fails on a `jq` without it.
 
 ---
 
@@ -200,6 +216,13 @@ Ubuntu and macOS — making a straightforward bug look platform-specific.
 
 **Obey it.** When you touch one twin, grep the other for the same concept before
 you commit. Reducing this duplication is tracked in issue #83.
+
+The `dot` dispatcher is a twin trio: `dot()` in `dot_aliases.zsh` and the `dot`
+function in both PowerShell profiles (`Documents/PowerShell/` and
+`Documents/WindowsPowerShell/`) must keep the same subcommands and the same
+unknown-command behaviour. `tests/dot_unknown_command_contract.sh` executes all
+three. The `.ps1` test twins (`tests/*.ps1`) are part of the same rule: the bash
+runner does not enumerate them, so each needs its own `ci.yml` step.
 
 The CI fixtures no longer have twins to keep in step: every job composes its
 `chezmoi.toml` from `tests/fixtures/chezmoi/`, and `tests/ci_fixture_contract.sh`
@@ -237,6 +260,77 @@ and forbids a fixed list of install-era literals (plane and update calls,
 binary asset names, Defender, `Unblock-File`) in the four consumers. Logic
 that avoids those literals gets past it, so the rule is yours to keep.
 
+A second thing the installer owns: replacing a running binary. The Windows
+consumer once moved the installed `guardrail.exe` aside before every run, which
+reset the evidence window (*"hook registered but NEVER OBSERVED FIRING"* after
+every `dot up`) and sent upstream down its fresh-download path instead of its
+update path. Leave the installed binary where it is and hand the installer the pin
+and the state; `tests/guardrail_installer_no_rename_contract.sh` executes the
+function with the network and the upstream installer stubbed.
+
+---
+
+## 12. In PowerShell strict mode, initialise every script-scope variable before use
+
+The Windows installer and several scripts run under `Set-StrictMode -Version Latest`,
+where **reading** a variable that was never set is a terminating error.
+
+**The incident.** A once-per-run guard, `if (-not $script:NpmUpgraded -and ...)`,
+shipped without an initialiser, so the first real `dot up` that reached
+`Install-Node` died with *"The variable '$script:NpmUpgraded' cannot be retrieved
+because it has not been set"* (#247). CI never saw it: its Windows jobs run with
+every package group off, so `Install-Node` never executes there.
+
+**Obey it.** Assign every `$script:Name` that is read at script scope (outside any
+function) before the function that reads it is defined.
+`tests/ps_script_scope_vars_contract.sh` checks this with PowerShell's own parser
+on the rendered installer and on the plain scripts that set strict mode.
+
+Its companion for native commands: under `$ErrorActionPreference = 'Stop'`,
+Windows PowerShell 5.1 turns a native command's **stderr** into a terminating
+error, so a command whose answer is its exit code or its output (`npm ls`,
+`npm install -g`) is run with the preference temporarily `'Continue'`
+(`Test-NpmGlobalCurrent`, `Invoke-GraftNpmInstall` in `scripts/lib/ps-common.ps1`).
+
+---
+
+## 13. A docs-only change must still create the required check names
+
+Required status checks are matched by **name**. The ruleset requires
+`Test (ubuntu-latest)` and `Test (macos-latest)`, but a skipped *matrix* job records
+one check literally named `Test (${{ matrix.os }})` and never the per-OS names, so a
+docs-only PR could not merge.
+
+**The incident.** The first CHANGELOG-only PR (#243) sat BLOCKED with every check
+green.
+
+**Obey it.** The heavy `test-unix` matrix runs only when `needs.changes.outputs.heavy
+== 'true'`; its companion `test-unix-skipped` has the same name and OS list, runs in
+the opposite case, and does one `echo`. Change one half and you must change the
+other; `tests/ci_docs_only_checks_contract.sh` reads `ci.yml` and holds the pair
+together. (The `lint` job always runs, with `fetch-depth: 0`, because the docs and
+changelog contracts must gate a docs change.)
+
+---
+
+## 14. Prefer an executable contract to a grep
+
+A test that greps a script for a string proves the string is there, not that the
+behaviour works. The contracts that have caught real bugs **run** the code: they
+extract a function and execute it against a fake `npm`/`git`/`choco`/`gum`, render
+the real template with `--override-data`, execute the zsh `dot()` under bash, or
+parse the script with PowerShell's own parser.
+
+**The incident.** With no `chezmoi` on the lint job's PATH, the skill-wiring
+contract skipped three rendering blocks and validated only greps while the job
+stayed green. And the PowerShell checker behind invariant 12 is itself run on
+known-bad and known-good fixtures first, so it cannot quietly start accepting
+everything.
+
+**Obey it.** When you add a contract, make it fail first (break the code, watch it
+turn red, restore it) and assert on behaviour. Keep a grep only for what cannot be
+executed, such as a forbidden literal (`forbid`) or a docs sentence.
+
 ---
 
 ## Checking yourself
@@ -249,5 +343,5 @@ chezmoi managed | wc -l                  # what WILL be
 git ls-files --eol <file>                # index vs worktree line endings
 ```
 
-Run the suite on Linux or WSL. Windows legitimately skips four tests, and a skip
+Run the suite on Linux or WSL: some tests legitimately skip on Windows, and a skip
 is not a pass.

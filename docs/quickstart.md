@@ -59,9 +59,9 @@ Five things, not a matrix:
 
 ```sh
 dot up          # sync: pull the repo, apply changes. Never upgrades packages.
-dot upgrade     # upgrade ALL tooling (apt/brew + AI CLIs). The only thing that does.
+dot upgrade     # upgrade ALL tooling (apt/brew/choco/winget + AI CLIs). The only thing that does.
 dot doctor      # health check: config parses, keys present, versions match the pins
-dot doctor --fix # same check, repairing what it safely can (e.g. a mangled config encoding)
+dot doctor --fix # same check, repairing what it safely can (a mangled config encoding; on Windows the Microsoft Store python3 stub)
 dot version     # which version of this repo is installed (also the dotfiles-version line of dot doctor)
 devprofile      # which git identity is active in this folder?  (alias: dp)
 ```
@@ -69,7 +69,26 @@ devprofile      # which git identity is active in this folder?  (alias: dp)
 `dot up` and `dot upgrade` are deliberately separate. Syncing your dotfiles
 should never quietly upgrade your compiler.
 
-`dot` with no arguments lists the family — it also has `backup` and `restore`.
+**Run `dot up` and `dot upgrade` with no agent or harness running** (Claude Code,
+Codex, OpenCode, `agy`, Serena — and the session you are reading this in). Tools
+like Graft and Codex cannot be replaced under a live session: `dot upgrade`
+defers what a live session is using and, on an interactive console, offers to
+stop it first. On Windows both need an elevated PowerShell. See
+[Windows Setup](windows.md#when-to-run-it-with-every-agent-session-closed).
+
+`dot` with no arguments lists the family. The rest of it:
+
+```sh
+dot backup           # encrypted portable backup of config + SSH keys
+dot restore <file>   # restore one (dot restore <archive.7z>)
+dot remote           # remote access: setup / status / fix / keys
+dot devtmp           # Windows only: build/test output folder for Defender
+dot ssh-fingerprints # Windows only: preview the SSH agent fingerprint sync
+```
+
+An unknown subcommand prints `dot: unknown command '<x>'` and the list. If you
+just ran `dot up` and a new command is "unknown", open a new shell: the one you
+are in loaded the old `dot`.
 
 ---
 
@@ -138,4 +157,5 @@ Read these when you need them, not now:
 - [devprofile](devprofile.md) — multi-account git identities, SSH keys, commit signing
 - [SSH Agents](ssh-agents.md) — where private keys live and how containers borrow them
 - [Backup & Restore](backup-restore.md) — encrypted portable backups
+- [Versioning & releases](versioning.md) — what `dot version` reports, tags, the changelog
 - [Invariants](invariants.md) — read this before changing templates, ignores or tests

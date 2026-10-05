@@ -1,6 +1,6 @@
 # Skills install strategy — findings
 
-_Status (2026-09-25): implemented and current. This is the as-built
+_Status (2026-10-05): implemented and current. This is the as-built
 strategy; the original design rationale is
 [agent-skill-wiring-design.md](agent-skill-wiring-design.md), and
 `tests/agent_skill_wiring_contract.sh` enforces the wiring._
@@ -8,6 +8,39 @@ strategy; the original design rationale is
 Investigation (2026-08-30) into how this repo should install curated skill
 subsets across agents, prompted by wanting a few [GStack](https://github.com/garrytan/gstack)
 skills without the whole thing.
+
+## Current state (2026-10-05)
+
+- **Catalog**: 18 curated skills, `scripts/curated-agent-skills.txt` (one name
+  per line; the single source of truth for the verify pass and the OpenCode
+  command shims).
+- **Sources** (8 `skills add` calls, in order): `mattpocock/skills` (10:
+  `codebase-design`, `domain-modeling`, `grill-with-docs`,
+  `improve-codebase-architecture`, `prototype`, `research`, `grilling`,
+  `handoff`, `teach`, `writing-for-agents`), `mattpocock/skills` staged as
+  `mp-code-review`, `anthropics/skills` (`frontend-design`),
+  `vercel-labs/skills` (`find-skills`), `vercel-labs/agent-browser`
+  (`agent-browser`), `CtrlCarlitos/skills` (`skill-creator`, our fork, and
+  `code-search`, two separate adds), `Leonxlnx/taste-skill`
+  (`design-taste-frontend`, `redesign-existing-projects`).
+- **Agents**: Claude Code, OpenCode and Codex through the `skills` CLI
+  (`.chezmoidata/agents.yaml` `skills.agents`); Antigravity CLI by copying the
+  verified Claude copy; generated commands for OpenCode only.
+- **Lifecycle** (installers and `update_ai_tools.*`, which `dot upgrade` runs):
+  retired-skill cleanup, then per source skip-or-`skills add --copy`, then
+  verify every catalog entry's `SKILL.md` per agent, Antigravity fan-out, and
+  OpenCode command generation, then a per-agent installed/skipped/failed
+  summary. `dot up` never refreshes skills; the installer only runs when its
+  rendered content changes.
+- **Version check**: a source is skipped when every skill is present and
+  upstream `HEAD` equals the commit recorded in
+  `$XDG_STATE_HOME/dotfiles/skills-sources`; `DOT_SKILLS_FORCE=1` forces a
+  refetch (see "Skipping sources that have not changed"). Skipped sources
+  print `<name>: up to date`.
+- **Retired skills**: `scripts/retired-agent-skills.txt` (`<skill> <source>`);
+  currently `resolving-merge-conflicts mattpocock/skills`.
+- **Why not `skills update`**: it takes no `--copy` or `-a` and re-links the
+  Claude copy as a symlink; see below.
 
 ## TL;DR
 
@@ -25,7 +58,8 @@ skills without the whole thing.
 - Generated commands carry a dotfiles ownership marker. Refresh replaces or
   removes only marker-owned commands; a user-owned name conflict is preserved
   with a warning.
-- Refresh explicitly with `scripts/update_ai_tools.sh` on Linux/macOS/WSL or
+- Refresh with `dot upgrade` (which runs the updater) or directly with
+  `scripts/update_ai_tools.sh` on Linux/macOS/WSL or
   `scripts/update_ai_tools.ps1` on Windows, then restart OpenCode. Start a new
   Claude Code, Antigravity CLI, or Codex CLI session before using a refreshed
   skill. `chezmoi apply` is not a reliable upstream-skill refresh trigger.
@@ -145,8 +179,10 @@ touched. Helpers: `skills_remove_retired` (`scripts/lib/agent-skills.sh`) and
 ## Historical investigation notes (pre-native-target lifecycle)
 
 The remaining notes preserve prior source evaluation and implementation history.
-They do not describe the current installation destinations or refresh workflow;
-follow the TL;DR above for the supported lifecycle.
+They do not describe the current installation destinations, counts or refresh
+workflow (the `skills update` suggestion in the first one is superseded by "Why
+not `skills update`?" above); follow "Current state" and the TL;DR above for the
+supported lifecycle.
 
 ### Matt Pocock's skills — proposed change
 
@@ -164,7 +200,8 @@ follow the TL;DR above for the supported lifecycle.
 > per-repo config wizard (writes `docs/agents/*.md` + a `## Agent skills` block;
 > downloads nothing) that only those tracker skills need.
 
-The 9 curated skills all still exist, now as **flat** names:
+(`resolving-merge-conflicts` was retired again on 2026-09-24, see "Retiring a
+skill".) The original 9 curated skills all still exist, now as **flat** names:
 
 `codebase-design`, `domain-modeling`, `grill-with-docs`,
 `improve-codebase-architecture`, `code-review`, `prototype`, `research`,
@@ -331,8 +368,9 @@ How it is maintained (in the skills repo):
 
 - `vendor/skill-creator/UPSTREAM` pins the upstream commit;
   `vendor/skill-creator/patches/000N-*.patch` is the patch queue.
-- `scripts/sync-skill-creator.sh` rebuilds `skills/skill-creator` from the pin
-  plus the patches; `--check` verifies the committed tree equals that rebuild
+- `scripts/sync-skill-creator.sh` (a script of the `CtrlCarlitos/skills` repo,
+  not of this one) rebuilds `skills/skill-creator` from the pin plus the
+  patches; `--check` verifies the committed tree equals that rebuild
   and runs in that repo's CI.
 - To update from upstream: bump `commit=` in UPSTREAM, run the sync script, fix
   any patch that no longer applies, commit all three together.
@@ -340,7 +378,6 @@ How it is maintained (in the skills repo):
   once none are left, switch these four call sites back to `anthropics/skills`
   and drop the fork.
 
-||||||| 8605a90
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
@@ -412,14 +449,15 @@ Skills of interest: `plan-devex-review`, `devex-review`, `qa-only`,
     "Curated set widened" section above); `tests/install_agent_skills_arguments.sh`
     expected-call count bumped 3 → 7 to match. 2026-09-14:
     `writing-great-skills` removed again (renamed upstream to
-    `writing-for-agents`, already installed) — expected-call count now 6.
+    `writing-for-agents`, already installed).
 7. ✅ 2026-09-24: `design-taste-frontend` and `redesign-existing-projects`
     from `Leonxlnx/taste-skill` added to all four files as one two-name
-    `skills add` (see "Curated set widened (2026-09-24)"); expected-call
-    count now 7, catalog fallback `skipped=18`.
+    `skills add` (see "Curated set widened (2026-09-24)").
 8. ✅ 2026-09-24: `code-search` from `CtrlCarlitos/skills` added to all four
     files (see "Curated set widened (2026-09-24): +1 home-grown skill");
-    expected-call count now 8, catalog fallback `skipped=19`.
+    `tests/install_agent_skills_arguments.sh` expects 8 controlled `npx`
+    calls; the catalog has 18 entries (the fallback `skipped=` count is the
+    catalog length).
 
 Not done / open:
 - ~~`-a antigravity` unverified with `agy` present on a box~~ **Verified

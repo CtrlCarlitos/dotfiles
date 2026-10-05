@@ -118,9 +118,15 @@ WSL runs the same apt code path as native Linux (see that section), plus:
   install" proves nothing unless you tested with `dev_desktop = true` and a
   WSLg session.
 - **Interop and line endings.** `dot_gitconfig.tmpl` picks `core.editor`
-  based on `code` findability; `.gitattributes` pins `*.sh` to LF and
-  `*.ps1` to CRLF — on CRLF drift, `git add --renormalize .` first, then
-  root-cause.
+  based on `code` findability; `.gitattributes` keeps the index LF, pins
+  `*.sh`/`*.zsh` to LF and `*.ps1`/`*.bat`/`*.cmd` to CRLF in the worktree —
+  on CRLF drift, `git add --renormalize .` first, then root-cause
+  (`git ls-files --eol`; [invariant 8](invariants.md)).
+- **Run the whole bash suite here, not in Git Bash.** Tests that need POSIX
+  symlinks or modes (`agent_tool_upgrade_contract.sh`, `dotbackup_restore.sh`)
+  skip on Windows and only really run in WSL or Linux; so do tests that need
+  `zsh`, `pwsh` or `chezmoi` when those are missing. `bash tests/run.sh --strict`
+  in WSL turns every such skip into a failure, which is the point.
 - **`act` caveat:** this repo's container detection treats any Docker
   container as a devcontainer, so under `act` nothing package-related ever
   runs interactively; use isolated `docker run` tests with a non-root sudo
@@ -162,10 +168,66 @@ The exit-code lesson is the biggest one in this playbook:
   `--local-only` flag, vendor renames) is Chocolatey-specific — port the
   method to other platforms, not the fixes.
 
+## The test suite
+
+`bash tests/run.sh` is the entrypoint, locally and in CI. It runs every
+`tests/*.sh` (not `run.sh`/`lib.sh`; `tests/fixtures/` is data) in its own
+`bash`, and accounts each one as passed, skipped or failed:
+
+```sh
+bash tests/run.sh            # strict by default on Linux/macOS/WSL; tolerant on Git Bash
+bash tests/run.sh --strict   # what CI runs: any skip is a failure
+TESTS_STRICT=0 bash tests/run.sh   # inspect skips locally without failing on them
+TEST_TIMEOUT_SECONDS=300 bash tests/run.sh   # per-test budget (default 180 s)
+bash tests/dot_cli_contract.sh     # one test on its own
+```
+
+A test that exits 0 without printing a `PASS`/`SKIP` completion line is a
+failure (an early `exit 0` must not look like a pass), and a file that is in
+the directory is run: there is nothing to wire for `.sh` tests.
+
+**Contract-test conventions.** A `tests/*_contract.sh` is the executable
+specification of one behaviour; read it before changing that behaviour.
+Each one sources `tests/lib.sh` (`fail`, `skip`, `pass`, `require`, `forbid`,
+`render`, `render_to`) and ends with `finish`, or with `skip "<why>"` when a
+tool it needs is absent. Prefer executing the code (a function extracted and run
+against a fake `npm`, `git`, `choco` or `gum`, or the real template rendered
+with an empty `--config` and `--override-data`) to grepping it, and break the
+code once to watch the contract fail ([invariant 14](invariants.md)). CI configs
+are composed from `tests/fixtures/chezmoi/` with `compose.sh`, never inlined.
+
+**Windows twins.** The bash runner does not enumerate `tests/*.ps1`; each has
+its own `ci.yml` step and you run it by hand:
+
+```powershell
+pwsh -NoProfile -File tests\devtmp.ps1                       # PowerShell 7
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\devtmp.ps1   # Windows PowerShell 5.1
+```
+
+The twins are `dotfiles_doctor`, `select_packages` (needs a console stdin on
+Windows, so it self-skips in CI there), `dotbackup_restore`, `devprofile_identity`
+(pwsh 7 only), `remote_access`, `desktop_shortcuts`, `devtmp`, `dot_doctor_windows`
+and `pwsh_profiles` (Windows only). The `test-windows` job runs the 5.1 set.
+Adding a `tests/*.ps1` means adding its `ci.yml` step in the same commit
+([invariant 7](invariants.md)).
+
 ## What CI already covers
 
-Before scheduling a long manual pass, check what's already enforced:
-`bash tests/run.sh` locally, the `ci.yml` workflow on every PR, and the
-manual `full-install-test.yml` for full-install runs. `dot doctor` (also run
-by `run_after_dotfiles-doctor.*` on every apply) is the canonical
+Before scheduling a long manual pass, check what's already enforced. The
+`ci.yml` workflow runs on every PR and push to `main`:
+
+- `changes` decides whether a PR is **docs-only** (only `docs/**` and root
+  `*.md`). Docs-only PRs skip the heavy jobs; `test-unix-skipped` then creates
+  the per-OS `Test (ubuntu-latest)` / `Test (macos-latest)` names the branch
+  ruleset requires ([invariant 13](invariants.md)).
+- `lint` always runs (full history and tags): shellcheck, PSScriptAnalyzer,
+  actionlint, gitleaks, TOML/YAML validation, `bash tests/run.sh --strict` and the
+  pwsh test twins, so the docs and changelog contracts gate every change.
+- `test-unix` (Ubuntu and macOS) and `test-windows` (PowerShell 5.1 twins, a
+  syntax check of every rendered `.ps1`) run `chezmoi apply --dry-run`; then the
+  devcontainer, Docker smoke, account-integration, minimal-config and Windows
+  installer jobs.
+
+The manual `full-install-test.yml` does full-install runs. `dot doctor` (also
+run by `run_after_dotfiles-doctor.*` on every apply) is the canonical
 post-install check.

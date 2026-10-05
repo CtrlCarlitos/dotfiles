@@ -149,8 +149,9 @@ whole matrix on both platforms becomes the documented default.
 - **SSH died / app killed:** the session never noticed. Reattach.
 - **"no session" on reattach:** `tmux ls` / `psmux ls` on the *host* lists
   what exists; attach by the listed name. A reboot empties the list — agents
-  must be restarted (sessions are not persisted across reboots; there is no
-  resurrect/continuum equivalent on psmux).
+  must be restarted. `dot_tmux.conf` lists the TPM plugins resurrect and
+  continuum, which save and restore tmux layouts, not running agents; psmux
+  has no equivalent.
 - **Layout went tiny on the desktop:** a small client is (or was) attached.
   Take over exclusively: `tmux attach -d -t main` / `psmux detach-client -a`.
   Optionally reapply a layout: `Ctrl+a`, `Space` cycles presets.
@@ -163,10 +164,21 @@ whole matrix on both platforms becomes the documented default.
 
 - **Newline in agents:** `Ctrl+J` is the universal newline — inside psmux it
   is the *reliable* one (psmux does not implement win32-input-mode, so
-  `Shift+Enter` can arrive as a bare Enter and submit).
+  `Shift+Enter` can arrive as a bare Enter and submit). Codex also accepts
+  `Ctrl+Enter` and `Alt+Enter` (forced by `dot_codex/modify_config.toml`),
+  where the terminal reports the modifier.
 - **Esc is instant:** `escape-time 0` is set in both multiplexers.
-- **OpenCode clipboard:** highlight-copies inside the TUI; `Ctrl+V` or
-  Shift+right-click pastes (see [Terminal Experience](terminal.md#clipboard)).
+- **OpenCode and Codex clipboard:** highlight-copies inside the TUI (the
+  shells export OpenCode's copy-on-select flag; `dot_codex/modify_config.toml`
+  forces Codex's `tui.copy_on_select = "always"`); `Ctrl+V` or Shift+right-click
+  pastes (see [Terminal Experience](terminal.md#clipboard)).
+- **Big pastes through psmux:** psmux's own paste handling strips escape bytes
+  and has deadlocked panes, so `psmux.conf` sets `paste-detection off` and
+  Windows Terminal pastes natively; psmux does not wrap pastes in bracketed
+  paste, so a substantial paste reaches the agent as a raw blob. Use
+  `clip-to-file` (PowerShell and zsh): it writes the clipboard to a timestamped
+  file, prints the path, and puts the path on the clipboard; give the agent
+  `@<path>`.
 - **Mouse:** the multiplexer owns the mouse; `Shift+drag` hands it back to the
   outer terminal for native selection.
 

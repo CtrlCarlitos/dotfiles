@@ -22,7 +22,7 @@ iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/insta
 
 That's it. You'll be asked to confirm, then a **menu appears** — pick what you want and press Enter. Packages install, dotfiles apply, and you have a working environment.
 
-> 🌱 **New here?** [**Quickstart**](docs/quickstart.md) — install, what you got, the four commands you will use, and a ten-minute check that it all works.
+> 🌱 **New here?** [**Quickstart**](docs/quickstart.md) — install, what you got, the commands you will use, and a ten-minute check that it all works.
 
 > 📺 **What the menu looks like:** [docs/menu-demo.md](docs/menu-demo.md)
 
@@ -51,7 +51,8 @@ chezmoi apply
 Curated skills install for every agent in one pass: Claude Code reads
 `~/.claude/skills`, OpenCode and Codex discover the shared
 `~/.agents/skills` catalog, Antigravity gets a synced copy. Refresh with
-`update_ai_tools.sh` / `update_ai_tools.ps1` (or just `dot upgrade`). Full
+`update_ai_tools.sh` / `update_ai_tools.ps1` (or just `dot upgrade`); a skills
+source that is already up to date is skipped. Full
 story — destinations, the `/teach` surface, and why you must restart OpenCode
 after a refresh — in
 [docs/skills-install-strategy.md](docs/skills-install-strategy.md).
@@ -171,7 +172,8 @@ New to zsh, tmux, or neovim? Start here:
 | [Quickstart](docs/quickstart.md) | Ten minutes from a fresh machine to a working environment |
 | [Docs index](docs/README.md) | Every doc in this repo, one line each |
 | [Invariants](docs/invariants.md) | Rules this repo learned the expensive way — read before changing templates, ignores or tests |
-| [Testing the dotfiles](docs/testing.md) | The per-platform verify/fix playbook (Linux, macOS, WSL, Windows) |
+| [Testing the dotfiles](docs/testing.md) | The per-platform verify/fix playbook and how the test suite and CI run |
+| [Versioning & releases](docs/versioning.md) | `dot version`, date-based tags, the generated `CHANGELOG.md`, cutting a release |
 | [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
@@ -184,6 +186,7 @@ New to zsh, tmux, or neovim? Start here:
 | [VS Code](docs/vscode.md) | Managed extensions, settings tiers, and per-machine overrides |
 | [Secrets & SSH Hosts](docs/secrets.md) | Machine-local config, SSH aliases, and safe handling |
 | [SSH Agents](docs/ssh-agents.md) | One key vault, one filtered agent per account; WSL relay; devcontainer forwarding |
+| [Defender & build output](docs/devtmp.md) | `dot devtmp` (Windows): one folder for Go/test output and the printed Defender exclusion |
 | [Windows Setup](docs/windows.md) | Windows specifics: elevation, PowerShell profile, Git for Windows, SSH agent, troubleshooting |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
@@ -233,17 +236,31 @@ Docker Desktop needs the `kvm` group. The installer adds you automatically, but 
 The `dot` family is the daily interface (zsh and PowerShell both define it):
 
 ```sh
-dot up        # sync: pull the repo, apply changes. Never upgrades packages.
+dot up        # sync: pull the repo, apply changes, re-init the config. Never upgrades packages.
 dot upgrade   # upgrade ALL tooling (apt/brew/choco/winget + AI CLIs). The only thing that does.
-              # Run it with every agent session closed, or Graft/Serena/Codex/OpenCode are deferred
-              # (docs/windows.md, "When to run it").
 dot backup    # encrypted portable backup of config + SSH keys
 dot restore   # restore a backup: dot restore <archive.7z>
 dot doctor    # dotfiles health check; add --fix to repair what it can
+dot remote    # remote access: setup / status / fix / keys (docs/remote-access.md)
 dot version   # which version of this repo is installed: tag, commits past it, short sha
 ```
 
-`dot` with no arguments prints this list. Underneath, it is still chezmoi —
+Windows PowerShell adds two more: `dot devtmp` (a build/test output folder for
+Defender, [docs/devtmp.md](docs/devtmp.md)) and `dot ssh-fingerprints` (preview
+the agent fingerprint sync; `--write` saves it, [docs/ssh-agents.md](docs/ssh-agents.md)).
+
+**Run `dot up` and `dot upgrade` with no agent or harness running** (Claude
+Code, Codex, OpenCode, `agy`, Serena, and the session you are reading this in).
+Tools such as Graft and Codex cannot be replaced under a live session. If one is
+live, `dot upgrade` defers that tool and reports `Deferred (live sessions): ...`
+at the end; on an interactive console it first offers to stop the blocking
+sessions. Details: [docs/windows.md](docs/windows.md#when-to-run-it-with-every-agent-session-closed).
+On Windows both commands need an elevated PowerShell. Versions, tags and the
+generated changelog: [docs/versioning.md](docs/versioning.md).
+
+`dot` with no arguments prints the list; an unknown subcommand prints
+`dot: unknown command '<x>'`, a hint to open a new shell (a shell started before
+`dot up` keeps the old function), the list, and exits 2. Underneath, it is still chezmoi —
 for the raw commands:
 
 ```sh
@@ -259,6 +276,7 @@ chezmoi doctor        # chezmoi's own health check
 |---|---|---|
 | `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
 | `DOTUPGRADE_NO_PROMPT` | `dot upgrade` | Set to `1` to skip the interactive offer to stop blocking agent sessions (the default on a terminal); the upgrade then only defers and reports, as it does when not run from a terminal |
+| `DOT_SKILLS_FORCE` | `update_ai_tools.*` | Set to `1` to re-install a skills source even when it is already up to date ([skills-install-strategy](docs/skills-install-strategy.md)) |
 | `DOTFILES_DOCTOR_IN_APPLY` | `run_after_dotfiles-doctor.*` | Runs `dot doctor` mid-apply in a restricted, non-fatal mode (it fires on every `chezmoi apply`) |
 | `CHEZMOI_CONFIG_DIR` | `dotfiles-doctor.*` | Where the doctor looks for `chezmoi.toml` (default `~/.config/chezmoi`) |
 | `CHEZMOI_SOURCE_DIR` | `run_after_dotfiles-doctor.*` | Where the apply-time doctor finds the source repo (default `~/.local/share/chezmoi`) |
@@ -281,19 +299,21 @@ run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
 .chezmoiexternal.toml                 # Oh My Zsh + tmux plugin externals (pinned archives)
 .chezmoitemplates/                    # Shared template bodies (pkg-names, keybindings, ...)
 .chezmoiignore                        # What never deploys to $HOME
+.gitattributes                        # Line-ending authority (index LF; .ps1/.bat/.cmd CRLF on checkout)
 guardrail.toml                        # guardrail overlay (read from the source repo, not $HOME)
 dot_zshrc / dot_aliases.zsh           # Shell config + the dot/devprofile/dco alias layer
 dot_tmux.conf / dot_gitconfig.tmpl    # tmux bindings; gitconfig with includeIf identity routing
 dot_config/                           # nvim (Lazy.nvim), git hooks, starship, ghostty, opencode, psmux (Windows tmux twin), Code keys
 dot_codex/modify_config.toml          # Codex config (merged, never clobbered)
-dot_local/bin/                        # devprofile (+ .ps1 twin), ssh-agent-relay
+dot_local/bin/                        # devprofile (+ .ps1 twin), git-agent, ssh-agent-key/-relay, python3 shim (+ .cmd)
 private_dot_ssh/private_config.tmpl   # SSH config (templated, mode 600)
 Documents/                            # Windows only: PowerShell profiles (5.1 + 7)
 AppData/, Library/, dot_config/Code/  # Windows Terminal settings + VS Code keybindings (per-OS)
 devcontainer/install.sh               # Devcontainer bootstrap
-scripts/                              # The dot family, menu, updaters, doctors (never deployed)
-tests/                                # CI contract suite — run it: bash tests/run.sh
+scripts/                              # The dot family, menu, updaters, doctors, release/changelog (never deployed)
+tests/                                # CI contract suite — run it: bash tests/run.sh (+ tests/*.ps1 Windows twins)
 docs/                                 # You are here — index: docs/README.md
+CHANGELOG.md                          # Generated from the tags (scripts/changelog.sh) — never edited by hand
 
 scripts/ and tests/ stay in the repo - they are never copied into $HOME.
 The `dot` family runs them from the source path.

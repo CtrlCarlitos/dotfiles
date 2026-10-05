@@ -44,6 +44,21 @@ One copy per machine is the rule for *live* machines, not a reason to have no co
   stores the key encrypted in the registry and it survives reboots. WSL and
   containers never prompt, because they hold no keys.
 
+## The pieces
+
+| Piece | What it is |
+|---|---|
+| `~/.local/bin/ssh-agent-relay` (`dot_local/bin/executable_ssh-agent-relay.tmpl`) | `start` / `use <alias>` / `status` / `stop`; rendered from your `[[data.accounts]]` and `[[data.ssh_hosts]]` |
+| `dot_zshrc` startup block | Interactive shells with the relay installed run `ssh-agent-relay start` in the background and point `SSH_AUTH_SOCK` at the default socket |
+| Oh-My-Zsh `ssh-agent` plugin | Loaded only when the relay is **not** installed: otherwise it would start a second agent, holding a copy of every key, that the relay's socket then shadows |
+| `~/.local/bin/git-agent` + generated `git-agent-<provider>-<username>` wrappers | WSL relay mode: Git transport and signing through the account's own socket (see [Signing](#signing)) |
+| `~/.local/bin/ssh-agent-key` (`~/.local/lib/ssh_agent_key.py`) | Picks the public key matching a fingerprint out of `ssh-add -L`; used for signing |
+| `dot ssh-fingerprints` (`scripts/ssh_fingerprints.py`) | Windows PowerShell `dot` only: previews or writes the fingerprint fields |
+| `run_onchange_generate_identities.{sh,ps1}.tmpl` | Per-account git include files, `allowed_signers`, and the Windows agent service setup |
+
+Tests: `tests/ssh_agent_relay_contract.sh`, `tests/ssh_zero_copy_contract.sh`,
+`tests/ssh_fingerprints.sh`, `tests/wsl_git_agent.sh`.
+
 ## Setup
 
 **Windows (the vault).** `run_onchange_generate_identities.ps1` already sets the

@@ -24,6 +24,19 @@ Sudo-style alternatives to opening a separate elevated terminal:
   builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
+### `dot up` vs `dot upgrade`
+
+| | `dot up` | `dot upgrade` |
+|---|---|---|
+| What it does | `chezmoi update --apply`, then `chezmoi init` (re-renders the config template after the pull), then a final `chezmoi apply` only if init changed `chezmoi.toml`; re-reads the registry PATH into the current session | the choco and winget sweeps, then the AI tools (`scripts/update_ai_tools.ps1`) |
+| Upgrades tools? | **Never.** The installer only installs what is missing | **Yes, and it is the only command that does** |
+| Elevation | required (installer gate, see above) | required (`scripts/dotupgrade.ps1`) |
+| Agents running? | run it with none | run it with none; live ones defer their tool |
+
+The one exception inside the installer that `dot up` runs is npm itself: it is upgraded
+once per run, and only when the registry has something newer (`npm is current (...)`
+otherwise).
+
 ### `dot upgrade` on Windows: admin + winget
 
 `dot upgrade` is the single owner of tool upgrades (system packages + AI
@@ -41,27 +54,46 @@ the script warns and continues), then the AI tools via
 defers upgrades for tools whose directories live agent sessions are
 currently using (via `DOTUPGRADE_DEFER`), and reports what to re-run when
 quiet. Inside a devcontainer, upgrades ship via image rebuild and the
-script no-ops.
+Unix twin (`scripts/dotupgrade.sh`) no-ops.
 
 The `choco upgrade all` sweep prints a one-line summary (`Nothing to upgrade (101 packages
 checked)` or `Upgraded 2 of 101: antigravity (2.18.1 -> 2.19.1), ...`) instead of one line per
 package. What a package's own installer says still streams live, so a hung or prompting installer
 stays visible, and the full output is kept in `~\.local\state\dotfiles\upgrade.log` (one previous
-generation is kept past 2 MB). A non-zero exit prints the last lines of the output.
+generation, `upgrade.log.1`, is kept once the log passes 2 MB). A non-zero exit prints the last
+lines of the output; exit 1641 or 3010 prints that a restart is needed instead.
 
-What counts as a live session is decided by process name **and** executable path.
+The sweep leaves out Chocolatey's `claude` package (Claude Desktop) whenever any `claude.exe` is
+running: its installer ends with `taskkill /F /IM claude.exe /T`, and Claude Code's CLI has the same
+image name, so the upgrade would kill live Claude Code sessions. `dot upgrade` says so; the next run
+with Claude closed takes the package. This check is by image name only, unlike the live-session
+check below.
+
+What the AI-tools step does on Windows:
+
+| Tool | Behavior |
+|---|---|
+| Codex (npm package) | skipped when `npm ls -g` already matches the registry's latest (`codex is current (...)`); an unreachable registry counts as "not current" |
+| Graft | skipped when `graft version` reports the installed version equals the latest published one. Otherwise installed with `npm install -g @nanonets/graft@latest` (with the installer's allow-scripts list), **not** `graft upgrade`, which fails on Windows with `spawnSync npm ENOENT`. Afterwards `graft --version` must start, and graft's Codex hook paths in `~\.codex\hooks.json` are normalized to forward slashes |
+| OpenCode | `choco upgrade opencode`; a legacy npm-global `opencode-ai` shim is removed |
+| Claude Code | the native installer is re-run (URL from `versions.claude_install_ps1`); deliberately **not** `claude update`, since `dot upgrade` is meant to run with every agent closed. Unix tries `claude update` first |
+| Skills | per-source: skipped when every skill is present and upstream HEAD equals the commit recorded in `%USERPROFILE%\.local\state\dotfiles\skills-sources`; `DOT_SKILLS_FORCE=1` forces a reinstall. See [Skills install strategy](skills-install-strategy.md) |
+
+What counts as a live session is decided by process name **and** executable path
+(`Get-LiveAgentProcess` in `scripts/lib/ps-common.ps1`; `live()` in `dotupgrade.sh`).
 Codex's shared app-server daemon (it runs its own copy under
 `~\.codex\packages\app-server-daemon\`, not the npm-global CLI the upgrade replaces) and
 Claude Desktop (under `AnthropicClaude\`, not Claude Code) do not defer anything. A
 process whose path cannot be read (an elevated process seen from a normal shell) still
-counts. The Unix twin applies the same rule for the Codex daemon. If Codex still reports
-as live, `codex app-server daemon stop` closes the daemon; it restarts on demand.
+counts. The Unix twin applies the Codex-daemon rule only (it has no Claude Desktop path rule).
+If Codex still reports as live, `codex app-server daemon stop` closes the daemon; it restarts
+on demand, and nothing in the dotfiles starts it.
 
 #### When to run it: with every agent session closed
 
-Run `dot upgrade` from a plain elevated terminal with **no agent running** —
-Claude Code, Codex, OpenCode, `agy` and Serena all count, and so does the
-session you are reading this in. It scans for those processes and
+Run `dot up` and `dot upgrade` from a plain elevated terminal with **no agent
+running** — Claude Code, Codex, OpenCode, `agy` and Serena all count, and so
+does the session you are reading this in. `dot upgrade` scans for those processes and
 **defers** what a live session resolves its files from:
 
 | Live process | Deferred |
@@ -77,6 +109,28 @@ incomplete: it ends with `Deferred (live sessions): ...`. Close the sessions
 and run `dot upgrade` again to pick those up. Expect to reopen apps as well:
 the sweep can replace the running Windows Terminal or Claude Code, and
 neither takes effect until restarted.
+
+#### The offer to stop live sessions
+
+On an interactive console, `dot upgrade` first lists the blocking processes and asks:
+
+```text
+These sessions block part of the upgrade:
+  claude (pid 1234, started 09:12)
+Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer
+```
+
+`y` stops all of them, `s` asks per process, anything else (the default) keeps today's
+defer-and-report. Stopping ends that session, so unsaved context is lost unless it can be
+resumed. On Windows each process is asked to close its window, then the whole process tree
+is killed after 5 seconds (Serena leaves language-server children behind); the Unix twin
+sends TERM to the tree and KILL after 5 seconds. Then the live-session scan runs again, so
+only what is still running defers.
+
+Never offered: this shell's own ancestry (the shell, the terminal, and the agent session
+that launched `dot upgrade`), since stopping it would end the command; those still defer.
+No prompt, only defer-and-report, when stdin or stdout is not a terminal or when
+`DOTUPGRADE_NO_PROMPT=1`. The contract is `tests/dotupgrade_stop_sessions_contract.sh`.
 
 #### Stop upgrades from recreating desktop shortcuts
 
@@ -160,13 +214,21 @@ What the PowerShell 7 profile sets up:
 | Modern tools | `ls`→eza (`ll`, `la`, `lt`, `lta`), `cat`→bat, `vim`/`vi`/`v`→nvim |
 | Git | OMZ-style `gst`, `gd`, `gl`, `gp`, `gco`, `ga`, `gcam`, `gb` |
 | Parity with `dot_aliases.zsh` | `c`, `h`, `py`, `nr`/`nrd`/`nrb`, `serve`, `ff`, `path`, `prof`, `get`/`post`, docker `d`/`dc*` |
-| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor` / `dot version`), `devprofile` / `dp` |
+| Dotfiles | `dot` family (`dot up` / `dot upgrade` / `dot backup` / `dot restore` / `dot doctor` / `dot remote` / `dot devtmp` / `dot version` / `dot ssh-fingerprints`), `devprofile` / `dp` |
 | Windows Terminal | reports the current folder (OSC 9;9), so splits open where you are (the 5.1 profile does too) |
 | SSH agent | tops up the Windows ssh-agent with your declared keys (only adds, never removes) |
 
 `dot_aliases.zsh` stays the source of truth for aliases; the profile ports the
 subset that maps cleanly to PowerShell. The profile's comments explain each
 deliberate omission.
+
+**The two profiles are twins.** A feature added to one (the `dot` function, the
+autocd handler, `clip-to-file`, `serena-clean`, the OpenCode clipboard block) belongs
+in the other, adjusted for 5.1 (no `cd -`, for example). The `dot` dispatcher is
+identical in both and a third copy lives in zsh; `tests/dot_unknown_command_contract.sh`
+executes all three, and `tests/pwsh_profiles.ps1` parses and dot-sources both. `dot <unknown>` prints `dot: unknown command '<x>'`, a hint that a shell
+started before `dot up` keeps the `dot` it loaded (open a new shell), then the help,
+and exits 2. See invariant 10 in [invariants.md](invariants.md#10-both-twins-or-neither).
 
 ## Git for Windows
 
@@ -221,7 +283,7 @@ pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix   # repair 
 ```
 
 It checks config encoding/parseability, prompted-key completeness, source
-dir, chezmoi version drift vs `.chezmoi-version`, the guardrail pin, and that
+dir, chezmoi version drift vs `.chezmoi-version`, the guardrail pin, the installed dotfiles version (`dot version`), and that
 `python3` resolves to a real interpreter (see [python3 on
 Windows](#python3-on-windows)) — the failure classes `chezmoi doctor` can't see. Unix twin:
 `bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh" [--fix]`.
@@ -266,6 +328,48 @@ WSL2 has its own network adapter. To access services:
 | Windows → WSL | `localhost:PORT` (usually works) |
 | WSL → Windows | Use host IP from `cat /etc/resolv.conf` |
 
+## Post-install notes
+
+The installer used to print the same four manual-step notes on every run. Each now
+prints only when its probe says it still applies, and a probe that cannot tell (tool
+missing, command failed or hung) prints the note, since a hidden problem is worse than a
+repeated reminder (`tests/windows_post_install_notes_contract.sh`):
+
+| Note | Printed when |
+|---|---|
+| Docker Desktop EULA | `docker info` fails |
+| WSL Integration | a real WSL distro (Docker's own `docker-desktop` distros excluded) has Docker Desktop's WSL Integration off, read from Docker Desktop's `settings-store.json`; with no distro at all it suggests `wsl --install -d Ubuntu` |
+| Tailscale sign-in | `tailscale status` fails (`remote_access` group only) |
+| sshd | the `sshd` service is not running (`remote_access_server` group only) |
+
+The Docker notes exist only with the `dev_desktop` group. Other quiet-output changes: one
+line per skills source (`<name>: up to date`), the agent-browser `doctor --json` result is
+summarised, and the installer's `curl` downloads are quiet.
+
+## Line endings and the PowerShell scripts
+
+`.gitattributes` is the single authority: the index holds LF for every text file, while
+`*.ps1`, `*.ps1.tmpl`, `*.bat` and `*.cmd` check out as CRLF (shell scripts stay LF), and
+`core.autocrlf` is `false`. `git ls-files --eol` shows both forms; `git diff` hides drift.
+`tests/line_endings_contract.sh` enforces it ([invariant 8](invariants.md#8-line-endings-come-from-gitattributes-not-from-your-editor);
+the Windows bash-suite side is issue #233). Applied dotfiles get each OS's native endings
+from chezmoi; `~/.ssh/id_*` key files are the exception, stripped of CR on every apply
+and checked by `dot doctor`.
+
+Rules learned the hard way when changing the Windows scripts:
+
+- **Strict mode:** the installer and several scripts run under `Set-StrictMode -Version
+  Latest`, where reading an unset variable is an error. Every `$script:Name` that is read
+  must be initialised at script scope before the function that reads it
+  (`tests/ps_script_scope_vars_contract.sh`; it broke the first Windows `dot up` once).
+- **Native stderr on Windows PowerShell 5.1:** under `$ErrorActionPreference = 'Stop'` any
+  stderr line from a native command becomes a terminating error. Probe natives under
+  `Continue` and judge by exit code, as `Test-NpmGlobalCurrent` and `Invoke-GraftNpmInstall` do.
+- **`jq.exe` emits CRLF** under Git Bash; every `jq` call in `scripts/*.sh` carries `jq -b`
+  (`tests/jq_binary_contract.sh`).
+- **Twins:** a change to a `.sh` / `.ps1` pair, or to one PowerShell profile, is a bug in
+  the other until proven otherwise ([invariant 10](invariants.md#10-both-twins-or-neither)).
+
 ## Troubleshooting
 
 ### Antimalware Service Executable busy during Go builds
@@ -296,7 +400,7 @@ Store-installed Python also lives in `WindowsApps` and passes.
 - **Turn the stub off yourself:** Settings > Apps > Advanced app settings >
   App execution aliases > `python3.exe`.
 - **Or let the doctor do it:**
-  `pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix`
+  `dot doctor --fix` (or `pwsh -File "$(chezmoi source-path)\scripts\dotfiles-doctor.ps1" -Fix`)
   removes the `python3.exe` stub in `WindowsApps` and nothing else. It never
   runs during `chezmoi apply`. A Store update can re-create the stub; re-run the
   doctor if `python3` breaks again.

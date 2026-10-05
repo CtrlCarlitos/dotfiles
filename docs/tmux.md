@@ -52,10 +52,13 @@ Move between panes using `h` `j` `k` `l` (Left, Down, Up, Right):
 ### Windows (Tabs)
 *   `Ctrl+a` then `n` → **N**ext window
 *   `Ctrl+a` then `p` → **P**revious window
+*   `Shift + Left/Right` → Previous / next window (no prefix needed)
 *   `Ctrl+Shift + Left/Right` → **Swap** the current window with its neighbour (no prefix needed!)
 
 ### Resizing Panes
-*   `Ctrl+a` then `H` / `J` / `K` / `L` (capitalized) to resize.
+*   `Ctrl+a` then `H` / `J` / `K` / `L` (capitalized) to resize by 5 cells; the keys are repeatable, so within tmux's short repeat window you can tap them again without the prefix.
+
+Windows and panes are numbered from 1, and closing a window renumbers the rest.
 
 ## 📝 Copy Mode (Scrolling)
 To scroll up or copy text:
@@ -76,7 +79,7 @@ Dragging with the mouse copies too. Where the copy lands:
   See [Terminal Experience](terminal.md#remote-ssh-hosts).
 
 ## 🔌 Plugins
-We use **TPM (Tmux Plugin Manager)**.
+We use **TPM (Tmux Plugin Manager)**, pinned in `.chezmoiexternal.toml` and installed into `~/.tmux/plugins` by `chezmoi apply`, with `tmux-sensible`, `tmux-resurrect` (save/restore sessions, pane contents included) and `tmux-continuum` (auto-save).
 *   `Ctrl+a` then `I` (capital i) → **I**nstall new plugins listed in `tmux.conf`.
 *   `Ctrl+a` then `r` → **R**eload configuration file.
 

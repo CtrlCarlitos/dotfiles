@@ -1,6 +1,6 @@
 # Agent context tools — Serena & Graft
 
-Practical guide (2026-09-12) to the two agent-context tools this repo installs
+Practical guide (2026-10-05) to the two agent-context tools this repo installs
 under the `agent_toolkit` package group: what each is for, what the installer
 already wired
 up, and the one manual step (per-repo Graft activation) that's deliberately
@@ -31,14 +31,18 @@ left to you.
 | | Serena | Graft |
 | :--- | :--- | :--- |
 | Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) | `npm i -g @nanonets/graft` (with npm's `--allow-scripts` allowlist for its tree-sitter native builds) |
-| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex`; JSON merge into OpenCode's global `mcp` key (graft joins it there too — opencode reads MCP only from that block); Antigravity gets both in the top-level `~/.gemini/config/mcp_config.json`, each server with `forceAllToolsEager: true` — agy marks every server's tools lazy by default, lazy tools are only reachable through the generic `call_mcp_tool` invoker guardrail denies, and a plugin bundle would prefix the server names into forms guardrail's registry does not know (#175) | Same file and same `forceAllToolsEager` flag as serena's; Claude and Codex get graft's MCP via graft's own global registration on first `graft init` |
+| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex` (run once the Codex CLI is installed); JSON merge into OpenCode's global `mcp` key (graft joins it there too — opencode reads MCP only from that block); Antigravity gets both in the top-level `~/.gemini/config/mcp_config.json`, each server with `forceAllToolsEager: true` — agy marks every server's tools lazy by default, lazy tools are only reachable through the generic `call_mcp_tool` invoker guardrail denies, and a plugin bundle would prefix the server names into forms guardrail's registry does not know (#175) | Same file and same `forceAllToolsEager` flag as serena's; Codex gets `codex mcp add graft -- graft mcp` from the installer (only while `~/.codex/config.toml` does not name `[mcp_servers.graft]` yet); Claude gets graft's MCP via graft's own registration on first `graft init` |
 | agy command form | `serena start-mcp-server --context ide-assistant` | `graft mcp` (the installed binary — with `npx -y` agy exposed no graft tools at all, a slow npx cold start being the prime suspect, #175) |
 | Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional | `graft init` + `graft build` (see below) |
 | Telemetry | n/a | Disabled by the installer (`graft telemetry disable`) |
-| Upgrade | `uv tool upgrade serena-agent` (also run by `scripts/update_ai_tools.*`) | `graft upgrade` (also run by `scripts/update_ai_tools.*`) |
+| Upgrade | `dot upgrade` only (via `scripts/update_ai_tools.*`; `dot up` never upgrades): `uv tool upgrade serena-agent` | `dot upgrade` only: skipped when `graft version` says it is current; otherwise `graft upgrade` on Linux/macOS/WSL (with the `--allow-scripts` list from the catalog exported), and `npm install -g @nanonets/graft@latest` on Windows because `graft upgrade` fails there (`spawnSync npm ENOENT`). A graft that does not start afterwards is reported |
 
-Both MCP registrations use the same launch command:
-`serena start-mcp-server --context ide-assistant`.
+Both tools are skipped by `dot upgrade` while an agent session is live
+(graft's directory is resolved by every hook event, and neither can be
+replaced under a running session): close the agents first, as `dot upgrade`
+says. OpenCode and agy register the two servers with the commands in
+`.chezmoidata/agents.yaml` (`serena start-mcp-server --context ide-assistant`
+and `graft mcp`).
 
 ## Graft per-repo activation
 

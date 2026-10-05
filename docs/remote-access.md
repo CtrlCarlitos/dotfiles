@@ -77,6 +77,13 @@ never automates provider authentication:
   hostname, with MFA enforced by your identity provider.
 - Register the cloudflared service as an elevated manual step:
   `cloudflared service install`.
+- On the Windows host the installer's own post-install notes cover the same
+  two steps, but only while they are still true: `[Post-Install] Tailscale is
+  not connected` (when `tailscale status` fails; `remote_access` group) and
+  `[Post-Install] The SSH server (sshd) is not running` (when the `sshd`
+  service is not `Running`; `remote_access_server` group). A probe that cannot
+  tell (tool missing, command failed or hung) prints the note rather than
+  hiding it. Connected and running machines see neither.
 - macOS: enable Remote Login and Screen Sharing by hand — `dot remote`
   verifies their state but never flips it.
 

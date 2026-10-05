@@ -25,14 +25,15 @@ An archive is a snapshot. After rotating or adding a key, take a new backup and 
 `dotbackup` creates a portable, AES-256 encrypted 7-Zip archive with encrypted archive headers (`-mhe=on`). The archive path is:
 
 ```text
-~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
+~/.dot_backups/dotfiles-<platform>-YYYYMMDD-HHMMSS.7z
 ```
 
-The archive has a fixed allowlist:
+`<platform>` is the machine the backup was taken on: `windows`, `linux` or `darwin` (WSL counts as `linux`). The archive has a fixed allowlist:
 
 - `~/.config/chezmoi/chezmoi.toml`
 - Every regular file under `~/.ssh`, including non-standard private-key names, public keys, SSH config, known-host data, and signing data
 - A `manifest.json` describing the `dotfiles-backup-v1` archive format, creation time, and source platform
+- A `RESTORE.md` for humans (contents, same-OS and cross-OS restore steps; the restore scripts never read it)
 - A `guardrail/` section, only when guardrail is configured on the machine (see [Guardrail operator state](#guardrail-operator-state))
 
 Git configuration, VS Code state, application data, installed packages, caches, and installed tools are excluded. Chezmoi recreates managed configuration after recovery.
@@ -108,12 +109,12 @@ Because the archive is portable, a backup created on Windows, Linux, macOS, or W
 
 ## Restore
 
-Restore only onto a machine where any existing `~/.config/chezmoi/chezmoi.toml` and conflicting files under `~/.ssh` have been reviewed. `dotrestore` refuses to overwrite either an existing ChezMoi config or any existing SSH file. Resolve collisions manually, then rerun the script.
+Restore only onto a machine where any existing `~/.config/chezmoi/chezmoi.toml` and conflicting files under `~/.ssh` have been reviewed. `dotrestore` refuses to overwrite either an existing ChezMoi config or any existing SSH file. It also refuses an existing guardrail file at a destination, an archive that contains a symlink, a destination under a symlink or reparse point, and a guardrail root that resolves outside your home directory. Resolve collisions manually, then rerun the script.
 
 The one command:
 
 ```sh
-dot restore ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
+dot restore ~/.dot_backups/dotfiles-<platform>-YYYYMMDD-HHMMSS.7z
 ```
 
 ### Linux / macOS / WSL
@@ -121,7 +122,7 @@ dot restore ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
 Pass the transferred archive path to the restore script:
 
 ```bash
-bash ~/.local/share/chezmoi/scripts/dotrestore.sh ~/.dot_backups/dotfiles-YYYYMMDD-HHMMSS.7z
+bash ~/.local/share/chezmoi/scripts/dotrestore.sh ~/.dot_backups/dotfiles-<platform>-YYYYMMDD-HHMMSS.7z
 ```
 
 ### Windows (PowerShell)
@@ -129,7 +130,7 @@ bash ~/.local/share/chezmoi/scripts/dotrestore.sh ~/.dot_backups/dotfiles-YYYYMM
 Pass the transferred archive path to the restore script:
 
 ```powershell
-powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotrestore.ps1" -Archive "C:\path\dotfiles-YYYYMMDD-HHMMSS.7z"
+powershell.exe -File "$env:USERPROFILE\.local\share\chezmoi\scripts\dotrestore.ps1" -Archive "C:\path\dotfiles-<platform>-YYYYMMDD-HHMMSS.7z"
 ```
 
 The restore script prompts for the passphrase, validates the manifest, restores the allowlisted local data, and then directs you to run:
@@ -140,6 +141,16 @@ chezmoi apply
 ```
 
 Run `chezmoi init` first, then `chezmoi apply`. This recreates managed configuration and applies the repository's SSH permission or ACL normalization.
+
+### Restoring on a different OS
+
+The restore compares the manifest's `source_platform` with the machine it runs on. When they differ it translates what translates and says what it did:
+
+- **Windows archive onto Linux/macOS/WSL:** strips Windows CRLF from the restored `~/.ssh` files (Unix OpenSSH rejects them before any auth) and sets permissions to 600.
+- **Unix archive onto Windows:** resets the key files to a user-only ACL (OpenSSH for Windows refuses identity files readable by broad groups).
+- **Guardrail:** passkey enrollment (`operator-auth/`) is skipped with a "enroll again on this machine" note, and repo grants in `waivers.toml` that are keyed by the other OS's absolute path are listed as not applying.
+
+The chezmoi config does not translate on its own: machine paths and `remote_access` values are specific to the machine it came from, so review `chezmoi.toml` before running `chezmoi init`.
 
 ---
 

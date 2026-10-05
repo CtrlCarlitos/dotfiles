@@ -1,6 +1,6 @@
 # Agent Skill Wiring Design
 
-_Status (2026-09-25): this is the original design document (2026-09-15,
+_Status (2026-10-05): this is the original design document (2026-09-15,
 #28). The design it describes is implemented — the as-built behavior,
 current flags and catalog live in
 [skills-install-strategy.md](skills-install-strategy.md), enforced by
@@ -54,8 +54,9 @@ Only OpenCode receives generated command adapters. Codex has no generated comman
 
 ## Curated Catalog
 
-Add a repository-owned, line-oriented curated-skill catalog containing the
-installed names:
+The repository-owned, line-oriented catalog is `scripts/curated-agent-skills.txt`
+(blank and `#` lines are skipped). It holds the installed names (18 today; the
+file, not this list, is authoritative):
 
 ```text
 codebase-design
@@ -75,6 +76,7 @@ agent-browser
 skill-creator
 design-taste-frontend
 redesign-existing-projects
+code-search
 ```
 
 The existing source-specific fetch logic remains responsible for downloading
@@ -88,7 +90,12 @@ their own subsets.
 
 Both platform installers and both AI-tool updaters use this order:
 
-1. Fetch or refresh every curated source.
+0. Remove retired skills (`scripts/retired-agent-skills.txt`, only when the
+   skills CLI lock records the listed source).
+1. Fetch or refresh every curated source; a source whose upstream commit is
+   already installed is skipped (`skills_up_to_date` in
+   `scripts/lib/agent-skills.sh`, `Invoke-SkillsSource` in
+   `scripts/lib/ps-skills.ps1`; `DOT_SKILLS_FORCE=1` forces).
 2. Install the fetched skills with the Claude Code and OpenCode adapters. The
    completed Claude Code copy is the verified source for the Antigravity CLI
    copy, so Antigravity never depends on the `skills` CLI's incompatible
@@ -97,7 +104,8 @@ Both platform installers and both AI-tool updaters use this order:
 4. Generate or refresh OpenCode commands for verified OpenCode skills.
 5. Print a per-agent summary of installed, skipped, and failed skills.
 
-The update scripts are the explicit refresh interface. `chezmoi apply` is not
+The update scripts are the explicit refresh interface (`dot upgrade` runs them;
+`dot up` never refreshes skills). `chezmoi apply` is not
 documented as a reliable upstream-skill update trigger because `run_onchange`
 only runs when Chezmoi detects a changed rendered script.
 
@@ -123,6 +131,7 @@ generate:
 Each file uses the supported OpenCode Markdown-command format:
 
 ```md
+<!-- managed-by: chezmoi-curated-skills -->
 ---
 description: Run the <name> skill
 ---
@@ -133,7 +142,7 @@ This makes `/teach <topic>`, `/research <question>`, and every other curated
 skill directly invokable in OpenCode. Commands are generated after skill
 verification, so a missing skill never receives a dangling command.
 
-Generated files include a dotfiles ownership marker. On refresh, the
+Generated files include a dotfiles ownership marker (the first line above). On refresh, the
 generator may replace or remove only marker-owned files. If a user-owned
 command already uses a curated skill name, preserve it, emit a warning, and do
 not overwrite it.
