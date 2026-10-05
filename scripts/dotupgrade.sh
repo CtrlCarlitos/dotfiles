@@ -160,6 +160,13 @@ case "$(uname -s)" in
         ;;
 esac
 
+# --- 1b. VS Code extensions: `dot up` only installs missing ones; updates are this command's
+# job. Skipped quietly when VS Code is absent; a failure never aborts.
+if command -v code &>/dev/null; then
+    echo "  Updating VS Code extensions..."
+    timeout 300 code --update-extensions >/dev/null 2>&1 || echo "  VS Code extension update did not finish cleanly - continuing."
+fi
+
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/update_ai_tools.sh"

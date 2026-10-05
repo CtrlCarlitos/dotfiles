@@ -37,6 +37,12 @@ The one exception inside the installer that `dot up` runs is npm itself: it is u
 once per run, and only when the registry has something newer (`npm is current (...)`
 otherwise).
 
+VS Code extensions follow the same rule: `dot up` lists what is installed once (a local call,
+about 3 s) and installs only the missing ones, with no `--force`. It used to force-reinstall all of
+them every run, which hit the marketplace for each one: a single slow response cost minutes (one
+run took 4m44s with two failures) and extensions were upgraded behind `dot upgrade`'s back.
+`dot upgrade` now runs `code --update-extensions`.
+
 ### `dot upgrade` on Windows: admin + winget
 
 `dot upgrade` is the single owner of tool upgrades (system packages + AI

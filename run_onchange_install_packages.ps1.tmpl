@@ -815,7 +815,7 @@ if (-not $vsApply) {
     # Extensions first (same gate): idempotent `code --install-extension`,
     # list rendered from .chezmoidata.yaml vscode.extensions (+ _windows).
     if (Get-Command code -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing VS Code extensions (global, idempotent)..." -ForegroundColor Yellow
+        Write-Host "  Checking VS Code extensions (installing only what is missing)..." -ForegroundColor Yellow
         # Machine-local drift lives in chezmoi.toml [data.vscode_overrides] -
         # deliberately a DIFFERENT key from the .chezmoidata.yaml vscode table:
         # chezmoi does not deep-merge same-named data tables (config [data.X]
@@ -837,13 +837,30 @@ if (-not $vsApply) {
 {{-   end }}
 {{- end }}
         )
-        foreach ($ext in $vsExts) {
+        # Install only what is MISSING. The loop used to run `code --install-extension --force`
+        # for every extension on every run: each call goes to the marketplace, so one slow or
+        # failing response cost minutes (a live `dot up` took 4m44s with two failures), and
+        # --force quietly upgraded extensions, which `dot up` must never do. One local listing
+        # decides; `dot upgrade` owns updates (`code --update-extensions`).
+        $vsInstalled = @()
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $vsInstalled = @(& code --list-extensions 2>$null | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $vsMissing = @($vsExts | Where-Object { $vsInstalled -notcontains $_.ToLowerInvariant() })
+        if ($vsMissing.Count -eq 0) {
+            Write-Host "  VS Code extensions: all $($vsExts.Count) present"
+        }
+        foreach ($ext in $vsMissing) {
             # code.cmd launches Node, whose non-fatal stderr warnings would
             # otherwise terminate this script under the global Stop policy.
             $previousErrorActionPreference = $ErrorActionPreference
             try {
                 $ErrorActionPreference = "Continue"
-                & code --install-extension $ext --force *> $null
+                & code --install-extension $ext *> $null
             } finally {
                 $ErrorActionPreference = $previousErrorActionPreference
             }
