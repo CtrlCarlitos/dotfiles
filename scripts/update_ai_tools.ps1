@@ -103,8 +103,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # upstream commit?" check, so an unchanged source costs one git ls-remote instead of an npx fetch.
     if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
     if ($PSScriptRoot) { Invoke-RetiredSkillsCleanup -ListPath (Join-Path $PSScriptRoot 'retired-agent-skills.txt') }
-    Invoke-SkillsSource -Label 'Matt Pocock skills' -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents') -Agents $skAgents -Install {
-        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents -a $skAgents -g -y --copy 2>$null | Out-Null
+    Invoke-SkillsSource -Label 'Matt Pocock skills' -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'pr', 'retro') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents pr retro -a $skAgents -g -y --copy 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
@@ -172,6 +172,8 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    Invoke-SkillsStatePrune
 
     $catalog = $curatedCatalog
     if ((-not $catalog) -or -not (Test-Path -LiteralPath $catalog -PathType Leaf)) {

@@ -11,13 +11,13 @@ skills without the whole thing.
 
 ## Current state (2026-10-05)
 
-- **Catalog**: 18 curated skills, `scripts/curated-agent-skills.txt` (one name
+- **Catalog**: 20 curated skills, `scripts/curated-agent-skills.txt` (one name
   per line; the single source of truth for the verify pass and the OpenCode
   command shims).
-- **Sources** (8 `skills add` calls, in order): `mattpocock/skills` (10:
+- **Sources** (8 `skills add` calls, in order): `mattpocock/skills` (12:
   `codebase-design`, `domain-modeling`, `grill-with-docs`,
   `improve-codebase-architecture`, `prototype`, `research`, `grilling`,
-  `handoff`, `teach`, `writing-for-agents`), `mattpocock/skills` staged as
+  `handoff`, `teach`, `writing-for-agents`, `pr`, `retro`), `mattpocock/skills` staged as
   `mp-code-review`, `anthropics/skills` (`frontend-design`),
   `vercel-labs/skills` (`find-skills`), `vercel-labs/agent-browser`
   (`agent-browser`), `CtrlCarlitos/skills` (`skill-creator`, our fork, and
@@ -39,6 +39,9 @@ skills without the whole thing.
   print `<name>: up to date`.
 - **Retired skills**: `scripts/retired-agent-skills.txt` (`<skill> <source>`);
   currently `resolving-merge-conflicts mattpocock/skills`.
+- **Superseded state**: changing a source's skill list (a skill added or retired)
+  changes its state key; the old line is pruned at the end of the run (see
+  "Skipping sources that have not changed").
 - **Why not `skills update`**: it takes no `--copy` or `-a` and re-links the
   Claude copy as a symlink; see below.
 
@@ -120,6 +123,14 @@ run. Each source is now skipped when **all** of these hold:
   (`$XDG_STATE_HOME/dotfiles/skills-sources`, default
   `~/.local/state/dotfiles/skills-sources`; `%USERPROFILE%\.local\state\...` on
   Windows).
+
+A source key is `repo|skills|agents`, so changing the selection (as when `pr` and
+`retro` joined the Matt batch) makes the old key stale: the batch reinstalls once
+(its new skills are missing, and the new key has no entry), and at the end of the run
+`skills_prune_state` / `Invoke-SkillsStatePrune` drops every line for a repo the run
+checked unless the run produced that exact key. Lines for repos the run did not touch
+are never removed, and a quiet run rewrites nothing. No manual state deletion is ever
+needed.
 
 Anything unknown (offline, no state, a failed add) installs as before; a failed
 add is never recorded. `mp-code-review`, which is staged from a clone, is
@@ -377,6 +388,81 @@ How it is maintained (in the skills repo):
 - When upstream ships the fixes, delete the patches that no longer apply and,
   once none are left, switch these four call sites back to `anthropics/skills`
   and drop the fork.
+
+## Curated set widened (2026-10-05): +2 Matt skills, `pr` and `retro` (#269)
+
+Only `pr` and `retro` were taken from `mattpocock/skills`; they join the 10 already
+installed as-is (12 + `mp-code-review`, 20 curated in total). Upstream layout, checked
+at `mattpocock/skills@4588b32`: both live under `skills/engineering/`.
+
+| Skill | What it is | Ships |
+|---|---|---|
+| `pr` | Writing guidance for a PR **body**: Summary (the smallest useful view: pseudocode, call/file/component tree, Mermaid, diff), Evidence (before/after), Merge Danger (one-way or two-way door, blast radius). Credits HumanLayer's `show-me`, which is not a dependency. | `SKILL.md`, `CREDITS.md`, `agents/openai.yaml` |
+| `retro` | An on-demand retrospective on a coding session: proposes changes to the agent's *environment* (navigation pointers, automated checks, coding standards, AGENTS.md size, tool economy, information access), ranked by severity. Calls `writing-for-agents` first. | `SKILL.md`, `agents/openai.yaml` with `allow_implicit_invocation: false`; `SKILL.md` carries `disable-model-invocation: true` |
+
+**Boundaries (what they are not).**
+
+- `pr` only shapes the description. Implementation, verification, review, and the human
+  decision to push, open or merge a PR stay with Superpowers and the repository's own
+  rules; it does not replace `mp-code-review` or Superpowers review, and it authorizes no
+  git or network write. Keep required repository fields (an issue reference such as
+  `Refs: #N`); the template is adapted, never used to drop them. Evidence must be real:
+  say when a before/after was not captured or a check was not run.
+- `retro` is on demand, never automatic after a task or a PR. It reads the session you name
+  (the current one by default), reports what the transcript does not show instead of
+  inventing it, and presents ranked proposals only. Running it authorizes no edit to a
+  global `AGENTS.md`, a guardrail, a skill, an installed tool, or an issue.
+- Versus `handoff` (continuation context for the next session), `mp-code-review` / Superpowers
+  review (evaluate a change), and Superpowers' session diagnosis (investigate one
+  workflow that went wrong): `retro` looks at a finished session and proposes durable
+  environment improvements.
+- Terminology: `pr` uses the repository's `GLOSSARY.md` when there is one and does nothing
+  special when there is not. Neither skill calls the `setup-matt-pocock-skills` wizard.
+
+**Invoking them.**
+
+| Agent | `pr` | `retro` |
+|---|---|---|
+| Claude Code | name the skill or describe the task ("write the PR body") | `/retro [session]` only (model invocation is disabled, so it is not in the model's skill list) |
+| Codex | name the skill in the request | `$retro [session]` only (`allow_implicit_invocation: false`) |
+| OpenCode | name the skill (it loads it with its `skill` tool); a generated `/pr` command also exists, not exercised | `/retro [session]` (generated command) |
+| Antigravity | the skill is copied; invocation not verified (see below) | same |
+
+A new agent session is needed after install; a running session keeps the skills it started
+with. The OpenCode commands are the generated shims already described above: a command you
+wrote yourself (a `pr.md` of your own) is left untouched and reported.
+
+**Refreshing.** Nothing new: `dot upgrade` runs the existing lifecycle. The Matt batch's
+state key now includes `pr` and `retro`, so the first run after this change reinstalls the
+batch once and prunes the superseded key (see "Skipping sources that have not changed").
+`skills add --copy` copies whole directories, and so do the Antigravity fan-out and the
+Windows `Copy-Item -Recurse`, so `agents/openai.yaml` and `CREDITS.md` arrive intact.
+`tests/curated_pr_retro_contract.sh` holds the four install lists identical, runs the Unix
+verification pass over the upstream layout, and checks nested files, the retained
+invocation metadata and command-shim ownership.
+
+**Smoke tests (real agents, Windows 11, 2026-10-05; Claude Code 2.1.289, Codex 0.160.0,
+OpenCode 1.18.34, agy 1.2.17).** Run read-only against commit `7a40e68` (`pr`, with `Refs: #269`
+required) and against two past session transcripts (`retro`).
+
+| Harness | `pr` | `retro` |
+|---|---|---|
+| Claude Code | pass: 3 sections, small diff view, evidence honest ("no test run ... not verified"), merge danger with door + blast radius, `Refs` line kept | pass: explicit `/retro`; on a startup-only transcript it reported there was nothing to retro rather than invent findings; on a 35-turn session it gave 5 ranked, line-referenced proposals |
+| Codex | pass: same shape, shorter; read `~/.agents/skills/pr/SKILL.md` itself | pass: `$retro`; loaded `writing-for-agents`; 5 ranked proposals, each tied to something in the transcript, with unknowns named |
+| OpenCode (plan agent) | pass: loaded the `pr` skill through its skill tool | pass: `/retro` command loaded `retro` and `writing-for-agents`; 5 ranked proposals with transcript line references. First attempt could not read a transcript outside the project (`external_directory` auto-rejected) and returned nothing, so give it a path inside the working directory |
+| agy | not run: headless mode auto-denies the `command` permission it needs even to load the skill, and the only fixes are an allow rule in `settings.json` or `--dangerously-skip-permissions`, neither applied | not run (same) |
+
+None of the runs changed a file, installed anything, or touched a steering file.
+Recurring `retro` findings were genuinely present in the transcript (a flaky temp-directory
+lookup by `mtime`, a pin test printing `PASS (0 checks)`, a repeated pin-bump recipe).
+
+**Applicability.** Windows (native): installed and smoke-tested above for three of four
+agents. WSL, Linux, macOS and devcontainers: the shell library is executed by the contract
+tests on Linux CI (install lists, verification pass, pruning); no real-agent smoke test was
+run there. The Windows installer and updater twins are held to the same lists by the
+contract and exercise the same helper library (`ps-skills.ps1`) under `pwsh`; the full
+Windows install path was not re-run end to end. Untested combinations: agy on any OS,
+every agent on macOS, and any agent inside a devcontainer.
 
 ## GStack — do not wire in
 

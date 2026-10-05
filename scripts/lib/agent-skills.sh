@@ -220,10 +220,14 @@ skills_source_state() {
     printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/skills-sources"
 }
 
+# Every source key a run checked (skills_up_to_date appends); skills_prune_state keeps those.
+SKILLS_SEEN_KEYS=()
+
 skills_up_to_date() {
     local repo="$1"; shift
     local skill recorded
     SKILLS_PENDING_KEY="$repo|$*|${AGENTS[*]}"
+    SKILLS_SEEN_KEYS+=("$SKILLS_PENDING_KEY")
     SKILLS_PENDING_HEAD="$(net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1)" || SKILLS_PENDING_HEAD=""
     [ "${DOT_SKILLS_FORCE:-}" != 1 ] || return 1
     for skill in "$@"; do
@@ -232,6 +236,31 @@ skills_up_to_date() {
     [ -n "$SKILLS_PENDING_HEAD" ] || return 1
     recorded="$(awk -F'\t' -v k="$SKILLS_PENDING_KEY" '$1 == k { print $2 }' "$(skills_source_state)" 2>/dev/null || true)"
     [ "$recorded" = "$SKILLS_PENDING_HEAD" ]
+}
+
+# skills_prune_state - drop state lines this run superseded. A source key is
+# repo|skills|agents, so changing a selection (a skill added or retired) leaves the old key
+# behind for good. For every repo this run checked, keep only the keys it checked; lines for
+# repos it did not touch are never removed. Best effort: the state is only a cache, and a
+# wrongly dropped line costs one reinstall.
+skills_prune_state() {
+    local state tmp seen
+    [ "${#SKILLS_SEEN_KEYS[@]}" -gt 0 ] || return 0
+    state="$(skills_source_state)"
+    [ -f "$state" ] || return 0
+    seen="$(mktemp 2>/dev/null)" || return 0
+    printf '%s\n' "${SKILLS_SEEN_KEYS[@]}" >"$seen"
+    tmp="$state.tmp.$$"
+    if awk -F'\t' -v seenfile="$seen" '
+        BEGIN { while ((getline k < seenfile) > 0) { keys[k] = 1; split(k, p, "|"); repos[p[1]] = 1 } }
+        { split($1, q, "|"); if (!(q[1] in repos) || ($1 in keys)) print }
+    ' "$state" >"$tmp" 2>/dev/null; then
+        mv "$tmp" "$state" 2>/dev/null || rm -f "$tmp"
+    else
+        rm -f "$tmp"
+    fi
+    rm -f "$seen"
+    return 0
 }
 
 # skills_record_source - after a successful add: store the HEAD that
@@ -255,22 +284,23 @@ skills_add_all() {
     # uses it owns the definition (it used to sit in each consumer and drift).
     local -a SK=(npx --yes --loglevel=error skills@latest)
 
-    # Matt Pocock's engineering/productivity skills - 10 installed as-is.
+    # Matt Pocock's engineering/productivity skills - 12 installed as-is (pr and retro added
+    # 2026-10-05, #269; the count below is the array length, never a literal).
     # teach + writing-for-agents live under skills/productivity/, the rest under
     # skills/engineering/; the CLI resolves by skill name, not path (grilling and
     # handoff are already productivity/ skills that resolve fine here).
     local -a mp_skills=(codebase-design domain-modeling grill-with-docs improve-codebase-architecture
-        prototype research grilling handoff teach writing-for-agents)
+        prototype research grilling handoff teach writing-for-agents pr retro)
     if skills_up_to_date mattpocock/skills "${mp_skills[@]}"; then
         info "Matt Pocock's skills: up to date"
-        record_cli_result installed 10
+        record_cli_result installed "${#mp_skills[@]}"
     elif info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..." && net_timeout 300 "${SK[@]}" add mattpocock/skills \
         -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 10
+        record_cli_result installed "${#mp_skills[@]}"
         skills_record_source
     else
-        record_cli_result failed 10
+        record_cli_result failed "${#mp_skills[@]}"
         warn "Matt Pocock skills install failed or timed out - continuing"
     fi
 
@@ -412,6 +442,8 @@ skills_add_all() {
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
     #  writing-for-agents, which is already in the batch above — the old name
     #  failed silently on every run.)
+
+    skills_prune_state
 }
 
 #-------------------------------------------------------------------------------
