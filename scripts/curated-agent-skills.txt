@@ -13,6 +13,8 @@ grilling
 handoff
 teach
 writing-for-agents
+pr
+retro
 mp-code-review
 frontend-design
 find-skills

@@ -90,31 +90,51 @@ run_all() {
 }
 
 export FAKE_HEAD=aaaaaaa
-[ "$(run_all)" = 'adds=8 installed=18' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=20' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
 # one line per source: an installing run says "Installing ..." (7 groups; mp-code-review's
 # clone-and-add is silent) and never "up to date"; a skipped one says "<name>: up to date" only.
 [ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
 if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
 
-[ "$(run_all)" = 'adds=0 installed=18' ] || fail "b: unchanged head must install nothing and still report 18 (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=20' ] || fail "b: unchanged head must install nothing and still report 20 (got $(run_all))"
 [ "$(grep -c ': up to date' "$tmp/last-run.txt" || true)" = 8 ] || fail "b: every source must say '<name>: up to date' exactly once (got: $(grep -c ': up to date' "$tmp/last-run.txt" || true))"
 if grep -q 'Installing ' "$tmp/last-run.txt"; then fail "b: a skipped source must not print 'Installing ...' first (the duplicate-message bug)"; else pass; fi
 
 FAKE_HEAD=bbbbbbb
-[ "$(run_all)" = 'adds=8 installed=18' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=20' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
 
 rm -rf "$home/.claude/skills/code-search"
-[ "$(run_all)" = 'adds=1 installed=18' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
-[ "$(run_all)" = 'adds=0 installed=18' ] || fail "d: and be quiet again afterwards"
+[ "$(run_all)" = 'adds=1 installed=20' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=20' ] || fail "d: and be quiet again afterwards"
 
 rm -rf "$home/.claude/skills/mp-code-review"
-[ "$(run_all)" = 'adds=1 installed=18' ] || fail "i: a missing mp-code-review must reinstall only it (got $(run_all))"
+[ "$(run_all)" = 'adds=1 installed=20' ] || fail "i: a missing mp-code-review must reinstall only it (got $(run_all))"
 
 DOT_SKILLS_FORCE=1 run_all | grep -q '^adds=8 ' || fail "f: DOT_SKILLS_FORCE=1 must install everything"
 
 AGENTS_OVERRIDE='claude-code opencode'
 run_all | grep -q '^adds=8 ' || fail "h: a changed agent list must reinstall everything"
 unset AGENTS_OVERRIDE
+
+# j. a changed selection supersedes its old state line (pr and retro joined the Matt batch):
+#    only the batch reinstalls, and the superseded key is pruned; lines for repos this run
+#    never touched survive; a second run is quiet and prunes nothing more.
+home="$tmp/home-prune"
+FAKE_HEAD=ddddddd
+run_all >/dev/null
+state="$home/.local/state/dotfiles/skills-sources"
+[ -f "$state" ] || fail "j: the first run must record state"
+good_lines="$(wc -l <"$state" | tr -d ' ')"
+printf 'mattpocock/skills|codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents|claude-code opencode codex\told\n' >>"$state"
+printf 'other/repo|x|claude-code opencode codex\tzzz\n' >>"$state"
+rm -rf "$home/.claude/skills/pr" "$home/.agents/skills/pr" "$home/.claude/skills/retro" "$home/.agents/skills/retro"
+[ "$(run_all)" = 'adds=1 installed=20' ] || fail "j: missing pr/retro must reinstall only the Matt batch (got $(run_all))"
+if grep -Fq $'writing-for-agents|claude-code opencode codex\told' "$state"; then fail "j: the superseded Matt key must be pruned"; else pass; fi
+grep -Fq $'other/repo|x|claude-code opencode codex\tzzz' "$state" || fail "j: a repo this run never checked must keep its line"
+[ "$(wc -l <"$state" | tr -d ' ')" = "$((good_lines + 1))" ] || fail "j: expected the $good_lines current lines plus the untouched other/repo one (got $(wc -l <"$state" | tr -d ' '))"
+before="$(cat "$state")"
+[ "$(run_all)" = 'adds=0 installed=20' ] || fail "j: and be quiet again afterwards"
+[ "$(cat "$state")" = "$before" ] || fail "j: a quiet run must not rewrite the state"
 
 # e. unreachable head: installs every run and records nothing
 home="$tmp/home-offline"
@@ -126,7 +146,7 @@ run_all | grep -q '^adds=8 ' || fail "e: unreachable head must keep installing (
 home="$tmp/home-failing"
 FAKE_HEAD=ccccccc
 FAKE_NPX_FAIL=1 run_all >/dev/null
-[ "$(run_all)" = 'adds=8 installed=18' ] || fail "g: failed adds must not be recorded (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=20' ] || fail "g: failed adds must not be recorded (got $(run_all))"
 
 # --- the PowerShell twin (scripts/lib/ps-skills.ps1), same scenarios, run under pwsh ------
 if command -v pwsh >/dev/null 2>&1; then
@@ -165,6 +185,20 @@ $script:head = ''; Step 'offline1'; Step 'offline2'
 $script:head = 'bbb'; Step 'back'
 $script:head = 'ccc'; $script:ok = $false; Step 'failed'; $script:ok = $true; Step 'afterfail'
 Step 'agents' @('claude-code', 'opencode')
+# a changed selection supersedes its old line; other repos survive; pruning is idempotent
+$script:SkillsSeenKeys = @()
+$script:head = 'ddd'
+$state = Get-SkillsSourceStatePath
+Add-Content -LiteralPath $state -Value "z/z|q|claude-code`t1"
+Add-Content -LiteralPath $state -Value ("o/r|a b|" + ($agents -join ' ') + "`told")
+Invoke-SkillsSource -Label 'y' -Repo 'o/r' -Skills 'a', 'b', 'c' -Agents $agents -Install { Add-FakeSkill 'a'; Add-FakeSkill 'b'; Add-FakeSkill 'c'; $true } | Out-Null
+Invoke-SkillsStatePrune
+$lines = @(Get-Content -LiteralPath $state)
+Write-Output ("prune-old=" + [bool]($lines | Where-Object { $_ -clike 'o/r|a b|*' }))
+Write-Output ("prune-new=" + [bool]($lines | Where-Object { $_ -clike 'o/r|a b c|*' }))
+Write-Output ("prune-other=" + [bool]($lines | Where-Object { $_ -clike 'z/z|q|*' }))
+Invoke-SkillsStatePrune
+Write-Output ("prune-twice=" + (@(Get-Content -LiteralPath $state).Count -eq $lines.Count))
 Write-Output ("state=" + (Test-Path -LiteralPath (Get-SkillsSourceStatePath)))
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" -UserDir "$(winpath "$tmp/ps-home")" 2>&1 | tr -d '\r')"
@@ -180,6 +214,10 @@ PSEOF
     expect 'failed=1'
     expect 'afterfail=1'
     expect 'agents=1'
+    expect 'prune-old=False'
+    expect 'prune-new=True'
+    expect 'prune-other=True'
+    expect 'prune-twice=True'
     expect 'state=True'
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'

@@ -25,6 +25,7 @@
 # them (tests/ps_script_scope_vars_contract.sh holds the class).
 $script:SkillsPendingKey = ''
 $script:SkillsPendingHead = ''
+$script:SkillsSeenKeys = @()
 
 # USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
 function Get-SkillsHome {
@@ -65,6 +66,7 @@ function Test-SkillsUpToDate {
     param([string]$Repo, [string[]]$Skills, [string[]]$Agents)
 
     $script:SkillsPendingKey = "$Repo|$($Skills -join ' ')|$($Agents -join ' ')"
+    $script:SkillsSeenKeys += $script:SkillsPendingKey
     $script:SkillsPendingHead = Get-SkillsRemoteHead -Repo $Repo
     if ($env:DOT_SKILLS_FORCE -eq '1') { return $false }
     foreach ($skill in $Skills) {
@@ -98,6 +100,26 @@ function Save-SkillsSource {
         [IO.File]::WriteAllLines($state, [string[]]$kept, (New-Object System.Text.UTF8Encoding($false)))
     }
     catch { Write-Verbose "skills state not saved: $($_.Exception.Message)" }
+}
+
+# Drop state lines this run superseded - twin of skills_prune_state in agent-skills.sh. A
+# source key is repo|skills|agents, so changing a selection (a skill added or retired)
+# leaves the old key behind for good. For every repo this run checked, keep only the keys it
+# checked; lines for repos it did not touch are never removed. Best effort: the state is
+# only a cache, and a wrongly dropped line costs one reinstall.
+function Invoke-SkillsStatePrune {
+    if ($script:SkillsSeenKeys.Count -eq 0) { return }
+    try {
+        $state = Get-SkillsSourceStatePath
+        if (-not (Test-Path -LiteralPath $state -PathType Leaf)) { return }
+        $repos = @($script:SkillsSeenKeys | ForEach-Object { ($_ -split '\|')[0] })
+        $kept = @(Get-Content -LiteralPath $state | Where-Object {
+                $key = ($_ -split "`t")[0]
+                ($repos -cnotcontains ($key -split '\|')[0]) -or ($script:SkillsSeenKeys -ccontains $key)
+            })
+        [IO.File]::WriteAllLines($state, [string[]]$kept, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    catch { Write-Verbose "skills state not pruned: $($_.Exception.Message)" }
 }
 
 # Install one source unless it is up to date. $Install returns $true on success; only
