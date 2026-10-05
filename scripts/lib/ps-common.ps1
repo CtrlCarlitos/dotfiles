@@ -247,6 +247,39 @@ function Test-LiveProcess {
     return [bool](@(Get-LiveAgentProcess -Name $Names).Count -gt 0)
 }
 
+# Codex's shared app-server daemon keeps running the release it started with, so after a
+# Codex CLI upgrade it can stay several versions behind until something restarts it. It is
+# not a session (see above) and restarts on demand, so `dot upgrade` stops it before
+# replacing the CLI. Only the daemon's own processes are matched, never a CLI session.
+function Get-CodexDaemonProcess {
+    foreach ($process in @(Get-Process codex -ErrorAction SilentlyContinue)) {
+        $path = $null
+        try { $path = $process.Path } catch { $path = $null }
+        if ($path -and $path -match $script:NonSessionPathPattern['codex'][0]) { $process }
+    }
+}
+
+# Returns the number of daemon processes it stopped (0 when none was running).
+function Stop-CodexDaemon {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([int]$TimeoutSeconds = 20)
+    $running = @(Get-CodexDaemonProcess)
+    if ($running.Count -eq 0) { return 0 }
+    if (-not $PSCmdlet.ShouldProcess('Codex app-server daemon', 'Stop')) { return 0 }
+    $codex = Get-Command codex -ErrorAction SilentlyContinue
+    if ($codex) {
+        try {
+            $proc = Start-Process -FilePath $codex.Source -ArgumentList 'app-server', 'daemon', 'stop' -WindowStyle Hidden -PassThru -ErrorAction Stop
+            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) { $proc.Kill() }
+        } catch { Write-Verbose "codex app-server daemon stop failed: $($_.Exception.Message)" }
+    }
+    # The polite stop did not take (or the CLI is too old to have it): the daemon is safe to end.
+    foreach ($left in @(Get-CodexDaemonProcess)) {
+        try { Stop-Process -Id $left.Id -Force -ErrorAction Stop } catch { Write-Verbose "daemon pid $($left.Id): $($_.Exception.Message)" }
+    }
+    return $running.Count
+}
+
 # --- Offering to stop live sessions (dot upgrade) ----------------------------------------
 # Deferring is the safe default, but it leaves the tool un-upgraded until the operator
 # closes things by hand and re-runs. On an interactive console `dot upgrade` instead lists

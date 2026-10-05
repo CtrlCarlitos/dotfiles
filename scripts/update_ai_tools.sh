@@ -227,23 +227,22 @@ fi
 # 2. Claude Code (Native)
 if command -v claude &>/dev/null; then
     echo "🧠 Updating Claude Code..."
-    # Try built-in update first (if it exists/works), otherwise reinstall.
-    # Same installer URL as the installer template (the old linux-only
-    # download path was wrong on macOS). Fetch-then-run, never piped: a
-    # piped `curl | bash` exits 0 on a failed fetch (empty stdin) and would
-    # both skip the update silently and - unguarded - abort this set -e
-    # script before Playwright/agent-browser/Serena/Graft update (#114;
-    # this script promises warn-and-continue).
-    if ! claude update &>/dev/null; then
-        echo "   Running installer to update..."
-        cl_inst="$(mktemp)"
-        if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
-            bash "$cl_inst" || echo "   Claude Code installer failed - continuing"
-        else
-            echo "   Claude Code installer download failed - continuing"
-        fi
-        rm -f "$cl_inst"
+    # Deliberately NOT `claude update` (same as the Windows twin): dot upgrade is meant to
+    # run with every agent and harness closed (graft, codex and the others cannot be
+    # replaced while a session runs, and Claude Code should not be replaced under one
+    # either), and with nothing running the installer is the simple, predictable path.
+    # Same installer URL as the installer template. Fetch-then-run, never piped: a piped
+    # `curl | bash` exits 0 on a failed fetch (empty stdin) and would both skip the update
+    # silently and - unguarded - abort this set -e script before
+    # Playwright/agent-browser/Serena/Graft update (#114; this script promises
+    # warn-and-continue).
+    cl_inst="$(mktemp)"
+    if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
+        bash "$cl_inst" || echo "   Claude Code installer failed - continuing"
+    else
+        echo "   Claude Code installer download failed - continuing"
     fi
+    rm -f "$cl_inst"
 
     # Superpowers skills plugin
     echo "✨ Updating Superpowers (Claude Code)..."

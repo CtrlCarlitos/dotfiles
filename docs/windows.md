@@ -76,7 +76,7 @@ What the AI-tools step does on Windows:
 | Codex (npm package) | skipped when `npm ls -g` already matches the registry's latest (`codex is current (...)`); an unreachable registry counts as "not current" |
 | Graft | skipped when `graft version` reports the installed version equals the latest published one. Otherwise installed with `npm install -g @nanonets/graft@latest` (with the installer's allow-scripts list), **not** `graft upgrade`, which fails on Windows with `spawnSync npm ENOENT`. Afterwards `graft --version` must start, and graft's Codex hook paths in `~\.codex\hooks.json` are normalized to forward slashes |
 | OpenCode | `choco upgrade opencode`; a legacy npm-global `opencode-ai` shim is removed |
-| Claude Code | the native installer is re-run (URL from `versions.claude_install_ps1`); deliberately **not** `claude update`, since `dot upgrade` is meant to run with every agent closed. Unix tries `claude update` first |
+| Claude Code | the native installer is re-run (URL from `versions.claude_install_ps1`); deliberately **not** `claude update`, since `dot upgrade` is meant to run with every agent closed. Linux, macOS and WSL do the same |
 | Skills | per-source: skipped when every skill is present and upstream HEAD equals the commit recorded in `%USERPROFILE%\.local\state\dotfiles\skills-sources`; `DOT_SKILLS_FORCE=1` forces a reinstall. See [Skills install strategy](skills-install-strategy.md) |
 
 What counts as a live session is decided by process name **and** executable path
@@ -86,8 +86,11 @@ Codex's shared app-server daemon (it runs its own copy under
 Claude Desktop (under `AnthropicClaude\`, not Claude Code) do not defer anything. A
 process whose path cannot be read (an elevated process seen from a normal shell) still
 counts. The Unix twin applies the Codex-daemon rule only (it has no Claude Desktop path rule).
-If Codex still reports as live, `codex app-server daemon stop` closes the daemon; it restarts
-on demand, and nothing in the dotfiles starts it.
+The daemon keeps running the release it started with, so it would stay behind the upgraded
+CLI. With no Codex session left, `dot upgrade` therefore stops it (`codex app-server daemon
+stop`, falling back to ending the daemon's own process) before the sweep; it restarts on
+demand, on the new version, and nothing in the dotfiles starts it. A live Codex session
+keeps the daemon, and Codex, deferred.
 
 #### When to run it: with every agent session closed
 
