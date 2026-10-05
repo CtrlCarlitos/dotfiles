@@ -56,7 +56,7 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     if ($chocoArguments -contains '--except=claude') {
         Write-Host "  claude (Desktop) left out of this sweep - a claude.exe is running, and the package's installer force-kills every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
     }
-    choco @chocoArguments
+    $null = Invoke-ChocoUpgradeAll -Arguments $chocoArguments   # it prints its own warning on a non-zero exit
 } else {
     Write-Host "  choco not found - skipping system packages." -ForegroundColor Yellow
 }
