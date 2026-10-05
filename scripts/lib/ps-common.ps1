@@ -413,3 +413,26 @@ function Get-ChocoUpgradeArgument {
     }
     return $chocoArguments
 }
+
+# Claude Code: `claude update` first (in place; a no-op when already current - the unix
+# updater does the same), and the full installer only when that fails. Windows used to
+# reinstall with the installer on every dot upgrade.
+function Invoke-ClaudeCodeUpdate {
+    param([string]$InstallerUrl)
+
+    $previous = $ErrorActionPreference
+    # PS 5.1 promotes native stderr to a terminating error under Stop; the exit code is the signal.
+    $ErrorActionPreference = 'Continue'
+    try {
+        claude update *> $null
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    catch { Write-Verbose "claude update failed: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previous }
+    if (-not $InstallerUrl) {
+        Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall" -ForegroundColor Red
+        return
+    }
+    Write-Host "  claude update did not succeed - running the installer..." -ForegroundColor Yellow
+    & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $InstallerUrl | iex"
+}

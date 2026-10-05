@@ -84,15 +84,21 @@ run_all() {
         installed_total=0
         record_cli_result() { [ "$1" != installed ] || installed_total=$((installed_total + $2)); }
         if [ -z "${AGENTS_OVERRIDE:-}" ]; then AGENTS=(claude-code opencode codex); else read -ra AGENTS <<<"$AGENTS_OVERRIDE"; fi
-        skills_add_all >/dev/null 2>&1
+        skills_add_all >"$tmp/last-run.txt" 2>&1
         printf 'adds=%s installed=%s\n' "$(grep -c '^ADD ' "$tmp/npx.log" || true)" "$installed_total"
     )
 }
 
 export FAKE_HEAD=aaaaaaa
 [ "$(run_all)" = 'adds=8 installed=18' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
+# one line per source: an installing run says "Installing ..." (7 groups; mp-code-review's
+# clone-and-add is silent) and never "up to date"; a skipped one says "<name>: up to date" only.
+[ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
+if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
 
 [ "$(run_all)" = 'adds=0 installed=18' ] || fail "b: unchanged head must install nothing and still report 18 (got $(run_all))"
+[ "$(grep -c ': up to date' "$tmp/last-run.txt" || true)" = 8 ] || fail "b: every source must say '<name>: up to date' exactly once (got: $(grep -c ': up to date' "$tmp/last-run.txt" || true))"
+if grep -q 'Installing ' "$tmp/last-run.txt"; then fail "b: a skipped source must not print 'Installing ...' first (the duplicate-message bug)"; else pass; fi
 
 FAKE_HEAD=bbbbbbb
 [ "$(run_all)" = 'adds=8 installed=18' ] || fail "c: a moved head must reinstall every group (got $(run_all))"

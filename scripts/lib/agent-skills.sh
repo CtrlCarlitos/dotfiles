@@ -112,8 +112,8 @@ sha256_cmd() {
 #-------------------------------------------------------------------------------
 fetch_and_verify() {
     local name="$1" asset_url="$2" sums_url="$3" asset_name="$4" dest="$5"
-    if ! net_timeout 60 curl -fLo "$dest/$asset_name" "$asset_url" ||
-        ! net_timeout 60 curl -fLo "$dest/SHA256SUMS" "$sums_url"; then
+    if ! net_timeout 60 curl -fsSL -o "$dest/$asset_name" "$asset_url" ||
+        ! net_timeout 60 curl -fsSL -o "$dest/SHA256SUMS" "$sums_url"; then
         warn "$name: installer download failed or timed out - skipping"
         return 1
     fi
@@ -145,6 +145,23 @@ fetch_and_verify() {
 # blocks the whole run; confirmed live 2026-08-30). net_timeout stays as the
 # wall-clock backstop.
 #-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# agent_browser_doctor <agent-browser binary> - run `doctor --json` (60 s cap) and print
+# a one-line summary plus one line per warn/fail check, instead of the ~3 KB JSON blob it
+# used to dump on every run. Output that is not the expected JSON (or no jq) is printed
+# raw, never dropped. Returns doctor's own exit status.
+#-------------------------------------------------------------------------------
+agent_browser_doctor() {
+    local out rc=0
+    out="$(net_timeout 60 "$1" doctor --json 2>&1)" || rc=$?
+    if command -v jq &>/dev/null && printf '%s' "$out" | jq -e '.summary' >/dev/null 2>&1; then
+        printf '%s' "$out" | jq -b -r '"agent-browser doctor: \(.summary.pass // 0) pass, \(.summary.warn // 0) warn, \(.summary.fail // 0) fail", (.checks[]? | select(.status == "warn" or .status == "fail") | "  \(.status): \(.message)" + (if .fix then " (fix: \(.fix))" else "" end))'
+    else
+        printf '%s\n' "$out"
+    fi
+    return "$rc"
+}
+
 #-------------------------------------------------------------------------------
 # skills_up_to_date <owner/repo> <skill>... - 0 when this source need not be
 # fetched again, 1 when it must be (or when anything is unknown).
@@ -244,11 +261,10 @@ skills_add_all() {
     # handoff are already productivity/ skills that resolve fine here).
     local -a mp_skills=(codebase-design domain-modeling grill-with-docs improve-codebase-architecture
         prototype research grilling handoff teach writing-for-agents)
-    info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..."
     if skills_up_to_date mattpocock/skills "${mp_skills[@]}"; then
-        info "Matt Pocock's skills are up to date"
+        info "Matt Pocock's skills: up to date"
         record_cli_result installed 10
-    elif net_timeout 300 "${SK[@]}" add mattpocock/skills \
+    elif info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..." && net_timeout 300 "${SK[@]}" add mattpocock/skills \
         -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 10
@@ -263,7 +279,7 @@ skills_add_all() {
     # that local directory. "mp-" keeps it distinct from this repo's own
     # /code-review command and Superpowers' receiving-code-review skill.
     if skills_up_to_date mattpocock/skills mp-code-review; then
-        info "mp-code-review is up to date"
+        info "mp-code-review: up to date"
         record_cli_result installed 1
     else
         local sk_tmp; sk_tmp="$(mktemp -d)"
@@ -305,11 +321,10 @@ skills_add_all() {
     fi
 
     # Anthropic's frontend-design skill - distinctive visual direction for new UI.
-    info "Installing Anthropic's frontend-design skill..."
     if skills_up_to_date anthropics/skills frontend-design; then
-        info "frontend-design up to date"
+        info "frontend-design: up to date"
         record_cli_result installed 1
-    elif net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing Anthropic's frontend-design skill..." && net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -319,11 +334,10 @@ skills_add_all() {
 
     # find-skills (vercel-labs/skills, 3.4M installs on skills.sh) - lets an
     # agent search and install skills from skills.sh mid-session.
-    info "Installing find-skills skill..."
     if skills_up_to_date vercel-labs/skills find-skills; then
-        info "find-skills up to date"
+        info "find-skills: up to date"
         record_cli_result installed 1
-    elif net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing find-skills skill..." && net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -333,11 +347,10 @@ skills_add_all() {
 
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - browser
     # automation: navigate, click, fill, scrape, screenshot.
-    info "Installing agent-browser skill..."
     if skills_up_to_date vercel-labs/agent-browser agent-browser; then
-        info "agent-browser up to date"
+        info "agent-browser: up to date"
         record_cli_result installed 1
-    elif net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing agent-browser skill..." && net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -348,11 +361,10 @@ skills_add_all() {
     # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands.
     # Upstream was: (anthropics/skills, 380K installs) - Anthropic's
     # skill-authoring lifecycle tool with benchmarks and eval viewer.
-    info "Installing Anthropic's skill-creator skill..."
     if skills_up_to_date CtrlCarlitos/skills skill-creator; then
-        info "skill-creator up to date"
+        info "skill-creator: up to date"
         record_cli_result installed 1
-    elif net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing Anthropic's skill-creator skill..." && net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -368,11 +380,10 @@ skills_add_all() {
     # skills, GPT/Stitch variants and v1 were left out (see
     # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
     # purpose; drop one if they double-trigger.
-    info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..."
     if skills_up_to_date Leonxlnx/taste-skill design-taste-frontend redesign-existing-projects; then
-        info "design-taste-frontend redesign-existing-projects up to date"
+        info "taste skills: up to date"
         record_cli_result installed 2
-    elif net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..." && net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 2
         skills_record_source
     else
@@ -387,11 +398,10 @@ skills_add_all() {
     # one empty result. Added 2026-09-24 after graft's "graph first for ANY
     # task" block cost every session in this repo two empty queries (the graph
     # covers one Lua file here) - docs/skills-install-strategy.md.
-    info "Installing code-search skill..."
     if skills_up_to_date CtrlCarlitos/skills code-search; then
-        info "code-search up to date"
+        info "code-search: up to date"
         record_cli_result installed 1
-    elif net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing code-search skill..." && net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else

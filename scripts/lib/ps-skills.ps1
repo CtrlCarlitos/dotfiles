@@ -106,10 +106,13 @@ function Invoke-SkillsSource {
     param([string]$Label, [string]$Repo, [string[]]$Skills, [string[]]$Agents, [scriptblock]$Install)
 
     if (Test-SkillsUpToDate -Repo $Repo -Skills $Skills -Agents $Agents) {
-        Write-Host "  $Label is up to date"
+        Write-Host "  ${Label}: up to date"
         return
     }
-    if ((& $Install) -eq $true) { Save-SkillsSource }
+    if ((& $Install) -eq $true) {
+        Save-SkillsSource
+        Write-Host "  ${Label}: installed"
+    }
 }
 
 # Remove the skills listed in scripts/retired-agent-skills.txt (`<skill> <source>` per line)
@@ -146,5 +149,25 @@ function Invoke-RetiredSkillsCleanup {
     }
     if ($changed) {
         [IO.File]::WriteAllText($lockPath, ($lock | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+
+# Prints a one-line summary plus one line per warn/fail check of `agent-browser doctor
+# --json` (the lines it printed) instead of the ~3 KB JSON blob it used to dump on every
+# run. Output that is not the expected JSON is printed raw, never dropped.
+function Write-AgentBrowserDoctorSummary {
+    param([string[]]$Output)
+
+    $text = (@($Output) -join "`n").Trim()
+    if (-not $text) { return }
+    try { $doctor = $text | ConvertFrom-Json -ErrorAction Stop } catch { Write-Host $text; return }
+    if ($null -eq $doctor -or $null -eq $doctor.PSObject.Properties['summary']) { Write-Host $text; return }
+    Write-Host ("  agent-browser doctor: {0} pass, {1} warn, {2} fail" -f $doctor.summary.pass, $doctor.summary.warn, $doctor.summary.fail)
+    if ($null -eq $doctor.PSObject.Properties['checks']) { return }
+    foreach ($check in @($doctor.checks)) {
+        if ($check.status -in 'warn', 'fail') {
+            $fix = if ($check.PSObject.Properties['fix'] -and $check.fix) { " (fix: $($check.fix))" } else { '' }
+            Write-Host ("    {0}: {1}{2}" -f $check.status, $check.message, $fix)
+        }
     }
 }
