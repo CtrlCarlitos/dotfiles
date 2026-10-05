@@ -258,6 +258,7 @@ chezmoi doctor        # chezmoi's own health check
 | Variable | Set by / for | What it does |
 |---|---|---|
 | `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
+| `DOTUPGRADE_NO_PROMPT` | `dot upgrade` | Set to `1` to skip the interactive offer to stop blocking agent sessions (the default on a terminal); the upgrade then only defers and reports, as it does when not run from a terminal |
 | `DOTFILES_DOCTOR_IN_APPLY` | `run_after_dotfiles-doctor.*` | Runs `dot doctor` mid-apply in a restricted, non-fatal mode (it fires on every `chezmoi apply`) |
 | `CHEZMOI_CONFIG_DIR` | `dotfiles-doctor.*` | Where the doctor looks for `chezmoi.toml` (default `~/.config/chezmoi`) |
 | `CHEZMOI_SOURCE_DIR` | `run_after_dotfiles-doctor.*` | Where the apply-time doctor finds the source repo (default `~/.local/share/chezmoi`) |

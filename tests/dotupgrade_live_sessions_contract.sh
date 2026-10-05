@@ -43,7 +43,10 @@ done <"$PROC_TABLE"
 EOF
 chmod +x "$tmp/bin/pgrep" "$tmp/bin/ps"
 
-awk '/^live\(\) \{/{f=1; print; if ($0 ~ /\}$/) exit; next} f{print} f && /^\}$/{exit}' "$repo_root/scripts/dotupgrade.sh" >"$tmp/live.sh"
+extract_fn() { # $1 = function name, $2 = file; handles one-line and multi-line definitions
+    awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; if ($0 ~ /\}$/ && $0 !~ /\{$/) exit; next} f{print} f && /^\}$/{exit}' "$2"
+}
+{ extract_fn live_pids "$repo_root/scripts/dotupgrade.sh"; extract_fn live "$repo_root/scripts/dotupgrade.sh"; } >"$tmp/live.sh"
 [ -s "$tmp/live.sh" ] || fail "live() not found in scripts/dotupgrade.sh"
 
 sh_live() { # $1 = process table contents, rest = names; prints yes/no

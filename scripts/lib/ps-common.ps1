@@ -247,6 +247,86 @@ function Test-LiveProcess {
     return [bool](@(Get-LiveAgentProcess -Name $Names).Count -gt 0)
 }
 
+# --- Offering to stop live sessions (dot upgrade) ----------------------------------------
+# Deferring is the safe default, but it leaves the tool un-upgraded until the operator
+# closes things by hand and re-runs. On an interactive console `dot upgrade` instead lists
+# what is blocking and asks. The invoker's own ancestry (this shell, the terminal, and the
+# agent session that launched `dot upgrade`) is never offered: stopping it would end the
+# very command that is asking. Those processes still defer their tools.
+function Get-AncestorProcessId {
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    $id = $PID
+    while ($id -gt 0 -and $ids.Add($id)) {
+        $row = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+        if (-not $row) { break }
+        $id = [int]$row.ParentProcessId
+    }
+    return @($ids)
+}
+
+function Get-StoppableAgentProcess {
+    param([string[]]$Name, [int[]]$ExcludeId = @())
+    return @(Get-LiveAgentProcess -Name $Name | Where-Object { $ExcludeId -notcontains $_.Id })
+}
+
+function Test-InteractiveConsole {
+    return ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected)
+}
+
+# Ask the window to close, then take the whole process tree down (Serena leaves language
+# server children behind otherwise). Console agents have no window, so they go straight to
+# the tree kill.
+function Stop-AgentProcess {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)]$Process, [int]$GraceSeconds = 5)
+    if (-not $PSCmdlet.ShouldProcess("$($Process.ProcessName) (pid $($Process.Id))", 'Stop process tree')) { return $false }
+    $closing = $false
+    try { $closing = [bool]$Process.CloseMainWindow() } catch { $closing = $false }
+    if ($closing -and $Process.WaitForExit($GraceSeconds * 1000)) { return $true }
+    & taskkill /PID $Process.Id /T /F *> $null
+    return $true
+}
+
+function Format-LiveProcess {
+    param($Process)
+    $started = ''
+    try { $started = ", started $($Process.StartTime.ToString('HH:mm'))" } catch { $started = '' }
+    return "$($Process.ProcessName) (pid $($Process.Id)$started)"
+}
+
+# Returns the processes it stopped. Nothing is stopped unless the operator says so;
+# DOTUPGRADE_NO_PROMPT=1 and a non-interactive console both keep today's defer-and-report.
+function Invoke-LiveSessionStop {
+    param([string[]]$Name, [int[]]$ExcludeId = @())
+    if ($env:DOTUPGRADE_NO_PROMPT -eq '1') { return @() }
+    $procs = @(Get-StoppableAgentProcess -Name $Name -ExcludeId $ExcludeId)
+    if ($procs.Count -eq 0) { return @() }
+    if (-not (Test-InteractiveConsole)) { return @() }
+
+    Write-Host "  These sessions block part of the upgrade:" -ForegroundColor Yellow
+    foreach ($p in $procs) { Write-Host "    $(Format-LiveProcess $p)" }
+    Write-Host "  Stopping one ends that session; unsaved context is lost unless it can be resumed." -ForegroundColor Yellow
+    $answer = (Read-Host "  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer").Trim().ToLower()
+
+    $chosen = @()
+    if ($answer -eq 'y') {
+        $chosen = $procs
+    } elseif ($answer -eq 's') {
+        foreach ($p in $procs) {
+            $each = (Read-Host "    Stop $(Format-LiveProcess $p)? [y/N]").Trim().ToLower()
+            if ($each -eq 'y') { $chosen += $p }
+        }
+    }
+    $stopped = @()
+    foreach ($p in $chosen) {
+        if (Stop-AgentProcess -Process $p) { $stopped += $p }
+    }
+    if ($stopped.Count -gt 0) {
+        Write-Host "  Stopped $($stopped.Count) process(es); re-scanning." -ForegroundColor Green
+    }
+    return $stopped
+}
+
 # --- "Is it already current?" (dot upgrade) ----------------------------------------------
 # `graft upgrade` ran every time (0.21.1 -> 0.21.1 took 41 s on WSL) and the codex
 # `npm install -g` another ~9 s. Ask first; anything unknown (empty answers, an unreachable

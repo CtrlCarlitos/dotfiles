@@ -22,6 +22,12 @@ Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
 # graft hook resolution, opencode lib-bkp, codex banner drift).
 # Test-LiveProcess / Get-LiveAgentProcess: scripts/lib/ps-common.ps1 (path-aware: Codex's
 # app-server daemon and Claude Desktop are not sessions).
+#
+# On an interactive console the operator is first offered the chance to stop the blocking
+# sessions (never this shell's own ancestry); whatever stays running still defers.
+$agentNames = @('opencode', 'claude', 'codex', 'agy', 'serena')
+$stoppedSessions = @(Invoke-LiveSessionStop -Name $agentNames -ExcludeId @(Get-AncestorProcessId))
+if ($stoppedSessions.Count -gt 0) { Start-Sleep -Seconds 1 }
 $defer = @()
 if (Test-LiveProcess @('codex'))  { $defer += 'codex' }
 if (Test-LiveProcess @('opencode','claude','codex','agy')) { $defer += 'graft' }
