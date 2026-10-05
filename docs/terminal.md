@@ -356,6 +356,14 @@ Same in Windows Terminal and the VS Code terminal:
   hands the mouse back to the terminal); a plain right-click does nothing.
   Upstream experimental flag, verified against 1.18.33 - if a future version
   renames it, right-click-to-copy silently comes back.
+- **Codex** also copies on select: `tui.copy_on_select = "always"` in
+  `~/.codex/config.toml`, forced by `dot_codex/modify_config.toml` on every machine.
+  Codex's default (`auto`) deliberately does *not* copy in Windows Terminal, Ghostty
+  1.2+, Kitty on macOS or VS Code on Windows, assuming the terminal's own
+  copy-on-select covers it. But Codex captures the mouse in its fullscreen UI, so the
+  terminal never sees the selection and only right-click copied. Restart Codex to pick
+  it up. Values: `auto` | `always` | `never`; a different value you set yourself is
+  replaced on the next apply (change it in the template, not the file).
 - **In psmux** the mouse belongs to the multiplexer, same as tmux: `y` in copy
   mode (and a mouse-drag copy) lands on the Windows clipboard via OSC 52, which
   Windows Terminal accepts. Paste with `Ctrl+V` or Shift+right-click.
