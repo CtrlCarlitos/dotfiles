@@ -36,8 +36,17 @@ done
 # Node occasionally writes non-fatal warnings to stderr. Windows PowerShell
 # turns those into terminating errors under the installer's global Stop
 # preference, so the native extension command must scope it to Continue.
-grep -Pzq 'try \{\r?\n                \$ErrorActionPreference = "Continue"\r?\n                & code --install-extension \$ext --force \*> \$null\r?\n            \} finally \{' "$ps1_installer" ||
+grep -Pzq 'try \{\r?\n                \$ErrorActionPreference = "Continue"\r?\n                & code --install-extension \$ext \*> \$null\r?\n            \} finally \{' "$ps1_installer" ||
     fail "$ps1_installer: VS Code extension install must tolerate native stderr"
+
+# `dot up` installs only MISSING extensions and never forces (--force always asked the
+# marketplace: one slow response cost minutes in a live run, and it upgraded silently).
+# One local listing decides; `dot upgrade` owns updates.
+grep -Fq -- 'code --list-extensions' "$ps1_installer" || fail "$ps1_installer: must list installed extensions once and install only the missing"
+if grep -Fq -- 'install-extension $ext --force' "$ps1_installer"; then fail "$ps1_installer: --force re-installs every extension on every run"; fi
+for f in scripts/dotupgrade.ps1 scripts/dotupgrade.sh; do
+    grep -Fq -- 'code --update-extensions' "$repo_root/$f" || fail "$f: dot upgrade must own VS Code extension updates"
+done
 
 # SSH: template renders [[data.ssh_hosts]] with the self-documenting comment.
 grep -Fq 'ssh_hosts' "$ssh_tmpl" || fail "ssh template: no ssh_hosts rendering"
