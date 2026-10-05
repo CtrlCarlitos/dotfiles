@@ -21,7 +21,7 @@ require "$common" 'function Remove-NewDesktopShortcut'
 
 # Order matters: snapshot before the first sweep, cleanup after the last.
 snapshot_line="$(grep -n 'Get-DesktopShortcut)' "$upgrade" | head -n1 | cut -d: -f1)"
-choco_line="$(grep -n '^    choco upgrade all' "$upgrade" | head -n1 | cut -d: -f1)"
+choco_line="$(grep -n '^    choco @chocoArguments' "$upgrade" | head -n1 | cut -d: -f1)"
 ai_line="$(grep -n "update_ai_tools.ps1')" "$upgrade" | head -n1 | cut -d: -f1)"
 cleanup_line="$(grep -n 'Remove-NewDesktopShortcut -Before' "$upgrade" | head -n1 | cut -d: -f1)"
 if [ -z "$snapshot_line" ] || [ -z "$choco_line" ] || [ -z "$ai_line" ] || [ -z "$cleanup_line" ]; then
