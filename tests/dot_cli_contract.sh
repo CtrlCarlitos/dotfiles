@@ -63,6 +63,17 @@ grep -Fq 'pgrep -x' "$up_sh" || fail "$up_sh: no live-session scan (pgrep)"
 grep -Fq 'brew upgrade' "$up_sh" || fail "$up_sh: no macOS sweep"
 grep -Fq 'apt-get upgrade' "$up_sh" || fail "$up_sh: no apt sweep"
 
+# `dot up` never upgrades: the installers it runs may refresh an index and install what is
+# missing, but must carry no package sweep (the Linux one ran `apt upgrade -y` until 2026-10-05,
+# upgrading the whole box on a plain `dot up`).
+for installer in run_onchange_install_packages.sh.tmpl run_onchange_install_packages.ps1.tmpl; do
+    # Commands only (a line that STARTS with the tool, optionally behind $SUDO or &): prose in
+    # an info/Write-Host message that merely names `choco upgrade all` is not a sweep.
+    if grep -Eq '^[[:space:]]*((\$SUDO|sudo)[[:space:]]+|&[[:space:]]+)?(apt|apt-get)[[:space:]]+(dist-)?upgrade|^[[:space:]]*(brew|choco|winget)(\.exe)?[[:space:]]+upgrade|^[[:space:]]*((\$SUDO|sudo)[[:space:]]+)?(dnf[[:space:]]+(up|upgrade)|pacman[[:space:]]+-Su)' "$repo_root/$installer"; then
+        fail "$installer: dot up must not run a package upgrade sweep (that is dot upgrade)"
+    fi
+done
+
 # Full sweep premise: on Windows, winget-managed apps (Build Tools, ChatGPT
 # Work/Codex msstore, Win-CodexBar) upgrade alongside choco - `winget
 # upgrade --all`, same premise as `choco upgrade all`. Linux/mac: brew and

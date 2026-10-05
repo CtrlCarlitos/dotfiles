@@ -40,6 +40,8 @@ This document outlines the tools installed by the dotfiles configuration across 
 | guardrail | opt-in flag: fetch + verify the pinned release's `install.sh`, run it with `--version <pin> --state <enabled\|disabled>` (desired state from `packages.guardrail`) | same | opt-in flag: fetch + verify the pinned release's `install.ps1`, run it with `-Version <pin> -State <enabled\|disabled>` | same as Linux | not installed (no `claude` there) | bump `guardrail.version` in `.chezmoidata.yaml` (single source of truth - templates render it, updaters read it at runtime), re-`chezmoi update` (the new tag's installer updates the binary and re-runs `guardrail setup`) |
 
 > **Note on Updates**: `dot up` never upgrades tools; `dot upgrade` is the single owner of upgrades (packages and the AI tools above) and should run with no agent or harness running. A live session defers its own tool (graft, codex, serena, opencode), and on an interactive console `dot upgrade` offers to stop live sessions first. agy self-updates.
+>
+> What `dot up` may still do on Linux and WSL: when the installer script changed it re-runs, refreshes the apt package index (`apt update`, no upgrade) and installs what is missing. It carries no `apt upgrade` sweep (removed 2026-10-05; `tests/dot_cli_contract.sh` forbids it in both installers). One apt behaviour remains: `apt install` on a package the installer lists and that is already present moves that one package to the repository's current version. Use `dot upgrade` for any deliberate sweep.
 
 > **Curated skills:** the installer refreshes the repository catalog and fans it
 > out to each native target. It verifies each `SKILL.md` before generating the
