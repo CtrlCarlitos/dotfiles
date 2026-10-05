@@ -64,30 +64,26 @@ again="$(printf '%s' "$out" | render "$kb")"
 [ "$again" = "$out" ] || fail "the keybindings merge must be idempotent (no ping-pong rewrites)"
 pass
 
-# --- the ignore rule lets exactly that one file through, only where ~/.claude exists --------
+# --- the ignore rule lets exactly that one file through of ~/.claude ------------------------
+# Not guarded on ~/.claude existing: Claude Code is installed DURING the first apply, so a
+# guard flips from ignored to managed afterwards (chezmoi verify drift, and a fresh machine
+# keeps Ctrl+Enter = send until its second `dot up`).
 render_ignore() { # $1 = fake home
-    HOME="$1" USERPROFILE="$1" chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
-        --file "$repo_root/.chezmoiignore" </dev/null
+    HOME="$1" USERPROFILE="$1" chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root"         --file "$repo_root/.chezmoiignore" </dev/null
 }
 mkdir -p "$tmp/home-with/.claude" "$tmp/home-without"
-render_ignore "$tmp/home-with" | grep -Fxq '!.claude/keybindings.json' \
-    || fail ".chezmoiignore must un-ignore .claude/keybindings.json when ~/.claude exists"
-render_ignore "$tmp/home-with" | grep -Fxq '.claude/*' \
-    || fail ".chezmoiignore must keep ignoring the rest of ~/.claude (.claude/*, not .claude/**: ** also ignores the directory itself, which makes the exception unreachable)"
-# End to end: a real apply creates the file where ~/.claude exists, and nothing where it does not.
-apply_kb() { # $1 = fake home
-    HOME="$1" USERPROFILE="$1" chezmoi --config "$tmp/chezmoi.toml" --source "$repo_root" --destination "$1" \
-        --no-tty apply --force "$1/.claude/keybindings.json" >/dev/null 2>&1 || true
-}
-apply_kb "$tmp/home-with"
-[ -f "$tmp/home-with/.claude/keybindings.json" ] \
-    && jq -e '.bindings[0].bindings["ctrl+enter"] == "chat:newline"' "$tmp/home-with/.claude/keybindings.json" >/dev/null \
-    || fail "a real chezmoi apply must create ~/.claude/keybindings.json with ctrl+enter -> chat:newline"
-apply_kb "$tmp/home-without"
-[ ! -e "$tmp/home-without/.claude" ] || fail "no ~/.claude: the apply must not create it"
-if render_ignore "$tmp/home-without" | grep -Fq '!.claude/keybindings.json'; then
-    fail "no ~/.claude means no keybindings.json: a modify_ template would create the file for a tool that is not installed"
-fi
+for h in home-with home-without; do
+    render_ignore "$tmp/$h" | grep -Fxq '!.claude/keybindings.json'         || fail ".chezmoiignore must un-ignore .claude/keybindings.json ($h)"
+    render_ignore "$tmp/$h" | grep -Fxq '.claude/*'         || fail ".chezmoiignore must keep ignoring the rest of ~/.claude (.claude/*, not .claude/**: ** also ignores the directory itself, which makes the exception unreachable) ($h)"
+done
+# End to end: a real apply creates the file with or without an existing ~/.claude, and a
+# verify right after it is clean (the CI Windows step).
+for h in home-with home-without; do
+    HOME="$tmp/$h" USERPROFILE="$tmp/$h" chezmoi --config "$tmp/chezmoi.toml" --source "$repo_root" --destination "$tmp/$h"         --no-tty apply --force "$tmp/$h/.claude" "$tmp/$h/.claude/keybindings.json" >/dev/null 2>&1 || true
+    if ! jq -e '.bindings[0].bindings["ctrl+enter"] == "chat:newline"' "$tmp/$h/.claude/keybindings.json" >/dev/null 2>&1; then
+        fail "a real chezmoi apply must create ~/.claude/keybindings.json with ctrl+enter -> chat:newline ($h)"
+    fi
+done
 pass
 
 # --- Windows Terminal: User.newline sends LF on ctrl+enter ----------------------------------

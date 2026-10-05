@@ -23,12 +23,12 @@ install.ps1
 # file under an ignored directory can never be un-ignored below.
 .claude/*
 # ...except the one file the dotfiles DO manage in ~/.claude: the keybindings merge
-# (dot_claude/modify_keybindings.json), and only where Claude Code has a config dir
-# (same guard as Codex/OpenCode below: a modify_ template run on an absent target
-# would create the file on a machine that never installed the tool).
-{{- if stat (joinPath .chezmoi.homeDir ".claude") }}
+# (dot_claude/modify_keybindings.json). Deliberately NOT guarded on ~/.claude existing,
+# unlike Codex/OpenCode below: Claude Code is part of the base install, so ~/.claude
+# appears DURING the first apply, and a guard would flip from ignored to managed
+# between that apply and the next (a fresh machine would keep Ctrl+Enter = send until
+# its second `dot up`, and `chezmoi verify` would report drift right after install).
 !.claude/keybindings.json
-{{- end }}
 
 # Git worktrees (agent isolation; source-repo only, matches .gitignore)
 .worktrees/**
