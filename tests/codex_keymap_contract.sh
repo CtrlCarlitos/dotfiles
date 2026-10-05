@@ -133,6 +133,69 @@ grep -Fq 'tui.keymap.editor.insert_newline = ["shift-enter", "ctrl-j", "ctrl-ent
     fail "dotted key: not replaced in place"
 ! grep -q '^\[tui\.keymap\.editor\]$' "$tmp/dotted.out" ||
     fail "dotted key: a duplicate table was appended anyway"
+# copy_on_select must follow the same spelling: a [tui] table here would redeclare the
+# table the dotted key already declared (invalid TOML; Codex would refuse to start).
+grep -Fqx 'tui.copy_on_select = "always"' "$tmp/dotted.out" ||
+    fail "dotted key: copy_on_select was not emitted in the dotted spelling at the root"
+! grep -q '^\[tui\]$' "$tmp/dotted.out" ||
+    fail "dotted key: a [tui] table was appended beside the dotted spelling"
+
+# 7b. tui.copy_on_select = "always". Codex's default ("auto") DECLINES to copy a mouse
+#     selection when it runs in Windows Terminal (it assumes the terminal's own
+#     copy-on-select handles it), but Codex captures the mouse, so the terminal never
+#     sees the selection: highlighting copied nothing and only right-click did. "always"
+#     copies every non-empty transcript selection on release.
+want_cos='copy_on_select = "always"'
+assert_cos_once() { # $1 = file, $2 = description
+    local n
+    n="$(grep -c '^copy_on_select = ' "$1" || true)"
+    [ "$n" = 1 ] || fail "$2: expected 1 copy_on_select line, got $n"
+    grep -Fqx -- "$want_cos" "$1" || fail "$2: copy_on_select is not \"always\""
+    n="$(grep -c '^\[tui\]$' "$1" || true)"
+    [ "$n" = 1 ] || fail "$2: expected exactly 1 [tui] table, got $n (a duplicate table is a TOML error)"
+}
+grep -Fq -- 'tui.copy_on_select' "$template" || fail "template no longer forces tui.copy_on_select"
+
+: | render_config > "$tmp/cos-empty.out"
+assert_cos_once "$tmp/cos-empty.out" "copy_on_select: empty input"
+
+# the realistic config has [tui.model_availability_nux] but no [tui] header: one is appended
+render_config < "$tmp/real.toml" > "$tmp/cos-real.out"
+assert_cos_once "$tmp/cos-real.out" "copy_on_select: config without a [tui] header"
+
+# the shape of a real machine: an existing [tui] table is extended in place, nothing lost
+cat > "$tmp/cos-tui.toml" <<'EOF'
+[tui]
+screen_reader_detection_done = true
+
+[projects.'C:\Users\me\projects\thing']
+trust_level = "trusted"
+
+[tui.keymap.editor]
+insert_newline = ["shift-enter"]
+EOF
+render_config < "$tmp/cos-tui.toml" > "$tmp/cos-tui.out"
+assert_cos_once "$tmp/cos-tui.out" "copy_on_select: existing [tui] table"
+assert_once "$tmp/cos-tui.out" "copy_on_select: existing [tui] table (keymap still forced)"
+grep -Fqx 'screen_reader_detection_done = true' "$tmp/cos-tui.out" ||
+    fail "copy_on_select: the user's own [tui] key was dropped"
+grep -Fqx "[projects.'C:\\Users\\me\\projects\\thing']" "$tmp/cos-tui.out" ||
+    fail "copy_on_select: a literal-quoted table header was rewritten"
+
+# a conflicting user value is replaced in place, never duplicated
+cat > "$tmp/cos-never.toml" <<'EOF'
+[tui]
+copy_on_select = "never"
+vim_mode_default = true
+EOF
+render_config < "$tmp/cos-never.toml" > "$tmp/cos-never.out"
+assert_cos_once "$tmp/cos-never.out" "copy_on_select: conflicting value"
+! grep -Fq '"never"' "$tmp/cos-never.out" || fail "copy_on_select: the old value survived"
+grep -Fqx 'vim_mode_default = true' "$tmp/cos-never.out" || fail "copy_on_select: an unrelated [tui] key was dropped"
+
+# idempotent: a second render of our own output changes nothing
+render_config < "$tmp/cos-tui.out" > "$tmp/cos-tui.out2"
+diff -u "$tmp/cos-tui.out" "$tmp/cos-tui.out2" >/dev/null || fail "copy_on_select: not idempotent"
 
 # 8. Every rendered case is valid TOML. This is the assertion that matters -
 #    the others describe intent, this one catches the config that won't load.

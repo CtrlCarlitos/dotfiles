@@ -17,7 +17,9 @@
   failure mode. Instead every byte Codex wrote is passed through untouched and
   exactly one key is forced.
 
-  The forced key: tui.keymap.editor.insert_newline.
+  The forced keys:
+    tui.keymap.editor.insert_newline   (below)
+    tui.copy_on_select = "always"      (see the end of this comment)
 
   Codex is the only one of the four agent CLIs with a user-configurable keymap
   (tui.keymap.{global,chat,composer,editor,pager,list,agents,approval,vim_*}),
@@ -37,12 +39,23 @@
   reports the modifier - win32-input-mode locally, the kitty keyboard protocol
   over SSH. Ctrl+J is still the habit that works everywhere; see docs/terminal.md.
 
+  copy_on_select: Codex's default ("auto") deliberately does NOT copy a mouse
+  selection when it runs in Windows Terminal (and Ghostty 1.2+, Kitty on macOS,
+  VS Code on Windows), on the assumption that the terminal's own copy-on-select
+  covers it. But Codex captures the mouse in its fullscreen UI, so the terminal
+  never sees the selection and highlighting copied nothing: only right-click did.
+  "always" copies every non-empty transcript selection on release, the same
+  highlight-copies contract Windows Terminal, OpenCode (see the profiles) and
+  Ghostty give everywhere else. Enum values (codex-rs/config types.rs):
+  auto | always | never.
+
   To force another Codex key, add it to $forced below as "<dotted path>" ->
   "<TOML value>". Anything not listed is left to you and to Codex.
 */ -}}
 
 {{- $forced := dict
       "tui.keymap.editor.insert_newline" `["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]`
+      "tui.copy_on_select" `"always"`
 -}}
 
 {{- $raw := .chezmoi.stdin | trimPrefix "\ufeff" -}}
@@ -53,7 +66,11 @@
 {{- /* header: current [table] we are inside. done: paths already emitted.
        skip: we are swallowing the continuation lines of a replaced multi-line
        array value (a key we replace may legitimately span lines). */ -}}
-{{- $st := dict "header" "" "done" (dict) "skip" false "out" (list) -}}
+{{- /* rootdotted: first segments of dotted keys written at the file root
+       (tui.x = ...). Such a key already DECLARES that table, so appending a
+       [tui] header later is a TOML "cannot declare twice" error. top: lines
+       that must therefore be emitted at the root, before any table. */ -}}
+{{- $st := dict "header" "" "done" (dict) "skip" false "out" (list) "top" (list) "rootdotted" (dict) -}}
 
 {{- range $lines -}}
 {{-   $line := . -}}
@@ -77,6 +94,7 @@
 {{-     $key := trim (first (splitList "=" $t)) -}}
 {{-     $path := $key -}}
 {{-     if ne $st.header "" }}{{ $path = printf "%s.%s" $st.header $key }}{{ end -}}
+{{-     if and (eq $st.header "") (contains "." $key) }}{{ $_ := set $st.rootdotted (first (splitList "." $key)) true }}{{ end -}}
 {{-     if hasKey $forced $path -}}
 {{- /* an existing setting for a forced key: drop it (and any continuation
              lines of a multi-line array), then emit ours unless already done */ -}}
@@ -100,10 +118,14 @@
 {{-     $parts := splitList "." $path -}}
 {{-     $key := last $parts -}}
 {{-     $table := join "." (initial $parts) -}}
-{{-     $_ := set $st "out" (append $st.out "") -}}
-{{-     $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_config.toml). Edits here are overwritten.") -}}
-{{-     $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
-{{-     $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-     if hasKey $st.rootdotted (first $parts) -}}
+{{-       $_ := set $st "top" (append $st.top (printf "%s = %s" $path $value)) -}}
+{{-     else -}}
+{{-       $_ := set $st "out" (append $st.out "") -}}
+{{-       $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_config.toml). Edits here are overwritten.") -}}
+{{-       $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
+{{-       $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-     end -}}
 {{-     $_ := set $st.done $path true -}}
 {{-   end -}}
 {{- end -}}
@@ -111,7 +133,7 @@
 {{- /* join on LF, tidy, then restore the file's own line ending. Collapsing
        runs of blank lines keeps the appended table from drifting a line further
        down each time, on a config that already ended in a newline. */ -}}
-{{- $body := join "\n" $st.out -}}
+{{- $body := join "\n" (concat $st.top $st.out) -}}
 {{- $body = regexReplaceAll `\n{3,}` $body "\n\n" -}}
 {{- $body = regexReplaceAll `(?s)^\s+|\s+$` $body "" -}}
 {{- if eq $eol "\r\n" }}{{ $body = replace "\n" "\r\n" $body }}{{ end -}}
