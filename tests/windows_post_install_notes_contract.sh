@@ -39,18 +39,18 @@ function Get-Fn([string]$name) {
     while ($lines[$end] -ne '}') { $end++ }
     ($lines[$start..$end]) -join "`n"
 }
-$names = 'Test-CommandSucceeds', 'Test-DockerEngineUp', 'Get-DockerWslGap', 'Get-DockerWslDistro', 'Write-DockerPostInstallNote',
+$names = 'Test-CommandSuccess', 'Test-DockerEngineUp', 'Get-DockerWslGap', 'Get-DockerWslDistro', 'Write-DockerPostInstallNote',
          'Test-TailscaleConnected', 'Write-RemoteAccessPostInstallNote', 'Test-SshServerRunning', 'Write-SshPostInstallNote'
 foreach ($n in $names) { Invoke-Expression (Get-Fn $n) }
 
 function Out-Notes([scriptblock]$Run) { (& $Run *>&1 | Out-String) }
 
-# --- Test-CommandSucceeds against real child processes ---------------------------------
-Write-Output ('cmd-ok=' + (Test-CommandSucceeds -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'exit 0')))
-Write-Output ('cmd-fail=' + (Test-CommandSucceeds -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'exit 3')))
-Write-Output ('cmd-missing=' + (Test-CommandSucceeds -Executable 'definitely-not-a-command-xyz' -Arguments @('x')))
+# --- Test-CommandSuccess against real child processes ---------------------------------
+Write-Output ('cmd-ok=' + (Test-CommandSuccess -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'exit 0')))
+Write-Output ('cmd-fail=' + (Test-CommandSuccess -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'exit 3')))
+Write-Output ('cmd-missing=' + (Test-CommandSuccess -Executable 'definitely-not-a-command-xyz' -Arguments @('x')))
 $sw = [Diagnostics.Stopwatch]::StartNew()
-$hang = Test-CommandSucceeds -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'Start-Sleep -Seconds 60') -TimeoutSeconds 3
+$hang = Test-CommandSuccess -Executable $Pwsh -Arguments @('-NoProfile', '-Command', 'Start-Sleep -Seconds 60') -TimeoutSeconds 3
 $sw.Stop()
 Write-Output ('cmd-hang=' + $hang)
 Write-Output ('cmd-hang-bounded=' + ($sw.Elapsed.TotalSeconds -lt 20))

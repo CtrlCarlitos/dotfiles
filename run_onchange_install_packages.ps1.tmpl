@@ -2203,28 +2203,35 @@ Write-Host "Package installation complete!" -ForegroundColor Green
 # cannot be confirmed - a tool missing, a command that fails or hangs - counts as "not
 # OK", so the note is printed rather than hidden. tests/windows_post_install_notes_contract.sh
 # executes these functions.
-function Test-CommandSucceeds {
+function Test-CommandSuccess {
     param([Parameter(Mandatory)][string]$Executable, [string[]]$Arguments = @(), [int]$TimeoutSeconds = 10)
 
-    if (-not (Get-Command $Executable -ErrorAction SilentlyContinue)) { return $false }
-    # A job: a hung native command must not hang the install. (Stop-Job cannot kill the
-    # native child itself - see Invoke-WithTimeout - but the install moves on.)
-    $job = Start-Job -ScriptBlock { param($exe, $argList) & $exe @argList *> $null; $LASTEXITCODE } -ArgumentList $Executable, (,$Arguments)
+    # A child process with a hard wait (not a job: a hung native command is killed, and
+    # there is no second PowerShell to start). Output is drained so a chatty command
+    # cannot fill its pipe and stall. A missing executable throws -> "not OK".
     try {
-        if (-not (Wait-Job $job -Timeout $TimeoutSeconds)) { return $false }
-        $code = @(Receive-Job $job -ErrorAction SilentlyContinue) | Select-Object -Last 1
-        return ($null -ne $code -and [int]$code -eq 0)
+        $info = New-Object System.Diagnostics.ProcessStartInfo
+        $info.FileName = $Executable
+        $info.Arguments = (@($Arguments) | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }) -join ' '
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        $process = [System.Diagnostics.Process]::Start($info)
+        $null = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch { Write-Verbose "kill failed: $($_.Exception.Message)" }
+            return $false
+        }
+        return ($process.ExitCode -eq 0)
     }
     catch { return $false }
-    finally {
-        Stop-Job $job -ErrorAction SilentlyContinue
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
-    }
 }
 {{- end }}
 {{- if $dev_desktop }}
 
-function Test-DockerEngineUp { return (Test-CommandSucceeds -Executable 'docker' -Arguments @('info')) }
+function Test-DockerEngineUp { return (Test-CommandSuccess -Executable 'docker' -Arguments @('info')) }
 
 # Real WSL distros in `wsl --list --quiet` order (the default distro first). That output
 # is UTF-16LE with embedded NULs - PowerShell prints it garbled unless stripped (confirmed
@@ -2297,7 +2304,7 @@ Write-DockerPostInstallNote
 {{- end }}
 {{- if $remote_access }}
 
-function Test-TailscaleConnected { return (Test-CommandSucceeds -Executable 'tailscale' -Arguments @('status')) }
+function Test-TailscaleConnected { return (Test-CommandSuccess -Executable 'tailscale' -Arguments @('status')) }
 
 function Write-RemoteAccessPostInstallNote {
     if (Test-TailscaleConnected) { return }
