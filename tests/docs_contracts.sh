@@ -294,7 +294,7 @@ validate_guide "$guide" || fail "remote-access guide violates the documentation 
 # non-raw string turned the `\t` of `C:\dev\tmp` into a literal TAB in docs/devtmp.md, and
 # nothing noticed: the page still rendered. Docs here are plain text; a TAB, a NUL or any
 # other control character (CR included: .md is LF) is always damage.
-ctrl_hits="$( (cd "$repo_root" && grep -rnP '[\x00-\x09\x0B-\x1F]' README.md docs --include='*.md' 2>/dev/null) | cut -c1-120)"
+ctrl_hits="$( (cd "$repo_root"; grep -rnP '[\x00-\x09\x0B-\x1F]' README.md docs --include='*.md' 2>/dev/null || true) | cut -c1-120)"
 if [ -n "$ctrl_hits" ]; then
   fail "control characters in the docs (TAB/CR/NUL damage):
 $ctrl_hits"
