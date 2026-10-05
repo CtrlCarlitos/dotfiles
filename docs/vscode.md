@@ -68,7 +68,7 @@ picture is in [Terminal Experience](terminal.md).
 ### Keybindings
 
 One shared template, `.chezmoitemplates/vscode-keybindings.json`, merges the agent
-agent keys and the Windows Terminal parity chords into VS Code's own `keybindings.json` on every OS. There's a thin
+agent keys and the Windows Terminal parity chords into VS Code's own `keybindings.json` on every OS (including `Ctrl+Enter` = line feed in the terminal, so it is a newline in every agent CLI). There's a thin
 `modify_keybindings.json` wrapper per location:
 
 - Windows: `AppData/Roaming/Code/User`

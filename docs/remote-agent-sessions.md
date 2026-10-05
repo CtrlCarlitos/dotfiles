@@ -164,9 +164,10 @@ whole matrix on both platforms becomes the documented default.
 
 - **Newline in agents:** `Ctrl+J` is the universal newline — inside psmux it
   is the *reliable* one (psmux does not implement win32-input-mode, so
-  `Shift+Enter` can arrive as a bare Enter and submit). Codex also accepts
-  `Ctrl+Enter` and `Alt+Enter` (forced by `dot_codex/modify_config.toml`),
-  where the terminal reports the modifier.
+  `Shift+Enter` can arrive as a bare Enter and submit). `Ctrl+Enter` is a
+  newline too where the terminal is one we manage (it sends the same line feed as
+  `Ctrl+J`; see [terminal.md](terminal.md)), and Codex and Claude Code have it bound
+  in their own configs for terminals that report the modifier.
 - **Esc is instant:** `escape-time 0` is set in both multiplexers.
 - **OpenCode and Codex clipboard:** highlight-copies inside the TUI (the
   shells export OpenCode's copy-on-select flag; `dot_codex/modify_config.toml`

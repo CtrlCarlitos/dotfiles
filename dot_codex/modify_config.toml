@@ -21,11 +21,11 @@
     tui.keymap.editor.insert_newline   (below)
     tui.copy_on_select = "always"      (see the end of this comment)
 
-  Codex is the only one of the four agent CLIs with a user-configurable keymap
-  (tui.keymap.{global,chat,composer,editor,pager,list,agents,approval,vim_*}),
-  and its default newline bindings are shift-enter and ctrl-j only. Claude Code,
-  OpenCode and agy all accept Ctrl+Enter; Codex silently did nothing, which is
-  the one inconsistency left in docs/terminal.md's "New line vs submit" table.
+  Codex's keymap is tui.keymap.{global,chat,composer,editor,pager,list,agents,approval,vim_*},
+  and its default newline bindings are shift-enter and ctrl-j only. OpenCode and agy
+  accept Ctrl+Enter natively and Claude Code is rebound by dot_claude/modify_keybindings.json;
+  Codex silently did nothing, so it is bound here to keep all four the same
+  (docs/terminal.md, "New line vs submit").
   Alt+Enter is included for the same reason - Windows Terminal leaves it unbound
   here (full screen is F11), so it reaches the CLI.
 

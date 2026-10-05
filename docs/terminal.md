@@ -247,8 +247,8 @@ Enter submits in all four. For a new line:
 
 | Tool | New line | Watch out |
 |---|---|---|
-| Claude Code | `Shift+Enter`, `Ctrl+J` (also `\` then Enter) | `Ctrl+Enter` **sends** the message |
-| Codex | `Ctrl+J`; `Shift+Enter` where the terminal passes it | `Ctrl+Enter` is **not bound** by default - see below |
+| Claude Code | `Shift+Enter`, `Ctrl+J`, `Ctrl+Enter` (rebound by the dotfiles; also `\` then Enter) | unmanaged, `Ctrl+Enter` **sends** (`chat:sendNow`, Claude Code 2.1.275+) |
+| Codex | `Ctrl+J`, `Ctrl+Enter`, `Alt+Enter` (all forced by the dotfiles); `Shift+Enter` where the terminal passes it | `Ctrl+Enter` is unbound by default |
 | OpenCode | `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, `Ctrl+J` | |
 | agy | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | |
 
@@ -262,11 +262,24 @@ Enter submits in all four. For a new line:
 - **VS Code terminal:** `Shift+Enter` relies on `terminal.integrated.enableWin32InputMode`
   (Windows, experimental; set by the installer, active after a VS Code reload).
   `Ctrl+J` works because the installer stops VS Code from grabbing it for its panel.
-- **Avoid `Ctrl+Enter`**: it's a newline in OpenCode and agy, *sends* in Claude Code,
-  and does nothing in Codex until you bind it. Codex is the only one of the four with
-  a configurable keymap; add this to `~/.codex/config.toml` to line it up with the
-  others (verified accepted by `codex` 0.155.1 - an invalid value is rejected at
-  startup with `data did not match any variant of untagged enum KeybindingsSpec`):
+- **`Ctrl+Enter` is a newline everywhere we manage, on purpose.** It used to be one by
+  accident: a terminal delivered it as a plain line feed, the byte `Ctrl+J` is. Claude Code
+  2.1.275 then bound `Ctrl+Enter` to `chat:sendNow` (send right away) and began asking
+  terminals for extended keys, so the same keypress started *sending*. Two layers keep it
+  a newline:
+  - **Terminal layer:** `Ctrl+Enter` sends a line feed in Windows Terminal (the
+    `User.newline` action), the VS Code integrated terminal (`terminalFocus` keybinding) and
+    Ghostty (`keybind = ctrl+enter=text:` plus a line feed). The harness just sees `Ctrl+J`,
+    so it works in all four, inside psmux too, whatever key reporting the terminal offers.
+  - **Harness layer** (terminals we do not manage, SSH from elsewhere):
+    `dot_claude/modify_keybindings.json` merges `"ctrl+enter": "chat:newline"` into
+    `~/.claude/keybindings.json` (hot-reloaded; `Ctrl+X Ctrl+S` stays the send-now chord),
+    and `dot_codex/modify_config.toml` binds it for Codex as below. OpenCode and agy take
+    `Ctrl+Enter` natively.
+
+  The Codex binding, applied for you (verified accepted by `codex` 0.155.1 - an invalid
+  value is rejected at startup with
+  `data did not match any variant of untagged enum KeybindingsSpec`):
 
   ```toml
   [tui.keymap.editor]

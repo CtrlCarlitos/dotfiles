@@ -18,8 +18,17 @@ install.ps1
 # Pre-commit config (only needed in source repo)
 .pre-commit-config.yaml
 
-# Claude Code project settings (source-repo tooling, not a dotfile to deploy)
-.claude/**
+# Claude Code project settings (source-repo tooling, not a dotfile to deploy).
+# `.claude/*`, not `.claude/**`: ** also matches the .claude directory itself, and a
+# file under an ignored directory can never be un-ignored below.
+.claude/*
+# ...except the one file the dotfiles DO manage in ~/.claude: the keybindings merge
+# (dot_claude/modify_keybindings.json). Deliberately NOT guarded on ~/.claude existing,
+# unlike Codex/OpenCode below: Claude Code is part of the base install, so ~/.claude
+# appears DURING the first apply, and a guard would flip from ignored to managed
+# between that apply and the next (a fresh machine would keep Ctrl+Enter = send until
+# its second `dot up`, and `chezmoi verify` would report drift right after install).
+!.claude/keybindings.json
 
 # Git worktrees (agent isolation; source-repo only, matches .gitignore)
 .worktrees/**
