@@ -28,6 +28,12 @@ Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
 $agentNames = @('opencode', 'claude', 'codex', 'agy', 'serena')
 $stoppedSessions = @(Invoke-LiveSessionStop -Name $agentNames -ExcludeId @(Get-AncestorProcessId))
 if ($stoppedSessions.Count -gt 0) { Start-Sleep -Seconds 1 }
+# Codex's app-server daemon is not a session but keeps running the release it started with;
+# with no Codex session left it is stopped so the next start is the upgraded version.
+if (-not (Test-LiveProcess @('codex'))) {
+    $daemonsStopped = Stop-CodexDaemon
+    if ($daemonsStopped -gt 0) { Write-Host "  Stopped Codex's app-server daemon (it restarts on demand, on the new version)." -ForegroundColor Yellow }
+}
 $defer = @()
 if (Test-LiveProcess @('codex'))  { $defer += 'codex' }
 if (Test-LiveProcess @('opencode','claude','codex','agy')) { $defer += 'graft' }

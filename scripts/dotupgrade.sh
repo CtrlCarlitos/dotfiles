@@ -105,6 +105,28 @@ stop_live_sessions() {
     echo "$stopped"
 }
 stop_live_sessions opencode claude codex agy serena >/dev/null
+
+# --- Codex's app-server daemon: not a session, but it keeps running the release it started
+# with, so it stays behind the CLI after an upgrade. With no Codex session left, stop it; it
+# restarts on demand, on the new version.
+codex_daemon_pids() {
+    local pid
+    for pid in $(pgrep -x codex 2>/dev/null); do
+        case "$(ps -o args= -p "$pid" 2>/dev/null)" in
+            *"/.codex/packages/app-server-daemon/"*) echo "$pid" ;;
+        esac
+    done
+}
+stop_codex_daemon() {
+    local pids pid
+    pids="$(codex_daemon_pids)"
+    [ -n "$pids" ] || return 0
+    command -v codex >/dev/null 2>&1 && timeout 20 codex app-server daemon stop >/dev/null 2>&1
+    # The polite stop did not take (or the CLI is too old to have it): the daemon is safe to end.
+    for pid in $(codex_daemon_pids); do kill -TERM "$pid" 2>/dev/null; done
+    echo "  Stopped Codex's app-server daemon (it restarts on demand, on the new version)."
+}
+live codex || stop_codex_daemon
 DEFER=""
 live codex && DEFER="codex"
 live opencode claude codex agy && DEFER="${DEFER:+$DEFER,}graft"
