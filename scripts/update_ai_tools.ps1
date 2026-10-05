@@ -490,14 +490,12 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
         } elseif (-not $graftAllow) {
             Write-Host "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade" -ForegroundColor Red
         } else {
-            $env:NPM_CONFIG_ALLOW_SCRIPTS = $graftAllow
+            # Not `graft upgrade`: it fails on Windows with "spawnSync npm ENOENT".
             try {
-                graft upgrade 2>$null
-                if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: graft upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+                $graftExit = Invoke-GraftNpmInstall -AllowScripts $graftAllow
+                if ($graftExit -ne 0) { Write-Host "  Warning: graft install failed (npm exit $graftExit) - continuing" -ForegroundColor Red }
             } catch {
-                Write-Host "  Warning: graft upgrade failed - continuing" -ForegroundColor Red
-            } finally {
-                Remove-Item Env:\NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue
+                Write-Host "  Warning: graft install failed - continuing" -ForegroundColor Red
             }
             # A graft that cannot start breaks every agent hook: say so now.
             graft --version *> $null

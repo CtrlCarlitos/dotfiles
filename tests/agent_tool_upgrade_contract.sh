@@ -40,8 +40,10 @@ grep -Fq '.agents.npm.codex' "$ai_ps1" ||
     fail "$ai_ps1: codex package name must be read from the agent catalog"
 grep -Fq '@latest"' "$ai_ps1" ||
     fail "$ai_ps1: codex must upgrade via @latest"
-grep -Fq 'graft upgrade' "$ai_ps1" ||
-    fail "$ai_ps1: graft must use its own self-updater"
+# graft's own `graft upgrade` dies on Windows with "spawnSync npm ENOENT" (npm is npm.cmd
+# there); the Windows updater runs the npm install it wraps, via Invoke-GraftNpmInstall.
+grep -Fq 'Invoke-GraftNpmInstall' "$ai_ps1" ||
+    fail "$ai_ps1: graft must be installed through Invoke-GraftNpmInstall (graft upgrade fails on Windows)"
 
 [ -f "$ai_sh" ] || { fail "$ai_sh missing"; finish; }
 command -v timeout >/dev/null 2>&1 || skip "coreutils timeout not installed"
@@ -222,14 +224,14 @@ fi
 # Anything unknown - offline, no answer - still installs.
 make_agent_browser
 : >"$tmp/npm.log"; : >"$tmp/graft.log"
-GRAFT_VERSION_OUT='graft 1.2.3\nlatest: 1.2.3\n' NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b.log" || true
+GRAFT_VERSION_OUT='graft 1.2.3\nlatest on npm: 1.2.3 \342\234\223 up to date\n' NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b.log" || true
 grep -Fq 'graft is current (1.2.3)' "$tmp/run5b.log" || fail "current graft must be reported, not upgraded: $(grep -i graft "$tmp/run5b.log" | head -3)"
 if grep -Eq '^upgrade ' "$tmp/graft.log"; then fail "graft 1.2.3 == latest must not run graft upgrade"; else pass; fi
 grep -Fq 'codex is current (9.9.9)' "$tmp/run5b.log" || fail "current codex must be reported, not reinstalled"
 if grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log"; then fail "codex 9.9.9 == latest must not reinstall"; else pass; fi
 
 : >"$tmp/npm.log"; : >"$tmp/graft.log"
-GRAFT_VERSION_OUT='graft 1.2.2\nlatest: 1.2.3\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
+GRAFT_VERSION_OUT='graft 1.2.2\nlatest on npm: 1.2.3 (update available)\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
 grep -Eq '^upgrade ' "$tmp/graft.log" || fail "a stale graft must be upgraded"
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "a stale codex must be reinstalled"
 

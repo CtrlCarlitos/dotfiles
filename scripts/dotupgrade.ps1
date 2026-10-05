@@ -52,7 +52,11 @@ if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading choco packages (choco upgrade all)..." -ForegroundColor Yellow
-    choco upgrade all -y --no-progress
+    $chocoArguments = @(Get-ChocoUpgradeArgument)
+    if ($chocoArguments -contains '--except=claude') {
+        Write-Host "  claude (Desktop) left out of this sweep - a claude.exe is running, and the package's installer force-kills every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
+    }
+    choco @chocoArguments
 } else {
     Write-Host "  choco not found - skipping system packages." -ForegroundColor Yellow
 }
