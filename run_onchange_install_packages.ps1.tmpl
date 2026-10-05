@@ -100,6 +100,12 @@ $ProgressPreference = 'SilentlyContinue'
 # rendered "✓" as "Γ£ô" in the apply log. Process-local, so nothing outside
 # this run changes. try: a host without a console handle throws here.
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { Write-Verbose "console encoding unchanged: $($_.Exception.Message)" }
+# The skills helpers (Invoke-SkillsSource, Write-AgentBrowserDoctorSummary, ...) are inlined
+# HERE, before anything calls them: a run_onchange script runs top to bottom, and the
+# include used to sit near the skills section, so the agent-browser step (far above it)
+# failed with "Write-AgentBrowserDoctorSummary is not recognized" and aborted the apply.
+# tests/ps_template_define_before_use_contract.sh pins the order.
+{{ include "scripts/lib/ps-skills.ps1" }}
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with
@@ -1608,7 +1614,6 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # (stderr alone wouldn't, in the job's default EAP).
 # NOTE: jobs do NOT inherit this session's variables - these scriptblocks
 # are deliberately self-contained (literal args + $env:TEMP only).
-{{ include "scripts/lib/ps-skills.ps1" }}
 function Write-CuratedSkillsSkippedSummary {
     # Rendered from scripts/curated-agent-skills.txt's line count - never a
     # literal, which drifted every time the catalog gained a skill.

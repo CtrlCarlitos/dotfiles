@@ -1,2 +1,2 @@
 [slots]
-  web_hosts = ["starship.rs"]
+  web_hosts = ["starship.rs", "code.claude.com"]
