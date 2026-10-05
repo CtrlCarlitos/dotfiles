@@ -45,7 +45,41 @@ Write-Output ('graft-current=' + (Get-GraftCurrentVersion -VersionOutput "graft 
 Write-Output ('graft-stale=[' + (Get-GraftCurrentVersion -VersionOutput "graft 0.18.0`nlatest: 0.21.1`n") + ']')
 Write-Output ('graft-offline=[' + (Get-GraftCurrentVersion -VersionOutput "graft 0.21.1`nlatest: unreachable (offline?)`n") + ']')
 Write-Output ('graft-empty=[' + (Get-GraftCurrentVersion -VersionOutput '') + ']')
-Write-Output ('graft-crlf=' + (Get-GraftCurrentVersion -VersionOutput "graft 0.21.1`r`nlatest: 0.21.1`r`n"))
+Write-Output ('graft-crlf=' + (Get-GraftCurrentVersion -VersionOutput "graft 0.21.1`r`nlatest on npm: 0.21.1 $([char]0x2713) up to date`r`n"))
+# The ONLINE spelling, as graft 0.21.1 prints it (the offline one is 'latest: unreachable').
+Write-Output ('graft-online=' + (Get-GraftCurrentVersion -VersionOutput "graft 0.21.1`nlatest on npm: 0.21.1 $([char]0x2713) up to date`n"))
+Write-Output ('graft-online-stale=[' + (Get-GraftCurrentVersion -VersionOutput "graft 0.18.0`nlatest on npm: 0.21.1 (update available)`n") + ']')
+
+# Invoke-GraftNpmInstall: `graft upgrade` fails on Windows (spawnSync npm ENOENT), so the
+# npm install it wraps is run directly, with the allow-list in the environment only for
+# the call, and npm's exit code handed back.
+$script:npmCalls = @()
+$script:npmExit = 0
+function npm {
+    if ($args[0] -eq 'install') { $script:npmCalls += (($args -join ' ') + ' allow=' + $env:NPM_CONFIG_ALLOW_SCRIPTS); $global:LASTEXITCODE = $script:npmExit; return }
+    if ($args[0] -eq 'ls') { $script:ls } elseif ($args[0] -eq 'view') { $script:view }
+}
+$env:NPM_CONFIG_ALLOW_SCRIPTS = 'keep-me'
+$exit = Invoke-GraftNpmInstall -AllowScripts 'tree-sitter-x,esbuild'
+Write-Output ('graft-install-exit=' + $exit)
+Write-Output ('graft-install-call=' + ($script:npmCalls -join '|'))
+Write-Output ('graft-install-env-restored=' + $env:NPM_CONFIG_ALLOW_SCRIPTS)
+Remove-Item Env:NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue
+$script:npmExit = 3
+Write-Output ('graft-install-fail-exit=' + (Invoke-GraftNpmInstall -AllowScripts 'a'))
+Write-Output ('graft-install-env-cleared=[' + $env:NPM_CONFIG_ALLOW_SCRIPTS + ']')
+
+# Get-ChocoUpgradeArgument: choco's `claude` package (Claude Desktop) ends its installer
+# with `taskkill /F /IM claude.exe /T`, which kills EVERY claude.exe - Claude Code
+# sessions included. While one runs, that package is left out of the sweep.
+$script:procs = @()
+function Get-Process { param([Parameter(Position = 0)][string[]]$Name) foreach ($n in $Name) { $script:procs | Where-Object { $_.ProcessName -eq $n } } }
+$script:procs = @()
+Write-Output ('choco-idle=' + ((Get-ChocoUpgradeArgument) -join ' '))
+$script:procs = @([pscustomobject]@{ ProcessName = 'claude'; Path = 'C:\x\.local\bin\claude.exe' })
+Write-Output ('choco-claude-running=' + ((Get-ChocoUpgradeArgument) -join ' '))
+$script:procs = @([pscustomobject]@{ ProcessName = 'codex'; Path = 'C:\x\codex.exe' })
+Write-Output ('choco-other-agent=' + ((Get-ChocoUpgradeArgument) -join ' '))
 PSEOF
 
 out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r' || true)"
@@ -63,5 +97,15 @@ expect 'graft-stale=[]'
 expect 'graft-offline=[]'
 expect 'graft-empty=[]'
 expect 'graft-crlf=0.21.1'
+expect 'graft-online=0.21.1'
+expect 'graft-online-stale=[]'
+expect 'graft-install-exit=0'
+expect 'graft-install-call=install -g @nanonets/graft@latest --loglevel=error --no-progress allow=tree-sitter-x,esbuild'
+expect 'graft-install-env-restored=keep-me'
+expect 'graft-install-fail-exit=3'
+expect 'graft-install-env-cleared=[]'
+expect 'choco-idle=upgrade all -y --no-progress'
+expect 'choco-claude-running=upgrade all -y --no-progress --except=claude'
+expect 'choco-other-agent=upgrade all -y --no-progress'
 
 finish

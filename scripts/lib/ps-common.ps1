@@ -371,7 +371,45 @@ function Get-GraftCurrentVersion {
     $installed = ''
     $latest = ''
     if ($VersionOutput -match '(?m)^graft (\d[^\s]*)') { $installed = $Matches[1] }
-    if ($VersionOutput -match '(?m)^latest: (\d[^\s]*)') { $latest = $Matches[1] }
+    # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
+    if ($VersionOutput -match '(?m)^latest(?: on npm)?: (\d[^\s]*)') { $latest = $Matches[1] }
     if ($installed -and $installed -eq $latest) { return $installed }
     return ''
+}
+
+# graft's own `graft upgrade` dies on Windows with "spawnSync npm ENOENT" (npm is npm.cmd
+# there and the upgrade spawns it without a shell). It only wraps `npm install -g`, so run
+# that directly. npm 12 skips install scripts unless allow-listed, so the installer's
+# allow-list (agents.yaml) goes into NPM_CONFIG_ALLOW_SCRIPTS for the call only. Returns
+# npm's exit code.
+function Invoke-GraftNpmInstall {
+    param([Parameter(Mandatory)][string]$AllowScripts)
+
+    $previousAllow = $env:NPM_CONFIG_ALLOW_SCRIPTS
+    $previousPreference = $ErrorActionPreference
+    # PS 5.1 promotes native stderr to a terminating error under Stop; the exit code is the signal.
+    $ErrorActionPreference = 'Continue'
+    try {
+        $env:NPM_CONFIG_ALLOW_SCRIPTS = $AllowScripts
+        npm install -g '@nanonets/graft@latest' --loglevel=error --no-progress
+        return [int]$LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+        if ($null -eq $previousAllow) { Remove-Item Env:NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue }
+        else { $env:NPM_CONFIG_ALLOW_SCRIPTS = $previousAllow }
+    }
+}
+
+# The `choco upgrade all` argument list. Chocolatey's `claude` package (Claude Desktop) ends
+# its installer with `taskkill /F /IM claude.exe /T`, which kills EVERY claude.exe - and
+# Claude Code's CLI has the same image name, so a live Claude Code session dies with it
+# (seen in the dot upgrade log: "Terminating Claude process..."). While any claude.exe is
+# running that one package is left out of the sweep; the next quiet dot upgrade takes it.
+function Get-ChocoUpgradeArgument {
+    $chocoArguments = @('upgrade', 'all', '-y', '--no-progress')
+    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) {
+        $chocoArguments += '--except=claude'
+    }
+    return $chocoArguments
 }

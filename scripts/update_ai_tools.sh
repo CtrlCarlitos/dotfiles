@@ -326,7 +326,8 @@ if command -v graft &>/dev/null; then
         # equal means nothing to do. "unreachable" or no answer still upgrades.
         graft_version_out="$(graft version 2>/dev/null || true)"
         graft_have="$(printf '%s\n' "$graft_version_out" | sed -n 's/^graft \([0-9][^ ]*\).*/\1/p' | head -n 1)"
-        graft_latest="$(printf '%s\n' "$graft_version_out" | sed -n 's/^latest: \([0-9][^ ]*\).*/\1/p' | head -n 1)"
+        # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
+        graft_latest="$(printf '%s\n' "$graft_version_out" | sed -n 's/^latest\( on npm\)\{0,1\}: \([0-9][^ ]*\).*/\2/p' | head -n 1)"
         if [ -n "$graft_have" ] && [ "$graft_have" = "$graft_latest" ]; then
             echo "  graft is current ($graft_have)"
         elif [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
