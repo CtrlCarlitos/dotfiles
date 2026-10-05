@@ -126,7 +126,8 @@ The practical consequences:
 ## Windows Terminal
 
 - **Look:** Catppuccin Mocha scheme and tab-row theme, Nerd Font at 12pt, light
-  acrylic (92% opacity), bar cursor, visual bell (window flash + taskbar).
+  acrylic (92% opacity), bar cursor, visual bell (window flash + taskbar), 20000
+  lines of history, `trimPaste`, equal-width tabs (`tabWidthMode: equal`).
 - **Tab color per environment:**
 
   | Color | Environment |
@@ -137,6 +138,9 @@ The practical consequences:
   | Green | SSH → Mac (`os = "mac"`) |
   | Red | SSH → Linux (`os = "linux"`) |
   | Purple | SSH, no `os` set |
+  | Teal | `psmux` profile (see [psmux](#psmux-windows-tmux-twin)) |
+  | Sapphire | Windows PowerShell 5.1 |
+  | Grey | Command Prompt |
 
 - **WSL profiles are styled by source, not GUID**, so every distro on every machine
   (Ubuntu-24.04, 26.04, or a new one) gets the look automatically. This also fixes
@@ -233,8 +237,9 @@ and worth knowing you've enabled it before typing anything destructive.
 ## Keys inside the agent CLIs
 
 These belong to each CLI, not to the terminal. Checked against the installed builds:
-Claude Code 2.1.284, Codex 0.155.1 (removed 2026-09-28 on purpose; back after the
-next `chezmoi update`), OpenCode 1.18.33, agy 1.2.7, psmux 3.3.8 (September 2026).
+Claude Code 2.1.284, Codex 0.155.1, OpenCode 1.18.33, agy 1.2.7, psmux 3.3.8
+(September 2026). The Codex key names and `copy_on_select` values were validated
+on 0.155.1.
 
 ### New line vs submit
 
@@ -274,8 +279,9 @@ Enter submits in all four. For a new line:
   **You don't have to add it by hand** - `dot_codex/modify_config.toml` applies this
   binding on every machine. Like Windows Terminal's `settings.json`, the file is
   *merged, not owned*: Codex rewrites it constantly (per-project trust levels, hook
-  hashes, model notices), so the template forces that one key and passes every other
-  byte through unchanged. Add more forced keys to its `$forced` map.
+  hashes, model notices), so the template forces two keys (this one and
+  `tui.copy_on_select`, see [Clipboard](#clipboard)) and passes every other byte
+  through unchanged. Add more forced keys to its `$forced` map.
 
 > [!WARNING]
 > **Don't run Claude Code's `/terminal-setup` in VS Code.** It adds a VS Code
@@ -367,6 +373,9 @@ Same in Windows Terminal and the VS Code terminal:
 - **In psmux** the mouse belongs to the multiplexer, same as tmux: `y` in copy
   mode (and a mouse-drag copy) lands on the Windows clipboard via OSC 52, which
   Windows Terminal accepts. Paste with `Ctrl+V` or Shift+right-click.
+- **Ghostty** (`copy-on-select = clipboard`) and **Windows Terminal** (`copyOnSelect`)
+  copy in the plain shell; the three TUIs above need their own setting because
+  they capture the mouse. **Shift+drag** hands the mouse back to the terminal.
 - **Over SSH**, copies inside the remote session reach your local clipboard through
   OSC 52, see [Remote hosts](#remote-ssh-hosts).
 
@@ -383,7 +392,12 @@ Set by the installer's VS Code step (DEFAULTS tier: a value you set yourself win
   protocol, on by default, does the job.
 - `Ctrl+B` and `Ctrl+J` go to the agent CLIs (background task, newline) instead of
   toggling VS Code's sidebar and panel while the terminal has focus.
+- A bar cursor and 30000 lines of scrollback.
 - The agent keys and the clipboard behavior above.
+- Windows Terminal parity chords while a terminal has focus: `Alt+Shift+D` split,
+  `Alt+←/→` and `Ctrl+Tab` move between terminals, `Ctrl+Shift+R` rename,
+  `Ctrl+Shift+W` kill, `Ctrl+=`/`Ctrl+-`/`Ctrl+0` font zoom
+  (`.chezmoitemplates/vscode-keybindings.json`).
 
 ## OpenCode
 
@@ -420,7 +434,12 @@ operator guide for running agents in these sessions:
 - **What is deliberately different:** no TPM (psmux has no plugin manager, and
   its server already keeps sessions alive across detaches); no `clip.exe`/
   `xclip` copy pipes (psmux yanks straight to the Windows clipboard); panes run
-  pwsh like every local tab. For a newline inside an agent CLI, use `Ctrl+J`
+  pwsh like every local tab (`default-shell pwsh`); and `paste-detection off`,
+  because psmux's own `Ctrl+V` handling stripped the first escape bytes of a
+  paste (a literal `[A` in OpenCode/Claude) and once deadlocked a pane, so
+  Windows Terminal pastes natively and the TUI's bracketed paste does the rest
+  (upstream psmux#719). The reload key (`prefix` `r`) re-reads
+  `~/.config/psmux/psmux.conf`. For a newline inside an agent CLI, use `Ctrl+J`
   (see [above](#keys-inside-the-agent-clis)).
 
 ## Remote SSH hosts

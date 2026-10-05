@@ -14,10 +14,10 @@ vscode_settings = false
 
 | What | Home |
 |---|---|
-| Extension baseline (23 curated + 1 Windows-only) | `.chezmoidata.yaml` → `vscode.extensions` (+ `extensions_windows`) |
+| Extension baseline (24 curated + 1 Windows-only) | `.chezmoidata.yaml` → `vscode.extensions` (+ `extensions_windows`) |
 | Whole-feature gate | `~/.config/chezmoi/chezmoi.toml` → `[data.packages]` → `vscode_settings` |
 | Settings baseline (forced/upsert/merge/unset tiers) | `.chezmoidata.yaml` → `vscode.settings` — both installer templates render from it |
-| Keybindings (agent keys) | `.chezmoitemplates/vscode-keybindings.json`, applied by per-OS `modify_keybindings.json` wrappers |
+| Keybindings (agent keys, pane/tab parity chords) | `.chezmoitemplates/vscode-keybindings.json`, applied by per-OS `modify_keybindings.json` wrappers |
 | Machine overrides | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode_overrides]` |
 
 **Why a different key (`vscode_overrides`, not `vscode`)**: chezmoi does not
@@ -31,7 +31,7 @@ in the installers.
 | Tier | Keys | On re-apply | Local drift |
 |---|---|---|---|
 | FORCED | editor/terminal font (MesloLGS Nerd Font Mono) | re-asserted | exclude to stop |
-| UPSERT | ~20 curated defaults, including the integrated terminal's (see below) | only written when absent | your value wins |
+| UPSERT | 21 curated defaults (+1 Windows-only), including the integrated terminal's (see below) | only written when absent | your value wins |
 | MERGE | `files.exclude` / `search.exclude` junk dirs; `workbench.colorCustomizations` terminal colors | only missing sub-keys added | your entries stay |
 | UNSET | `remote.SSH.configFile` | removed when present | exclude to keep |
 
@@ -48,6 +48,8 @@ picture is in [Terminal Experience](terminal.md).
 | Setting | Value | Why |
 |---|---|---|
 | `terminal.integrated.fontSize` | `16` | About 12pt, the Windows Terminal size |
+| `terminal.integrated.cursorStyle` | `bar` | Windows Terminal's bar cursor (VS Code defaults to block) |
+| `terminal.integrated.scrollback` | `30000` | Long agent transcripts |
 | `terminal.integrated.copyOnSelection` | `true` | Highlight copies |
 | `terminal.integrated.rightClickBehavior` | `paste` | Right-click pastes |
 | `terminal.integrated.commandsToSkipShell` | `-…toggleSidebarVisibility`, `-…togglePanel` | `Ctrl+B` / `Ctrl+J` reach the agent CLIs |
@@ -66,7 +68,7 @@ picture is in [Terminal Experience](terminal.md).
 ### Keybindings
 
 One shared template, `.chezmoitemplates/vscode-keybindings.json`, merges the agent
-keys into VS Code's own `keybindings.json` on every OS. There's a thin
+agent keys and the Windows Terminal parity chords into VS Code's own `keybindings.json` on every OS. There's a thin
 `modify_keybindings.json` wrapper per location:
 
 - Windows: `AppData/Roaming/Code/User`
@@ -76,7 +78,18 @@ keys into VS Code's own `keybindings.json` on every OS. There's a thin
 `.chezmoiignore` applies a wrapper only where VS Code's User folder already exists,
 so a headless server never gets a Code config. WSL is skipped because its VS Code
 keys live on the Windows side. The keys are scoped to a focused terminal: `Ctrl+Alt+C`/`X`/`O`/`A` type
-`claude`/`codex`/`opencode`/`agy` + Enter; add `Shift` to run them in a new split.
+`claude`/`codex`/`opencode`/`agy` + Enter; add `Shift` to run them in a new split
+(same folder). The parity chords, also only while a terminal has focus:
+
+| Keys | Action |
+|---|---|
+| `Alt+Shift+D` | Split the terminal |
+| `Alt+←` / `Alt+→` | Focus previous / next terminal |
+| `Ctrl+Tab` | Focus next terminal |
+| `Ctrl+Shift+R` | Rename the terminal |
+| `Ctrl+Shift+W` | Kill the terminal |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Terminal font zoom in / out / reset |
+
 Entries bound to the same keys are replaced; everything else in the file stays.
 VS Code's comment header is dropped on the first merge.
 

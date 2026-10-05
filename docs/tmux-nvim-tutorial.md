@@ -151,11 +151,14 @@ top of it.
 | `Ctrl+a` → `-` | Split pane horizontally (stacked). |
 | `Ctrl+a` → `h j k l` | Move between panes (vim directions: left/down/up/right). |
 | `Ctrl+a` → `c` | New window, same directory you're already in. |
+| `Ctrl+a` → `n` / `p` | Next / previous window. `Shift` + `←`/`→` does the same with no prefix. |
 | `Ctrl+Shift` + `←`/`→` | Move the current window left/right in the strip — no prefix needed. |
 | `Ctrl+a` → `H J K L` | Resize the current pane (holdable — keep pressing). |
 | `Ctrl+a` → `d` | Detach — leaves everything running in the background. |
 | `Ctrl+a` → `[` | Enter copy/scroll mode. `v` starts a selection, `y` copies it (goes to your system clipboard). |
 | `Ctrl+a` → `r` | Reload the config after editing it. |
+
+> **On Windows**, [psmux](terminal.md#psmux-windows-tmux-twin) runs the same keys in a plain Terminal tab (its config is `dot_config/psmux/psmux.conf`).
 
 > **Already on by default:** the mouse works — click a pane to focus it, drag a border to resize,
 > scroll to see history. Nothing above is mandatory on day one; it's there so you can go faster

@@ -31,8 +31,9 @@ identity, creating a new account:
 |---------|-------------|
 | `devprofile` | Which identity is active in this repo? |
 | `devprofile list` | All configured accounts and their SSH keys |
-| `devprofile use <username>` | Override identity for this repo only |
+| `devprofile use [username]` | Override identity for this repo only; with no name, pick interactively |
 | `devprofile init <username> <email> [--passphrase\|--no-passphrase]` | New account with fresh keys |
+| `devprofile help` (`-h`, `--help`) | Usage |
 | `devprofile verify [--install-hook]` | Sanity check; `--install-hook` adds a pre-commit hook that prints the identity and fails a commit only when `user.name`/`user.email` are unset (git's `useConfigOnly` already blocks that — the hook is a visibility aid, not a gate against the wrong account) |
 
 Passphrase handling for `init`: with neither flag, an interactive terminal
@@ -40,8 +41,15 @@ gets a `[y/N]` prompt (default **no** passphrase); `--passphrase` forces the
 `ssh-keygen` prompt, `--no-passphrase` skips it. On bash,
 `DEVPROFILE_PASSPHRASE` (`1`/`0`, or `true`/`yes`/`no`/`false`) sets the
 default when neither flag is given — explicit flags win over the env var.
+(The PowerShell twin, `dot_local/bin/devprofile.ps1`, also accepts the switches
+`-InstallHook`, `-Passphrase` and `-NoPassphrase`, and reads
+`DEVPROFILE_PASSPHRASE` the same way. Note that there the env var is applied
+*after* the flags, so it overrides them.)
 
-Short alias everywhere (zsh and PowerShell): `dp`.
+Short aliases everywhere (zsh and PowerShell): `dp` is `devprofile`, and
+`devprofiles` is `devprofile list`. On Windows, `devprofile` itself is a function
+in the PowerShell profiles that calls `~\.local\bin\devprofile.ps1`; see
+[windows.md](windows.md#devprofile-powershell).
 
 ## Example outputs
 
@@ -170,11 +178,17 @@ See [docs/chezmoi.toml.example](chezmoi.toml.example) for a complete example.
 
 ## SSH agent behavior
 
-- **Linux/macOS:** keys are added to `ssh-agent` on shell start (passphrase
-  asked once per agent lifetime).
+- **Linux/macOS:** `ssh-agent-relay start` (run from your zsh startup) gives each
+  account its own agent holding only that account's local keys; macOS loads
+  passphrase-protected keys from the keychain, elsewhere the relay prints the
+  `ssh-add` command to run once.
 - **Windows:** the `ssh-agent` Windows service stores keys DPAPI-encrypted
   and reloads them automatically on boot. No macOS-style `UseKeychain`
   needed.
+- **WSL:** holds no keys; the relay bridges the Windows agent and hands each
+  account a filtered socket.
+
+Full picture: [SSH agents](ssh-agents.md).
 - **Keys persist across reboots on all platforms.**
 - **This repo only ever ADDS keys, never flushes.** A key you loaded
   yourself is left alone.
@@ -219,5 +233,6 @@ account's directory, or a `devprofile use` run in the wrong repo.
 **Platform docs?**
 - [Windows specifics](windows.md) — PowerShell profiles, Chocolatey, the
   Windows `ssh-agent` service
-- [WSL specifics](testing.md) — WSL has its own agent, separate from
-  Windows
+- [SSH agents](ssh-agents.md) — WSL holds no keys; it relays the Windows
+  agent through per-account filtered sockets
+- [WSL specifics](testing.md#wsl) — interop and testing notes

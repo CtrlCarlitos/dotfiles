@@ -1,10 +1,14 @@
 ## The Menu
 
 When you run the installer, this is what you'll see. (Mirrors
-`scripts/select-packages.sh` / `.ps1`; the strings below are the script's
-own headers, so if they drift the scripts win.)
+`scripts/select-packages.sh` / `.ps1`; the two header lines below are the
+scripts' own, so if they drift the scripts win. The real menu lists the 16 group
+names only; the descriptions in the demo are added here from
+[package-groups.md](package-groups.md).)
 
-**Step 1 — Pick a preset:**
+**Step 1 — Pick a preset** (first run only: once `~/.config/chezmoi/chezmoi.toml`
+has a `[data.packages]` section this step is skipped, and the menu below is
+pre-checked with the groups you already have set to true):
 
 ```
 Preset? minimal=core only | standard=recommended | full=everything | custom=hand-pick
@@ -42,11 +46,12 @@ Toggle package groups (space=toggle, a=all, enter=confirm)
 (That pre-check set is the **standard** preset. Host-only groups — the
 desktop apps — are also skipped entirely on WSL and in containers.)
 
-**Step 3 — Done.** Your selections are saved to `~/.config/chezmoi/chezmoi.toml` and installed on the next `chezmoi apply`. Re-run the menu anytime:
+**Step 3 — Done.** Your selections are saved to `~/.config/chezmoi/chezmoi.toml` and installed on the next `chezmoi apply`. The menu owns the `[data.packages]` table (hand-edited keys inside it are replaced; everything outside it is kept, and an explicit `vscode_settings` value is preserved). Re-run the menu anytime:
 ```sh
-bash "$(chezmoi source-path)/scripts/select-packages.sh"
+bash "$(chezmoi source-path)/scripts/select-packages.sh"          # Linux, macOS, WSL
+pwsh "$(chezmoi source-path)/scripts/select-packages.ps1"          # Windows
 ```
 
 > 💡 The menu uses [gum](https://github.com/charmbracelet/gum) — you already have it.
-> If gum isn't available (or stdin isn't a TTY, e.g. CI), the menu skips and
+> If gum isn't available (or there is no interactive terminal, e.g. CI), the menu skips and
 > chezmoi's native prompts or your existing config apply as-is.

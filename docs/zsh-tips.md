@@ -12,7 +12,6 @@ A guide to getting the most out of your Zsh setup.
 | `zsh-syntax-highlighting` | Colors commands (green=valid, red=invalid) | Automatic |
 | `zsh-history-substring-search` | Search history by typing | ↑/↓ arrows after typing |
 | `zsh-completions` | Extra completions for many tools | Automatic |
-| `zoxide` | Smarter cd command | `z project` jumps to ~/projects |
 | `zsh-you-should-use` | Reminds you about aliases | Automatic |
 | `fzf` | Fuzzy finder | `Ctrl+R` for history, `Ctrl+T` for files |
 | `git` | Git aliases | `gst`, `gco`, `gp`, etc. |
@@ -23,6 +22,9 @@ A guide to getting the most out of your Zsh setup.
 | `copyfile` | Copy file contents to clipboard | `copyfile script.sh` |
 | `fzf-tab` | Replaces the default tab-completion list with a fuzzy-searchable one | Press `Tab` as usual, then type to filter |
 
+Not Oh-My-Zsh plugins, but initialised by `.zshrc` when installed: **Starship**
+(prompt), **zoxide** (`z project`, `zi`) and **direnv** (per-directory `.envrc`).
+
 ### Host-Only (Not in Devcontainers)
 
 | Plugin | What It Does |
@@ -30,7 +32,7 @@ A guide to getting the most out of your Zsh setup.
 | `docker` | Docker completions and aliases |
 | `docker-compose` | Docker Compose aliases |
 | `ssh` | SSH completions |
-| `ssh-agent` | Auto-starts/reuses an SSH agent, loads keys |
+| `ssh-agent` | Auto-starts/reuses an SSH agent, loads keys. Only when `ssh-agent-relay` is **not** installed: the relay owns the agent otherwise (see [SSH agents](ssh-agents.md)) |
 | `ubuntu` | Ubuntu-specific commands |
 
 ## Modern CLI Tools (`modern_cli`)
@@ -65,9 +67,14 @@ Installed alongside the plugins above, not part of Oh-My-Zsh itself:
 |----------|--------|
 | `Ctrl+R` | Fuzzy search history (with fzf) |
 | `↑` / `↓` | Navigate history (or substring search) |
-| `!!` | Repeat last command |
-| `!$` | Last argument of previous command |
-| `!*` | All arguments of previous command |
+| `Alt+.` | Insert the last argument of the previous command (zsh's `insert-last-word`) |
+
+`!!`, `!$` and `!*` do **not** work here: `.zshrc` sets `NO_BANG_HIST`, so `!` is an
+ordinary character. History is 50000 entries, shared between terminals, written
+immediately, with duplicates dropped.
+
+Other shell options set in `.zshrc`: `AUTO_CD` (type a directory name to `cd` into it),
+`CORRECT` (suggests fixes for mistyped commands), `NO_CASE_GLOB` and `NUMERIC_GLOB_SORT`.
 
 ### Productivity
 
@@ -142,17 +149,58 @@ dco         # docker compose
 dcupd       # docker compose up -d
 dcdn        # docker compose down
 dclf        # docker compose logs -f
+docker-clean       # docker system prune -af --volumes (destructive)
+docker-stop-all    # stop every container
 ```
 
 ### General
 ```bash
-ll          # List with details (eza)
+ll          # List with details (eza, with git status)
 la          # List all (eza)
-lt          # Tree view
+lt / lta    # Tree view, 2 levels (lta: including dotfiles)
 reload      # Reload .zshrc
 zshrc       # Edit .zshrc
 aliases     # Edit aliases file
+v / vi / vim  # nvim, when installed
+lg          # lazygit, when installed
+c / h / path  # clear / history / print PATH one per line
+ff <name>   # find . -type f -name <name>
+py / pip    # python3 / pip3
+serve       # python3 -m http.server 8000
+ni / nr / nrd / nrb  # npm install / run / run dev / run build
+get / post  # curl -sS / curl -sS -X POST
+rm / mv / cp  # interactive (-i); mkdir is -p
+cat         # bat, no pager (use \cat for the real one)
+du / df / ps  # dust / duf / procs, when installed
 ```
+
+`pbcopy` / `pbpaste` exist everywhere: native on macOS, `xclip` or `wl-copy` on
+Linux, `clip.exe` / PowerShell `Get-Clipboard` on WSL.
+
+`agy` is aliased to `agy --dangerously-skip-permissions` (the guardrail hooks are the
+enforced boundary). `serena-clean` kills leftover serena processes after an agent
+exits. `clip-to-file` (WSL) writes the Windows clipboard to `/tmp/clip-<timestamp>.txt`,
+prints the path and puts the path back on the clipboard: paste that path to an agent
+(`@<path>`) instead of a large blob, which pastes through psmux unreliably.
+
+### The `dot` command
+
+`dot` is a shell function (in `~/.aliases.zsh`); the PowerShell profiles have twins.
+
+```bash
+dot up        # chezmoi update --apply, then chezmoi init (config re-init); never upgrades
+dot upgrade   # the single owner of tool upgrades (run with no agent session open)
+dot backup    # encrypted portable backup
+dot restore   # restore a backup
+dot doctor    # health check
+dot remote    # remote-access setup/status/fix/keys
+dot version   # dotfiles vYYYY.MM.DD (sha)
+```
+
+An unknown subcommand prints `dot: unknown command '<x>'`, a hint, the help, and exits 2.
+If a command added by a recent `dot up` is "unknown", open a new shell: the one you
+are in loaded the older function. See [Windows](windows.md) for the PowerShell side and
+[versioning](versioning.md) for `dot version`.
 
 ## Oh-My-Zsh Git Aliases
 

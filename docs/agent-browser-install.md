@@ -71,6 +71,31 @@ package's Windows post-install path supplies a native executable shim; Windows
 ARM64 uses the published x64 binary through Windows emulation when an ARM64
 binary is unavailable. [post-install source][postinstall]
 
+### As built
+
+The installers (`run_onchange_install_packages.sh.tmpl`, `.ps1.tmpl`) follow the
+recommendation above, with two differences from the snippets: a failing step is
+a warning and the run continues (`|| warn ...`, never `throw`), and every step
+is wall-clock guarded. Playwright Chromium comes first, so `agent-browser
+install` finds it before downloading another browser; on apt systems
+`playwright install-deps chromium` runs first as root, the browser download
+itself never does.
+
+`doctor --json` is not dumped (it is about 3 KB). It is summarised: one line
+`agent-browser doctor: N pass, N warn, N fail`, then one line per `warn` or
+`fail` check with its fix hint. Output that is not the expected JSON (or, on
+Unix, a machine without `jq`) is printed raw, never dropped. The summarisers
+are `agent_browser_doctor` in `scripts/lib/agent-skills.sh` and
+`Write-AgentBrowserDoctorSummary` in `scripts/lib/ps-skills.ps1`
+(`tests/quiet_output_contract.sh`, `tests/agent_browser_provisioning_contract.sh`).
+
+`dot upgrade` (via `scripts/update_ai_tools.*`) re-runs the same global `npm
+install` and `agent-browser install`; the Unix updater only checks `doctor`'s
+exit status. The `agent-browser` skill itself is one of the curated skills
+(`vercel-labs/agent-browser`, see
+[skills-install-strategy.md](skills-install-strategy.md)); it is the discovery
+stub described above, and the CLI is what the npm install provides.
+
 ## OpenCode installation addendum
 
 - Unix/macOS: `curl -fsSL https://opencode.ai/install | bash` is current

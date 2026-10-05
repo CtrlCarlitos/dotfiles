@@ -37,9 +37,13 @@ Then:
 
 | Command | What it does |
 |---|---|
-| `dot devtmp` | Prints the plan. Changes nothing. |
+| `dot devtmp` (or `dot devtmp plan`) | Prints the plan. Changes nothing. |
 | `dot devtmp apply` | Creates the folder and runs `go env -w GOTMPDIR=<path>` (persistent, no admin). Says so plainly if Go is missing and `GOTMPDIR` was not set. |
 | `dot devtmp run go test ./...` | Runs the command with `TMP` and `TEMP` pointed at the folder **for that process only**. |
+
+Exit status: 0 on success; 1 when no folder is configured, the path is refused
+or the folder cannot be created; 2 on a usage error or a non-native command
+(`run` otherwise leaves the command's own exit code).
 
 `run` takes a **native executable** (`go`, `pwsh`, `cmd`, ...), not a PowerShell
 script, cmdlet or function: their `-Named` parameters would be passed
@@ -65,10 +69,11 @@ Add-MpPreference -ExclusionPath 'C:\dev\tmp'
 Defender settings are changed by you, from an admin shell. The dotfiles, and any
 agent working in them, do not touch Defender.
 
-To confirm the exclusion took effect (no admin needed):
+To confirm the exclusion took effect (from an admin shell; a normal shell
+prints `N/A: Must be an administrator to view exclusions`):
 
 ```powershell
-(Get-MpPreference).ExclusionPath -contains 'C:\dev	mp'   # True once added
+(Get-MpPreference).ExclusionPath -contains 'C:\dev\tmp'   # True once added
 ```
 
 ## 3. The contract: build and test output only

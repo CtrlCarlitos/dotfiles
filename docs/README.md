@@ -5,7 +5,7 @@ are reference.
 
 ## Getting started
 
-- [Quickstart](quickstart.md) — ten minutes from a fresh machine to a working environment
+- [Quickstart](quickstart.md) — ten minutes from a fresh machine to a working environment, and the `dot` commands you will use
 - [Package Groups](package-groups.md) — the 16 groups, presets, and how to change your selection
 - [Menu Demo](menu-demo.md) — what the selection menu actually looks like
 - [Backup & Restore](backup-restore.md) — `dot backup` / `dot restore`, the encrypted portable archive
@@ -29,6 +29,7 @@ are reference.
 - [Skills Install Strategy](skills-install-strategy.md) — the as-built curated-skills wiring (status: implemented)
 - [Agent Skill Wiring Design](agent-skill-wiring-design.md) — the original design spec behind it (implemented; rationale record)
 - [Dot Repo Baseline Design](superpowers/specs/2026-09-25-dot-repo-baseline-design.md) — the repository baseline audit/apply handover spec
+- Design specs behind the CLI: [`dot`](superpowers/specs/2026-09-20-dot-cli-design.md), [`dot remote`](superpowers/specs/2026-09-27-dot-remote-design.md), [`dot devtmp`](superpowers/specs/2026-10-02-dot-devtmp-design.md)
 - [agent-browser install](agent-browser-install.md) — install requirements for the browser-automation CLI
 - [Guardrail Install](guardrail-install.md) — how the dotfiles call the agent-guardrails installer, and the config they ship
 - [Secrets & SSH Hosts](secrets.md) — machine-local config, SSH aliases, safe handling
@@ -39,12 +40,14 @@ are reference.
 - [Tool Parity](tool-parity.md) — the full per-program table across all 5 platforms
 - [VS Code](vscode.md) — managed extensions, settings tiers, per-machine overrides
 - [Devcontainer Setup](devcontainer.md) — using the dotfiles in VS Code devcontainers
+- [Remote Agent Sessions](remote-agent-sessions.md) — tmux/psmux across desk and phone: canonical keys, detach/attach, recovery
 - [Remote Access](remote-access.md) — `dot remote`: scripted SSH/RDP/tmux plumbing and the optional Cloudflare Access browser path
-- [Testing the dotfiles](testing.md) — the per-platform verify/fix playbook (Linux, macOS, WSL, Windows)
+- [Testing the dotfiles](testing.md) — the per-platform verify/fix playbook, plus how the test suite and CI run
 - [Config Example](chezmoi.toml.example) — complete annotated `chezmoi.toml`
 - [Invariants](invariants.md) — the expensive lessons; read before changing templates, ignores or tests
 
 ## Elsewhere in the repo
 
 - [README](../README.md) — install one-liners and the day-to-day `dot` family
+- [CHANGELOG](../CHANGELOG.md) — generated release notes (see [Versioning & releases](versioning.md))
 - [SECURITY](../SECURITY.md) — how to report vulnerabilities

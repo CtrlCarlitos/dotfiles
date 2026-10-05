@@ -26,7 +26,7 @@ dot version
 | `dotfiles unknown (no git metadata in DIR)` | a copy of the repo without `.git` (exit 1) |
 
 Untracked files do not count as `dirty`. `dot doctor` prints the same line as its
-`dotfiles-version` check; it is informational and never a warning or an error.
+`dotfiles-version` check; it is informational and never a warning or an error (with no git metadata it is a skip). `dot version` exists in zsh and in both PowerShell profiles (`scripts/dotversion.sh` / `dotversion.ps1`).
 
 ## The changelog
 
@@ -43,15 +43,16 @@ It relies on the commit title, which the squash-merge makes the PR title:
 | `docs: ...` | Documentation |
 | `test: ...`, `ci: ...` | Tests and CI |
 | `refactor: ...` | Refactoring |
-| `chore: ...` | Maintenance |
+| `chore: ...`, `build: ...`, `style: ...` | Maintenance |
 | anything else | Other |
 | any type with `!` (`fix(x)!: ...`) | **Breaking**, listed there only |
 
 The `(#N)` GitHub adds becomes a PR link. Automation is not listed one by one:
 `chore(release): ...` commits are dropped, and the version-pin bumps
 (`chore: auto-update software versions`, `chore(guardrail): pin ...`) are summarised
-as one line under Maintenance. The oldest tag is the **baseline**: its section lists no
-commits, and earlier history stays in `git log`.
+as one line under Maintenance. The oldest tag (`v2026.10.02`) is the **baseline**: its section lists no
+commits, and earlier history stays in `git log`. The dated headings use the date in
+the tag name, not a commit date, so the committed file regenerates byte-identically.
 
 Useful while working:
 
@@ -90,7 +91,8 @@ deliberate.
    committed `CHANGELOG.md` does not.
 
 `prepare` refuses to run with uncommitted tracked changes, from a `HEAD` that is not
-`origin/main`, or when there is nothing to release. `publish` refuses a malformed tag,
+`origin/main`, or when there is nothing to release since the latest tag. `--dry-run`
+on either step prints the plan and changes nothing. `publish` refuses a malformed tag,
 a tag that already exists (locally or on origin), and a tag with no merged
 `chore(release)` commit.
 
