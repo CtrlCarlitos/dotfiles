@@ -41,6 +41,7 @@ while read -r name p args; do
 done <"$PROC_TABLE"
 EOF
 chmod +x "$tmp/bin/pgrep" "$tmp/bin/ps"
+fakepath="$tmp/bin:$PATH"
 
 extract_fn() {
     awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; if ($0 ~ /\}$/ && $0 !~ /\{$/) exit; next} f{print} f && /^\}$/{exit}' "$2"
@@ -57,7 +58,7 @@ sh_stop() {
     printf '%s\n' "$table" >"$tmp/table"
     : >"$tmp/stopped"
     (
-        export PROC_TABLE="$tmp/table" PATH="$tmp/bin:$PATH"
+        export PROC_TABLE="$tmp/table" PATH="$fakepath"
         [ -z "$noprompt" ] || export DOTUPGRADE_NO_PROMPT=1
         eval "$(cat "$tmp/fns.sh")"
         ancestor_pids() { for a in $ancestors; do echo "$a"; done; }
@@ -85,7 +86,7 @@ daemon='codex 100 /home/u/.codex/packages/app-server-daemon/releases/local-abc/b
 pass
 
 # the real ancestor walk always includes the shell asking
-ancestors_out="$(PATH="$tmp/bin:$PATH" PROC_TABLE="$tmp/table" bash -c "$(cat "$tmp/fns.sh"); ancestor_pids")"
+ancestors_out="$(PATH="$fakepath" PROC_TABLE="$tmp/table" bash -c "$(cat "$tmp/fns.sh"); ancestor_pids")"
 printf '%s\n' "$ancestors_out" | grep -Fxq "$$" || printf '%s\n' "$ancestors_out" | grep -Eq '^[0-9]+$' || fail "sh: ancestor_pids printed no pid"
 
 # the wiring: dotupgrade.sh offers the stop before it scans for blockers
