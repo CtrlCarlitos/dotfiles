@@ -738,13 +738,19 @@ function Get-DockerDesktopProcess {
 
 # '' when nothing is pending, else the available version. winget is asked first (it tends to
 # carry the newer build), then choco; any probe that fails counts as "nothing pending".
+# -Owner (from Get-DockerDesktopOwner) skips the manager that does not own it: each probe costs
+# 5-10 s and only the owner can upgrade it.
 function Get-DockerDesktopUpgrade {
+    param([string]$Owner = '')
     $previous = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
-        $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
-        if ($row) { return [string]$row.Available }
+        if ($Owner -ne 'choco') {
+            $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+            $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
+            if ($row) { return [string]$row.Available }
+            if ($Owner -eq 'winget') { return '' }
+        }
         # choco installed it: winget answers "install technology is different" instead of a table
         # and can never upgrade it, so only choco's own list counts.
         foreach ($line in @(& choco outdated --limit-output 2>&1 | ForEach-Object { "$_" })) {
@@ -864,6 +870,78 @@ function Get-DockerDesktopOwner {
     catch { Write-Verbose "docker desktop owner probe failed: $($_.Exception.Message)" }
     finally { $ErrorActionPreference = $previous }
     return ''
+}
+
+# --- Docker Desktop: compacting its data disk (`dot docker-compact`) -------------------------------
+# docker_data.vhdx grows with every image and build layer and never shrinks on its own: removing
+# images frees space inside it, not on the drive. Compacting needs Docker Desktop stopped and WSL
+# shut down (the disk is attached to Docker's WSL distro). Optimize-VHD (Hyper-V PowerShell
+# module) is tried first; where it is missing or fails (Windows Home, or no Hyper-V service to
+# back it) diskpart's `compact vdisk` does the same job.
+
+function Get-DockerDataDiskPath {
+    param([string]$LocalAppData = $env:LOCALAPPDATA)
+    return (Join-Path $LocalAppData 'Docker\wsl\disk\docker_data.vhdx')
+}
+
+# Each compactor returns $true on success. Separate functions so tests can replace them.
+function Invoke-OptimizeVhdCompact {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Get-Command Optimize-VHD -ErrorAction SilentlyContinue)) { return $false }
+    try { Optimize-VHD -Path $Path -Mode Full -ErrorAction Stop; return $true }
+    catch { Write-Host "  Optimize-VHD failed ($($_.Exception.Message)) - trying diskpart." -ForegroundColor Yellow; return $false }
+}
+
+function Invoke-DiskpartCompact {
+    param([Parameter(Mandatory)][string]$Path)
+    $script = [IO.Path]::GetTempFileName()
+    try {
+        Set-Content -LiteralPath $script -Encoding ASCII -Value @(
+            "select vdisk file=`"$Path`"", 'attach vdisk readonly', 'compact vdisk', 'detach vdisk')
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $out = (& diskpart /s $script 2>&1 | Out-String)
+        $code = [int]$LASTEXITCODE
+        $ErrorActionPreference = $previous
+        if ($code -ne 0) { Write-Host "  diskpart failed (exit $code):" -ForegroundColor Red; Write-Host $out; return $false }
+        return $true
+    }
+    finally { Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue }
+}
+
+# The whole run. True when the disk was compacted. Nothing is stopped unless the operator says y
+# (or -Yes); a VS Code hosting this terminal is never closed (-ExcludeId).
+function Invoke-DockerDiskCompact {
+    param([string]$Path = (Get-DockerDataDiskPath), [int[]]$ExcludeId = @(), [switch]$Yes)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Write-Host "  No Docker data disk at $Path - nothing to compact." -ForegroundColor Yellow
+        return $false
+    }
+    $before = (Get-Item -LiteralPath $Path).Length
+    Write-Host ("  Docker data disk: {0:N1} GB ({1})" -f ($before / 1GB), $Path)
+    Write-Host "  Compacting stops Docker Desktop (every running container) and shuts WSL down (every WSL" -ForegroundColor Yellow
+    Write-Host "  terminal). VS Code is closed first. Nothing is restarted afterwards." -ForegroundColor Yellow
+    if (-not $Yes) {
+        $answer = (Read-DotAnswer "  Compact it now? [y/N]").Trim().ToLower()
+        if ($answer -ne 'y') { Write-Host "  Left as it is."; return $false }
+    }
+    $vs = @(Get-VsCodeProcess | Where-Object { $ExcludeId -notcontains $_.Id })
+    if ($vs.Count -gt 0) { $null = Stop-VsCode -Process $vs }
+    if (@(Get-DockerDesktopProcess).Count -gt 0 -and -not (Stop-DockerDesktop)) {
+        Write-Host "  Docker Desktop did not stop - nothing was compacted." -ForegroundColor Red
+        return $false
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & wsl --shutdown *> $null
+    $ErrorActionPreference = $previous
+
+    $ok = Invoke-OptimizeVhdCompact -Path $Path
+    if (-not $ok) { $ok = Invoke-DiskpartCompact -Path $Path }
+    if (-not $ok) { Write-Host "  The disk was not compacted." -ForegroundColor Red; return $false }
+    $after = (Get-Item -LiteralPath $Path).Length
+    Write-Host ("  Compacted: {0:N1} GB -> {1:N1} GB (freed {2:N1} GB). Start Docker Desktop when you need it." -f ($before / 1GB), ($after / 1GB), (($before - $after) / 1GB)) -ForegroundColor Green
+    return $true
 }
 
 # --- where the time of a `dot upgrade` goes -----------------------------------------------------

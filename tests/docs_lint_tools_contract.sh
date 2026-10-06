@@ -103,8 +103,18 @@ grep -Fq "{{ range .catalog.packages }}{{ if hasKey . \"npm\" }}{{ .npm }} {{ en
     fail "update_ai_tools.sh must update the catalog's npm globals"
 grep -Fq "{{ range .catalog.packages }}{{ if hasKey . \"npm\" }}{{ .npm }} {{ end }}{{ end }}" "$repo_root/scripts/update_ai_tools.ps1" ||
     fail "update_ai_tools.ps1 must update the catalog's npm globals"
-grep -Eq 'outside package managers.*lychee, vale' "$repo_root/scripts/dotupgrade.sh" ||
-    fail "dotupgrade.sh must name lychee and vale among the Linux tools it cannot upgrade"
+# the Linux note names what is installed and cannot be upgraded - lychee and vale among them -
+# and nothing that is absent (WSL has no desktop apps; it used to list Docker Desktop there)
+awk '/^unmanaged_present\(\) \{/{f=1} f{print} f&&/^}$/{exit}' "$repo_root/scripts/dotupgrade.sh" >"$fx/unmanaged.sh"
+grep -q '^unmanaged_present() {' "$fx/unmanaged.sh" || fail "dotupgrade.sh: unmanaged_present() not found"
+mkdir -p "$fx/ubin" "$fx/uhome"
+for b in lychee vale delta; do printf '#!/bin/sh\n' >"$fx/ubin/$b"; chmod +x "$fx/ubin/$b"; done
+printf '#!/bin/sh\nexit 1\n' >"$fx/ubin/dpkg"; chmod +x "$fx/ubin/dpkg"
+sed_bin="$(command -v sed)"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$sed_bin" >"$fx/ubin/sed"; chmod +x "$fx/ubin/sed"
+# PATH is the fake folder only: a CI runner has a real google-chrome in /usr/bin
+note="$(HOME="$fx/uhome" PATH="$fx/ubin" "$BASH" -c '. "$1"; unmanaged_present' _ "$fx/unmanaged.sh")"
+[ "$note" = "delta, lychee, vale" ] || fail "the Linux note must name exactly what is installed (got: $note)"
 pass
 
 finish

@@ -84,6 +84,7 @@ dot restore <file>   # restore one (dot restore <archive.7z>)
 dot remote           # remote access: setup / status / fix / keys
 dot devtmp           # Windows only: build/test output folder for Defender
 dot ssh-fingerprints # Windows only: preview the SSH agent fingerprint sync
+dot docker-compact   # Windows only: shrink Docker Desktop's data disk (stops Docker)
 ```
 
 An unknown subcommand prints `dot: unknown command '<x>'` and the list. If you
