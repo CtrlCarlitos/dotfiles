@@ -199,8 +199,9 @@ pass
 du="$repo_root/scripts/dotupgrade.ps1"
 dock_line="$(grep -n 'Get-DockerDesktopUpgrade' "$du" | head -1 | cut -d: -f1)"
 choco_line="$(grep -n 'Invoke-ChocoUpgradeAll -Arguments' "$du" | head -1 | cut -d: -f1)"
-[ -n "$dock_line" ] && [ -n "$choco_line" ] && [ "$dock_line" -lt "$choco_line" ] \
-    || fail "dotupgrade.ps1 must check Docker Desktop BEFORE the choco sweep"
+if [ -z "$dock_line" ] || [ -z "$choco_line" ] || [ "$dock_line" -ge "$choco_line" ]; then
+    fail "dotupgrade.ps1 must check Docker Desktop BEFORE the choco sweep"
+fi
 grep -Fq 'Get-ChocoUpgradeArgument -KeepDockerDesktop:$dockerKept' "$du" || fail "dotupgrade.ps1 must exclude Docker Desktop from the sweep when it was kept running"
 grep -Fq 'Invoke-WingetUpgradeAll' "$du" || fail "dotupgrade.ps1 must run winget through Invoke-WingetUpgradeAll"
 if grep -Eq '^[[:space:]]*&[[:space:]]+winget[[:space:]]+upgrade --all' "$du"; then fail "dotupgrade.ps1 must not call the raw winget sweep"; fi
