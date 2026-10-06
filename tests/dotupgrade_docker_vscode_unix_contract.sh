@@ -108,6 +108,7 @@ run() {
         printf '%s\n' 'set -u' ". \"$repo_root/scripts/lib/docker-vscode.sh\""
         printf '%s\n' 'dock_os() { echo "${FAKE_OS:-Linux}"; }'
         printf '%s\n' 'dock_is_interactive() { [ "${FAKE_TTY:-1}" = 1 ]; }'
+        printf '%s\n' 'dock_native_engine_running() { [ "${FAKE_ENGINE:-0}" = 1 ] && pgrep -x dockerd >/dev/null 2>&1; }'
         printf '%s\n' 'dock_exclude_pids() { echo $$; for p in ${FAKE_ANCESTORS:-}; do echo "$p"; done; }'
         printf '%s\n' 'DOCK_GRACE_SECONDS=2'
         printf '%s\n' "$1"
@@ -201,7 +202,7 @@ pass
 e1="$("$tmp/dockerd-bin/dockerd" 300 >/dev/null 2>&1 & echo $!)"; spawned+=("$e1")
 v1="$(spawn /fake/usr/share/code/code)"
 settle
-printf 'y\n' | run 'dock_gate "docker-ce"; echo "rc=$?"' >"$tmp/out" || true
+printf 'y\n' | FAKE_ENGINE=1 run 'dock_gate "docker-ce"; echo "rc=$?"' >"$tmp/out" || true
 settle
 grep -Fxq 'rc=0' "$tmp/out" || fail "engine only: the gate proceeds (got: $(cat "$tmp/out"))"
 if alive "$v1"; then fail "engine only: VS Code is still closed first"; fi

@@ -20,7 +20,7 @@
 # WSL runs neither: Docker Desktop and VS Code live on Windows there, and the Windows dot upgrade
 # handles both. Nothing here is ever reached unless Docker is running, so those cost nothing.
 #
-# Overridable for tests: dock_os, dock_is_interactive, dock_exclude_pids; DOCK_GRACE_SECONDS.
+# Overridable for tests: dock_os, dock_is_interactive, dock_native_engine_running, dock_exclude_pids; DOCK_GRACE_SECONDS.
 
 DOCK_PKG_REGEX='docker-ce|docker-ce-cli|containerd\.io|docker-desktop|docker-compose-plugin|docker-buildx-plugin'
 DOCK_VSCODE_LINUX='/usr/share/code/|/usr/share/code-insiders/|/opt/visual-studio-code|/snap/code/|/usr/lib/code/'
@@ -31,6 +31,7 @@ DOCK_HELD=()
 
 dock_os() { uname -s; }
 dock_is_interactive() { [ -t 0 ] && [ -t 1 ]; }
+dock_native_engine_running() { pgrep -x dockerd >/dev/null 2>&1; }
 
 # The invoker's own ancestry (this shell, the terminal, an integrated terminal's VS Code): never
 # offered for closing, since stopping it would end this very command.
@@ -65,7 +66,7 @@ dock_desktop_pids() { _dock_pgrep "$(dock_desktop_pattern)"; }
 # 0 when Docker is running here: Docker Desktop, or on Linux a native engine
 dock_docker_running() {
     [ -n "$(dock_desktop_pids)" ] && return 0
-    if [ "$(dock_os)" != Darwin ] && pgrep -x dockerd >/dev/null 2>&1; then return 0; fi
+    if [ "$(dock_os)" != Darwin ] && dock_native_engine_running; then return 0; fi
     return 1
 }
 
