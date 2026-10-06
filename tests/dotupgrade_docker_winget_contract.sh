@@ -103,10 +103,38 @@ Write-Output ('docker-pending-none=[' + (Get-DockerDesktopUpgrade) + ']')
 $script:dockerUp = $true
 $script:dockerStubborn = $false
 $script:dockerCalls = @()
-function Get-Process { param([Parameter(Position = 0)][string[]]$Name) if ($script:dockerUp) { [pscustomobject]@{ ProcessName = 'Docker Desktop'; Id = 4242 } } }
+# A fake process table: Docker Desktop (pid 4242) and VS Code processes, found by name or by id.
+# A VS Code process answers CloseMainWindow like a real one (it exits unless $vsStubborn).
+$script:vsProcs = @()
+$script:vsStubborn = $false
+$script:events = @()
+function New-VsProc([int]$Id) {
+    $p = [pscustomobject]@{ ProcessName = 'Code'; Id = $Id }
+    $p | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value {
+        $script:events += "vscode:close:$($this.Id)"
+        if (-not $script:vsStubborn) { $script:vsProcs = @($script:vsProcs | Where-Object { $_.Id -ne $this.Id }) }
+        return $true
+    }
+    return $p
+}
+function Get-Process {
+    param([Parameter(Position = 0)][string[]]$Name, [int[]]$Id)
+    $all = @()
+    if ($script:dockerUp) { $all += [pscustomobject]@{ ProcessName = 'Docker Desktop'; Id = 4242 } }
+    $all += @($script:vsProcs)
+    if ($Id) { return @($all | Where-Object { $Id -contains $_.Id }) }
+    if ($Name) { return @($all | Where-Object { $Name -contains $_.ProcessName }) }
+    return $all
+}
 function docker { $script:dockerCalls += ($args -join ' '); if (-not $script:dockerStubborn) { $script:dockerUp = $false } }
 $script:killed = @()
-function Stop-AgentProcess { param($Process) $script:killed += $Process.Id; $script:dockerUp = $false; return $true }
+function Stop-AgentProcess {
+    param($Process, [int]$GraceSeconds)
+    $script:killed += $Process.Id
+    $script:events += "kill:$($Process.Id)"
+    if ($Process.Id -eq 4242) { $script:dockerUp = $false } else { $script:vsProcs = @($script:vsProcs | Where-Object { $_.Id -ne $Process.Id }) }
+    return $true
+}
 
 Write-Output ('stop-graceful=' + (Stop-DockerDesktop -TimeoutSeconds 1))
 Write-Output ('stop-used-cli=' + ($script:dockerCalls -join '|'))
@@ -123,9 +151,12 @@ function Test-InteractiveConsole { return $script:interactive }
 function Read-Host { param([string]$Prompt) $script:prompts++; return $script:answer }
 $script:stopResult = $true
 $script:stopCalls = 0
-function Stop-DockerDesktop { param([int]$TimeoutSeconds) $script:stopCalls++; return $script:stopResult }
+function Stop-DockerDesktop { param([int]$TimeoutSeconds) $script:stopCalls++; $script:events += 'docker:stop'; return $script:stopResult }
 
-function Offer { $script:prompts = 0; $script:stopCalls = 0; $script:out = (& { $script:r = Invoke-DockerDesktopStopOffer -Version '4.94.0' } *>&1 | Out-String) }
+function Offer([int[]]$Exclude = @()) {
+    $script:prompts = 0; $script:stopCalls = 0; $script:events = @()
+    $script:out = (& { $script:r = Invoke-DockerDesktopStopOffer -Version '4.94.0' -ExcludeId $Exclude -VsCodeGraceSeconds 1 } *>&1 | Out-String)
+}
 
 $script:dockerUp = $false
 Offer
@@ -153,6 +184,52 @@ Write-Output ("offer-accepted=$($script:r)|stops=$($script:stopCalls)|says=" + (
 $script:stopResult = $false
 Offer
 Write-Output ("offer-stop-failed=$($script:r)|warns=" + ($script:out -match 'did not stop'))
+Write-Output ('no-vscode-no-mention=' + (-not ($script:out -match 'VS Code')))
+
+# ---- VS Code: closed first, only as part of stopping Docker ------------------------------------------
+# A window attached to a dev container loses it when Docker stops, so VS Code is closed (cleanly)
+# BEFORE Docker is stopped; a VS Code that hosts this terminal is never closed (that would end
+# this very command); nothing is touched unless the operator accepts.
+$script:stopResult = $true
+$script:answer = 'y'
+$script:dockerUp = $true; $script:dockerStubborn = $true
+$script:vsStubborn = $false
+$script:vsProcs = @((New-VsProc 7001), (New-VsProc 7002))
+Offer
+Write-Output ("vs-accepted=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs).Count)")
+Write-Output ('vs-prompt-says=' + (($script:out -match 'VS Code is running \(2 process') -and ($script:out -match 'closed first')))
+Write-Output ('vs-no-host-note=' + (-not ($script:out -match 'hosts THIS terminal')))
+Write-Output ('vs-confirms=' + ($script:out -match 'VS Code closed'))
+
+$script:vsProcs = @((New-VsProc 7001), (New-VsProc 7002))
+$script:answer = 'n'
+Offer
+Write-Output ("vs-declined=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs).Count)")
+
+$script:answer = 'y'
+$script:vsProcs = @((New-VsProc 7001), (New-VsProc 7002))
+$env:DOTUPGRADE_NO_PROMPT = '1'
+Offer
+Remove-Item Env:DOTUPGRADE_NO_PROMPT
+Write-Output ("vs-no-prompt=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs).Count)")
+
+# VS Code hosts this terminal (pid 7001 is an ancestor): only the other window is closed
+$script:vsProcs = @((New-VsProc 7001), (New-VsProc 7002))
+Offer -Exclude @(7001)
+Write-Output ("vs-hosting=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs | ForEach-Object { $_.Id }) -join ',')")
+Write-Output ('vs-hosting-says=' + ($script:out -match 'hosts THIS terminal'))
+
+# only the terminal's own VS Code: nothing to close, the note still warns, Docker is stopped
+$script:vsProcs = @((New-VsProc 7001))
+Offer -Exclude @(7001)
+Write-Output ("vs-only-host=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs).Count)")
+Write-Output ('vs-only-host-no-close-line=' + (-not ($script:out -match 'will be closed first')))
+
+# a VS Code that ignores the close request is ended after the grace period, still before Docker
+$script:vsStubborn = $true
+$script:vsProcs = @((New-VsProc 7001), (New-VsProc 7002))
+Offer
+Write-Output ("vs-stubborn=$($script:r)|events=$($script:events -join ',')|left=$(@($script:vsProcs).Count)")
 PSEOF
 
 mkdir -p "$tmp/log"
@@ -193,6 +270,18 @@ expect 'offer-declined=False|prompts=1|stops=0'
 expect 'offer-default-is-no=False|stops=0'
 expect 'offer-accepted=True|stops=1|says=True'
 expect 'offer-stop-failed=False|warns=True'
+expect 'no-vscode-no-mention=True'
+expect 'vs-accepted=True|events=vscode:close:7001,vscode:close:7002,docker:stop|left=0'
+expect 'vs-prompt-says=True'
+expect 'vs-no-host-note=True'
+expect 'vs-confirms=True'
+expect 'vs-declined=False|events=|left=2'
+expect 'vs-no-prompt=False|events=|left=2'
+expect 'vs-hosting=True|events=vscode:close:7002,docker:stop|left=7001'
+expect 'vs-hosting-says=True'
+expect 'vs-only-host=True|events=docker:stop|left=1'
+expect 'vs-only-host-no-close-line=True'
+expect 'vs-stubborn=True|events=vscode:close:7001,vscode:close:7002,kill:7001,kill:7002,docker:stop|left=0'
 pass
 
 # --- wiring: Docker is dealt with before the choco sweep, and winget runs through the summary ---
