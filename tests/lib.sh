@@ -27,6 +27,17 @@
 _LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 _LIB_REPO_ROOT="$(cd -- "$_LIB_DIR/.." && pwd)"
 
+# Every test runs with its own state root. Code under test writes to
+# ${XDG_STATE_HOME:-$HOME/.local/state} (shell) and $env:XDG_STATE_HOME or
+# %USERPROFILE%\.local\state (PowerShell). A harness that overrode HOME but ran
+# the PowerShell twin still reached the operator's real USERPROFILE: two tests
+# emptied the real skills-sources and every next `dot up` reinstalled every
+# skill (2026-10-06). A test that needs XDG_STATE_HOME unset unsets it itself.
+_lib_state="${TMPDIR:-/tmp}/dotfiles-tests-state"
+if command -v cygpath >/dev/null 2>&1; then _lib_state="$(cygpath -m "$_lib_state")"; fi
+mkdir -p "$_lib_state" 2>/dev/null || true
+export XDG_STATE_HOME="$_lib_state"
+
 _tests_checks=0
 _tests_failed=0
 
