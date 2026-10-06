@@ -93,17 +93,42 @@ winget lists some packages it cannot upgrade at all (`A newer version was found,
 technology is different`: Docker Desktop installed by Chocolatey, Microsoft Edge). When it reports blocked
 upgrades, each pending package is asked about by id, and the ones it refuses move out of "still pending"
 into `Not upgradeable through winget (installed another way; choco or the app itself updates it): ...`.
-For Docker Desktop that means a newer winget build is not an upgrade `dot upgrade` can do while Chocolatey
-owns the app: no offer to stop Docker is made until the `docker-desktop` choco package catches up.
+A Docker Desktop still installed by Chocolatey lands there: see
+[Docker Desktop through winget](#docker-desktop-through-winget) below.
 
-**Docker Desktop** cannot be replaced while it runs: its installer (Chocolatey's `docker-desktop`, or
-winget's `Docker.DockerDesktop` for the same app) used to do nothing, silently. When an upgrade is pending
+**Docker Desktop** cannot be replaced while it runs: its installer (winget's `Docker.DockerDesktop`; on a
+machine not moved yet, Chocolatey's `docker-desktop`) used to do nothing, silently. When an upgrade is pending
 and Docker Desktop is up, `dot upgrade` offers to stop it first (`docker desktop stop`, then the remaining
 processes) with the same rule as the agent sessions: it asks on an interactive console, never when
 `DOTUPGRADE_NO_PROMPT=1` or non-interactive, and says plainly that the upgrade was left for the next run.
 Stopping it stops every running container, and they are not restarted afterwards. If it is kept running,
-`docker-desktop` is left out of the choco sweep (`--except=docker-desktop`, combined with `claude` when both
-apply) and the winget summary names the pending version.
+it is held out of the winget sweep (`winget pin add` for the sweep, removed afterwards; a pin you set
+yourself is left alone), or of the choco sweep on a machine not moved yet (`--except=docker-desktop`), and
+the winget summary names the pending version.
+
+#### Docker Desktop through winget
+
+Docker Desktop is installed and upgraded through winget (`Docker.DockerDesktop`, Docker's own EXE
+installer), not Chocolatey. Chocolatey's `docker-desktop` package installs Docker's MSI and lagged Docker's
+releases (4.93.0 while 4.94.0 was out, 2026-10-06), and winget refuses to upgrade that copy because the
+install technology differs. Uninstalling it can take the data disk (images, containers, volumes) with it,
+so `dot up` never replaces it: both `dot up` and `dot upgrade` say when a machine still has it, and the move
+is done once, by hand, keeping the data disk:
+
+1. Quit Docker Desktop (tray icon > Quit) and close VS Code windows attached to containers. Then, in an
+   elevated PowerShell: `wsl --shutdown` (the data disk is held by Docker's WSL distro until then).
+2. Move the data disk aside (a rename on the same drive, instant whatever its size):
+   `Move-Item "$env:LOCALAPPDATA\Docker\wsl\disk" "$env:LOCALAPPDATA\Docker-disk-keep"`, and copy the
+   settings: `Copy-Item -Recurse "$env:APPDATA\Docker" "$env:LOCALAPPDATA\Docker-settings-keep"`.
+3. `choco uninstall docker-desktop -y`
+4. `winget install --id Docker.DockerDesktop --exact --source winget --accept-package-agreements --accept-source-agreements`
+   and do **not** start Docker Desktop yet.
+5. Put the disk back: if the install created `$env:LOCALAPPDATA\Docker\wsl\disk`, rename it out of the way
+   first, then `Move-Item "$env:LOCALAPPDATA\Docker-disk-keep" "$env:LOCALAPPDATA\Docker\wsl\disk"`. If
+   `$env:APPDATA\Docker` is gone, copy the settings back.
+6. Start Docker Desktop, check `docker images` and `docker volume ls`, and confirm
+   `winget upgrade --id Docker.DockerDesktop` no longer says "install technology is different". Then the
+   two `*-keep` folders can be deleted.
 
 **VS Code is closed first.** A VS Code window attached to a dev container loses it the moment Docker
 stops, so when you accept the Docker Desktop stop and VS Code (`Code.exe`, or `Code - Insiders`) is

@@ -33,9 +33,11 @@ _LIB_REPO_ROOT="$(cd -- "$_LIB_DIR/.." && pwd)"
 # the PowerShell twin still reached the operator's real USERPROFILE: two tests
 # emptied the real skills-sources and every next `dot up` reinstalled every
 # skill (2026-10-06). A test that needs XDG_STATE_HOME unset unsets it itself.
-_lib_state="${TMPDIR:-/tmp}/dotfiles-tests-state"
-if command -v cygpath >/dev/null 2>&1; then _lib_state="$(cygpath -m "$_lib_state")"; fi
+# One fresh folder per test file (a shared one carried recorded state from one test into
+# the next); tests/run.sh removes them at the end of the suite.
+_lib_state="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-tests-state.XXXXXX" 2>/dev/null)" || _lib_state="${TMPDIR:-/tmp}/dotfiles-tests-state.$$"
 mkdir -p "$_lib_state" 2>/dev/null || true
+if command -v cygpath >/dev/null 2>&1; then _lib_state="$(cygpath -m "$_lib_state")"; fi
 export XDG_STATE_HOME="$_lib_state"
 
 _tests_checks=0

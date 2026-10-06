@@ -2226,6 +2226,36 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 {{- end }}
 
+# Docker Desktop: winget (Docker.DockerDesktop, Docker's own EXE installer), not Chocolatey
+# (see the catalog note). A Chocolatey copy is NOT replaced here: uninstalling it can take the
+# data disk (images, containers, volumes) with it, so the move is a manual, data-keeping step
+# documented in docs/windows.md. `dot upgrade` upgrades the winget copy.
+{{- if $dev_desktop }}
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "  Warning: winget not found - cannot install Docker Desktop" -ForegroundColor Red
+} else {
+    # Captured separately so 2>$null can't be misread as a comparison (PSScriptAnalyzer).
+    $chocoDockerList = ''
+    if (Get-Command choco -ErrorAction SilentlyContinue) { $chocoDockerList = (choco list --limit-output --exact docker-desktop 2>$null | Out-String) }
+    $dockerList = (winget list --id Docker.DockerDesktop --exact --accept-source-agreements 2>$null | Out-String)
+    if ($chocoDockerList -match '(?m)^docker-desktop\|') {
+        Write-Host "  Docker Desktop is still Chocolatey's - winget cannot upgrade it. Move it (keeping your data): docs/windows.md, Docker Desktop through winget." -ForegroundColor Yellow
+    } elseif ($dockerList -match 'Docker\.DockerDesktop') {
+        Write-Host "Docker Desktop already installed" -ForegroundColor Green
+    } else {
+        try {
+            Write-Host "Installing Docker Desktop (winget)..." -ForegroundColor Cyan
+            Invoke-WithTimeout -Description "Docker Desktop install" -Seconds 900 -Action {
+                winget install --id Docker.DockerDesktop --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+                if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+            }
+        } catch {
+            Write-Host "  Warning: Failed to install Docker Desktop - $_" -ForegroundColor Red
+        }
+    }
+}
+{{- end }}
+
 # Meld: winget, not Chocolatey (see the catalog note). A copy left by the
 # old Chocolatey install blocks winget's upgrade (different installer
 # technology), so remove it first; user settings survive the reinstall.

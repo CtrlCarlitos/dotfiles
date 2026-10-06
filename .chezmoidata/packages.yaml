@@ -361,9 +361,13 @@ catalog:
     - id: docker-desktop
       group: dev_desktop
       cask: docker
-      choco: docker-desktop
-      migrate_risk: "uninstalling Docker Desktop removes local images, containers and volumes"
-      note: "apt: official .deb download by procedure"
+      note: >-
+        apt: official .deb download by procedure. Windows: winget
+        (Docker.DockerDesktop, Docker's own EXE installer) by procedure, not
+        Chocolatey: the Chocolatey package installs Docker's MSI, lags Docker's
+        releases, and `winget upgrade` refuses a Chocolatey copy (different
+        install technology). Moving an existing Chocolatey copy is manual and
+        keeps the data disk: docs/windows.md, Docker Desktop through winget.
     - id: vscode
       group: dev_desktop
       cask: visual-studio-code
