@@ -18,6 +18,7 @@ Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
 # cannot be recreated while live agent sessions resolve from them.
 function Test-Deferred([string]$Tool) { return (@($env:DOTUPGRADE_DEFER -split ',') -contains $Tool) }
 
+Add-DotTimingMark -Name 'NPM packages and OpenCode'
 # 1. NPM Packages (Codex) + OpenCode via choco
 # OpenCode is NOT npm on Windows anymore: opencode-ai's npm package only
 # fetches its real platform binary in a postinstall script, and installs
@@ -61,6 +62,7 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     }
 }
 
+Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates
 # (checksum verify each run); this just refreshes the plugin.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
@@ -68,6 +70,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
     agy plugin install https://github.com/obra/superpowers 2>$null
 }
 
+Add-DotTimingMark -Name 'curated skills'
 # 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
 # Re-running the same `skills add` re-fetches latest (--copy overwrites). Keep
 # this list in sync with run_onchange_install_packages.ps1.tmpl. The CLI
@@ -282,6 +285,7 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
     }
 }
 
+Add-DotTimingMark -Name 'guardrail'
 # guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
 # ~/.config/chezmoi/chezmoi.toml [data.packages] guardrail (default false,
@@ -405,6 +409,7 @@ if ($guardrailState -and -not $guardrailVersion) {
 }
 # guardrail-section: end
 
+Add-DotTimingMark -Name 'Claude Code'
 # 2. Claude Code (Native)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host "🧠 Updating Claude Code..." -ForegroundColor Yellow
@@ -431,6 +436,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     claude plugin update superpowers -y 2>$null
 }
 
+Add-DotTimingMark -Name 'Superpowers (OpenCode)'
 # 3. Superpowers (OpenCode) - separate from Claude Code's plugin above.
 # Not a version-pinned npm dep, so re-running the install pulls the latest
 # commit. Uses the same Windows-specific --prefix workaround as the installer.
@@ -440,12 +446,14 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
     npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --allow-git=all --loglevel=error --no-progress 2>$null
 }
 
+Add-DotTimingMark -Name 'Playwright Chromium'
 # 4. Playwright Chromium (headless browser for agent automation)
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "🌐 Updating Playwright Chromium..." -ForegroundColor Yellow
     npx --yes playwright install chromium 2>$null
 }
 
+Add-DotTimingMark -Name 'agent-browser'
 # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "🌐 Updating agent-browser..." -ForegroundColor Yellow
@@ -474,6 +482,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     }
 }
 
+Add-DotTimingMark -Name 'Serena and Graft'
 # 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
 # Both are defer-aware: uv/graft recreate package dirs that live sessions
 # resolve from (2026-09-20 live incidents).
@@ -556,4 +565,5 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
     }
 }
 
+Write-DotTimingSummary -Title 'AI tools'
 Write-Host "✅ AI Tools Update Complete!" -ForegroundColor Green

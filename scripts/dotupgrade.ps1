@@ -15,6 +15,7 @@ if (-not (Test-IsAdmin)) {
 }
 
 Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
+Add-DotTimingMark -Name 'sessions and Codex daemon'
 
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run.
 # npm -g / uv tool / choco opencode all delete+recreate package directories
@@ -55,6 +56,7 @@ $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
 if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
 
+Add-DotTimingMark -Name 'Docker Desktop'
 # --- Docker Desktop: its installer cannot replace a running app, so an available upgrade used to
 # do nothing without a word. When one is pending and Docker Desktop is up, offer to stop it (same
 # rule as the agent sessions above); whichever manager owns the package then upgrades it.
@@ -65,6 +67,7 @@ if (@(Get-DockerDesktopProcess).Count -gt 0) {
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion) }
 }
 
+Add-DotTimingMark -Name 'choco'
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading choco packages (choco upgrade all)..." -ForegroundColor Yellow
@@ -77,6 +80,7 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  choco not found - skipping system packages." -ForegroundColor Yellow
 }
 
+Add-DotTimingMark -Name 'winget'
 # --- 1a. winget-managed apps (Build Tools, ChatGPT Work/Codex msstore,
 # Win-CodexBar): same full-sweep premise as choco - upgrade everything
 # winget knows, not just what this repo installed. --include-unknown: apps
@@ -90,6 +94,7 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "  winget not found - skipping winget packages." -ForegroundColor Yellow
 }
 
+Add-DotTimingMark -Name 'VS Code extensions'
 # --- 1b. VS Code extensions: `dot up` only installs missing ones (no --force); updates are
 # this command's job. Skipped quietly when VS Code is absent; a failure never aborts.
 if (Get-Command code -ErrorAction SilentlyContinue) {
@@ -104,6 +109,7 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     }
 }
 
+Add-DotTimingMark -Name 'AI tools'
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 & (Join-Path $PSScriptRoot 'update_ai_tools.ps1')
 
@@ -115,6 +121,7 @@ if ($dropDesktopShortcuts) {
     }
 }
 
+Write-DotTimingSummary -Title 'dot upgrade'
 # --- Deferred report: what to re-run when quiet. ---
 if ($defer.Count -gt 0) {
     Write-Host ""

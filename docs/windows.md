@@ -75,6 +75,16 @@ image name, so the upgrade would kill live Claude Code sessions. `dot upgrade` s
 with Claude closed takes the package. This check is by image name only, unlike the live-session
 check below.
 
+**Where the time goes.** A Windows `dot upgrade` took 13 minutes with no breakdown, so each script now
+marks its sections (sessions, Docker Desktop, choco, winget, VS Code extensions, AI tools; inside the AI
+tools: npm packages, curated skills, guardrail, Claude Code, OpenCode, Playwright, agent-browser, Serena and
+Graft) and ends with one line, for example `Timings (dot upgrade, 13m03s): choco 6m10s, AI tools 4m20s, ...`,
+listing sections of 5 seconds or more, slowest first (`DOT_TIMING_MIN_SECONDS` changes the floor), plus the
+same line for the AI-tools part. The line is appended to `upgrade.log` (Linux and macOS:
+`~/.local/state/dotfiles/upgrade.log`) so one run can be compared with the next. Shell twin:
+`scripts/lib/timing.sh`; PowerShell twin: `Add-DotTimingMark` / `Write-DotTimingSummary` in
+`scripts/lib/ps-common.ps1`; `tests/upgrade_timing_contract.sh` runs both against a fake clock.
+
 **winget** gets the same treatment: its output streams (minus spinner and progress-bar noise) and is
 kept in the same `upgrade.log`, and the sweep ends with what it upgraded (`winget upgraded 2 package(s).`)
 and, from a second listing, what is **still pending** (`Still pending in winget: Docker Desktop (4.93.0 -> 4.94.0), ...`).
