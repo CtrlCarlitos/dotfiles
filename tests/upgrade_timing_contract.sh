@@ -49,6 +49,12 @@ grep -Eq '^=== [0-9T:-]+ Timings \(dot upgrade, 14m10s\): skills 10m00s' "$log" 
 # the floor is configurable
 out2="$(HOME="$home" DOT_TIMING_MIN_SECONDS=1 bash -c '. "$1/scripts/lib/timing.sh"; fake_now=100; dot_timing_now() { echo $fake_now; }; dot_timing_mark a; fake_now=102; dot_timing_mark b; fake_now=104; dot_timing_summary t' _ "$repo_root")"
 printf '%s\n' "$out2" | grep -Fxq '  Timings (t, 4s): a 2s, b 2s' || fail "shell: DOT_TIMING_MIN_SECONDS=1 must list 2 s sections (got: $out2)"
+# A prompt's answer time is its own section, and the section it interrupted adds up around it
+# (Windows reported "sessions and Codex daemon 1m28s", most of it the operator reading the prompt).
+out3="$(HOME="$home" bash -c '. "$1/scripts/lib/timing.sh"; fake_now=100; dot_timing_now() { echo $fake_now; }; dot_timing_mark sessions; fake_now=110; dot_timing_wait; fake_now=170; dot_timing_resume; fake_now=180; dot_timing_summary t' _ "$repo_root")"
+printf '%s\n' "$out3" | grep -Fxq '  Timings (t, 1m20s): your answers 1m00s, sessions 20s' || fail "shell: answer time must be its own section and the interrupted one must add up (got: $out3)"
+out4="$(HOME="$home" bash -c '. "$1/scripts/lib/timing.sh"; dot_timing_wait; dot_timing_resume; echo "untimed-ok:${DOT_TIMING_LAST:-none}"' _ "$repo_root")"
+[ "$out4" = 'untimed-ok:none' ] || fail "shell: wait/resume outside a timed run must do nothing (got: $out4)"
 pass
 
 # --- PowerShell twin --------------------------------------------------------------------------------
@@ -80,6 +86,14 @@ Add-DotTimingMark -Name 'a'
 Step 2 'b'
 $script:clock = $script:clock.AddSeconds(2)
 Write-Output ('floor=' + (Capture { Write-DotTimingSummary -Title 't' -LogPath $Log }))
+$env:DOT_TIMING_MIN_SECONDS = '5'
+function Read-Host { param($Prompt) $script:clock = $script:clock.AddSeconds(60); return 'y' }
+Add-DotTimingMark -Name 'sessions'
+$script:clock = $script:clock.AddSeconds(10)
+$null = Read-DotAnswer 'Stop?'
+$script:clock = $script:clock.AddSeconds(10)
+Write-Output ('answers=' + (Capture { Write-DotTimingSummary -Title 't' -LogPath $Log }))
+Write-Output ('untimed=' + (Read-DotAnswer 'x') + '|' + $script:DotTimingLast + '|')
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" -Log "$(winpath "$tmp/ps.log")" 2>&1 | tr -d '\r' || true)"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
@@ -87,6 +101,8 @@ PSEOF
     expect 'second=[]'
     expect 'log=True'
     expect 'floor=Timings (t, 4s): a 2s, b 2s'
+    expect 'answers=Timings (t, 1m20s): your answers 1m00s, sessions 20s'
+    expect 'untimed=y||'
     pass
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'

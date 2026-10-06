@@ -119,4 +119,14 @@ expect 'choco-claude-and-docker=upgrade all -y --no-progress --except=claude,doc
 expect 'graft-install-scalar=True'
 expect 'choco-other-agent=upgrade all -y --no-progress'
 
+# On Windows `graft version` answers "latest: unreachable" (it cannot spawn npm.cmd), so the
+# graft-text check alone never said "current" there and graft was reinstalled on every run.
+# The updater falls back to asking npm directly before reinstalling.
+ai_ps1="$repo_root/scripts/update_ai_tools.ps1"
+grep -Fq "if (-not \$graftCurrent -and (Test-NpmGlobalCurrent '@nanonets/graft'))" "$ai_ps1" ||
+    fail "update_ai_tools.ps1 must ask npm whether graft is current when graft version cannot"
+awk '/Test-NpmGlobalCurrent .@nanonets\/graft./{a=NR} /Invoke-GraftNpmInstall -AllowScripts/{b=NR} END{exit !(a && b && a<b)}' "$ai_ps1" ||
+    fail "the npm currency fallback must run before the graft reinstall"
+pass
+
 finish

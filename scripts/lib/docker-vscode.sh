@@ -180,7 +180,9 @@ dock_gate() {
         fi
         printf '  Stop Docker so it can upgrade now? [y/N]: '
     } >&2
+    dot_timing_wait 2>/dev/null || true
     read -r answer || answer=""
+    dot_timing_resume 2>/dev/null || true
     case "$answer" in
         [yY]) ;;
         *)

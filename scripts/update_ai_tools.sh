@@ -309,7 +309,7 @@ if command -v opencode &>/dev/null; then
     # the latest commit since no version/tag is pinned.
     echo "✨ Updating Superpowers (OpenCode)..."
     # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$HOME/.config/opencode" --allow-git=all --loglevel=error --no-progress 2>/dev/null || echo "   Superpowers not installed for OpenCode - skipping"
+    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$HOME/.config/opencode" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false >/dev/null 2>&1 || echo "   Superpowers not installed for OpenCode - skipping"
 fi
 
 dot_timing_mark 'Playwright Chromium'

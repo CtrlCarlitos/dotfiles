@@ -387,14 +387,14 @@ function Invoke-LiveSessionStop {
     Write-Host "  These sessions block part of the upgrade:" -ForegroundColor Yellow
     foreach ($p in $procs) { Write-Host "    $(Format-LiveProcess $p)" }
     Write-Host "  Stopping one ends that session; unsaved context is lost unless it can be resumed." -ForegroundColor Yellow
-    $answer = (Read-Host "  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer").Trim().ToLower()
+    $answer = (Read-DotAnswer "  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer").Trim().ToLower()
 
     $chosen = @()
     if ($answer -eq 'y') {
         $chosen = $procs
     } elseif ($answer -eq 's') {
         foreach ($p in $procs) {
-            $each = (Read-Host "    Stop $(Format-LiveProcess $p)? [y/N]").Trim().ToLower()
+            $each = (Read-DotAnswer "    Stop $(Format-LiveProcess $p)? [y/N]").Trim().ToLower()
             if ($each -eq 'y') { $chosen += $p }
         }
     }
@@ -610,6 +610,10 @@ function ConvertFrom-WingetUpgradeTable {
 # What winget still lists as upgradable, plus its "N package(s) have upgrades blocked" note
 # (those packages are not named anywhere in winget's output).
 function Get-WingetPendingUpgrade {
+    # SweepBlocked: winget's "N package(s) have upgrades blocked" line from the `upgrade --all`
+    # sweep. Only the sweep prints it; the plain listing below never does (seen live 2026-10-06,
+    # which is why keying on the listing found nothing).
+    param([string]$SweepBlocked = '')
     $lines = @()
     $previous = $ErrorActionPreference
     try {
@@ -618,7 +622,7 @@ function Get-WingetPendingUpgrade {
     }
     catch { $lines = @() }
     finally { $ErrorActionPreference = $previous }
-    $blocked = ''
+    $blocked = $SweepBlocked
     foreach ($line in $lines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $blocked = $line.Trim() } }
     $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
     # winget lists a package it cannot upgrade ("a newer version was found, but the install
@@ -673,15 +677,19 @@ function Invoke-WingetUpgradeAll {
             if ($line -match 'Successfully installed') { $installed++ }
             # spinner frames, blank lines and download bars carry no information
             if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
+            # the blocked note is explained (or repeated) by the summary below
+            if ($line -match '\d+ package\(s\) have upgrades blocked') { return }
             Write-Host $line
         }
         $code = [int]$LASTEXITCODE
     }
     catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
     finally { $ErrorActionPreference = $previous }
+    $sweepBlocked = ''
+    foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
 
     if ($installed -gt 0) { Write-Host ("  winget upgraded {0} package(s)." -f $installed) -ForegroundColor Green }
-    $pending = Get-WingetPendingUpgrade
+    $pending = Get-WingetPendingUpgrade -SweepBlocked $sweepBlocked
     if (@($pending.Rows).Count -gt 0) {
         $names = @($pending.Rows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
         Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
@@ -793,7 +801,7 @@ function Invoke-DockerDesktopStopOffer {
     if ($vsHostsThisTerminal) {
         Write-Host "  VS Code also hosts THIS terminal, so it is not closed: any of its windows attached to a container will disconnect when Docker stops. Run dot upgrade from another terminal to avoid that." -ForegroundColor Yellow
     }
-    $answer = (Read-Host "  Stop Docker Desktop so it can upgrade now? [y/N]").Trim().ToLower()
+    $answer = (Read-DotAnswer "  Stop Docker Desktop so it can upgrade now? [y/N]").Trim().ToLower()
     if ($answer -ne 'y') {
         Write-Host "  Docker Desktop left running; its upgrade waits for the next run." -ForegroundColor Yellow
         return $false
@@ -830,6 +838,17 @@ $script:DotTimingStart = [DateTime]::MinValue
 
 function Get-DotTimingNow { return [DateTime]::UtcNow }
 
+# Read-Host for dot upgrade's prompts: the time spent answering is its own section ("your
+# answers") in the closing Timings line, not part of the work it interrupted. Twin of
+# dot_timing_wait / dot_timing_resume. Outside a timed run it is plain Read-Host.
+function Read-DotAnswer {
+    param([string]$Prompt)
+    $resume = $script:DotTimingLast
+    if ($resume) { Add-DotTimingMark -Name 'your answers' }
+    try { return (Read-Host $Prompt) }
+    finally { if ($resume) { Add-DotTimingMark -Name $resume } }
+}
+
 function Add-DotTimingMark {
     param([Parameter(Mandatory)][string]$Name)
     $now = Get-DotTimingNow
@@ -861,11 +880,15 @@ function Write-DotTimingSummary {
     if ($script:DotTimingNames.Count -eq 0) { return }
     $min = 5
     if ($env:DOT_TIMING_MIN_SECONDS -and $null -ne ($env:DOT_TIMING_MIN_SECONDS -as [int])) { $min = [int]$env:DOT_TIMING_MIN_SECONDS }
-    $rows = @()
+    # a section can recur (work resumes after "your answers"): its parts add up
+    $sums = [ordered]@{}
     for ($i = 0; $i -lt $script:DotTimingNames.Count; $i++) {
-        if ($script:DotTimingSeconds[$i] -ge $min) {
-            $rows += [pscustomobject]@{ Name = $script:DotTimingNames[$i]; Seconds = $script:DotTimingSeconds[$i] }
-        }
+        $name = $script:DotTimingNames[$i]
+        if ($sums.Contains($name)) { $sums[$name] += $script:DotTimingSeconds[$i] } else { $sums[$name] = $script:DotTimingSeconds[$i] }
+    }
+    $rows = @()
+    foreach ($name in $sums.Keys) {
+        if ($sums[$name] -ge $min) { $rows += [pscustomobject]@{ Name = $name; Seconds = $sums[$name] } }
     }
     $top = @($rows | Sort-Object -Property Seconds -Descending | Select-Object -First 6 |
         ForEach-Object { '{0} {1}' -f $_.Name, (Format-DotDuration -Seconds $_.Seconds) })

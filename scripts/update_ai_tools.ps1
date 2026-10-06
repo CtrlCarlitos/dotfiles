@@ -467,7 +467,9 @@ Add-DotTimingMark -Name 'Superpowers (OpenCode)'
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
     # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --allow-git=all --loglevel=error --no-progress 2>$null
+    # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
+    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "  Superpowers not installed for OpenCode - skipping" -ForegroundColor Yellow }
 }
 
 Add-DotTimingMark -Name 'Playwright Chromium'
@@ -537,6 +539,10 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
         # Only upgrade when the installed graft is not already the latest published one.
         $graftCurrent = ''
         try { $graftCurrent = Get-GraftCurrentVersion -VersionOutput ((graft version 2>$null) | Out-String) } catch { Write-Verbose "graft version probe failed: $($_.Exception.Message)" }
+        # On Windows `graft version` cannot reach npm (it spawns npm.cmd without a shell, the same
+        # ENOENT as `graft upgrade`) and answers "latest: unreachable", so the ~1 min reinstall ran
+        # every time. Ask npm directly before concluding it is not current.
+        if (-not $graftCurrent -and (Test-NpmGlobalCurrent '@nanonets/graft')) { $graftCurrent = $script:NpmCurrentVersion }
         if ($graftCurrent) {
             Write-Host "  graft is current ($graftCurrent)"
         } elseif (-not $graftAllow) {

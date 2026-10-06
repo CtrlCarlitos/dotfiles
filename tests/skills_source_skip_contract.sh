@@ -95,6 +95,10 @@ export FAKE_HEAD=aaaaaaa
 # clone-and-add is silent) and never "up to date"; a skipped one says "<name>: up to date" only.
 [ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
 if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
+# every "installed" line says why: a reinstall on every run must be explainable from the log
+grep -Fq "Matt Pocock's skills: installed (" "$tmp/last-run.txt" || fail "a: an install line must carry its reason (got: $(grep -F 'installed' "$tmp/last-run.txt" | head -2 | tr '
+' ' '))"
+grep -q "missing from\|no install recorded" "$tmp/last-run.txt" || fail "a: a fresh install's reason must be a missing skill or no record"
 grep -Fq 'mp-code-review: installed' "$tmp/last-run.txt" || fail "a: the staged mp-code-review install must say so (every other source prints a line; got: $(grep -c . "$tmp/last-run.txt") lines)"
 
 [ "$(run_all)" = 'adds=0 installed=20' ] || fail "b: unchanged head must install nothing and still report 20 (got $(run_all))"
@@ -103,6 +107,8 @@ if grep -q 'Installing ' "$tmp/last-run.txt"; then fail "b: a skipped source mus
 
 FAKE_HEAD=bbbbbbb
 [ "$(run_all)" = 'adds=8 installed=20' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
+grep -Fq "code-search: installed (upstream changed)" "$tmp/last-run.txt" || fail "c: a moved head must say 'upstream changed' (got: $(grep -F 'code-search' "$tmp/last-run.txt" | tr '
+' ' '))"
 
 rm -rf "$home/.claude/skills/code-search"
 [ "$(run_all)" = 'adds=1 installed=20' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
@@ -180,6 +186,7 @@ function Step([string]$label, [string[]]$Agents = $agents) {
 Step 'fresh'
 Step 'same'
 $script:head = 'bbb'; Step 'moved'
+Write-Output ('moved-reason=' + $script:SkillsStaleReason)
 Remove-Item -Recurse -Force (Join-Path $UserDir '.claude\skills\a'); Step 'missing'
 $env:DOT_SKILLS_FORCE = '1'; Step 'force'; Remove-Item Env:DOT_SKILLS_FORCE
 $script:head = ''; Step 'offline1'; Step 'offline2'
@@ -207,6 +214,7 @@ PSEOF
     expect 'fresh=1'
     expect 'same=0'
     expect 'moved=1'
+    expect 'moved-reason=upstream changed'
     expect 'missing=1'
     expect 'force=1'
     expect 'offline1=1'
