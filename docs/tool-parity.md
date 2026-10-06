@@ -164,7 +164,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `cutepdf` | dev_desktop | — | — | — | `cutepdf` |  |
 | `everything` | dev_desktop | — | — | — | `Everything` |  |
 | `ghostscript` | dev_desktop | `ghostscript` | — | `ghostscript` | `Ghostscript.app` |  |
-| `docker-desktop` | dev_desktop | procedure | — | `docker` | `docker-desktop` | apt: official .deb download by procedure |
+| `docker-desktop` | dev_desktop | procedure | — | `docker` | — | apt: official .deb download by procedure. Windows: winget (Docker.DockerDesktop, Docker's own EXE installer) by procedure, not Chocolatey: the Chocolatey package installs Docker's MSI, lags Docker's releases, and `winget upgrade` refuses a Chocolatey copy (different install technology). Moving an existing Chocolatey copy is manual and keeps the data disk: docs/windows.md, Docker Desktop through winget. |
 | `vscode` | dev_desktop | procedure | — | `visual-studio-code` | `vscode.install` | apt: Microsoft's repo by procedure |
 | `geany` | dev_desktop | `geany` | — | `geany` | `geany` | Replaces Notepad++ (Windows-only): free, open source, and the same "lightweight quick-edit GUI editor" role on all three platforms. |
 | `obs-studio` | dev_desktop | `obs-studio` | — | `obs` | `obs-studio.install` |  |

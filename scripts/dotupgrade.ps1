@@ -62,6 +62,11 @@ Add-DotTimingMark -Name 'Docker Desktop'
 # rule as the agent sessions above); whichever manager owns the package then upgrades it.
 $dockerKept = $false
 $dockerPendingVersion = ''
+# Docker Desktop is winget's (Docker's own EXE installer, current releases). A machine that
+# still has Chocolatey's MSI copy cannot be upgraded by winget and lags behind: say how to move.
+if ((Get-DockerDesktopOwner) -eq 'choco') {
+    Write-Host "  Docker Desktop is still Chocolatey's (its package lags Docker's releases, and winget will not upgrade it). To move it to winget and keep your data, see docs/windows.md (Docker Desktop through winget)." -ForegroundColor Yellow
+}
 if (@(Get-DockerDesktopProcess).Count -gt 0) {
     $dockerPendingVersion = Get-DockerDesktopUpgrade
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
@@ -89,7 +94,9 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading winget packages (winget upgrade --all)..." -ForegroundColor Yellow
     $wingetRunningNote = ''
     if ($dockerKept) { $wingetRunningNote = "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
-    $null = Invoke-WingetUpgradeAll -RunningNote $wingetRunningNote   # it prints its own summary and warnings
+    $wingetHold = @()
+    if ($dockerKept) { $wingetHold = @('Docker.DockerDesktop') }   # running: its installer would fail mid-sweep
+    $null = Invoke-WingetUpgradeAll -RunningNote $wingetRunningNote -HoldId $wingetHold   # it prints its own summary and warnings
 } else {
     Write-Host "  winget not found - skipping winget packages." -ForegroundColor Yellow
 }

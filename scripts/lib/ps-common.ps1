@@ -652,8 +652,12 @@ function Get-WingetPendingUpgrade {
 # upgrade log; the end says what upgraded and, from a second listing, what is STILL pending.
 # Before this the raw table was shown and a package that silently did not upgrade (Docker
 # Desktop, running) was invisible.
+# -HoldId: packages the sweep must leave alone this run (Docker Desktop kept running: its
+# installer cannot replace a running app). `upgrade --all` has no --except, so each is pinned
+# for the sweep and unpinned afterwards - only pins this run added, never one the operator had
+# (twin of the apt-mark hold in scripts/lib/docker-vscode.sh).
 function Invoke-WingetUpgradeAll {
-    param([string]$LogPath, [string]$RunningNote = '')
+    param([string]$LogPath, [string]$RunningNote = '', [string[]]$HoldId = @())
 
     if (-not $LogPath) { $LogPath = Join-Path $HOME '.local\state\dotfiles\upgrade.log' }
     try {
@@ -668,6 +672,17 @@ function Invoke-WingetUpgradeAll {
     $installed = 0
     $allLines = New-Object System.Collections.Generic.List[string]
     $previous = $ErrorActionPreference
+    $pinned = @()
+    if (@($HoldId).Count -gt 0) {
+        $ErrorActionPreference = 'Continue'
+        $pinList = (& winget pin list --accept-source-agreements 2>$null | Out-String)
+        foreach ($id in $HoldId) {
+            if ($pinList -match [regex]::Escape($id)) { continue }
+            & winget pin add --id $id --exact --accept-source-agreements *> $null
+            if ($LASTEXITCODE -eq 0) { $pinned += $id }
+        }
+        $ErrorActionPreference = $previous
+    }
     try {
         $ErrorActionPreference = 'Continue'
         & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object {
@@ -684,7 +699,10 @@ function Invoke-WingetUpgradeAll {
         $code = [int]$LASTEXITCODE
     }
     catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
-    finally { $ErrorActionPreference = $previous }
+    finally {
+        foreach ($id in $pinned) { & winget pin remove --id $id --exact *> $null }
+        $ErrorActionPreference = $previous
+    }
     $sweepBlocked = ''
     foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
 
@@ -819,6 +837,33 @@ function Invoke-DockerDesktopStopOffer {
     }
     Write-Host "  Warning: Docker Desktop did not stop - its upgrade is left for the next run." -ForegroundColor Red
     return $false
+}
+
+# --- Docker Desktop: who owns it ------------------------------------------------------------------
+# Chocolatey's docker-desktop package installs Docker's MSI; winget's Docker.DockerDesktop is
+# Docker's EXE installer. To Windows those are two install technologies, so `winget upgrade`
+# refuses a Chocolatey copy ("install technology is different"), and Chocolatey's package lags
+# Docker's releases (4.93.0 while 4.94.0 was out, 2026-10-06). Docker Desktop is winget's now;
+# a machine that still has the Chocolatey copy is told how to move it (docs/windows.md).
+
+# 'choco', 'winget' or '' (not installed). winget lists every installed app, Chocolatey's
+# MSI copy included, so Chocolatey is asked first.
+function Get-DockerDesktopOwner {
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        if (Get-Command choco -ErrorAction SilentlyContinue) {
+            $chocoList = (choco list --limit-output --exact docker-desktop 2>$null | Out-String)
+            if ($chocoList -match '(?m)^docker-desktop\|') { return 'choco' }
+        }
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            $wingetList = (winget list --id Docker.DockerDesktop --exact --accept-source-agreements 2>$null | Out-String)
+            if ($wingetList -match 'Docker\.DockerDesktop') { return 'winget' }
+        }
+    }
+    catch { Write-Verbose "docker desktop owner probe failed: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previous }
+    return ''
 }
 
 # --- where the time of a `dot upgrade` goes -----------------------------------------------------

@@ -132,6 +132,7 @@ for f in "$tests_dir"/*.sh; do
 done
 
 if [ -n "$state_snapshot" ]; then rm -f "$state_snapshot"; fi
+rm -rf "${TMPDIR:-/tmp}"/dotfiles-tests-state.* 2>/dev/null   # each test's own state root (tests/lib.sh)
 printf '\nsuite: %d passed, %d skipped, %d failed\n' "$passed" "$skipped" "$failed"
 [ -n "$skipped_names" ] && printf 'skipped:%s\n' "$skipped_names"
 
