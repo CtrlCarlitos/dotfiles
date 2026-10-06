@@ -229,11 +229,16 @@ grep -Fq 'graft is current (1.2.3)' "$tmp/run5b.log" || fail "current graft must
 if grep -Eq '^upgrade ' "$tmp/graft.log"; then fail "graft 1.2.3 == latest must not run graft upgrade"; else pass; fi
 grep -Fq 'codex is current (9.9.9)' "$tmp/run5b.log" || fail "current codex must be reported, not reinstalled"
 if grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log"; then fail "codex 9.9.9 == latest must not reinstall"; else pass; fi
+grep -Fq 'agent-browser is current (9.9.9)' "$tmp/run5b.log" || fail "a current agent-browser must be reported, not reinstalled"
+if grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log"; then fail "agent-browser 9.9.9 == latest must not reinstall"; else pass; fi
+grep -Fq 'install' "$tmp/agent-browser.log" || fail "a current agent-browser still gets its browser setup"
+grep -Fq 'doctor --json' "$tmp/agent-browser.log" || fail "a current agent-browser is still verified"
 
 : >"$tmp/npm.log"; : >"$tmp/graft.log"
 GRAFT_VERSION_OUT='graft 1.2.2\nlatest on npm: 1.2.3 (update available)\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
 grep -Eq '^upgrade ' "$tmp/graft.log" || fail "a stale graft must be upgraded"
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "a stale codex must be reinstalled"
+grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" || fail "a stale agent-browser must be reinstalled"
 
 : >"$tmp/npm.log"; : >"$tmp/graft.log"
 GRAFT_VERSION_OUT='graft 1.2.3\nlatest: unreachable (offline?)\n' run_updater "$tmp/run5d.log" || true

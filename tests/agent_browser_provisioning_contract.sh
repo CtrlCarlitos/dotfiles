@@ -15,7 +15,10 @@ set -euo pipefail
 #   3. when present, `install` (browser setup) and `doctor --json`
 #      (verification) both run;
 #   4. an install failure or a missing CLI degrades to a warning - the
-#      browser setup never aborts the installer.
+#      browser setup never aborts the installer;
+#   5. an already-installed CLI is NOT reinstalled by `dot up` (that is an
+#      upgrade; `dot upgrade` owns it) - the browser setup and the verification
+#      still run.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -41,7 +44,7 @@ render_to "$sh_rendered" sh '{"agent_toolkit": true}'
 # block itself prints; extraction validity is checked below (a reshaped
 # source fails loudly here rather than silently testing nothing).
 awk '
-    /Installing agent-browser\.\.\./ {on = 1}
+    /Only when missing: reinstalling .agent-browser@latest. every run/ {on = 1}
     on {print}
     on && /agent-browser command was not installed/ {getline; print; exit}
 ' "$sh_rendered" >"$tmp/block.sh"
@@ -58,7 +61,7 @@ sh_run() { # $1 = outfile; env pre-set by caller
     local outfile="$1"
     HOME="$tmp/home" PATH="$bin:/usr/bin:/bin" NPM_BIN="$bin/npm" npm_sudo="" \
         NPM_LOG="$tmp/npm.log" NPM_FAIL="${NPM_FAIL:-0}" NPM_FAKE_PREFIX="$prefix" \
-        AB_LOG="$tmp/ab.log" \
+        AB_LOG="$tmp/ab.log" NPM_CREATES="${NPM_CREATES:-}" \
         timeout 60 bash "$tmp/harness.sh" >"$outfile" 2>&1
 }
 
@@ -71,6 +74,11 @@ if [ "${1:-}" = prefix ] && [ "${2:-}" = -g ]; then
     exit 0
 fi
 [ "${NPM_FAIL:-0}" = 1 ] && exit 1
+# NPM_CREATES: a successful `npm install` leaves the CLI behind, like the real one does.
+if [ "${1:-}" = install ] && [ -n "${NPM_CREATES:-}" ]; then
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${AB_LOG:?}"\nexit 0\n' >"$NPM_CREATES"
+    chmod +x "$NPM_CREATES"
+fi
 exit 0
 EOF
 chmod +x "$bin/npm"
@@ -86,12 +94,12 @@ make_ab_stub() {
     cat "$tmp/block.sh"
 } >"$tmp/harness.sh"
 
-# 1. Happy path: npm -g install with the allow-scripts list, CLI resolved via
-#    `npm prefix -g`, then browser setup + verification.
+# 1. Happy path: the CLI is absent, so npm -g installs it with the allow-scripts list, the CLI
+#    is resolved via `npm prefix -g`, then browser setup + verification.
+rm -f "$prefix/bin/agent-browser"
 : >"$tmp/npm.log"; : >"$tmp/ab.log"
-make_ab_stub
 out="$tmp/sh-ok.log"
-sh_run "$out"
+NPM_CREATES="$prefix/bin/agent-browser" sh_run "$out"
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" ||
     fail "sh twin: install must go through npm -g with --allow-scripts=agent-browser"
 grep -Fq 'prefix -g' "$tmp/npm.log" ||
@@ -100,6 +108,17 @@ grep -Fq 'install' "$tmp/ab.log" || fail "sh twin: agent-browser install (browse
 grep -Fq 'doctor --json' "$tmp/ab.log" ||
     fail "sh twin: agent-browser doctor --json verification did not run"
 if [ "$(grep -c 'net_timeout' "$sh_rendered")" -ge 1 ]; then pass; else fail "sh installer lost net_timeout guards"; fi
+
+# 1b. Already installed: `dot up` must not reinstall it (that is an upgrade), but the browser
+#     setup and the verification still run.
+make_ab_stub
+: >"$tmp/npm.log"; : >"$tmp/ab.log"
+sh_run "$tmp/sh-present.log"
+if grep -Fq 'install -g' "$tmp/npm.log"; then fail "sh twin: an installed agent-browser must not be reinstalled by dot up"; else pass; fi
+grep -Fq 'agent-browser is installed - skipping the npm install' "$tmp/sh-present.log" ||
+    fail "sh twin: the skip must say so"
+grep -Fq 'install' "$tmp/ab.log" || fail "sh twin: browser setup must still run when the CLI is already installed"
+grep -Fq 'doctor --json' "$tmp/ab.log" || fail "sh twin: verification must still run when the CLI is already installed"
 
 # 2. Install failure: warning, no browser setup (the prefix lookup itself is
 #    unconditional in the source - only the setup is guarded; with no CLI left
@@ -132,7 +151,7 @@ ps1_rendered="$tmp/installer.ps1"
 render_to "$ps1_rendered" ps1 '{"agent_toolkit": true}'
 [ -s "$ps1_rendered" ] || fail "ps1 installer did not render"
 
-ps1_start="$(grep -nF 'Installing agent-browser...' "$ps1_rendered" | head -1 | cut -d: -f1)"
+ps1_start="$(grep -nF 'Only when missing: reinstalling agent-browser@latest' "$ps1_rendered" | head -1 | cut -d: -f1)"
 [ -n "$ps1_start" ] || fail "ps1 render: agent-browser block not found"
 skip_line="$(grep -nF 'skipping browser setup' "$ps1_rendered" | head -1 | cut -d: -f1)"
 [ -n "$skip_line" ] || fail "ps1 render: skip-warn anchor not found"
@@ -168,6 +187,17 @@ function Invoke-WithTimeout {
     if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
 }
 
+# Whether the CLI is "already installed" is decided here, never by the host's real PATH (a
+# developer machine, or WSL with a global npm prefix on /usr, may genuinely have agent-browser).
+$script:abPresent = ($mode -eq 'present')
+function Get-Command {
+    param([Parameter(Position = 0)][string]$Name)
+    if ($Name -eq 'agent-browser') {
+        if ($script:abPresent) { return [pscustomobject]@{ Name = $Name } }
+        return $null
+    }
+    Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+}
 try {
     Invoke-Expression $block
 } catch {
@@ -186,6 +216,12 @@ switch ($mode) {
         if (-not ($ab -match 'install')) { Fail 'ps1: agent-browser install did not run' }
         if (-not ($ab -match 'doctor --json')) { Fail 'ps1: agent-browser doctor --json did not run' }
         if ($env:AGENT_BROWSER) { Fail 'ps1: AGENT_BROWSER env leaked' }
+    }
+    'present' {
+        if (Get-Content $npmLog | Select-String 'install -g') { Fail 'ps1: an installed agent-browser must not be reinstalled by dot up' }
+        $ab = Get-Content $abLog
+        if (-not ($ab -match 'install')) { Fail 'ps1: browser setup must still run when the CLI is installed' }
+        if (-not ($ab -match 'doctor --json')) { Fail 'ps1: verification must still run when the CLI is installed' }
     }
     'npmfail' {
         if (Get-Content $npmLog | Select-String 'prefix -g') { Fail 'ps1: failed install must not look up the CLI' }
@@ -248,6 +284,13 @@ NPM_FAIL=1 ps1_run npmfail "$tmp/ps1-npmfail.log" ||
 if grep -q 'FAIL' "$tmp/ps1-npmfail.log"; then fail "ps1 twin npmfail: $(cat "$tmp/ps1-npmfail.log")"; else pass; fi
 grep -Fq 'install failed (exit code 1) - continuing' "$tmp/ps1-npmfail.log" ||
     fail "ps1 twin: an install failure must warn-and-continue"
+
+: >"$tmp/npm.log"; : >"$tmp/ab.log"
+ps1_run present "$tmp/ps1-present.log" ||
+    fail "ps1 twin: installed-CLI scenario failed: $(cat "$tmp/ps1-present.log")"
+if grep -q 'FAIL' "$tmp/ps1-present.log"; then fail "ps1 twin present: $(cat "$tmp/ps1-present.log")"; else pass; fi
+grep -Fq 'agent-browser is installed - skipping the npm install' "$tmp/ps1-present.log" ||
+    fail "ps1 twin: the skip must say so"
 
 rm -f "$prefix/agent-browser.cmd"
 : >"$tmp/npm.log"; rm -f "$tmp/ab.log"

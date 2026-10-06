@@ -193,3 +193,29 @@ function Write-AgentBrowserDoctorSummary {
         }
     }
 }
+
+# --- guardrail installer output (shared by the installer and the updater) -------------------------
+# Twin of guardrail_console_filter in scripts/lib/agent-skills.sh: the agent-guardrails installer
+# ends every run with a ~45-line doctor dump, identical on a healthy machine, that buried the
+# lines that matter. The FULL output goes to the apply log (Tee-Object, upstream of this filter);
+# the console loses only lines whose shape is on this list. A warning, a problem, a verdict, the
+# hook latency and anything never seen before - above all an approval prompt or URL, which the
+# installer blocks on - stay. DOT_GUARDRAIL_VERBOSE=1 shows everything.
+$script:GuardrailHidden = 0
+$script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):|^web-research enforcement:|^recipes |^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)|^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)|^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)|^antigravity coverage:|^  (configured MCP servers|declared MCP tools|uncontracted)|^note: codex probes invoke the hook directly|^setup: (registering|plane status)|^guardrail v[0-9]'
+
+function Select-GuardrailConsoleLine {
+    [CmdletBinding()]
+    param([Parameter(ValueFromPipeline = $true)]$InputObject)
+    begin { $script:GuardrailHidden = 0 }
+    process {
+        $line = "$InputObject"
+        if ($env:DOT_GUARDRAIL_VERBOSE -ne '1' -and $line -cmatch $script:GuardrailRoutinePattern) { $script:GuardrailHidden++ }
+        else { Write-Host $line }
+    }
+    end {
+        if ($script:GuardrailHidden -gt 0) {
+            Write-Host ("  ({0} routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)" -f $script:GuardrailHidden) -ForegroundColor DarkGray
+        }
+    }
+}

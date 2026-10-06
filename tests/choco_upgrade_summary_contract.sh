@@ -51,6 +51,11 @@ Write-Output ('upgrade-summary=' + ($script:out -match 'Upgraded 2 of 3: antigra
 Write-Output ('chatter-stays-live=' + ($script:out -match 'Downloading antigravity' -and $script:out -match 'Installing antigravity\.\.\.'))
 Write-Output ('upgrade-hides-up-to-date=' + (-not ($script:out -match 'git\|')))
 
+# --- a dependency upgraded alongside its parent has no pipe line, only a footer entry ---
+$script:chocoLines = @('a|1|1|false', 'cmake|4.4.3|4.4.4|false', 'b|2|2|false', 'cmake.install v4.4.4 [Approved]', 'Chocolatey upgraded 2/3 packages.', 'Upgraded:', ' - cmake v4.4.4', ' - cmake.install v4.4.4')
+Run @('upgrade', 'all', '-y', '--no-progress')
+Write-Output ('dependency-counted=' + ($script:out -match 'Upgraded 2 of 3: cmake \(4\.4\.3 -> 4\.4\.4\), cmake\.install \(-> 4\.4\.4\)'))
+
 # --- failure: tail of the output, exit code returned ---
 $script:chocoLines = @('a|1|1|false', 'pkg-x|1|2|false', 'ERROR: pkg-x failed to install', 'The install of pkg-x was NOT successful.')
 $script:chocoExit = 1
@@ -83,6 +88,7 @@ expect 'limit-output-passed=True'
 expect 'upgrade-summary=True'
 expect 'chatter-stays-live=True'
 expect 'upgrade-hides-up-to-date=True'
+expect 'dependency-counted=True'
 expect 'fail-exit=1'
 expect 'fail-warns=True'
 expect 'fail-shows-tail=True'

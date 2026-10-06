@@ -184,6 +184,38 @@ agent_browser_doctor() {
 # stores exactly the commit that was checked.
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
+# guardrail_console_filter - stdin: the agent-guardrails installer's output; stdout: the
+# same, minus the routine status lines.
+#
+# The installer ends every run with a ~45-line doctor dump (policy, recipes, audit log, hook
+# latency, four planes registered, four probe summaries, MCP coverage...). On a healthy run
+# that is the same text every time and it buried the lines that matter. The FULL output still
+# goes to the apply log (tee, upstream of this filter); the console loses only the lines whose
+# shape is on the list below. Everything else stays: a warning, a problem, a verdict, the hook
+# latency, and anything this list has never seen - above all an approval prompt or URL, which
+# the installer blocks on, so nothing is ever hidden by default.
+# DOT_GUARDRAIL_VERBOSE=1 shows everything.
+#-------------------------------------------------------------------------------
+guardrail_console_filter() {
+    if [ "${DOT_GUARDRAIL_VERBOSE:-}" = 1 ]; then cat; return 0; fi
+    awk '
+        /^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):/ { hidden++; next }
+        /^web-research enforcement:/ { hidden++; next }
+        /^recipes / { hidden++; next }
+        /^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)/ { hidden++; next }
+        /^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)/ { hidden++; next }
+        /^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)/ { hidden++; next }
+        /^antigravity coverage:/ { hidden++; next }
+        /^  (configured MCP servers|declared MCP tools|uncontracted)/ { hidden++; next }
+        /^note: codex probes invoke the hook directly/ { hidden++; next }
+        /^setup: (registering|plane status)/ { hidden++; next }
+        /^guardrail v[0-9]/ { hidden++; next }
+        { print; fflush() }
+        END { if (hidden > 0) printf "  (%d routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)\n", hidden }
+    '
+}
+
+#-------------------------------------------------------------------------------
 # skills_remove_retired <list-file> - remove skills listed in
 # scripts/retired-agent-skills.txt (`<skill> <source>` per line) from every agent
 # directory, the OpenCode command shim we generated, and the skills CLI lock.

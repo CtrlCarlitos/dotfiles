@@ -46,6 +46,17 @@ call `guardrail next`; pending steps are printed verbatim, followed by
 `ACTION NEEDED: run 'guardrail setup' in an interactive terminal ...`, so the remedy is the
 last thing the run prints.
 
+**What the console shows.** The installer ends every run with a ~45-line doctor dump (policy, recipes,
+audit log, four planes registered, probe summaries, MCP coverage...), identical on a healthy machine. The
+installers and both `update_ai_tools.*` scripts keep the **full** output in `apply.log` (the updaters did not
+log it before) and print a filtered copy: only lines of a known routine shape are dropped, and the run says
+how many (`(38 routine guardrail status line(s) hidden; ...)`). Warnings, problems, the verdict, the hook
+latency, `selftest:` and any line the filter has never seen stay, in particular an approval prompt or URL,
+which the installer blocks on. `DOT_GUARDRAIL_VERBOSE=1 dot up` (or `dot upgrade`) prints everything.
+The shell filter is `guardrail_console_filter` in `scripts/lib/agent-skills.sh`, the PowerShell one
+`Select-GuardrailConsoleLine` in `scripts/lib/ps-skills.ps1`; `tests/guardrail_console_filter_contract.sh`
+runs both on real output and requires them to keep the same lines.
+
 ## The flag
 
 | `packages.guardrail` | What the dotfiles do |

@@ -479,16 +479,18 @@ function Invoke-ChocoUpgradeAll {
     catch { $LogPath = $null; Write-Verbose "upgrade log unavailable: $($_.Exception.Message)" }
 
     $packageLines = New-Object System.Collections.Generic.List[string]
+    $footerLines = New-Object System.Collections.Generic.List[string]
     $allLines = New-Object System.Collections.Generic.List[string]
     & choco @Arguments --limit-output 2>&1 | ForEach-Object {
         $line = "$_"
         $allLines.Add($line)
         if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
         if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) } else { Write-Host $line }
+        if ($line -match '^\s+-\s+\S+\s+v\S+\s*$') { $footerLines.Add($line) }
     }
     $code = [int]$LASTEXITCODE
 
-    $summary = Get-ChocoUpgradeSummary -Lines $packageLines
+    $summary = Get-ChocoUpgradeSummary -Lines $packageLines -FooterLines $footerLines
     if ($summary.Upgraded.Count -gt 0) {
         Write-Host ("  Upgraded {0} of {1}: {2}" -f $summary.Upgraded.Count, $summary.Checked, ($summary.Upgraded -join ', ')) -ForegroundColor Green
     }
@@ -509,16 +511,30 @@ function Invoke-ChocoUpgradeAll {
 
 # name|installed|available|pinned lines -> how many were checked and which changed.
 function Get-ChocoUpgradeSummary {
-    param([string[]]$Lines)
+    # -FooterLines: choco's own closing "Upgraded:" list (` - name vX`). A package pulled in as
+    # a DEPENDENCY (cmake.install with cmake) is upgraded without a `name|old|new|pinned` line,
+    # so the pipe lines alone undercounted ("4 of 99" while choco said 5/100).
+    param([string[]]$Lines, [string[]]$FooterLines = @())
 
     $upgraded = @()
+    $names = @()
     $checked = 0
     foreach ($line in @($Lines)) {
         $parts = $line -split '\|'
         if ($parts.Count -lt 3) { continue }
         $checked++
-        if ($parts[1] -and $parts[2] -and $parts[1] -ne $parts[2]) { $upgraded += ("{0} ({1} -> {2})" -f $parts[0], $parts[1], $parts[2]) }
+        if ($parts[1] -and $parts[2] -and $parts[1] -ne $parts[2]) {
+            $upgraded += ("{0} ({1} -> {2})" -f $parts[0], $parts[1], $parts[2])
+            $names += $parts[0]
+        }
     }
+    foreach ($line in @($FooterLines)) {
+        if ($line -match '^\s+-\s+(?<name>\S+)\s+v(?<version>\S+)\s*$' -and $names -notcontains $Matches['name']) {
+            $upgraded += ("{0} (-> {1})" -f $Matches['name'], $Matches['version'])
+            $names += $Matches['name']
+        }
+    }
+    if ($checked -lt $upgraded.Count) { $checked = $upgraded.Count }
     return [pscustomobject]@{ Checked = $checked; Upgraded = @($upgraded) }
 }
 

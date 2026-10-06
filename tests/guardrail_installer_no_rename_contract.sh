@@ -39,6 +39,13 @@ $end = $start
 while ($lines[$end] -ne '}') { $end++ }
 Invoke-Expression (($lines[$start..$end]) -join "`n")
 
+# The installer pipes its console copy through Select-GuardrailConsoleLine (inlined from
+# scripts/lib/ps-skills.ps1 together with the pattern it matches on): bring both in.
+$filterStart = ($lines | Select-String -Pattern '^\$script:GuardrailHidden = 0' | Select-Object -First 1).LineNumber - 1
+$filterEnd = ($lines | Select-String -Pattern '^function Select-GuardrailConsoleLine \{' | Select-Object -First 1).LineNumber - 1
+while ($lines[$filterEnd] -ne '}') { $filterEnd++ }
+Invoke-Expression (($lines[$filterStart..$filterEnd]) -join "`n")
+
 # Windows always has %TEMP%; Linux pwsh does not.
 if (-not $env:TEMP) { $env:TEMP = [IO.Path]::GetTempPath() }
 $guardrailVersion = 'v9.9.9-test'

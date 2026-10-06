@@ -425,7 +425,7 @@ install_agent_guardrails() {
     local code=0
     local log="$HOME/.local/state/guardrail/apply.log"
     mkdir -p "$(dirname "$log")"
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" || code=$?
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
     rm -rf "$tmp"
     case "$code" in
         0) ;;
@@ -1132,9 +1132,15 @@ PYEOF
             #                          THIS machine only (the repo-side veto
             #                          contract still guards the curated list)
             # Final list computed in one place, then fed to the loop.
-            local ext
+            # Installed ones are listed ONCE (a local call) and skipped, like the Windows installer:
+            # `code --install-extension` per extension asks the marketplace each time, and `dot up`
+            # installs what is missing but never upgrades (`dot upgrade` runs --update-extensions).
+            local ext ext_lc vs_installed
+            vs_installed="$(code --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]')" || vs_installed=""
             while IFS= read -r ext; do
                 [ -n "$ext" ] || continue
+                ext_lc="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+                if printf '%s\n' "$vs_installed" | grep -qxF -- "$ext_lc"; then continue; fi
                 code --install-extension "$ext" >/dev/null 2>&1 \
                     || warn "vscode: failed to install extension $ext - continuing"
             done <<'VSEXT'
@@ -1307,11 +1313,24 @@ install_agent_toolkit() {
         if [ "$PKG_MANAGER" = apt ]; then
             net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
         fi
-        net_timeout 600 "$NPX_BIN" --yes playwright install chromium || warn "Playwright Chromium download failed or timed out - continuing"
+        # Output shown only on failure: outside a project `npx playwright install` prints a 13-line
+        # "install your project's dependencies first" box on EVERY run, which is not about this install.
+        local pw_out; pw_out="$(mktemp)"
+        if ! net_timeout 600 "$NPX_BIN" --yes playwright install chromium >"$pw_out" 2>&1; then
+            cat "$pw_out" >&2
+            warn "Playwright Chromium download failed or timed out - continuing"
+        fi
+        rm -f "$pw_out"
 
-        info "Installing agent-browser..."
-        net_timeout 300 $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
+        # Only when missing: reinstalling `agent-browser@latest` every run is an upgrade (`dot up` never
+        # upgrades; `dot upgrade` does it, and skips it when already current).
         AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
+        if [[ -x "$AGENT_BROWSER_BIN" ]]; then
+            info "agent-browser is installed - skipping the npm install (dot upgrade updates it)."
+        else
+            info "Installing agent-browser..."
+            net_timeout 300 $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
+        fi
         if [[ -x "$AGENT_BROWSER_BIN" ]]; then
             # Playwright Chromium is already available above; agent-browser
             # discovers it before downloading another browser.
@@ -1339,7 +1358,9 @@ install_agent_toolkit() {
         fi
         # Upgrades: `dot upgrade` only (defer-aware there).
         if command -v serena &>/dev/null; then
-            net_timeout 120 serena init || warn "serena init failed - continuing"
+            # Output shown only on failure: it prints the version, the config path and a list of
+            # `serena setup <client>` commands to run (this repo already does that) on every run.
+            serena_out="$(net_timeout 120 serena init 2>&1)" || { printf '%s\n' "$serena_out" >&2; warn "serena init failed - continuing"; }
             # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
             # per-machine override [data.agents.serena] open_dashboard = true in
             # chezmoi.toml). serena init regenerates the file with Serena's default
@@ -1623,14 +1644,16 @@ install_chatgpt_cli() {
     # idempotent like the Claude/Antigravity Superpowers steps.
     if command -v codex &>/dev/null; then
         info "Installing Superpowers plugin for Codex..."
-        net_timeout 300 codex plugin add superpowers@openai-curated-remote \
-            || warn "Superpowers plugin install for Codex failed - continuing"
+        # Output shown only on failure ("Added plugin ... Installed plugin root: ..." on every run).
+        codex_out="$(net_timeout 300 codex plugin add superpowers@openai-curated-remote 2>&1)" \
+            || { printf '%s\n' "$codex_out" >&2; warn "Superpowers plugin install for Codex failed - continuing"; }
         # MCP registration for Codex lives HERE, not in the serena section
         # above (see that section's note): codex only exists from this point
         # on a fresh/reinstall machine. Idempotent: serena's own setup tool
         # rewrites its entry; graft goes in via the codex CLI only while
         # config.toml does not name it yet.
-        net_timeout 60 serena setup codex || warn "serena setup codex failed - continuing"
+        serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
+            || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
         if ! grep -Fq '[mcp_servers.graft]' "$HOME/.codex/config.toml" 2>/dev/null; then
             net_timeout 60 codex mcp add graft -- graft mcp \
                 || warn "graft MCP registration for Codex failed - continuing"
