@@ -351,6 +351,23 @@ skills_record_source() {
     return 0
 }
 
+# skills_cli <seconds> <cmd...> - net_timeout for a `skills` CLI call. Each call prints a banner, a
+# summary box and a security table (about 35 lines, eight calls per run) that say nothing a
+# "installed" line does not. Shown only when the call fails, or with DOT_SKILLS_VERBOSE=1.
+skills_cli() {
+    local secs="$1" out rc=0
+    shift
+    if [ "${DOT_SKILLS_VERBOSE:-}" = 1 ]; then
+        net_timeout "$secs" "$@"
+        return
+    fi
+    out="$(mktemp)"
+    net_timeout "$secs" "$@" >"$out" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then cat "$out" >&2; fi
+    rm -f "$out"
+    return "$rc"
+}
+
 skills_add_all() {
     # The npx wrapper is identical for every consumer, so the function that
     # uses it owns the definition (it used to sit in each consumer and drift).
@@ -366,7 +383,7 @@ skills_add_all() {
     if skills_up_to_date mattpocock/skills "${mp_skills[@]}"; then
         info "Matt Pocock's skills: up to date"
         record_cli_result installed "${#mp_skills[@]}"
-    elif info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..." && net_timeout 300 "${SK[@]}" add mattpocock/skills \
+    elif info "Installing Matt Pocock's skills (Claude Code / OpenCode / Antigravity)..." && skills_cli 300 "${SK[@]}" add mattpocock/skills \
         -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed "${#mp_skills[@]}"
@@ -400,7 +417,7 @@ skills_add_all() {
                     # set -e and abort the whole run - frontend-design, Playwright,
                     # act, desktop apps and shell setup all come after this.
                     sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                    if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+                    if skills_cli 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
                         record_cli_result installed 1
                         skills_record_source
                         info "mp-code-review: installed"
@@ -427,7 +444,7 @@ skills_add_all() {
     if skills_up_to_date anthropics/skills frontend-design; then
         info "frontend-design: up to date"
         record_cli_result installed 1
-    elif info "Installing Anthropic's frontend-design skill..." && net_timeout 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing Anthropic's frontend-design skill..." && skills_cli 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -440,7 +457,7 @@ skills_add_all() {
     if skills_up_to_date vercel-labs/skills find-skills; then
         info "find-skills: up to date"
         record_cli_result installed 1
-    elif info "Installing find-skills skill..." && net_timeout 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing find-skills skill..." && skills_cli 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -453,7 +470,7 @@ skills_add_all() {
     if skills_up_to_date vercel-labs/agent-browser agent-browser; then
         info "agent-browser: up to date"
         record_cli_result installed 1
-    elif info "Installing agent-browser skill..." && net_timeout 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing agent-browser skill..." && skills_cli 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -467,7 +484,7 @@ skills_add_all() {
     if skills_up_to_date CtrlCarlitos/skills skill-creator; then
         info "skill-creator: up to date"
         record_cli_result installed 1
-    elif info "Installing Anthropic's skill-creator skill..." && net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing Anthropic's skill-creator skill..." && skills_cli 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else
@@ -486,7 +503,7 @@ skills_add_all() {
     if skills_up_to_date Leonxlnx/taste-skill design-taste-frontend redesign-existing-projects; then
         info "taste skills: up to date"
         record_cli_result installed 2
-    elif info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..." && net_timeout 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..." && skills_cli 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 2
         skills_record_source
     else
@@ -504,7 +521,7 @@ skills_add_all() {
     if skills_up_to_date CtrlCarlitos/skills code-search; then
         info "code-search: up to date"
         record_cli_result installed 1
-    elif info "Installing code-search skill..." && net_timeout 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+    elif info "Installing code-search skill..." && skills_cli 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
         skills_record_source
     else

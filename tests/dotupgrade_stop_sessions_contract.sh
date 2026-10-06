@@ -36,7 +36,7 @@ cat >"$tmp/bin/ps" <<'EOF'
 pid="${@: -1}"
 while read -r name p args; do
     if [ "$p" = "$pid" ]; then
-        case "$*" in *comm=*) echo "$name" ;; *etime=*) echo "01:00" ;; *) printf '%s\n' "$args" ;; esac
+        case "$*" in *tty=*) echo "${FAKE_TTY:-}" ;; *comm=*) echo "$name" ;; *etime=*) echo "01:00" ;; *) printf '%s\n' "$args" ;; esac
     fi
 done <"$PROC_TABLE"
 EOF
@@ -47,7 +47,7 @@ extract_fn() {
     awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; if ($0 ~ /\}$/ && $0 !~ /\{$/) exit; next} f{print} f && /^\}$/{exit}' "$2"
 }
 : >"$tmp/fns.sh"
-for fn in live_pids ancestor_pids descendant_pids is_interactive stop_pid_tree describe_pid stop_live_sessions; do
+for fn in live_pids ancestor_pids descendant_pids is_interactive stop_pid_tree agent_tty reset_agent_terminal describe_pid stop_live_sessions; do
     extract_fn "$fn" "$repo_root/scripts/dotupgrade.sh" >>"$tmp/fns.sh"
     grep -q "^$fn() {" "$tmp/fns.sh" || fail "$fn() not found in scripts/dotupgrade.sh"
 done
@@ -83,6 +83,15 @@ daemon='codex 100 /home/u/.codex/packages/app-server-daemon/releases/local-abc/b
 [ "$(sh_stop "$two" "200 300" 1 $'y\n')" = "0|" ] || fail "sh: only ancestors left means no stop"
 [ "$(sh_stop "$daemon" "" 1 $'y\n')" = "0|" ] || fail "sh: Codex's app-server daemon is not a session and must not be offered"
 [ "$(sh_stop "" "" 1 $'y\n')" = "0|" ] || fail "sh: nothing running means nothing stopped"
+# a stopped TUI agent's terminal gets its modes switched off (written to its tty), and only a real tty
+mkdir -p "$tmp/dev"; : >"$tmp/dev/pts9"
+FAKE_TTY=pts9 DOT_TTY_ROOT="$tmp/dev" sh_stop "$two" "" 1 $'y\n' >/dev/null
+for code in '?1000l' '?1006l' '?2004l' '<99u' '?25h'; do
+    grep -Fq "$code" "$tmp/dev/pts9" || fail "sh: a stopped agent's tty must get the reset ($code missing)"
+done
+: >"$tmp/dev/pts9"
+FAKE_TTY='?' DOT_TTY_ROOT="$tmp/dev" sh_stop "$two" "" 1 $'y\n' >/dev/null
+[ ! -s "$tmp/dev/pts9" ] || fail "sh: no tty ('?') must write nothing"
 pass
 
 # the real ancestor walk always includes the shell asking
@@ -112,7 +121,8 @@ function Get-Process {
 }
 function Test-InteractiveConsole { return $script:interactive }
 function Read-Host { param($Prompt) $script:prompts++; return [string]$script:answers.Dequeue() }
-function Stop-AgentProcess { param($Process) $script:stopped += $Process.Id; return $true }
+function Stop-AgentProcess { param($Process, [switch]$ResetTerminal) if ($ResetTerminal) { $script:resets++ }; $script:stopped += $Process.Id; return $true }
+$script:resets = 0
 function P($name, $id, $path) { [pscustomobject]@{ ProcessName = $name; Id = $id; Path = $path; StartTime = [datetime]'2026-10-04 10:00' } }
 function Case($label, $rows, [string[]]$answers, [int[]]$exclude = @(), [bool]$tty = $true) {
     $script:table = @($rows); $script:stopped = @(); $script:prompts = 0
@@ -126,6 +136,7 @@ $serena = P 'serena' 300 'C:\Users\u\.local\bin\serena.exe'
 $daemon = P 'codex' 100 'C:\Users\u\.codex\packages\app-server-daemon\releases\local-abc\bin\codex.exe'
 $two = @($code, $serena)
 Case 'all' $two @('y')
+Write-Output ('all-resets-terminal=' + $script:resets)
 Case 'no' $two @('n')
 Case 'default' $two @('')
 Case 'garbage' $two @('maybe')
@@ -142,6 +153,7 @@ PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
     expect 'all=2|200,300|prompts=1'
+    expect 'all-resets-terminal=2'
     expect 'no=0||prompts=1'
     expect 'default=0||prompts=1'
     expect 'garbage=0||prompts=1'
@@ -152,6 +164,30 @@ PSEOF
     expect 'daemon=0||prompts=0'
     expect 'nothing=0||prompts=0'
     expect 'noprompt-env=0||prompts=0'
+    # A console agent ended by taskkill never switches off its TUI's terminal modes; they print as
+    # stray characters. Stop-AgentProcess -ResetTerminal writes the switch-offs to its console
+    # FIRST (and only then), and the sequence covers mouse, focus, paste, kitty keys, cursor.
+    cat >"$tmp/reset.ps1" <<'PSEOF'
+param([string]$Lib)
+Set-StrictMode -Version Latest
+. $Lib
+$script:calls = @()
+function Reset-AgentTerminal { param([int]$ProcessId) $script:calls += "reset:$ProcessId"; return $true }
+function taskkill { $script:calls += 'taskkill'; $global:LASTEXITCODE = 0 }
+$proc = [pscustomobject]@{ ProcessName = 'claude'; Id = 77 }
+$proc | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value { return $false }
+$null = Stop-AgentProcess -Process $proc -ResetTerminal
+Write-Output ('with=' + ($script:calls -join ','))
+$script:calls = @()
+$null = Stop-AgentProcess -Process $proc
+Write-Output ('without=' + ($script:calls -join ','))
+$seq = Get-TerminalResetSequence
+foreach ($code in '?1000l', '?1006l', '?1004l', '?2004l', '<99u', '?25h') { Write-Output ("seq-$code=" + $seq.Contains($code)) }
+PSEOF
+    out="$(pwsh -NoProfile -File "$(winpath "$tmp/reset.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '')"
+    expect 'with=reset:77,taskkill'
+    expect 'without=taskkill'
+    for code in '?1000l' '?1006l' '?1004l' '?2004l' '<99u' '?25h'; do expect "seq-$code=True"; done
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'
 fi

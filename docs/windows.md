@@ -88,8 +88,12 @@ same line for the AI-tools part. The line is appended to `upgrade.log` (Linux an
 **winget** gets the same treatment: its output streams (minus spinner and progress-bar noise) and is
 kept in the same `upgrade.log`, and the sweep ends with what it upgraded (`winget upgraded 2 package(s).`)
 and, from a second listing, what is **still pending** (`Still pending in winget: Docker Desktop (4.93.0 -> 4.94.0), ...`).
-winget's `N package(s) have upgrades blocked` note is passed through; it never names those packages, so
-`winget upgrade --include-unknown` is the way to find them.
+winget lists some packages it cannot upgrade at all (`A newer version was found, but the install
+technology is different`: Docker Desktop installed by Chocolatey, Microsoft Edge). When it reports blocked
+upgrades, each pending package is asked about by id, and the ones it refuses move out of "still pending"
+into `Not upgradeable through winget (installed another way; choco or the app itself updates it): ...`.
+For Docker Desktop that means a newer winget build is not an upgrade `dot upgrade` can do while Chocolatey
+owns the app: no offer to stop Docker is made until the `docker-desktop` choco package catches up.
 
 **Docker Desktop** cannot be replaced while it runs: its installer (Chocolatey's `docker-desktop`, or
 winget's `Docker.DockerDesktop` for the same app) used to do nothing, silently. When an upgrade is pending
@@ -174,6 +178,13 @@ resumed. On Windows each process is asked to close its window, then the whole pr
 is killed after 5 seconds (Serena leaves language-server children behind); the Unix twin
 sends TERM to the tree and KILL after 5 seconds. Then the live-session scan runs again, so
 only what is still running defers.
+
+A terminal UI that is ended this way never switches off what it turned on (mouse reporting, focus
+reports, bracketed paste, the kitty keyboard protocol, the alternate screen), so its terminal went on
+typing those reports into the prompt as stray characters. Before the kill on Windows (a short-lived child
+attaches to the agent's console and writes the switch-offs there), and after the stop on Unix (written to
+the agent's tty), `dot upgrade` switches them off. If a terminal still misbehaves after a stopped session,
+`reset` (or closing the tab) clears it.
 
 Never offered: this shell's own ancestry (the shell, the terminal, and the agent session
 that launched `dot upgrade`), since stopping it would end the command; those still defer.
