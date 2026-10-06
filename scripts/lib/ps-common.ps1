@@ -741,7 +741,7 @@ function Write-DotTimingSummary {
     }
     if ($script:DotTimingNames.Count -eq 0) { return }
     $min = 5
-    if ($env:DOT_TIMING_MIN_SECONDS -and ($env:DOT_TIMING_MIN_SECONDS -as [int]) -ne $null) { $min = [int]$env:DOT_TIMING_MIN_SECONDS }
+    if ($env:DOT_TIMING_MIN_SECONDS -and $null -ne ($env:DOT_TIMING_MIN_SECONDS -as [int])) { $min = [int]$env:DOT_TIMING_MIN_SECONDS }
     $rows = @()
     for ($i = 0; $i -lt $script:DotTimingNames.Count; $i++) {
         if ($script:DotTimingSeconds[$i] -ge $min) {
