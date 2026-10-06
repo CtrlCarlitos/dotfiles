@@ -12,6 +12,8 @@ set -e
 . "${BASH_SOURCE[0]%/*}/lib/agent-skills.sh"
 # The [data.packages] scanner + the 16-group taxonomy (issue #123).
 . "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
+# Where the time goes: marks at each section, a summary at the end.
+. "${BASH_SOURCE[0]%/*}/lib/timing.sh"
 
 echo "🤖 Updating AI Coding Tools..."
 
@@ -46,6 +48,7 @@ if command -v npm &>/dev/null; then
     fi
 fi
 
+dot_timing_mark 'NPM packages'
 # 1. NPM Packages (Codex)
 # Note: OpenCode is native on Linux/Mac, so it's not included here
 if command -v npm &>/dev/null; then
@@ -71,6 +74,7 @@ else
     echo "⚠️  npm not found. Skipping npm packages."
 fi
 
+dot_timing_mark 'Superpowers (Antigravity)'
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates (checksum
 # verify each run), so this just refreshes the plugin - re-running `agy plugin
 # install` is the same idempotent pattern used for Claude Code/OpenCode below.
@@ -79,6 +83,7 @@ if command -v agy &>/dev/null; then
     agy plugin install https://github.com/obra/superpowers &>/dev/null || echo "   Superpowers plugin update for Antigravity failed - skipping"
 fi
 
+dot_timing_mark 'curated skills'
 # 1b. Curated third-party skills via the `skills` CLI (vercel-labs/skills).
 # Re-running the same `skills add` re-fetches latest (--copy overwrites). The
 # add batch and the target-verification pass are shared verbatim with
@@ -162,6 +167,7 @@ if command -v codex &>/dev/null; then
     fi
 fi
 
+dot_timing_mark 'guardrail'
 # guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
 #     ~/.config/chezmoi/chezmoi.toml [data.packages] guardrail (default false,
@@ -230,6 +236,7 @@ else
 fi
 # guardrail-section: end
 
+dot_timing_mark 'Claude Code'
 # 2. Claude Code (Native)
 if command -v claude &>/dev/null; then
     echo "🧠 Updating Claude Code..."
@@ -255,6 +262,7 @@ if command -v claude &>/dev/null; then
     claude plugin update superpowers -y &>/dev/null || echo "   Superpowers not installed for Claude Code - skipping"
 fi
 
+dot_timing_mark 'OpenCode'
 # 3. OpenCode (Native)
 if command -v opencode &>/dev/null; then
     if deferred opencode; then
@@ -284,12 +292,14 @@ if command -v opencode &>/dev/null; then
     npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$HOME/.config/opencode" --allow-git=all --loglevel=error --no-progress 2>/dev/null || echo "   Superpowers not installed for OpenCode - skipping"
 fi
 
+dot_timing_mark 'Playwright Chromium'
 # 4. Playwright Chromium (headless browser for agent automation)
 if command -v npx &>/dev/null; then
     echo "🌐 Updating Playwright Chromium..."
     npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
 fi
 
+dot_timing_mark 'agent-browser'
 # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
 if command -v npm &>/dev/null; then
     NPM_BIN="$(command -v npm)"
@@ -308,6 +318,7 @@ if command -v npm &>/dev/null; then
     fi
 fi
 
+dot_timing_mark 'Serena and Graft'
 # 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
 # Both are defer-aware: uv/graft recreate package dirs that live sessions
 # resolve from (2026-09-20 live incidents).
@@ -369,4 +380,5 @@ fi
 # - git bash, which the Codex TUI spawns there, eats backslashes - and the
 # Windows twin normalizes it after every graft upgrade.
 
+dot_timing_summary 'AI tools'
 echo "✅ AI Tools Update Complete!"

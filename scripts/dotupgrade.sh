@@ -10,7 +10,12 @@ if [ -n "${DEVCONTAINER:-}" ] || [ -n "${REMOTE_CONTAINERS:-}" ] || [ -e /.docke
     exit 0
 fi
 
+# Where the time goes (scripts/lib/timing.sh): marks at each section, a summary at the end.
+DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DOT_SCRIPT_DIR/lib/timing.sh"
+
 echo "dot upgrade - sweeping all tooling..."
+dot_timing_mark 'sessions and Codex daemon'
 
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run. ---
 # A name match is not always a session: Codex's shared app-server daemon runs its OWN
@@ -140,6 +145,7 @@ else
     echo "  No live agent sessions - full sweep."
 fi
 
+dot_timing_mark 'system packages'
 # --- 1. System packages: apt on Linux/WSL, brew on macOS. ---
 case "$(uname -s)" in
     Linux)
@@ -160,6 +166,7 @@ case "$(uname -s)" in
         ;;
 esac
 
+dot_timing_mark 'VS Code extensions'
 # --- 1b. VS Code extensions: `dot up` only installs missing ones; updates are this command's
 # job. Skipped quietly when VS Code is absent; a failure never aborts.
 if command -v code &>/dev/null; then
@@ -167,6 +174,7 @@ if command -v code &>/dev/null; then
     timeout 300 code --update-extensions >/dev/null 2>&1 || echo "  VS Code extension update did not finish cleanly - continuing."
 fi
 
+dot_timing_mark 'AI tools'
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/update_ai_tools.sh"
@@ -186,6 +194,7 @@ case "$(uname -s)" in
         ;;
 esac
 
+dot_timing_summary 'dot upgrade'
 # --- Deferred report: what to re-run when quiet. ---
 if [ -n "$DEFER" ]; then
     echo ""
