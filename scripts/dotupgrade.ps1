@@ -64,7 +64,7 @@ $dockerKept = $false
 $dockerPendingVersion = ''
 if (@(Get-DockerDesktopProcess).Count -gt 0) {
     $dockerPendingVersion = Get-DockerDesktopUpgrade
-    if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion) }
+    if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
 }
 
 Add-DotTimingMark -Name 'choco'

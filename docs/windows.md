@@ -100,6 +100,17 @@ Stopping it stops every running container, and they are not restarted afterwards
 `docker-desktop` is left out of the choco sweep (`--except=docker-desktop`, combined with `claude` when both
 apply) and the winget summary names the pending version.
 
+**VS Code is closed first.** A VS Code window attached to a dev container loses it the moment Docker
+stops, so when you accept the Docker Desktop stop and VS Code (`Code.exe`, or `Code - Insiders`) is
+running, the same prompt says so and VS Code is closed **before** Docker: every window gets a normal
+close request (so VS Code saves its state and ends the session cleanly), then anything still alive after
+20 seconds is ended. It happens only as part of that stop, never on its own; it is not reopened
+afterwards (VS Code restores its windows and a dev container reconnects once Docker is up). A VS Code
+that hosts the terminal running `dot upgrade` is never closed, since that would end the command
+itself, the same rule as agent sessions: the prompt warns that its container windows will disconnect,
+and running `dot upgrade` from Windows Terminal avoids that. The Linux and WSL `dot upgrade` has no
+Docker Desktop step (the engine there is Docker Desktop's), so nothing changes there.
+
 What the AI-tools step does on Windows:
 
 | Tool | Behavior |

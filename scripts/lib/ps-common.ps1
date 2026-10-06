@@ -669,22 +669,66 @@ function Stop-DockerDesktop {
     return (@(Get-DockerDesktopProcess).Count -eq 0)
 }
 
+# VS Code (Code.exe, or Code - Insiders) is closed BEFORE Docker Desktop is stopped. A window
+# attached to a dev container loses it the moment Docker stops; closing the window first lets
+# VS Code save its state (hot exit) and end the session cleanly instead of dropping the
+# connection under an open editor. Only as part of the Docker stop: nothing else in
+# `dot upgrade` needs VS Code closed.
+function Get-VsCodeProcess {
+    return @(Get-Process -Name 'Code', 'Code - Insiders' -ErrorAction SilentlyContinue)
+}
+
+# Ask every window to close, wait (VS Code can take several seconds with many windows), then
+# end whatever is left. True when no process of the given set remains.
+function Stop-VsCode {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][object[]]$Process, [int]$GraceSeconds = 20)
+    if (-not $PSCmdlet.ShouldProcess('VS Code', 'Close')) { return $false }
+    $ids = @($Process | ForEach-Object { $_.Id })
+    foreach ($p in $Process) {
+        try { $null = $p.CloseMainWindow() } catch { Write-Verbose "close request failed: $($_.Exception.Message)" }
+    }
+    $deadline = (Get-Date).AddSeconds($GraceSeconds)
+    while (@(Get-Process -Id $ids -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+    foreach ($left in @(Get-Process -Id $ids -ErrorAction SilentlyContinue)) { $null = Stop-AgentProcess -Process $left -GraceSeconds 1 }
+    return (@(Get-Process -Id $ids -ErrorAction SilentlyContinue).Count -eq 0)
+}
+
 # True when Docker Desktop is not running (so its upgrade can proceed); False when it is still
 # up. Nothing is stopped unless the operator says so; DOTUPGRADE_NO_PROMPT=1 and a
-# non-interactive console keep "leave it running and say so".
+# non-interactive console keep "leave it running and say so". When the operator accepts and
+# VS Code is running, VS Code is closed first (see above); a VS Code that hosts THIS terminal
+# (its integrated terminal runs dot upgrade) is never closed, like the agent sessions in the
+# invoker's ancestry: that would end this very command. -ExcludeId carries those pids.
 function Invoke-DockerDesktopStopOffer {
-    param([Parameter(Mandatory)][string]$Version)
+    param([Parameter(Mandatory)][string]$Version, [int[]]$ExcludeId = @(), [int]$VsCodeGraceSeconds = 20)
     if (@(Get-DockerDesktopProcess).Count -eq 0) { return $true }
     if ($env:DOTUPGRADE_NO_PROMPT -eq '1' -or -not (Test-InteractiveConsole)) {
         Write-Host "  Docker Desktop $Version is available but Docker Desktop is running (its installer cannot replace a running app): left for the next run." -ForegroundColor Yellow
         return $false
     }
+    $vsAll = @(Get-VsCodeProcess)
+    $vsClosable = @($vsAll | Where-Object { $ExcludeId -notcontains $_.Id })
+    $vsHostsThisTerminal = ($vsAll.Count -gt $vsClosable.Count)
     Write-Host "  Docker Desktop $Version is available, but Docker Desktop is running and its installer cannot replace a running app." -ForegroundColor Yellow
     Write-Host "  Stopping it stops every running container; they are not restarted afterwards." -ForegroundColor Yellow
+    if ($vsClosable.Count -gt 0) {
+        Write-Host "  VS Code is running ($($vsClosable.Count) process(es)) and may be attached to a container: it will be closed first, so nothing disconnects under an open editor." -ForegroundColor Yellow
+    }
+    if ($vsHostsThisTerminal) {
+        Write-Host "  VS Code also hosts THIS terminal, so it is not closed: any of its windows attached to a container will disconnect when Docker stops. Run dot upgrade from another terminal to avoid that." -ForegroundColor Yellow
+    }
     $answer = (Read-Host "  Stop Docker Desktop so it can upgrade now? [y/N]").Trim().ToLower()
     if ($answer -ne 'y') {
         Write-Host "  Docker Desktop left running; its upgrade waits for the next run." -ForegroundColor Yellow
         return $false
+    }
+    if ($vsClosable.Count -gt 0) {
+        if (Stop-VsCode -Process $vsClosable -GraceSeconds $VsCodeGraceSeconds) {
+            Write-Host "  VS Code closed; reopen it when you need it (a dev container reconnects once Docker is up)." -ForegroundColor Green
+        } else {
+            Write-Host "  Warning: VS Code did not close - continuing; windows attached to a container will disconnect." -ForegroundColor Red
+        }
     }
     if (Stop-DockerDesktop) {
         Write-Host "  Docker Desktop stopped for the upgrade; start it again when you need it." -ForegroundColor Green
