@@ -34,6 +34,21 @@ dot_timing_mark() {
 }
 
 # 125 -> 2m05s, 45 -> 45s
+# dot_timing_wait / dot_timing_resume around a prompt: the time spent answering is its own
+# section ("your answers"), so it is not counted as the work it interrupted. No-ops when no
+# section is open (callers outside a timed run, tests).
+DOT_TIMING_RESUME=""
+dot_timing_wait() {
+    [ -n "$DOT_TIMING_LAST" ] || return 0
+    DOT_TIMING_RESUME="$DOT_TIMING_LAST"
+    dot_timing_mark 'your answers'
+}
+dot_timing_resume() {
+    [ -n "$DOT_TIMING_RESUME" ] || return 0
+    dot_timing_mark "$DOT_TIMING_RESUME"
+    DOT_TIMING_RESUME=""
+}
+
 dot_timing_format() {
     local s="$1"
     if [ "$s" -ge 60 ]; then printf '%dm%02ds' "$((s / 60))" "$((s % 60))"; else printf '%ds' "$s"; fi
@@ -56,9 +71,12 @@ dot_timing_summary() {
         line="${line:+$line, }${row#* } $(dot_timing_format "${row%% *}")"
         shown=$((shown + 1))
     done < <(
+        # a section can recur (work resumes after "your answers"): its parts add up
         for i in "${!DOT_TIMING_NAMES[@]}"; do
-            [ "${DOT_TIMING_SECS[$i]}" -ge "$min" ] && printf '%s %s\n' "${DOT_TIMING_SECS[$i]}" "${DOT_TIMING_NAMES[$i]}"
-        done | sort -rn -s
+            printf '%s\t%s\n' "${DOT_TIMING_NAMES[$i]}" "${DOT_TIMING_SECS[$i]}"
+        done | awk -F'\t' -v min="$min" '
+            { if (!($1 in s)) order[++n] = $1; s[$1] += $2 }
+            END { for (i = 1; i <= n; i++) if (s[order[i]] >= min) print s[order[i]] " " order[i] }' | sort -rn -s
     )
     local text total_text
     total_text="$(dot_timing_format "$total")"

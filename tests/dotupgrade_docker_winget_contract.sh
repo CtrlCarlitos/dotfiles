@@ -78,8 +78,11 @@ Write-Output ('pending-no-upgraded-claim=' + (-not ($script:out -match 'winget u
 # winget lists packages it cannot upgrade; asked by id it says why. Those are not "pending".
 $sentence = 'A newer version was found, but the install technology is different from the current version installed. Please uninstall the package and install the newer version.'
 $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @($sentence) }
-$script:sweep = @('Found Docker Desktop [Docker.DockerDesktop] Version 4.94.0')
-$script:listing = $real
+# Real winget (2026-10-06): the blocked note is printed by the `upgrade --all` SWEEP only; the
+# plain listing ends at "2 upgrades available." - so the listing here carries no blocked line.
+$listingNoNote = @($real | Where-Object { $_ -notmatch 'have upgrades blocked' })
+$script:sweep = @($real)
+$script:listing = $listingNoNote
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log -RunningNote 'Docker Desktop waits: it is running' }
 Write-Output ('other-listed=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop \(4\.93\.0 -> 4\.94\.0\), Microsoft Edge'))
 Write-Output ('other-not-pending=' + (-not ($script:out -match 'Still pending')))
@@ -89,6 +92,11 @@ $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
 Write-Output ('mixed-pending=' + ($script:out -match 'Still pending in winget: Microsoft Edge'))
 Write-Output ('mixed-other=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop'))
+# a sweep without the blocked note probes nothing: the listing's rows stay "still pending"
+$script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @($sentence) }
+$script:sweep = @('Found nothing')
+Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
+Write-Output ('noblock-no-probe=' + ($script:out -match 'Still pending in winget: Docker Desktop'))
 $script:idProbe = @{}
 
 $script:sweep = @()
@@ -273,6 +281,7 @@ expect 'other-not-nothing=True'
 expect 'other-no-raw-blocked=True'
 expect 'mixed-pending=True'
 expect 'mixed-other=True'
+expect 'noblock-no-probe=True'
 expect 'pending-no-upgraded-claim=True'
 expect 'idle-says-nothing=True'
 expect 'fail-warns=True'

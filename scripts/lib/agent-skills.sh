@@ -294,6 +294,7 @@ skills_source_state() {
 
 # Every source key a run checked (skills_up_to_date appends); skills_prune_state keeps those.
 SKILLS_SEEN_KEYS=()
+SKILLS_STALE_REASON=""
 
 skills_up_to_date() {
     local repo="$1"; shift
@@ -301,13 +302,18 @@ skills_up_to_date() {
     SKILLS_PENDING_KEY="$repo|$*|${AGENTS[*]}"
     SKILLS_SEEN_KEYS+=("$SKILLS_PENDING_KEY")
     SKILLS_PENDING_HEAD="$(net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1)" || SKILLS_PENDING_HEAD=""
-    [ "${DOT_SKILLS_FORCE:-}" != 1 ] || return 1
+    # Why the answer is "not current", printed with the install line (twin of
+    # $script:SkillsStaleReason): a reinstall on every run then says why.
+    SKILLS_STALE_REASON=""
+    if [ "${DOT_SKILLS_FORCE:-}" = 1 ]; then SKILLS_STALE_REASON="DOT_SKILLS_FORCE=1"; return 1; fi
     for skill in "$@"; do
-        [ -f "$HOME/.claude/skills/$skill/SKILL.md" ] && [ -f "$HOME/.agents/skills/$skill/SKILL.md" ] || return 1
+        if [ ! -f "$HOME/.claude/skills/$skill/SKILL.md" ]; then SKILLS_STALE_REASON="$skill missing from ~/.claude/skills"; return 1; fi
+        if [ ! -f "$HOME/.agents/skills/$skill/SKILL.md" ]; then SKILLS_STALE_REASON="$skill missing from ~/.agents/skills"; return 1; fi
     done
-    [ -n "$SKILLS_PENDING_HEAD" ] || return 1
+    if [ -z "$SKILLS_PENDING_HEAD" ]; then SKILLS_STALE_REASON="upstream unreachable"; return 1; fi
     recorded="$(awk -F'\t' -v k="$SKILLS_PENDING_KEY" '$1 == k { print $2 }' "$(skills_source_state)" 2>/dev/null || true)"
-    [ "$recorded" = "$SKILLS_PENDING_HEAD" ]
+    if [ -z "$recorded" ]; then SKILLS_STALE_REASON="no install recorded for this selection"; return 1; fi
+    if [ "$recorded" != "$SKILLS_PENDING_HEAD" ]; then SKILLS_STALE_REASON="upstream changed"; return 1; fi
 }
 
 # skills_prune_state - drop state lines this run superseded. A source key is
@@ -387,6 +393,7 @@ skills_add_all() {
         -s "${mp_skills[@]}" \
         -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed "${#mp_skills[@]}"
+        info "Matt Pocock's skills: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed "${#mp_skills[@]}"
@@ -420,7 +427,7 @@ skills_add_all() {
                     if skills_cli 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
                         record_cli_result installed 1
                         skills_record_source
-                        info "mp-code-review: installed"
+                        info "mp-code-review: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
                     else
                         record_cli_result failed 1
                         warn "mp-code-review skill install failed - continuing"
@@ -446,6 +453,7 @@ skills_add_all() {
         record_cli_result installed 1
     elif info "Installing Anthropic's frontend-design skill..." && skills_cli 300 "${SK[@]}" add anthropics/skills -s frontend-design -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
+        info "frontend-design: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 1
@@ -459,6 +467,7 @@ skills_add_all() {
         record_cli_result installed 1
     elif info "Installing find-skills skill..." && skills_cli 300 "${SK[@]}" add vercel-labs/skills -s find-skills -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
+        info "find-skills: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 1
@@ -472,6 +481,7 @@ skills_add_all() {
         record_cli_result installed 1
     elif info "Installing agent-browser skill..." && skills_cli 300 "${SK[@]}" add vercel-labs/agent-browser -s agent-browser -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
+        info "agent-browser: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 1
@@ -486,6 +496,7 @@ skills_add_all() {
         record_cli_result installed 1
     elif info "Installing Anthropic's skill-creator skill..." && skills_cli 300 "${SK[@]}" add CtrlCarlitos/skills -s skill-creator -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
+        info "skill-creator: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 1
@@ -505,6 +516,7 @@ skills_add_all() {
         record_cli_result installed 2
     elif info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..." && skills_cli 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 2
+        info "taste skills: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 2
@@ -523,6 +535,7 @@ skills_add_all() {
         record_cli_result installed 1
     elif info "Installing code-search skill..." && skills_cli 300 "${SK[@]}" add CtrlCarlitos/skills -s code-search -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
         record_cli_result installed 1
+        info "code-search: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
         record_cli_result failed 1

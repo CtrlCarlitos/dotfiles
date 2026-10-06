@@ -26,6 +26,9 @@
 $script:SkillsPendingKey = ''
 $script:SkillsPendingHead = ''
 $script:SkillsSeenKeys = @()
+# Why the last Test-SkillsUpToDate said "not current", printed with the install line so a
+# reinstall on every run can be told apart from a real upstream change.
+$script:SkillsStaleReason = ''
 
 # USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
 function Get-SkillsHome {
@@ -68,20 +71,28 @@ function Test-SkillsUpToDate {
     $script:SkillsPendingKey = "$Repo|$($Skills -join ' ')|$($Agents -join ' ')"
     $script:SkillsSeenKeys += $script:SkillsPendingKey
     $script:SkillsPendingHead = Get-SkillsRemoteHead -Repo $Repo
-    if ($env:DOT_SKILLS_FORCE -eq '1') { return $false }
+    $script:SkillsStaleReason = ''
+    if ($env:DOT_SKILLS_FORCE -eq '1') { $script:SkillsStaleReason = 'DOT_SKILLS_FORCE=1'; return $false }
     foreach ($skill in $Skills) {
-        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".claude\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
-        if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) ".agents\skills\$skill\SKILL.md") -PathType Leaf)) { return $false }
+        foreach ($root in '.claude', '.agents') {
+            if (-not (Test-Path -LiteralPath (Join-Path (Get-SkillsHome) "$root\skills\$skill\SKILL.md") -PathType Leaf)) {
+                $script:SkillsStaleReason = "$skill missing from ~\$root\skills"
+                return $false
+            }
+        }
     }
-    if (-not $script:SkillsPendingHead) { return $false }
+    if (-not $script:SkillsPendingHead) { $script:SkillsStaleReason = 'upstream unreachable'; return $false }
     $state = Get-SkillsSourceStatePath
-    if (-not (Test-Path -LiteralPath $state -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath $state -PathType Leaf)) { $script:SkillsStaleReason = 'no install recorded yet'; return $false }
     foreach ($line in @(Get-Content -LiteralPath $state)) {
         $parts = $line -split "`t"
         if ($parts.Count -eq 2 -and $parts[0] -ceq $script:SkillsPendingKey) {
-            return ($parts[1] -ceq $script:SkillsPendingHead)
+            if ($parts[1] -ceq $script:SkillsPendingHead) { return $true }
+            $script:SkillsStaleReason = 'upstream changed'
+            return $false
         }
     }
+    $script:SkillsStaleReason = 'no install recorded for this selection'
     return $false
 }
 
@@ -133,7 +144,7 @@ function Invoke-SkillsSource {
     }
     if ((& $Install) -eq $true) {
         Save-SkillsSource
-        Write-Host "  ${Label}: installed"
+        Write-Host "  ${Label}: installed ($script:SkillsStaleReason)"
     }
 }
 

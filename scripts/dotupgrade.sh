@@ -105,6 +105,8 @@ stop_live_sessions() {
         echo "  Stopping one ends that session; unsaved context is lost unless it can be resumed."
         printf '  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer: '
     } >&2
+    # the time spent answering is "your answers" in the closing Timings line, not this section
+    dot_timing_wait 2>/dev/null || true
     read -r answer || answer=""
     case "$answer" in
         [yY]) chosen="$pids" ;;
@@ -116,6 +118,7 @@ stop_live_sessions() {
             done
             ;;
     esac
+    dot_timing_resume 2>/dev/null || true
     for pid in $chosen; do
         tty="$(agent_tty "$pid")"
         stop_pid_tree "$pid"

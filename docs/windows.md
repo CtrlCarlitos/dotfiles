@@ -80,7 +80,8 @@ marks its sections (sessions, Docker Desktop, choco, winget, VS Code extensions,
 tools: npm packages, curated skills, guardrail, Claude Code, OpenCode, Playwright, agent-browser, Serena and
 Graft) and ends with one line, for example `Timings (dot upgrade, 13m03s): choco 6m10s, AI tools 4m20s, ...`,
 listing sections of 5 seconds or more, slowest first (`DOT_TIMING_MIN_SECONDS` changes the floor), plus the
-same line for the AI-tools part. The line is appended to `upgrade.log` (Linux and macOS:
+same line for the AI-tools part. Time spent answering a prompt (stop sessions, stop Docker) is its own
+section, `your answers`, so it is not counted as the work it interrupted. The line is appended to `upgrade.log` (Linux and macOS:
 `~/.local/state/dotfiles/upgrade.log`) so one run can be compared with the next. Shell twin:
 `scripts/lib/timing.sh`; PowerShell twin: `Add-DotTimingMark` / `Write-DotTimingSummary` in
 `scripts/lib/ps-common.ps1`; `tests/upgrade_timing_contract.sh` runs both against a fake clock.
