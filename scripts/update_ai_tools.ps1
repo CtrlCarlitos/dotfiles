@@ -380,7 +380,11 @@ if ($guardrailState -and -not $guardrailVersion) {
             $launchFailed = $false
             $launchError = ""
             try {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $guardrailState
+                # Full output to the apply log (the installer's file); the console gets the filtered view.
+                $guardrailApplyLog = Join-Path $env:USERPROFILE ".local\state\guardrail\apply.log"
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $guardrailApplyLog) | Out-Null
+                & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $guardrailState 2>&1 |
+                    Tee-Object -FilePath $guardrailApplyLog -Append | Select-GuardrailConsoleLine
                 $code = $LASTEXITCODE
             } catch {
                 # The native launch itself never started - distinct from a
@@ -445,7 +449,14 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "🌐 Updating agent-browser..." -ForegroundColor Yellow
-    npm install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>$null
+    # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
+    # The browser setup and the verification below still run.
+    if (Test-NpmGlobalCurrent 'agent-browser') {
+        Write-Host "   agent-browser is current ($script:NpmCurrentVersion)"
+        $LASTEXITCODE = 0
+    } else {
+        npm install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>$null
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
     } else {

@@ -40,7 +40,8 @@ function Get-Fn([string]$name) {
     ($lines[$start..$end]) -join "`n"
 }
 $names = 'Test-CommandSuccess', 'Test-DockerEngineUp', 'Get-DockerWslGap', 'Get-DockerWslDistro', 'Write-DockerPostInstallNote',
-         'Test-TailscaleConnected', 'Write-RemoteAccessPostInstallNote', 'Test-SshServerRunning', 'Write-SshPostInstallNote'
+         'Test-TailscaleConnected', 'Write-RemoteAccessPostInstallNote', 'Test-SshServerRunning', 'Write-SshPostInstallNote',
+         'Install-OpenSshServerCapability'
 foreach ($n in $names) { Invoke-Expression (Get-Fn $n) }
 
 function Out-Notes([scriptblock]$Run) { (& $Run *>&1 | Out-String) }
@@ -109,6 +110,17 @@ $script:svc = [pscustomobject]@{ Status = 'Stopped' }
 Write-Output ('ssh-stopped-note=' + ((Out-Notes { Write-SshPostInstallNote }) -match 'sshd'))
 $script:svc = $null
 Write-Output ('ssh-missing-note=' + ((Out-Notes { Write-SshPostInstallNote }) -match 'sshd'))
+# --- the OpenSSH capability: reported only when it was actually added --------------------------
+$script:capState = 'Installed'
+$script:addCalls = 0
+function Get-WindowsCapability { param([switch]$Online, [string]$Name) [pscustomobject]@{ Name = 'OpenSSH.Server~~~~0.0.1.0'; State = $script:capState } }
+function Add-WindowsCapability { param([switch]$Online, [string]$Name) $script:addCalls++; [pscustomobject]@{ Online = $true; RestartNeeded = $false } }
+$script:capState = 'Installed'
+$r1 = Install-OpenSshServerCapability
+Write-Output ("ssh-cap-present=$r1|adds=$($script:addCalls)")
+$script:capState = 'NotPresent'
+$r2 = @(Install-OpenSshServerCapability)
+Write-Output ("ssh-cap-missing=$($r2 -join ',')|adds=$($script:addCalls)|scalar=$($r2.Count -eq 1)")
 PSEOF
 
 out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -Pwsh "$(command -v pwsh)" 2>&1 | tr -d '\r' || true)"
@@ -131,5 +143,7 @@ expect 'tailscale-down-note=True'
 expect 'ssh-running-silent=True'
 expect 'ssh-stopped-note=True'
 expect 'ssh-missing-note=True'
+expect 'ssh-cap-present=False|adds=0'
+expect 'ssh-cap-missing=True|adds=1|scalar=True'
 
 finish

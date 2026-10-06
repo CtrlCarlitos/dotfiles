@@ -215,7 +215,13 @@ else
     else
         echo "  Running agent-guardrails installer ${GUARDRAIL_VERSION} (--state ${guardrail_state}); approval URL prints here if WebAuthn is required..."
         guardrail_code=0
-        sh "$gtmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$guardrail_state" || guardrail_code=$?
+        # Full output to the apply log (same file the installer uses); the console gets the filtered
+        # view. The exit status goes through a file so it never depends on pipefail.
+        glog="$HOME/.local/state/guardrail/apply.log"
+        mkdir -p "$(dirname "$glog")"
+        { sh "$gtmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$guardrail_state" 2>&1 || echo "$?" >"$gtmp/exit"; } |
+            tee -a "$glog" | guardrail_console_filter
+        if [ -f "$gtmp/exit" ]; then guardrail_code="$(cat "$gtmp/exit")"; fi
         rm -rf "$gtmp"
         if [ "$guardrail_code" -ne 0 ]; then
             echo "  guardrail installer exited with code $guardrail_code - continuing"
@@ -288,7 +294,13 @@ fi
 if command -v npm &>/dev/null; then
     NPM_BIN="$(command -v npm)"
     echo "🌐 Updating agent-browser..."
-    $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress || echo "   agent-browser install failed - skipping"
+    # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
+    # The browser setup and the verification below still run.
+    if npm_global_current agent-browser; then
+        echo "   agent-browser is current ($CURRENT_NPM_VERSION)"
+    else
+        $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress || echo "   agent-browser install failed - skipping"
+    fi
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
         "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"

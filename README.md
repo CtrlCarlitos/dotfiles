@@ -276,6 +276,7 @@ chezmoi doctor        # chezmoi's own health check
 |---|---|---|
 | `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
 | `DOTUPGRADE_NO_PROMPT` | `dot upgrade` | Set to `1` to skip the interactive offer to stop blocking agent sessions (the default on a terminal); the upgrade then only defers and reports, as it does when not run from a terminal |
+| `DOT_GUARDRAIL_VERBOSE` | `dot up`, `dot upgrade` | Set to `1` to print the agent-guardrails installer's full output; by default routine status lines are hidden on the console (the full text is always in `guardrail/apply.log`) |
 | `DOT_SKILLS_FORCE` | `update_ai_tools.*` | Set to `1` to re-install a skills source even when it is already up to date ([skills-install-strategy](docs/skills-install-strategy.md)) |
 | `DOTFILES_DOCTOR_IN_APPLY` | `run_after_dotfiles-doctor.*` | Runs `dot doctor` mid-apply in a restricted, non-fatal mode (it fires on every `chezmoi apply`) |
 | `CHEZMOI_CONFIG_DIR` | `dotfiles-doctor.*` | Where the doctor looks for `chezmoi.toml` (default `~/.config/chezmoi`) |
