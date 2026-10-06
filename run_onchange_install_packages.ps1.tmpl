@@ -1046,7 +1046,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             $claudeHasSerena = $false
             # try/catch, not bare 2>$null: under EAP=Stop a missing claude binary
             # is a terminating error the exit-code check below never sees.
-            try { claude mcp get serena 2>$null; $claudeHasSerena = ($LASTEXITCODE -eq 0) } catch { Write-Verbose "claude mcp get serena probe failed: $($_.Exception.Message)" }
+            try { claude mcp get serena *> $null; $claudeHasSerena = ($LASTEXITCODE -eq 0) } catch { Write-Verbose "claude mcp get serena probe failed: $($_.Exception.Message)" }
             if (-not $claudeHasSerena) {
                 Invoke-WithTimeout -Description "serena setup claude-code" -Seconds 60 -Action { serena setup claude-code 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
             }
@@ -1685,7 +1685,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                 if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
                 '__SKILLS_OK__'
             }) -contains '__SKILLS_OK__'
-            if ($mpInstalled) { Save-SkillsSource }
+            if ($mpInstalled) { Save-SkillsSource; Write-Host "  mp-code-review: installed" }
         } else {
             Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
         }

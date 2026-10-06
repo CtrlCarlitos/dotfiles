@@ -56,12 +56,15 @@ Write-Output ('graft-online-stale=[' + (Get-GraftCurrentVersion -VersionOutput "
 $script:npmCalls = @()
 $script:npmExit = 0
 function npm {
-    if ($args[0] -eq 'install') { $script:npmCalls += (($args -join ' ') + ' allow=' + $env:NPM_CONFIG_ALLOW_SCRIPTS); $global:LASTEXITCODE = $script:npmExit; return }
+    # npm prints a summary line on stdout, like the real one ("changed 44 packages in 1m"): the
+    # function must not let it leak into its return value.
+    if ($args[0] -eq 'install') { $script:npmCalls += (($args -join ' ') + ' allow=' + $env:NPM_CONFIG_ALLOW_SCRIPTS); $global:LASTEXITCODE = $script:npmExit; 'changed 44 packages in 1m'; return }
     if ($args[0] -eq 'ls') { $script:ls } elseif ($args[0] -eq 'view') { $script:view }
 }
 $env:NPM_CONFIG_ALLOW_SCRIPTS = 'keep-me'
 $exit = Invoke-GraftNpmInstall -AllowScripts 'tree-sitter-x,esbuild'
 Write-Output ('graft-install-exit=' + $exit)
+Write-Output ('graft-install-scalar=' + (($exit -is [int]) -and (@($exit).Count -eq 1)))
 Write-Output ('graft-install-call=' + ($script:npmCalls -join '|'))
 Write-Output ('graft-install-env-restored=' + $env:NPM_CONFIG_ALLOW_SCRIPTS)
 Remove-Item Env:NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue
@@ -80,6 +83,11 @@ $script:procs = @([pscustomobject]@{ ProcessName = 'claude'; Path = 'C:\x\.local
 Write-Output ('choco-claude-running=' + ((Get-ChocoUpgradeArgument) -join ' '))
 $script:procs = @([pscustomobject]@{ ProcessName = 'codex'; Path = 'C:\x\codex.exe' })
 Write-Output ('choco-other-agent=' + ((Get-ChocoUpgradeArgument) -join ' '))
+# Docker Desktop kept running (its installer cannot replace a running app): left out too.
+$script:procs = @()
+Write-Output ('choco-keep-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop) -join ' '))
+$script:procs = @([pscustomobject]@{ ProcessName = 'claude'; Path = 'C:/x/.local/bin/claude.exe' })
+Write-Output ('choco-claude-and-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop) -join ' '))
 PSEOF
 
 out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r' || true)"
@@ -106,6 +114,9 @@ expect 'graft-install-fail-exit=3'
 expect 'graft-install-env-cleared=[]'
 expect 'choco-idle=upgrade all -y --no-progress'
 expect 'choco-claude-running=upgrade all -y --no-progress --except=claude'
+expect 'choco-keep-docker=upgrade all -y --no-progress --except=docker-desktop'
+expect 'choco-claude-and-docker=upgrade all -y --no-progress --except=claude,docker-desktop'
+expect 'graft-install-scalar=True'
 expect 'choco-other-agent=upgrade all -y --no-progress'
 
 finish

@@ -55,11 +55,21 @@ $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
 if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
 
+# --- Docker Desktop: its installer cannot replace a running app, so an available upgrade used to
+# do nothing without a word. When one is pending and Docker Desktop is up, offer to stop it (same
+# rule as the agent sessions above); whichever manager owns the package then upgrades it.
+$dockerKept = $false
+$dockerPendingVersion = ''
+if (@(Get-DockerDesktopProcess).Count -gt 0) {
+    $dockerPendingVersion = Get-DockerDesktopUpgrade
+    if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion) }
+}
+
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading choco packages (choco upgrade all)..." -ForegroundColor Yellow
-    $chocoArguments = @(Get-ChocoUpgradeArgument)
-    if ($chocoArguments -contains '--except=claude') {
+    $chocoArguments = @(Get-ChocoUpgradeArgument -KeepDockerDesktop:$dockerKept)
+    if (($chocoArguments -join ' ') -match '--except=\S*claude') {
         Write-Host "  claude (Desktop) left out of this sweep - a claude.exe is running, and the package's installer force-kills every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
     }
     $null = Invoke-ChocoUpgradeAll -Arguments $chocoArguments   # it prints its own warning on a non-zero exit
@@ -73,12 +83,9 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
 # with undetermined installed versions are skipped without it.
 if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading winget packages (winget upgrade --all)..." -ForegroundColor Yellow
-    try {
-        & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements
-        if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: winget upgrade exited $LASTEXITCODE (store apps can require interactive agreement) - continuing" -ForegroundColor Red }
-    } catch {
-        Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red
-    }
+    $wingetRunningNote = ''
+    if ($dockerKept) { $wingetRunningNote = "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
+    $null = Invoke-WingetUpgradeAll -RunningNote $wingetRunningNote   # it prints its own summary and warnings
 } else {
     Write-Host "  winget not found - skipping winget packages." -ForegroundColor Yellow
 }

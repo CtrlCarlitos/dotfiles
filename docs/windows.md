@@ -75,6 +75,21 @@ image name, so the upgrade would kill live Claude Code sessions. `dot upgrade` s
 with Claude closed takes the package. This check is by image name only, unlike the live-session
 check below.
 
+**winget** gets the same treatment: its output streams (minus spinner and progress-bar noise) and is
+kept in the same `upgrade.log`, and the sweep ends with what it upgraded (`winget upgraded 2 package(s).`)
+and, from a second listing, what is **still pending** (`Still pending in winget: Docker Desktop (4.93.0 -> 4.94.0), ...`).
+winget's `N package(s) have upgrades blocked` note is passed through; it never names those packages, so
+`winget upgrade --include-unknown` is the way to find them.
+
+**Docker Desktop** cannot be replaced while it runs: its installer (Chocolatey's `docker-desktop`, or
+winget's `Docker.DockerDesktop` for the same app) used to do nothing, silently. When an upgrade is pending
+and Docker Desktop is up, `dot upgrade` offers to stop it first (`docker desktop stop`, then the remaining
+processes) with the same rule as the agent sessions: it asks on an interactive console, never when
+`DOTUPGRADE_NO_PROMPT=1` or non-interactive, and says plainly that the upgrade was left for the next run.
+Stopping it stops every running container, and they are not restarted afterwards. If it is kept running,
+`docker-desktop` is left out of the choco sweep (`--except=docker-desktop`, combined with `claude` when both
+apply) and the winget summary names the pending version.
+
 What the AI-tools step does on Windows:
 
 | Tool | Behavior |

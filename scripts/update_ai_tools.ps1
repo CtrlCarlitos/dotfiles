@@ -110,7 +110,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     }
 
     if (Test-SkillsUpToDate -Repo 'mattpocock/skills' -Skills @('mp-code-review') -Agents $skAgents) {
-        Write-Host "  mp-code-review is up to date"
+        Write-Host "  mp-code-review: up to date"
     } else {
         $skRepo  = "$env:TEMP\mp-skills-repo"
         $skStage = "$env:TEMP\mp-skills-stage"
@@ -128,7 +128,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             }
             npx --yes --loglevel=error skills@latest add "$skStage" -s mp-code-review -a $skAgents -g -y --copy 2>$null | Out-Null
             if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
-            if ($LASTEXITCODE -eq 0) { Save-SkillsSource }
+            if ($LASTEXITCODE -eq 0) { Save-SkillsSource; Write-Host "  mp-code-review: installed" }
         }
         Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
     }
