@@ -71,7 +71,7 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     # Remove any legacy npm-global opencode-ai shim (dead binary) so it can't
     # shadow choco's binary - the PS profile prepends %APPDATA%\npm to PATH.
     if (Get-Command npm -ErrorAction SilentlyContinue) {
-        npm rm -g opencode-ai --loglevel=error --no-progress 2>$null
+        npm rm -g opencode-ai --loglevel=error --no-progress 2>$null | Out-Null   # its "up to date in 1s" said nothing
     }
 }
 

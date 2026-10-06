@@ -63,6 +63,27 @@ if [ "${#test_command[@]}" -eq 2 ]; then
     printf 'warning: GNU timeout unavailable; per-test time limits disabled\n' >&2
 fi
 
+# The operator's own state must survive the suite. A test that rewrote the real
+# skills-sources made the next `dot up` reinstall every skill (2026-10-06); each
+# test is checked against a snapshot, failed if it touched the file, and the
+# file is put back.
+real_state="$HOME/.local/state/dotfiles/skills-sources"
+state_snapshot=""
+if [ -f "$real_state" ]; then
+    state_snapshot="$(mktemp)"
+    cp -p "$real_state" "$state_snapshot"
+fi
+state_changed() {
+    if [ -n "$state_snapshot" ]; then
+        ! cmp -s "$real_state" "$state_snapshot"
+    else
+        [ -e "$real_state" ]
+    fi
+}
+state_restore() {
+    if [ -n "$state_snapshot" ]; then cp -p "$state_snapshot" "$real_state"; else rm -f "$real_state"; fi
+}
+
 shopt -s nullglob
 for f in "$tests_dir"/*.sh; do
     base="$(basename -- "$f")"
@@ -73,6 +94,12 @@ for f in "$tests_dir"/*.sh; do
     started=$SECONDS
     out="$("${test_command[@]}" "$f" 2>&1)"
     rc=$?
+    if state_changed; then
+        state_restore
+        failed=$((failed + 1))
+        printf 'FAIL %s (wrote the real %s; restored)\n' "$base" "$real_state"
+        continue
+    fi
 
     if [ "$rc" -ne 0 ]; then
         failed=$((failed + 1))
@@ -104,6 +131,7 @@ for f in "$tests_dir"/*.sh; do
     fi
 done
 
+if [ -n "$state_snapshot" ]; then rm -f "$state_snapshot"; fi
 printf '\nsuite: %d passed, %d skipped, %d failed\n' "$passed" "$skipped" "$failed"
 [ -n "$skipped_names" ] && printf 'skipped:%s\n' "$skipped_names"
 
