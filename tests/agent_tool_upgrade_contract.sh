@@ -182,7 +182,9 @@ grep -Fq 'AI Tools Update Complete' "$out" ||
 DOTUPGRADE_DEFER=codex,graft,opencode,serena run_updater "$tmp/run2.log" || true
 if grep -Fq 'codex deferred' "$tmp/run2.log"; then pass; else fail "deferred codex must be reported, not upgraded"; fi
 if grep -Fq 'graft deferred' "$tmp/run2.log"; then pass; else fail "deferred graft must be reported, not upgraded"; fi
-if grep -Fq '@latest' "$tmp/npm.log"; then fail "DOTUPGRADE_DEFER=codex must suppress the npm @latest upgrade"; else pass; fi
+if grep -Fq '@openai/codex@latest' "$tmp/npm.log"; then fail "DOTUPGRADE_DEFER=codex must suppress the npm @latest upgrade"; else pass; fi
+# the catalog's npm tools (markdownlint-cli2) are not agent tools: a codex defer does not hold them
+if grep -Fq 'install -g markdownlint-cli2@latest' "$tmp/npm.log"; then pass; else fail "catalog npm tools must still upgrade when codex is deferred; npm saw: $(tr '\n' ' ' <"$tmp/npm.log")"; fi
 if [ -s "$tmp/graft.log" ]; then fail "DOTUPGRADE_DEFER=graft must suppress graft upgrade"; else pass; fi
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" ||
     fail "agent-browser is not defer-listed and must still refresh"
