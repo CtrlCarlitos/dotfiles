@@ -36,14 +36,16 @@ pass
 if command -v chezmoi >/dev/null 2>&1; then
     on='{"core":true,"modern_cli":true}'
     render --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"6.8-generic\"}},\"packages\":$on}" --file "$sh_t" >"$fx/linux.sh"
-    grep -Eq '^ *install_npm_tools markdownlint-cli2$' "$fx/linux.sh" || fail "linux render: markdownlint-cli2 is not installed through install_npm_tools"
+    if ! grep -Fq 'npm_tools="markdownlint-cli2"' "$fx/linux.sh" || ! grep -Eq '^ *install_npm_tools \$npm_tools$' "$fx/linux.sh"; then
+        fail "linux render: markdownlint-cli2 is not installed through install_npm_tools"
+    fi
     for tool in lychee vale; do
         n="$(grep -c "install_release_binary $tool \"https://github.com/" "$fx/linux.sh" || true)"
         [ "$n" = 2 ] || fail "linux render: $tool needs one pinned release per architecture (amd64, arm64), got $n"
     done
     [ "$(grep -cE '^ +[0-9a-f]{64} (lychee|vale)' "$fx/linux.sh" || true)" = 4 ] || fail "linux render: every lychee/vale download needs its sha256"
     render --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"kernel\":{\"osrelease\":\"24.0.0\"}},\"packages\":$on}" --file "$sh_t" >"$fx/darwin.sh"
-    grep -Eq '^ *install_npm_tools markdownlint-cli2$' "$fx/darwin.sh" || fail "macOS render: markdownlint-cli2 is not installed"
+    grep -Fq 'npm_tools="markdownlint-cli2"' "$fx/darwin.sh" || fail "macOS render: markdownlint-cli2 is not installed"
     grep -Eq '^ *brew install .*\blychee\b.*\bvale\b' "$fx/darwin.sh" || fail "macOS render: lychee and vale must come from brew"
     render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$on}" --file "$ps_t" >"$fx/win.ps1"
     grep -Fq "Install-NpmCatalogTool -Package @('markdownlint-cli2' -split ' '" "$fx/win.ps1" || fail "windows render: markdownlint-cli2 is not installed through Install-NpmCatalogTool"

@@ -2242,7 +2242,11 @@ main() {
 
     # The catalog's npm globals (markdownlint-cli2): every OS, after the package manager
     # has had its chance to install Node.
-    install_npm_tools {{ includeTemplate "pkg-names" (dict "manager" "npm" "group" "modern_cli" "catalog" .catalog.packages) }}
+    # Bound to a variable first: the lint strips template actions, and a bare call would
+    # then look argument-less (SC2120). Word splitting of the name list is the point.
+    npm_tools="{{ includeTemplate "pkg-names" (dict "manager" "npm" "group" "modern_cli" "catalog" .catalog.packages) }}"
+    # shellcheck disable=SC2086
+    install_npm_tools $npm_tools
 {{- end }}
 
     # VS Code settings + extensions - hoisted out of install_apt (#124) so the
