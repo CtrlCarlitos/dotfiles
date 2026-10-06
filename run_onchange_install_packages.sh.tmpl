@@ -2151,6 +2151,9 @@ main() {
     pkg_manager=$(detect_package_manager)
     info "Detected Package Manager: $pkg_manager"
     PKG_MANAGER="$pkg_manager"
+    # Quiet apt (see quiet_apt_enable in scripts/lib/agent-skills.sh): only now that the package
+    # manager is known, so `command -v apt` checks on other systems are never fooled by it.
+    if [ "$PKG_MANAGER" = apt ]; then quiet_apt_enable; fi
 
     # The npm sudo decision, computed ONCE for the whole run (#124): sudo
     # only for the system-owned /usr prefix - a user-managed npm (nvm,
