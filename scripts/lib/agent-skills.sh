@@ -331,6 +331,7 @@ skills_add_all() {
                     if net_timeout 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
                         record_cli_result installed 1
                         skills_record_source
+                        info "mp-code-review: installed"
                     else
                         record_cli_result failed 1
                         warn "mp-code-review skill install failed - continuing"

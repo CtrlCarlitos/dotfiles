@@ -424,8 +424,14 @@ function Invoke-GraftNpmInstall {
     $ErrorActionPreference = 'Continue'
     try {
         $env:NPM_CONFIG_ALLOW_SCRIPTS = $AllowScripts
-        npm install -g '@nanonets/graft@latest' --loglevel=error --no-progress
-        return [int]$LASTEXITCODE
+        # Captured, never emitted: PowerShell returns EVERYTHING a function writes, so npm's
+        # "changed 44 packages" used to come back as part of the result (("changed ...", 0))
+        # and the caller printed "graft install failed (npm exit changed 44 packages in 1m 0)".
+        # Its output is shown only when the install actually failed.
+        $npmOutput = @(npm install -g '@nanonets/graft@latest' --loglevel=error --no-progress 2>&1)
+        $exitCode = [int]$LASTEXITCODE
+        if ($exitCode -ne 0) { foreach ($line in $npmOutput) { Write-Host "    $line" } }
+        return $exitCode
     }
     finally {
         $ErrorActionPreference = $previousPreference
@@ -440,10 +446,14 @@ function Invoke-GraftNpmInstall {
 # (seen in the dot upgrade log: "Terminating Claude process..."). While any claude.exe is
 # running that one package is left out of the sweep; the next quiet dot upgrade takes it.
 function Get-ChocoUpgradeArgument {
+    param([switch]$KeepDockerDesktop)
     $chocoArguments = @('upgrade', 'all', '-y', '--no-progress')
-    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) {
-        $chocoArguments += '--except=claude'
-    }
+    $except = @()
+    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) { $except += 'claude' }
+    # Docker Desktop's installer cannot replace a running app: when the operator kept it running,
+    # leave its package out instead of letting the installer fail or hang.
+    if ($KeepDockerDesktop) { $except += 'docker-desktop' }
+    if ($except.Count -gt 0) { $chocoArguments += ('--except=' + ($except -join ',')) }
     return $chocoArguments
 }
 
@@ -510,4 +520,160 @@ function Get-ChocoUpgradeSummary {
         if ($parts[1] -and $parts[2] -and $parts[1] -ne $parts[2]) { $upgraded += ("{0} ({1} -> {2})" -f $parts[0], $parts[1], $parts[2]) }
     }
     return [pscustomobject]@{ Checked = $checked; Upgraded = @($upgraded) }
+}
+
+# --- winget sweep (dot upgrade) ----------------------------------------------------------------
+# winget prints a human table, not machine output. A row ends with `Id  Version  Available
+# Source`, but the Name column is padded to its LONGEST entry, so the longest name sits only one
+# space from the Id: columns cannot be split on runs of spaces. Rows are recognised from the
+# right instead (a version and an available version, each with a digit, then a source of
+# winget or msstore); the header, the dashed rule, the "N upgrades available." footer and any
+# prose never end that way and are skipped.
+function ConvertFrom-WingetUpgradeTable {
+    param([string[]]$Lines)
+    $rows = @()
+    foreach ($line in @($Lines)) {
+        if ("$line" -match '^(?<name>\S.*?)\s+(?<id>\S+)\s+(?<version>[^\s]*\d[^\s]*)\s+(?<available>[^\s]*\d[^\s]*)\s+(?<source>winget|msstore)\s*$') {
+            $rows += [pscustomobject]@{
+                Name = $Matches['name']; Id = $Matches['id']; Version = $Matches['version']
+                Available = $Matches['available']; Source = $Matches['source']
+            }
+        }
+    }
+    return @($rows)
+}
+
+# What winget still lists as upgradable, plus its "N package(s) have upgrades blocked" note
+# (those packages are not named anywhere in winget's output).
+function Get-WingetPendingUpgrade {
+    $lines = @()
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& winget upgrade --include-unknown --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+    }
+    catch { $lines = @() }
+    finally { $ErrorActionPreference = $previous }
+    $blocked = ''
+    foreach ($line in $lines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $blocked = $line.Trim() } }
+    return [pscustomobject]@{ Rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines); Blocked = $blocked }
+}
+
+# The sweep: output streams (minus spinner and progress-bar noise) and is kept whole in the
+# upgrade log; the end says what upgraded and, from a second listing, what is STILL pending.
+# Before this the raw table was shown and a package that silently did not upgrade (Docker
+# Desktop, running) was invisible.
+function Invoke-WingetUpgradeAll {
+    param([string]$LogPath, [string]$RunningNote = '')
+
+    if (-not $LogPath) { $LogPath = Join-Path $HOME '.local\state\dotfiles\upgrade.log' }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
+        if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath $LogPath).Length -gt 2MB) {
+            Move-Item -LiteralPath $LogPath -Destination "$LogPath.1" -Force
+        }
+        Add-Content -LiteralPath $LogPath -Value ("=== {0} winget upgrade --all" -f (Get-Date -Format s))
+    }
+    catch { $LogPath = $null; Write-Verbose "upgrade log unavailable: $($_.Exception.Message)" }
+
+    $installed = 0
+    $allLines = New-Object System.Collections.Generic.List[string]
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object {
+            $line = "$_"
+            $allLines.Add($line)
+            if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
+            if ($line -match 'Successfully installed') { $installed++ }
+            # spinner frames, blank lines and download bars carry no information
+            if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
+            Write-Host $line
+        }
+        $code = [int]$LASTEXITCODE
+    }
+    catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
+    finally { $ErrorActionPreference = $previous }
+
+    if ($installed -gt 0) { Write-Host ("  winget upgraded {0} package(s)." -f $installed) -ForegroundColor Green }
+    $pending = Get-WingetPendingUpgrade
+    if ($pending.Rows.Count -gt 0) {
+        $names = @($pending.Rows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
+        Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
+        if ($RunningNote) { Write-Host "  $RunningNote" -ForegroundColor Yellow }
+    }
+    elseif ($installed -eq 0) {
+        Write-Host "  Nothing to upgrade in winget."
+    }
+    if ($pending.Blocked) { Write-Host "  $($pending.Blocked)" -ForegroundColor Yellow }
+    if ($code -ne 0 -and $installed -eq 0 -and $pending.Rows.Count -eq 0) {
+        Write-Host "  Warning: winget exited $code (store apps can require interactive agreement) - continuing" -ForegroundColor Red
+    }
+    if ($LogPath) { Write-Host "  (full output: $LogPath)" -ForegroundColor DarkGray }
+    return $code
+}
+
+# --- Docker Desktop ------------------------------------------------------------------------------
+# Its installer (choco `docker-desktop` or winget `Docker.DockerDesktop`) cannot replace a
+# running app, so an upgrade silently did nothing while Docker Desktop was up. `dot upgrade`
+# now offers to stop it first, the same way it offers to stop live agent sessions.
+function Get-DockerDesktopProcess {
+    return @(Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue)
+}
+
+# '' when nothing is pending, else the available version. winget is asked first (it tends to
+# carry the newer build), then choco; any probe that fails counts as "nothing pending".
+function Get-DockerDesktopUpgrade {
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+        $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
+        if ($row) { return [string]$row.Available }
+        foreach ($line in @(& choco outdated --limit-output 2>&1 | ForEach-Object { "$_" })) {
+            $parts = $line -split '\|'
+            if ($parts.Count -ge 3 -and $parts[0] -eq 'docker-desktop' -and $parts[2]) { return [string]$parts[2] }
+        }
+    }
+    catch { Write-Verbose "docker desktop upgrade probe failed: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previous }
+    return ''
+}
+
+# Graceful first (`docker desktop stop` also stops the engine and the backend), then the
+# remaining Docker Desktop processes. True when none is left.
+function Stop-DockerDesktop {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([int]$TimeoutSeconds = 90)
+    if (-not $PSCmdlet.ShouldProcess('Docker Desktop', 'Stop')) { return $false }
+    try { & docker desktop stop 2>&1 | Out-Null } catch { Write-Verbose "docker desktop stop failed: $($_.Exception.Message)" }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while (@(Get-DockerDesktopProcess).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+    foreach ($left in @(Get-DockerDesktopProcess)) { $null = Stop-AgentProcess -Process $left }
+    return (@(Get-DockerDesktopProcess).Count -eq 0)
+}
+
+# True when Docker Desktop is not running (so its upgrade can proceed); False when it is still
+# up. Nothing is stopped unless the operator says so; DOTUPGRADE_NO_PROMPT=1 and a
+# non-interactive console keep "leave it running and say so".
+function Invoke-DockerDesktopStopOffer {
+    param([Parameter(Mandatory)][string]$Version)
+    if (@(Get-DockerDesktopProcess).Count -eq 0) { return $true }
+    if ($env:DOTUPGRADE_NO_PROMPT -eq '1' -or -not (Test-InteractiveConsole)) {
+        Write-Host "  Docker Desktop $Version is available but Docker Desktop is running (its installer cannot replace a running app): left for the next run." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "  Docker Desktop $Version is available, but Docker Desktop is running and its installer cannot replace a running app." -ForegroundColor Yellow
+    Write-Host "  Stopping it stops every running container; they are not restarted afterwards." -ForegroundColor Yellow
+    $answer = (Read-Host "  Stop Docker Desktop so it can upgrade now? [y/N]").Trim().ToLower()
+    if ($answer -ne 'y') {
+        Write-Host "  Docker Desktop left running; its upgrade waits for the next run." -ForegroundColor Yellow
+        return $false
+    }
+    if (Stop-DockerDesktop) {
+        Write-Host "  Docker Desktop stopped for the upgrade; start it again when you need it." -ForegroundColor Green
+        return $true
+    }
+    Write-Host "  Warning: Docker Desktop did not stop - its upgrade is left for the next run." -ForegroundColor Red
+    return $false
 }

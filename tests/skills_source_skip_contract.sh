@@ -95,6 +95,7 @@ export FAKE_HEAD=aaaaaaa
 # clone-and-add is silent) and never "up to date"; a skipped one says "<name>: up to date" only.
 [ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
 if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
+grep -Fq 'mp-code-review: installed' "$tmp/last-run.txt" || fail "a: the staged mp-code-review install must say so (every other source prints a line; got: $(grep -c . "$tmp/last-run.txt") lines)"
 
 [ "$(run_all)" = 'adds=0 installed=20' ] || fail "b: unchanged head must install nothing and still report 20 (got $(run_all))"
 [ "$(grep -c ': up to date' "$tmp/last-run.txt" || true)" = 8 ] || fail "b: every source must say '<name>: up to date' exactly once (got: $(grep -c ': up to date' "$tmp/last-run.txt" || true))"
