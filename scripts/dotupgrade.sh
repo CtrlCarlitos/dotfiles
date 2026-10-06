@@ -13,6 +13,7 @@ fi
 # Where the time goes (scripts/lib/timing.sh): marks at each section, a summary at the end.
 DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DOT_SCRIPT_DIR/lib/timing.sh"
+. "$DOT_SCRIPT_DIR/lib/docker-vscode.sh"
 
 echo "dot upgrade - sweeping all tooling..."
 dot_timing_mark 'sessions and Codex daemon'
@@ -147,11 +148,29 @@ fi
 
 dot_timing_mark 'system packages'
 # --- 1. System packages: apt on Linux/WSL, brew on macOS. ---
+# Docker (lib/docker-vscode.sh): an upgrade restarts Docker and stops every container, and a VS
+# Code window attached to a dev container loses it. When a Docker upgrade is pending AND Docker
+# is running, the operator is asked first; on yes VS Code is closed, then Docker stopped. Nothing
+# below costs anything when Docker is not running (WSL: Docker Desktop and VS Code are Windows').
 case "$(uname -s)" in
     Linux)
         if command -v apt-get &>/dev/null; then
             echo "  Upgrading apt packages..."
-            sudo apt-get update && sudo apt-get upgrade -y
+            if sudo apt-get update; then
+                if dock_docker_running; then
+                    dock_pending="$(dock_pending_linux | tr '\n' ' ')"
+                    if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
+                        # Kept running: hold the Docker packages out of THIS run (released at exit,
+                        # and only the holds taken here), so nothing restarts Docker under you.
+                        # shellcheck disable=SC2086  # the package list is word-split on purpose
+                        dock_hold $dock_pending
+                        trap dock_unhold EXIT
+                        echo "  Docker packages held back for this run: ${dock_pending% }"
+                    fi
+                fi
+                sudo apt-get upgrade -y
+                dock_unhold
+            fi
         else
             echo "  apt-get not found - skipping system packages."
         fi
@@ -159,7 +178,17 @@ case "$(uname -s)" in
     Darwin)
         if command -v brew &>/dev/null; then
             echo "  Upgrading brew packages..."
-            brew update && brew upgrade
+            if brew update; then
+                # The docker cask auto-updates itself, so a plain `brew upgrade` skips it: when it
+                # is outdated and Docker is not running (or the operator agreed to the stop), take
+                # it explicitly - dot upgrade is the one owner of upgrades.
+                dock_cask_docker=0
+                if [ -n "$(dock_pending_macos)" ] && dock_gate "Docker Desktop (brew cask)"; then dock_cask_docker=1; fi
+                brew upgrade
+                if [ "$dock_cask_docker" = 1 ]; then
+                    brew upgrade --cask --greedy docker || echo "  Warning: the Docker Desktop cask upgrade failed - continuing."
+                fi
+            fi
         else
             echo "  brew not found - skipping system packages."
         fi

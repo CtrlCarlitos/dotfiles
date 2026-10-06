@@ -108,8 +108,11 @@ close request (so VS Code saves its state and ends the session cleanly), then an
 afterwards (VS Code restores its windows and a dev container reconnects once Docker is up). A VS Code
 that hosts the terminal running `dot upgrade` is never closed, since that would end the command
 itself, the same rule as agent sessions: the prompt warns that its container windows will disconnect,
-and running `dot upgrade` from Windows Terminal avoids that. The Linux and WSL `dot upgrade` has no
-Docker Desktop step (the engine there is Docker Desktop's), so nothing changes there.
+and running `dot upgrade` from Windows Terminal avoids that. WSL needs nothing of its own: Docker
+Desktop and VS Code both run on Windows (VS Code connects to WSL through its server), the WSL
+`dot upgrade` upgrades neither, and the Windows `dot upgrade` above closes VS Code, including windows
+connected to WSL. Native Linux and macOS have the same rule in the shell twin; see
+[Docker and VS Code on Linux and macOS](tool-parity.md#docker-and-vs-code-on-linux-and-macos).
 
 What the AI-tools step does on Windows:
 

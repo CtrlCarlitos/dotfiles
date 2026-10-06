@@ -226,6 +226,32 @@ A few rows the catalog deliberately does not carry, kept by hand:
 
 > **Post-Install:** Launch Docker Desktop once from your applications menu (Start menu on Windows) to accept the EULA and start the engine, then confirm it works with `docker ps`. On a Linux host the installer also adds you to the `kvm` group for Desktop's VM backend — that needs a logout/login. The Windows installer prints its post-install notes (Docker EULA, WSL Integration per distro, Tailscale sign-in, sshd) only while each is still true on that machine: nothing is printed when Docker answers, integration is on for every distro, Tailscale is connected and sshd runs. See [remote-access.md](remote-access.md).
 
+## Docker and VS Code on Linux and macOS
+
+A Docker upgrade restarts Docker and stops every running container, and a VS Code window attached to a
+dev container loses it. The Windows `dot upgrade` therefore offers to close VS Code and stop Docker
+Desktop before a pending Docker Desktop upgrade (see [windows.md](windows.md)); the shell
+`dot upgrade` does the same on native Linux and macOS (`scripts/lib/docker-vscode.sh`, called from
+`scripts/dotupgrade.sh`). The rule is identical: only when an upgrade is **pending** and Docker is
+**running**; never without a `y` (and never with `DOTUPGRADE_NO_PROMPT=1` or without a terminal); VS
+Code is closed first, then Docker; neither is reopened; a VS Code that hosts the terminal running
+`dot upgrade` is never closed.
+
+| | Linux | macOS |
+|---|---|---|
+| "Pending" | `apt-get -s upgrade` lists a Docker package (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-desktop`, the compose/buildx plugins), checked between `apt-get update` and `upgrade` | the `docker` cask is outdated (`brew outdated --cask --greedy`; it auto-updates itself, so a plain `brew upgrade` skips it) |
+| "Running" | Docker Desktop (`/opt/docker-desktop/`) or a native `dockerd` | Docker Desktop (`/Applications/Docker.app`) |
+| Close VS Code | `TERM`, then `KILL` after 20 s | a normal quit through `osascript`, then `KILL` after 20 s |
+| Stop Docker | `docker desktop stop`, then `systemctl --user stop docker-desktop`, then the processes; a native engine alone is not stopped (its package upgrade restarts it) | `docker desktop stop`, then `osascript` quit, then the processes |
+| If you decline | those Docker packages are held for this run (`apt-mark hold`, released at exit; a hold you already had is never touched) | the cask is not upgraded this run |
+| If Docker is not running | the upgrade just proceeds | the cask is upgraded explicitly (`brew upgrade --cask --greedy docker`) |
+
+WSL runs none of this: Docker Desktop and VS Code live on Windows there, nothing in the WSL
+`dot upgrade` upgrades either, and the Windows run closes VS Code (including windows connected to WSL).
+`tests/dotupgrade_docker_vscode_unix_contract.sh` runs the logic against real throwaway processes and
+fake `docker` / `osascript` / `brew` / `apt-get` / `apt-mark` binaries (Linux only: CI and WSL);
+it has not been run on a real Mac or a native Linux desktop.
+
 ## Network-step timeouts
 
 Every unbounded network fetch in the install scripts (large `.deb`/`.dmg`/
