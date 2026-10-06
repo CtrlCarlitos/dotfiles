@@ -70,6 +70,16 @@ if command -v npm &>/dev/null; then
             fi
         fi
     fi
+    # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime
+    # like the codex name. Updated only when installed and behind; `dot up` installs them.
+    for npm_tool in $(chezmoi execute-template '{{ range .catalog.packages }}{{ if hasKey . "npm" }}{{ .npm }} {{ end }}{{ end }}' 2>/dev/null || true); do
+        npm ls -g --depth=0 "$npm_tool" >/dev/null 2>&1 || continue
+        if npm_global_current "$npm_tool"; then
+            echo "   $npm_tool is current ($CURRENT_NPM_VERSION)"
+        else
+            $npm_sudo npm install -g "${npm_tool}@latest" --loglevel=error --no-progress || echo "   $npm_tool upgrade failed - continuing"
+        fi
+    done
 else
     echo "⚠️  npm not found. Skipping npm packages."
 fi

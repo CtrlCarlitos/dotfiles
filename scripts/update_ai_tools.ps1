@@ -45,6 +45,19 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             }
         }
     }
+    # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime
+    # like the codex name. Updated only when installed and behind; `dot up` installs them.
+    $npmTools = @()
+    try { $npmTools = @(((chezmoi execute-template '{{ range .catalog.packages }}{{ if hasKey . "npm" }}{{ .npm }} {{ end }}{{ end }}' | Out-String).Trim() -split ' ') | Where-Object { $_ }) } catch { Write-Verbose "npm tool list probe failed: $($_.Exception.Message)" }
+    foreach ($npmTool in $npmTools) {
+        npm ls -g --depth=0 $npmTool 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { continue }
+        if (Test-NpmGlobalCurrent $npmTool) {
+            Write-Host "  $npmTool is current ($script:NpmCurrentVersion)"
+        } else {
+            npm install -g "$($npmTool)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+        }
+    }
 } else {
     Write-Host "⚠️  npm not found. Skipping npm packages." -ForegroundColor Red
 }

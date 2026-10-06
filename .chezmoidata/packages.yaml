@@ -17,6 +17,8 @@
 #   brew     Homebrew formula
 #   cask     Homebrew cask (macOS desktop apps and fonts)
 #   choco    Chocolatey package (Windows)
+#   npm      global npm package, the same name on every OS (needs Node). `dot up`
+#            installs it when missing; `dot upgrade` updates it when installed.
 #   note     why this tool, or a caveat worth keeping next to its name
 #   migrate  false = scripts/migrate-to-choco.ps1 must never uninstall/reinstall
 #            this one (migrate_reason says why)
@@ -254,6 +256,20 @@ catalog:
       brew: shfmt
       choco: shfmt
       note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
+    - id: markdownlint-cli2
+      group: modern_cli
+      npm: markdownlint-cli2
+      note: "npm global on every OS (`npm install -g markdownlint-cli2` after Node), so no manager column names it. Markdown structure lint for any repo; the release-notes and update-docs skills check their output with it (CtrlCarlitos/skills#2, #3)"
+    - id: lychee
+      group: modern_cli
+      brew: lychee
+      choco: lychee
+      note: "broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
+    - id: vale
+      group: modern_cli
+      brew: vale
+      choco: vale
+      note: "prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
     - id: pstop
       group: modern_cli
       choco: pstop

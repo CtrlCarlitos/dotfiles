@@ -22,7 +22,7 @@ the persisted `[data.packages]` section is emitted in.
 | Group | Menu line | Contents |
 |---|---|---|
 | `core` | Terminal fundamentals | git, zsh, tmux/psmux, node 24, python, neovim, ripgrep, gh, jq, fzf, 7zip… |
-| `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt; network diagnostics (net-tools, dnsutils, traceroute, mtr, tcpdump, nmap, whois, iperf3, telnet — #177) |
+| `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt; docs linting (markdownlint-cli2 via npm, lychee, vale); network diagnostics (net-tools, dnsutils, traceroute, mtr, tcpdump, nmap, whois, iperf3, telnet — #177) |
 | `fonts` | Nerd Fonts | MesloLGS NF |
 | `agent_toolkit` | Cross-vendor agent layer | Serena, Graft, act, Playwright Chromium |
 | `opencode_cli` | OpenCode CLI + Superpowers + skills + guardrail | OpenCode CLI (native installer / choco) + superpowers plugin + curated skills + guardrail opencode plane |

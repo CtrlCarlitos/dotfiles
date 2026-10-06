@@ -245,6 +245,52 @@ npm_upgrade_once() {
     $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
 }
 
+# install_release_binary <name> <tarball-url> <sha256> <path-in-archive> - one binary from a
+# pinned GitHub release tarball: checksum-verified before anything is extracted, installed to
+# /usr/local/bin. Skipped when <name> is already on PATH (a pin bump reaches machines that do
+# not have it yet; the others keep theirs until it is removed or upgraded by hand).
+install_release_binary() {
+    local name="$1" url="$2" sha="$3" member="$4" sha_cmd tmp
+    if command -v "$name" &>/dev/null; then return 0; fi
+    sha_cmd="$(sha256_cmd)"
+    if [[ -z "$sha_cmd" ]]; then
+        warn "$name: no SHA-256 tool found - cannot verify the download, skipping"
+        return 0
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        warn "$name: could not create a temporary directory - skipping"
+        return 0
+    fi
+    info "Installing $name..."
+    if ! net_timeout 120 curl -fsSLo "$tmp/release.tar.gz" "$url"; then
+        warn "$name download failed or timed out - continuing"
+    elif ! printf '%s  %s\n' "$sha" "$tmp/release.tar.gz" | $sha_cmd -c - >/dev/null; then
+        warn "$name checksum verification failed - not installing"
+    elif ! tar -xzf "$tmp/release.tar.gz" -C "$tmp" "$member"; then
+        warn "$name: $member not found in the release archive - not installing"
+    elif ! $SUDO install "$tmp/$member" "/usr/local/bin/$name"; then
+        warn "$name install failed - continuing"
+    fi
+    rm -rf "$tmp"
+    return 0
+}
+
+# install_npm_tools <pkg...> - the catalog's npm globals (field `npm`), each only when it is
+# missing: `dot upgrade` keeps them current.
+install_npm_tools() {
+    local pkg
+    [ "$#" -gt 0 ] || return 0
+    if ! command -v npm &>/dev/null; then
+        warn "npm not found - skipping $*"
+        return 0
+    fi
+    for pkg in "$@"; do
+        if npm ls -g --depth=0 "$pkg" &>/dev/null; then continue; fi
+        info "Installing $pkg (npm)..."
+        net_timeout 300 $npm_sudo npm install -g "$pkg" --loglevel=error --no-progress --fund=false || warn "$pkg install failed - continuing"
+    done
+}
+
 install_node() {
     # The major comes from .chezmoidata.yaml versions.node_major (#125).
     # Bound to a variable first: the lint strips template actions to nothing,
@@ -810,6 +856,26 @@ install_apt() {
         fi
     fi
     
+    # Docs tooling (CtrlCarlitos/skills#2, #3): lychee and vale are not in the Ubuntu
+    # archive, so pinned GitHub release tarballs, checksum-verified like shfmt. brew and
+    # choco install both from the catalog. A bump changes the version in both URLs and
+    # both checksums (from the release's .sha256 / checksums.txt).
+    case "$(uname -m)" in
+        x86_64|amd64)
+            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz" \
+                1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a lychee-x86_64-unknown-linux-gnu/lychee
+            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_64-bit.tar.gz" \
+                867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214 vale
+            ;;
+        aarch64|arm64)
+            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-aarch64-unknown-linux-gnu.tar.gz" \
+                91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c lychee-aarch64-unknown-linux-gnu/lychee
+            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_arm64.tar.gz" \
+                104cbd349279e50c4cb40adb70adf345d93cc4a3a0191f9e68bdccb97086b582 vale
+            ;;
+        *) warn "lychee, vale: unsupported architecture $(uname -m) - skipping" ;;
+    esac
+
     # Symlink batcat -> bat (Ubuntu/Debian)
     if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
         info "Symlinking batcat -> bat..."
@@ -2171,6 +2237,13 @@ main() {
         brew) install_brew ;;
         *)    warn "Skipping package installation (unsupported manager: $pkg_manager)" ;;
     esac
+
+{{- if $modern_cli }}
+
+    # The catalog's npm globals (markdownlint-cli2): every OS, after the package manager
+    # has had its chance to install Node.
+    install_npm_tools {{ includeTemplate "pkg-names" (dict "manager" "npm" "group" "modern_cli" "catalog" .catalog.packages) }}
+{{- end }}
 
     # VS Code settings + extensions - hoisted out of install_apt (#124) so the
     # Darwin settings arm is reachable on macOS too.

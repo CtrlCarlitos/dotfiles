@@ -39,7 +39,8 @@
 
     # modern_cli — Modern CLI replacements: bat, eza, fd, starship, zoxide,
     #              direnv, lazygit, delta, gum, tealdeer, dust/duf/procs,
-    #              shellcheck, shfmt. See docs/tool-parity.md.
+    #              shellcheck, shfmt, markdownlint-cli2 (npm), lychee,
+    #              vale. See docs/tool-parity.md.
     modern_cli = true
 
     # fonts — Nerd Fonts: MesloLGS NF (for terminal/Starship)
