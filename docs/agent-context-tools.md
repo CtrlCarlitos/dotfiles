@@ -56,8 +56,11 @@ graft build         # builds the local graft/ graph (deterministic, $0, no key)
 
 Non-interactive equivalent: `graft init --agents claude agents`. Re-run
 `graft build` after big code changes to refresh the graph. This repo is
-already wired (dogfooding) — see the Graft block in `AGENTS.md` for how to
-query it.
+deliberately **not** wired: its graph covers one Lua file, so graft's
+"use graft for any task" instructions and its broad `Bash(graft:*)` allow rules
+would be wrong here (`AGENTS.md` says so; `.claude/settings.json` allows only
+read-only subcommands). Do not run `graft init` in this repo; if it was run,
+see "graft rewrote `AGENTS.md` and `.claude/settings.json`" below.
 
 ### CLI greatest hits
 
@@ -101,6 +104,26 @@ npm page) for setup; everything above works without a key.
   install scripts by default, which silently skips graft's tree-sitter parser
   native builds. The installers pass the exact `--allow-scripts` allowlist
   npm's own warning prints; if you install by hand, include it.
+- **graft rewrote `AGENTS.md` and `.claude/settings.json` after an upgrade.**
+  Graft's SessionStart hook (registered at user level, so it runs in every
+  project) replays `graft init` for a repo that is already wired, whenever the
+  repo's recorded graft version differs from the running one. "Wired" is machine-local
+  state: `graft/.cache/wiring-stamp.json`, `.claude/helpers/graft-*.cjs`, and graft's
+  fenced section in `AGENTS.md` (all but the last are gitignored). After the 0.18.0 -> 0.21.1
+  upgrade it added the "use graft for ANY task" block to `AGENTS.md` and re-added
+  `Bash(graft:*)`, `Bash(npx graft:*)`, hooks and a statusline to `.claude/settings.json`,
+  which `tests/claude_settings_graft_contract.sh` forbids. A repo with no wiring at all is
+  left alone ("never wired here — not our business"), so the fix is to make it unwired
+  (once per machine), not to fight the refresh:
+  ```sh
+  git checkout -- .claude/settings.json AGENTS.md        # only if graft already rewrote them
+  rm -f .claude/helpers/graft-hooks.cjs .claude/helpers/graft-statusline.cjs graft/.cache/wiring-stamp.json
+  ```
+  (PowerShell: `Remove-Item .claude\helpers\graft-*.cjs, graft\.cache\wiring-stamp.json`.)
+  Verified against graft 0.21.1's own `reconcileWiring` on both the Windows and the WSL
+  clone: with nothing wired, a pretend upgrade rewrites nothing and writes no stamp. The
+  `graft/` graph, `graft ask` and the MCP tools are unaffected. Running `graft init` here
+  re-creates the wiring; repeat the cleanup if that happens.
 - **Serena's semantic tools inert for a language**: no language server
   installed for it — see the note above; the LSPs are opt-in per language.
 
