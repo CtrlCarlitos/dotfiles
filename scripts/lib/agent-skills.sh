@@ -184,6 +184,46 @@ agent_browser_doctor() {
 # stores exactly the commit that was checked.
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
+# quiet_apt_enable - make every `apt install|update` / `apt-get install|update` this shell runs
+# print only what matters.
+#
+# A WSL `dot up` printed ~100 lines of apt chatter ("git is already the newest version",
+# "Reading package lists...", "N upgraded, 0 newly installed...", the update's Hit:/Get: list)
+# across ~13 install groups, while the Windows run (choco) was quiet. `apt -qq` still prints the
+# "already the newest version" lines; `apt-get -qq` prints nothing but errors (and dpkg's own
+# lines for a real install), and has no "apt does not have a stable CLI interface" warning. So
+# install and update are routed to `apt-get -qq`; every other apt subcommand, and every other
+# sudo command, passes through untouched. Done with functions so none of the ~40 call sites
+# (pinned by tests/package_catalog_contract.sh) has to change, and
+# with NO pipe, so prompts, sudo's password request and exit codes behave exactly as before.
+# DOT_APT_VERBOSE=1 leaves apt alone. Call it only once the package manager is known to be apt.
+#-------------------------------------------------------------------------------
+_qapt_rewrite() {
+    QAPT_ARGS=("$@")
+    case "$1:${2:-}" in
+        apt:install | apt:update | apt-get:install | apt-get:update) QAPT_ARGS=(apt-get -qq "${@:2}") ;;
+    esac
+}
+
+quiet_apt_enable() {
+    [ "${DOT_APT_VERBOSE:-}" != 1 ] || return 0
+    # shellcheck disable=SC2317  # defined here, called by the installer's own commands
+    sudo() {
+        if [ "${1:-}" = apt ] || [ "${1:-}" = apt-get ]; then
+            _qapt_rewrite "$@"
+            command sudo "${QAPT_ARGS[@]}"
+        else
+            command sudo "$@"
+        fi
+    }
+    # shellcheck disable=SC2317
+    apt() { _qapt_rewrite apt "$@"; command "${QAPT_ARGS[@]}"; }
+    # shellcheck disable=SC2317
+    apt-get() { _qapt_rewrite apt-get "$@"; command "${QAPT_ARGS[@]}"; }
+    info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it); errors are always shown."
+}
+
+#-------------------------------------------------------------------------------
 # guardrail_console_filter - stdin: the agent-guardrails installer's output; stdout: the
 # same, minus the routine status lines.
 #
