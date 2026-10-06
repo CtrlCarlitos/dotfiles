@@ -33,9 +33,10 @@ awk '/chocoDockerList -match/{a=NR} /winget install --id Docker.DockerDesktop/{b
 pass
 
 # --- dot upgrade wiring ---------------------------------------------------------------------------
-grep -Fq "if ((Get-DockerDesktopOwner) -eq 'choco')" "$du" || fail "dotupgrade.ps1 must say when Docker Desktop is still Chocolatey's"
+grep -Fq "if (\$dockerOwner -eq 'choco')" "$du" || fail "dotupgrade.ps1 must say when Docker Desktop is still Chocolatey's"
 grep -Fq "if (\$dockerKept) { \$wingetHold = @('Docker.DockerDesktop') }" "$du" || fail "dotupgrade.ps1 must hold a kept-running Docker Desktop out of the winget sweep"
 grep -Fq -- '-HoldId $wingetHold' "$du" || fail "dotupgrade.ps1 must pass the hold to Invoke-WingetUpgradeAll"
+grep -Fq -- 'Get-DockerDesktopUpgrade -Owner $dockerOwner' "$du" || fail "dotupgrade.ps1 must probe only the manager that owns Docker Desktop"
 pass
 
 # --- executed: owner probe and the winget hold ---------------------------------------------------
@@ -45,7 +46,8 @@ param([string]$Lib, [string]$Log)
 Set-StrictMode -Version Latest
 . $Lib
 $script:chocoOut = @(); $script:wingetList = @(); $script:pins = @(); $script:calls = @()
-function choco { $script:chocoOut | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
+$script:chocoCalls = 0
+function choco { $script:chocoCalls++; $script:chocoOut | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
 function winget {
     $line = ($args -join ' ')
     if ($args[0] -eq 'list') { $script:wingetList | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
@@ -59,6 +61,14 @@ $script:chocoOut = @('git|2.56.0')
 Write-Output ('owner-winget=' + (Get-DockerDesktopOwner))
 $script:wingetList = @('No installed package found matching input criteria.')
 Write-Output ('owner-none=[' + (Get-DockerDesktopOwner) + ']')
+
+# only the owner is probed for a pending Docker Desktop upgrade
+$script:calls = @(); $script:chocoCalls = 0
+$null = Get-DockerDesktopUpgrade -Owner 'winget'
+Write-Output ('probe-winget-owner=' + $script:chocoCalls + '|' + @($script:calls | Where-Object { $_ -match '^upgrade --id Docker' }).Count)
+$script:calls = @(); $script:chocoCalls = 0
+$null = Get-DockerDesktopUpgrade -Owner 'choco'
+Write-Output ('probe-choco-owner=' + $script:chocoCalls + '|' + @($script:calls | Where-Object { $_ -match '^upgrade --id Docker' }).Count)
 
 $script:calls = @()
 $null = Invoke-WingetUpgradeAll -LogPath $Log -HoldId @('Docker.DockerDesktop')
@@ -76,6 +86,8 @@ PSEOF
     expect 'owner-choco=choco'
     expect 'owner-winget=winget'
     expect 'owner-none=[]'
+    expect 'probe-winget-owner=0|1'
+    expect 'probe-choco-owner=1|0'
     expect 'hold=pin add,upgrade --all,pin remove,upgrade --include-unknown'
     expect 'hold-id=True|True'
     expect 'own-pin=upgrade --all,upgrade --include-unknown'

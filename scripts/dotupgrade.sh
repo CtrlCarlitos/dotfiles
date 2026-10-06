@@ -232,9 +232,29 @@ bash "$SCRIPT_DIR/update_ai_tools.sh"
 # procs, neovim/lazygit/lychee/vale tarballs - plus the Antigravity 2.0 tar.gz; macOS:
 # ScreenRec and Antigravity 2.0 .dmgs). Most self-update or are refreshable
 # by re-running the installer; named here so the gap stays visible.
+# Only what is actually installed here is named: WSL has none of the desktop apps (they live on
+# Windows), and listing Docker Desktop there read as if WSL had a copy to keep current.
+unmanaged_present() {
+    local names=() n
+    # delta, dust, procs: GitHub .debs with no repo; lychee, vale: pinned release tarballs
+    if command -v google-chrome &>/dev/null; then names+=("Chrome"); fi
+    if dpkg -s docker-desktop &>/dev/null || command -v docker-desktop &>/dev/null; then names+=("Docker Desktop"); fi
+    if dpkg -s termius &>/dev/null || command -v termius &>/dev/null; then names+=("Termius"); fi
+    if dpkg -s handy &>/dev/null; then names+=("Handy"); fi
+    if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then names+=("OpenCode Desktop"); fi
+    for n in delta dust procs lychee vale; do
+        if command -v "$n" &>/dev/null; then names+=("$n"); fi
+    done
+    if [ -d "$HOME/.local/share/antigravity-2.0" ]; then names+=("Antigravity 2.0"); fi
+    local IFS=','
+    printf '%s' "${names[*]}" | sed 's/,/, /g'
+}
 case "$(uname -s)" in
     Linux)
-        echo "  Note: outside package managers (no auto-upgrade): Chrome, Docker Desktop, Termius, Handy, OpenCode Desktop, git-delta, dust, procs, lychee, vale, Antigravity 2.0 - re-run the installer or upgrade manually if any lags."
+        unmanaged="$(unmanaged_present)"
+        if [ -n "$unmanaged" ]; then
+            echo "  Note: outside package managers (no auto-upgrade): $unmanaged - re-run the installer or upgrade manually if any lags."
+        fi
         ;;
     Darwin)
         echo "  Note: outside package managers (no auto-upgrade): ScreenRec, Antigravity 2.0 - re-run the installer or upgrade manually if any lags."

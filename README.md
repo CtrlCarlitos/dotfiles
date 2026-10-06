@@ -245,9 +245,11 @@ dot remote    # remote access: setup / status / fix / keys (docs/remote-access.m
 dot version   # which version of this repo is installed: tag, commits past it, short sha
 ```
 
-Windows PowerShell adds two more: `dot devtmp` (a build/test output folder for
-Defender, [docs/devtmp.md](docs/devtmp.md)) and `dot ssh-fingerprints` (preview
-the agent fingerprint sync; `--write` saves it, [docs/ssh-agents.md](docs/ssh-agents.md)).
+Windows PowerShell adds three more: `dot devtmp` (a build/test output folder for
+Defender, [docs/devtmp.md](docs/devtmp.md)), `dot ssh-fingerprints` (preview
+the agent fingerprint sync; `--write` saves it, [docs/ssh-agents.md](docs/ssh-agents.md))
+and `dot docker-compact` (shrink Docker Desktop's data disk,
+[docs/windows.md](docs/windows.md#compacting-the-docker-data-disk)).
 
 **Run `dot up` and `dot upgrade` with no agent or harness running** (Claude
 Code, Codex, OpenCode, `agy`, Serena, and the session you are reading this in).

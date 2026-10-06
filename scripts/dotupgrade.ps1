@@ -64,11 +64,12 @@ $dockerKept = $false
 $dockerPendingVersion = ''
 # Docker Desktop is winget's (Docker's own EXE installer, current releases). A machine that
 # still has Chocolatey's MSI copy cannot be upgraded by winget and lags behind: say how to move.
-if ((Get-DockerDesktopOwner) -eq 'choco') {
+$dockerOwner = Get-DockerDesktopOwner
+if ($dockerOwner -eq 'choco') {
     Write-Host "  Docker Desktop is still Chocolatey's (its package lags Docker's releases, and winget will not upgrade it). To move it to winget and keep your data, see docs/windows.md (Docker Desktop through winget)." -ForegroundColor Yellow
 }
 if (@(Get-DockerDesktopProcess).Count -gt 0) {
-    $dockerPendingVersion = Get-DockerDesktopUpgrade
+    $dockerPendingVersion = Get-DockerDesktopUpgrade -Owner $dockerOwner
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
 }
 

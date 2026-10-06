@@ -130,6 +130,19 @@ is done once, by hand, keeping the data disk:
    `winget upgrade --id Docker.DockerDesktop` no longer says "install technology is different". Then the
    two `*-keep` folders can be deleted.
 
+#### Compacting the Docker data disk
+
+`docker_data.vhdx` (`%LOCALAPPDATA%\Docker\wsl\disk`: images, containers, volumes, build cache) grows
+and never shrinks on its own: `docker image prune -a` or `docker builder prune` free space inside it, not on
+the drive. `dot docker-compact` (elevated) shows the disk size and asks, then closes VS Code (never the one
+hosting the terminal), stops Docker Desktop, runs `wsl --shutdown` (every WSL terminal closes) and compacts
+the disk: `Optimize-VHD -Mode Full` first, diskpart's `compact vdisk` when that cmdlet is missing or fails.
+It prints the size before and after and restarts nothing. `-Yes` skips the question. Prune first to get the
+most out of it. `Optimize-VHD` is in the Hyper-V PowerShell module, a Windows feature: the installer
+(`dev_desktop`) enables only that module (`Microsoft-Hyper-V-Management-PowerShell`) when the cmdlet is
+missing, never the Hyper-V platform (Docker runs on WSL 2). Windows Home has no such feature and uses
+diskpart. `tests/docker_compact_contract.sh` runs the flow against fakes; it has not compacted a real disk.
+
 **VS Code is closed first.** A VS Code window attached to a dev container loses it the moment Docker
 stops, so when you accept the Docker Desktop stop and VS Code (`Code.exe`, or `Code - Insiders`) is
 running, the same prompt says so and VS Code is closed **before** Docker: every window gets a normal

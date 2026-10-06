@@ -2256,6 +2256,24 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 {{- end }}
 
+# Optimize-VHD for `dot docker-compact`: it lives in the Hyper-V PowerShell module, a Windows
+# feature (no package manager carries it). Only the module is enabled, never the Hyper-V
+# platform (Docker runs on WSL 2). Windows Home has no such feature; dot docker-compact uses
+# diskpart there, so a failure here is a note, not a warning.
+{{- if $dev_desktop }}
+if (-not (Get-Command Optimize-VHD -ErrorAction SilentlyContinue)) {
+    try {
+        $hvModule = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell -ErrorAction Stop
+        if ($hvModule.State -ne 'Enabled') {
+            Write-Host "Enabling the Hyper-V PowerShell module (Optimize-VHD, for dot docker-compact)..." -ForegroundColor Cyan
+            $null = Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell -NoRestart -ErrorAction Stop
+        }
+    } catch {
+        Write-Host "  Hyper-V PowerShell module not available here - dot docker-compact uses diskpart instead." -ForegroundColor DarkGray
+    }
+}
+{{- end }}
+
 # Meld: winget, not Chocolatey (see the catalog note). A copy left by the
 # old Chocolatey install blocks winget's upgrade (different installer
 # technology), so remove it first; user settings survive the reinstall.
