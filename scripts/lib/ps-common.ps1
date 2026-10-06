@@ -306,16 +306,64 @@ function Test-InteractiveConsole {
     return ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected)
 }
 
+# What a terminal UI (Claude Code, Codex, OpenCode) switches on and a taskkill never lets it
+# switch off again: mouse reporting (1000/1002/1003/1006), focus reports (1004), bracketed paste
+# (2004), the kitty keyboard protocol (CSI < u pops it), modifyOtherKeys, the alternate screen
+# (1049); then the cursor back. Left on, the terminal keeps sending those reports into the
+# prompt and they print as stray characters.
+function Get-TerminalResetSequence {
+    $e = [string][char]27
+    return ($e + '[?1000l' + $e + '[?1002l' + $e + '[?1003l' + $e + '[?1004l' + $e + '[?1006l' + $e + '[?2004l' +
+        $e + '[<99u' + $e + '[>4;0m' + $e + '[?1049l' + $e + '[?25h')
+}
+
+# Write the switch-offs to the console of a process that is about to be ended. A throwaway child
+# does it (a process has one console; this one must keep its own): FreeConsole, AttachConsole,
+# write to CONOUT$. Best effort and bounded: no console, no process, a slow start - all fine.
+function Reset-AgentTerminal {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][int]$ProcessId)
+    if (-not $PSCmdlet.ShouldProcess("console of pid $ProcessId", 'Switch off terminal modes')) { return $false }
+    try {
+        $sequence = Get-TerminalResetSequence
+        $code = @'
+param([uint32]$TargetId, [string]$Text)
+Add-Type -Namespace DotTerm -Name Native -MemberDefinition @"
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool FreeConsole();
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool AttachConsole(uint pid);
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool WriteFile(IntPtr handle, byte[] buffer, uint count, out uint written, IntPtr overlapped);
+[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+"@
+[void][DotTerm.Native]::FreeConsole()
+if (-not [DotTerm.Native]::AttachConsole($TargetId)) { exit 1 }
+$h = [DotTerm.Native]::CreateFileW('CONOUT$', 0x40000000, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+if ($h -eq [IntPtr]::new(-1)) { exit 2 }
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+$written = [uint32]0
+[void][DotTerm.Native]::WriteFile($h, $bytes, [uint32]$bytes.Length, [ref]$written, [IntPtr]::Zero)
+[void][DotTerm.Native]::CloseHandle($h)
+'@
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& { $code } -TargetId $ProcessId -Text '$sequence'"))
+        $exe = (Get-Process -Id $PID).Path
+        $child = Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+        if (-not $child.WaitForExit(8000)) { try { $child.Kill() } catch { Write-Verbose "reset helper still running: $($_.Exception.Message)" } }
+        return $true
+    }
+    catch { Write-Verbose "terminal reset failed: $($_.Exception.Message)"; return $false }
+}
+
 # Ask the window to close, then take the whole process tree down (Serena leaves language
 # server children behind otherwise). Console agents have no window, so they go straight to
-# the tree kill.
+# the tree kill - after -ResetTerminal switched off what their UI left on in the terminal.
 function Stop-AgentProcess {
     [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)]$Process, [int]$GraceSeconds = 5)
+    param([Parameter(Mandatory)]$Process, [int]$GraceSeconds = 5, [switch]$ResetTerminal)
     if (-not $PSCmdlet.ShouldProcess("$($Process.ProcessName) (pid $($Process.Id))", 'Stop process tree')) { return $false }
     $closing = $false
     try { $closing = [bool]$Process.CloseMainWindow() } catch { $closing = $false }
     if ($closing -and $Process.WaitForExit($GraceSeconds * 1000)) { return $true }
+    if ($ResetTerminal) { $null = Reset-AgentTerminal -ProcessId $Process.Id }
     & taskkill /PID $Process.Id /T /F *> $null
     return $true
 }
@@ -352,7 +400,7 @@ function Invoke-LiveSessionStop {
     }
     $stopped = @()
     foreach ($p in $chosen) {
-        if (Stop-AgentProcess -Process $p) { $stopped += $p }
+        if (Stop-AgentProcess -Process $p -ResetTerminal) { $stopped += $p }
     }
     if ($stopped.Count -gt 0) {
         Write-Host "  Stopped $($stopped.Count) process(es); re-scanning." -ForegroundColor Green
@@ -572,7 +620,28 @@ function Get-WingetPendingUpgrade {
     finally { $ErrorActionPreference = $previous }
     $blocked = ''
     foreach ($line in $lines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $blocked = $line.Trim() } }
-    return [pscustomobject]@{ Rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines); Blocked = $blocked }
+    $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+    # winget lists a package it cannot upgrade ("a newer version was found, but the install
+    # technology is different": Docker Desktop installed by choco, Edge) as if it could. When it
+    # says some are blocked, ask about each by id: those are not "pending", they belong to
+    # whoever installed them.
+    $other = @()
+    if ($blocked -and $rows.Count -gt 0 -and $rows.Count -le 8) {
+        $upgradeable = @()
+        foreach ($row in $rows) {
+            $probe = ''
+            try {
+                $ErrorActionPreference = 'Continue'
+                $probe = (@(& winget upgrade --id $row.Id --accept-source-agreements 2>&1 | ForEach-Object { "$_" }) -join ' ')
+            }
+            catch { $probe = '' }
+            finally { $ErrorActionPreference = $previous }
+            if ($probe -match 'install technology is different') { $other += $row } else { $upgradeable += $row }
+        }
+        $rows = $upgradeable
+        if ($other.Count -gt 0) { $blocked = '' }
+    }
+    return [pscustomobject]@{ Rows = @($rows); Other = @($other); Blocked = $blocked }
 }
 
 # The sweep: output streams (minus spinner and progress-bar noise) and is kept whole in the
@@ -613,16 +682,20 @@ function Invoke-WingetUpgradeAll {
 
     if ($installed -gt 0) { Write-Host ("  winget upgraded {0} package(s)." -f $installed) -ForegroundColor Green }
     $pending = Get-WingetPendingUpgrade
-    if ($pending.Rows.Count -gt 0) {
+    if (@($pending.Rows).Count -gt 0) {
         $names = @($pending.Rows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
         Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
         if ($RunningNote) { Write-Host "  $RunningNote" -ForegroundColor Yellow }
     }
-    elseif ($installed -eq 0) {
+    elseif ($installed -eq 0 -and @($pending.Other).Count -eq 0) {
         Write-Host "  Nothing to upgrade in winget."
     }
+    if (@($pending.Other).Count -gt 0) {
+        $others = @($pending.Other | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
+        Write-Host ("  Not upgradeable through winget (installed another way; choco or the app itself updates it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
+    }
     if ($pending.Blocked) { Write-Host "  $($pending.Blocked)" -ForegroundColor Yellow }
-    if ($code -ne 0 -and $installed -eq 0 -and $pending.Rows.Count -eq 0) {
+    if ($code -ne 0 -and $installed -eq 0 -and @($pending.Rows).Count -eq 0) {
         Write-Host "  Warning: winget exited $code (store apps can require interactive agreement) - continuing" -ForegroundColor Red
     }
     if ($LogPath) { Write-Host "  (full output: $LogPath)" -ForegroundColor DarkGray }
@@ -646,6 +719,8 @@ function Get-DockerDesktopUpgrade {
         $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
         $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
         if ($row) { return [string]$row.Available }
+        # choco installed it: winget answers "install technology is different" instead of a table
+        # and can never upgrade it, so only choco's own list counts.
         foreach ($line in @(& choco outdated --limit-output 2>&1 | ForEach-Object { "$_" })) {
             $parts = $line -split '\|'
             if ($parts.Count -ge 3 -and $parts[0] -eq 'docker-desktop' -and $parts[2]) { return [string]$parts[2] }

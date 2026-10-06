@@ -50,8 +50,10 @@ $script:listing = @()
 $script:sweepExit = 0
 function winget {
     if ($args -contains '--all') { $script:sweep | ForEach-Object { $_ }; $global:LASTEXITCODE = $script:sweepExit }
+    elseif ($args -contains '--id' -and $script:idProbe.Count -gt 0) { $script:idProbe[[string]$args[([array]::IndexOf($args, '--id') + 1)]] | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
     else { $script:listing | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
 }
+$script:idProbe = @{}
 $log = Join-Path $LogDir 'upgrade.log'
 function Run([scriptblock]$Block) { $script:out = (& $Block *>&1 | Out-String) }
 
@@ -72,6 +74,22 @@ Write-Output ('pending-names=' + ($script:out -match 'Still pending in winget: D
 Write-Output ('pending-note=' + ($script:out -match 'Docker Desktop waits: it is running'))
 Write-Output ('pending-blocked=' + ($script:out -match '1 package\(s\) have upgrades blocked'))
 Write-Output ('pending-no-upgraded-claim=' + (-not ($script:out -match 'winget upgraded')))
+
+# winget lists packages it cannot upgrade; asked by id it says why. Those are not "pending".
+$sentence = 'A newer version was found, but the install technology is different from the current version installed. Please uninstall the package and install the newer version.'
+$script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @($sentence) }
+$script:sweep = @('Found Docker Desktop [Docker.DockerDesktop] Version 4.94.0')
+$script:listing = $real
+Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log -RunningNote 'Docker Desktop waits: it is running' }
+Write-Output ('other-listed=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop \(4\.93\.0 -> 4\.94\.0\), Microsoft Edge'))
+Write-Output ('other-not-pending=' + (-not ($script:out -match 'Still pending')))
+Write-Output ('other-not-nothing=' + (-not ($script:out -match 'Nothing to upgrade in winget')))
+Write-Output ('other-no-raw-blocked=' + (-not ($script:out -match 'have upgrades blocked')))
+$script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @('Found Microsoft Edge') }
+Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
+Write-Output ('mixed-pending=' + ($script:out -match 'Still pending in winget: Microsoft Edge'))
+Write-Output ('mixed-other=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop'))
+$script:idProbe = @{}
 
 $script:sweep = @()
 $script:listing = @('No installed package found matching input criteria.')
@@ -249,6 +267,12 @@ expect 'swept-exit=0'
 expect 'pending-names=True'
 expect 'pending-note=True'
 expect 'pending-blocked=True'
+expect 'other-listed=True'
+expect 'other-not-pending=True'
+expect 'other-not-nothing=True'
+expect 'other-no-raw-blocked=True'
+expect 'mixed-pending=True'
+expect 'mixed-other=True'
 expect 'pending-no-upgraded-claim=True'
 expect 'idle-says-nothing=True'
 expect 'fail-warns=True'

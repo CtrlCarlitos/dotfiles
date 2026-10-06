@@ -426,7 +426,18 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # runs, and Claude Code should not be replaced under one either), and with nothing
     # running the full installer is the simple, predictable path.
     if ($claudeInstallUrl) {
-        & powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex"
+        # The installer prints a banner, a location and a "next steps" block on every run; the
+        # version is the only news. Its whole output is shown only when it fails.
+        $claudeOut = @(& powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex" 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -eq 0) {
+            $claudeVersion = ''
+            foreach ($claudeLine in $claudeOut) { if ($claudeLine -match '^\s*Version:\s*(\S+)') { $claudeVersion = $Matches[1] } }
+            if (-not $claudeVersion) { $claudeVersion = 'installed' }
+            Write-Host "  Claude Code $claudeVersion (installer re-run)"
+        } else {
+            $claudeOut | ForEach-Object { Write-Host $_ }
+            Write-Host "  Claude Code installer failed - continuing" -ForegroundColor Red
+        }
     } else {
         Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall" -ForegroundColor Red
     }

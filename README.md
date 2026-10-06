@@ -277,6 +277,7 @@ chezmoi doctor        # chezmoi's own health check
 | `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
 | `DOTUPGRADE_NO_PROMPT` | `dot upgrade` | Set to `1` to skip the interactive offer to stop blocking agent sessions (the default on a terminal); the upgrade then only defers and reports, as it does when not run from a terminal |
 | `DOT_APT_VERBOSE` | `dot up` (Linux, WSL) | Set to `1` to show apt's full output; by default the installer runs `apt install` / `apt update` as `apt-get -qq` (errors and dpkg's own lines still show) so a run is not ~100 lines of "already the newest version" |
+| `DOT_SKILLS_VERBOSE` | `dot up`, `dot upgrade` (Linux, WSL, macOS) | Set to `1` to show the `skills` CLI's full output (banner, summary box, security table, about 35 lines per skill source); by default it is shown only when a call fails |
 | `DOT_TIMING_MIN_SECONDS` | `dot upgrade` | Smallest section (in seconds, default `5`) the closing `Timings (...)` line lists; the line is also appended to `upgrade.log` |
 | `DOT_GUARDRAIL_VERBOSE` | `dot up`, `dot upgrade` | Set to `1` to print the agent-guardrails installer's full output; by default routine status lines are hidden on the console (the full text is always in `guardrail/apply.log`) |
 | `DOT_SKILLS_FORCE` | `update_ai_tools.*` | Set to `1` to re-install a skills source even when it is already up to date ([skills-install-strategy](docs/skills-install-strategy.md)) |

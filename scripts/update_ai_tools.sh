@@ -251,7 +251,17 @@ if command -v claude &>/dev/null; then
     # warn-and-continue).
     cl_inst="$(mktemp)"
     if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
-        bash "$cl_inst" || echo "   Claude Code installer failed - continuing"
+        # The installer prints a banner, a location and a "next steps" block on every run; the
+        # version is the only news. Its whole output is shown only when it fails.
+        cl_out="$(mktemp)"
+        if bash "$cl_inst" >"$cl_out" 2>&1; then
+            cl_ver="$(sed -n 's/^[[:space:]]*Version:[[:space:]]*//p' "$cl_out")"
+            echo "   Claude Code ${cl_ver:-installed} (installer re-run)"
+        else
+            cat "$cl_out"
+            echo "   Claude Code installer failed - continuing"
+        fi
+        rm -f "$cl_out"
     else
         echo "   Claude Code installer download failed - continuing"
     fi

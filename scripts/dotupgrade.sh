@@ -72,10 +72,23 @@ stop_pid_tree() {
     kill -KILL $tree 2>/dev/null
     return 0
 }
+# A TUI agent that is ended never switches off what it turned on in its terminal (mouse
+# reporting, bracketed paste, the kitty keyboard protocol); the terminal then keeps typing
+# those reports into the prompt. After the stop, write the switch-offs to the agent's tty.
+agent_tty() { ps -o tty= -p "$1" 2>/dev/null | tr -d ' '; }
+reset_agent_terminal() {
+    local tty="$1" dev
+    case "$tty" in '' | '?' | '-') return 0 ;; esac
+    dev="${DOT_TTY_ROOT:-/dev}/$tty"
+    if [ -w "$dev" ]; then
+        printf '\033[?1000l\033[?1002l\033[?1003l\033[?1004l\033[?1006l\033[?2004l\033[<99u\033[>4;0m\033[?1049l\033[?25h' >"$dev" 2>/dev/null || true
+    fi
+    return 0
+}
 describe_pid() { printf '%s (pid %s, up %s)' "$(ps -o comm= -p "$1" 2>/dev/null)" "$1" "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
 # Prints the number of sessions stopped. Nothing is stopped unless the operator says so.
 stop_live_sessions() {
-    local mine pids pid answer each stopped=0 chosen=""
+    local mine pids pid answer each stopped=0 chosen="" tty
     [ "${DOTUPGRADE_NO_PROMPT:-}" = 1 ] && { echo 0; return 0; }
     mine=" $(ancestor_pids | tr '\n' ' ')"
     pids=""
@@ -104,7 +117,9 @@ stop_live_sessions() {
             ;;
     esac
     for pid in $chosen; do
+        tty="$(agent_tty "$pid")"
         stop_pid_tree "$pid"
+        reset_agent_terminal "$tty"
         stopped=$((stopped + 1))
     done
     [ "$stopped" -gt 0 ] && echo "  Stopped $stopped process(es); re-scanning." >&2
