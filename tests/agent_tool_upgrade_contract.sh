@@ -56,7 +56,8 @@ prefix="$tmp/prefix" # what the npm stub answers `prefix -g` with
 mkdir -p "$bin" "$home" "$prefix/bin"
 
 # --- Stubs -------------------------------------------------------------------
-for c in npx git uv serena opencode agy; do
+# codex starts (exit 0): "current" requires a codex that runs (tests/codex_platform_binary_contract.sh)
+for c in npx git uv serena opencode agy codex; do
     printf '#!/bin/sh\nexit 0\n' >"$bin/$c"
     chmod +x "$bin/$c"
 done

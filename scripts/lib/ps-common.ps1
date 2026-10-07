@@ -549,7 +549,7 @@ function Invoke-LiveSessionStop {
 
 # --- Codex's platform binary (dot upgrade) --------------------------------------------------
 # Codex ships its native binary as an optional dependency per platform
-# (@openai/codex-win32-x64 -> npm:@openai/codex@<version>-win32-x64), published minutes AFTER
+# (<pkg>-win32-x64 -> npm:<pkg>@<version>-win32-x64), published minutes AFTER
 # the main package. npm skips a missing optional dependency silently: a `dot upgrade` in that
 # gap removed the old binary, installed none, and every codex command died with "Missing
 # optional dependency" (2026-10-07) - while the version check said "codex is current".

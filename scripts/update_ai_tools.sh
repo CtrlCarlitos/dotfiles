@@ -34,10 +34,10 @@ npm_global_current() {
 }
 
 # Codex ships its native binary as an optional dependency per platform
-# (@openai/codex-linux-x64 -> npm:@openai/codex@<version>-linux-x64), published minutes AFTER
+# (<pkg>-linux-x64 -> npm:<pkg>@<version>-linux-x64), published minutes AFTER
 # the main package. npm skips a missing optional dependency silently: a `dot upgrade` in that
 # gap removed the old binary, installed none, and every codex command died with "Missing
-# optional dependency @openai/codex-linux-x64" (2026-10-07: 0.161.0 at 16:04, its Linux
+# optional dependency <pkg>-linux-x64" (2026-10-07: 0.161.0 at 16:04, its Linux
 # binary at 16:16) - while the version check went on saying "codex is current".
 npm_platform_tag() {
     case "$(uname -s)-$(uname -m)" in
@@ -54,7 +54,7 @@ npm_platform_published() {
     local pkg="$1" ver="$2" tag spec
     tag="$(npm_platform_tag)"
     [ -n "$tag" ] && command -v jq &>/dev/null || return 0
-    spec="$(npm view "$pkg@$ver" optionalDependencies --json 2>/dev/null | jq -r --arg k "$pkg-$tag" '.[$k] // empty' 2>/dev/null)" || spec=""
+    spec="$(npm view "$pkg@$ver" optionalDependencies --json 2>/dev/null | jq -b -r --arg k "$pkg-$tag" '.[$k] // empty' 2>/dev/null)" || spec=""
     [ -n "$spec" ] || return 0
     case "$spec" in
         npm:*) spec="${spec#npm:}" ;;
