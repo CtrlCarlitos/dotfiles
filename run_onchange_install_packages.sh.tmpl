@@ -1384,8 +1384,24 @@ install_agent_toolkit() {
         # `gtimeout` (macOS only with coreutils brewed), running unguarded if
         # neither is present - so it's safe to reuse in the brew/macOS block too.
         # install-deps is apt-specific: the concept does not exist on macOS.
+        # Quiet like the installer's own apt calls (DOT_APT_VERBOSE=1 shows it): install-deps runs
+        # `apt-get update` and `apt-get install` itself and printed ~40 "already the newest version"
+        # lines on every run. Only stdout/stderr go to the file - stdin stays the terminal and the
+        # --foreground timeout above is unchanged. The output is shown on failure; apt's summary
+        # line only when something was installed.
         if [ "$PKG_MANAGER" = apt ]; then
-            net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+            if [ "${DOT_APT_VERBOSE:-0}" = 1 ]; then
+                net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+            else
+                local pw_deps; pw_deps="$(mktemp)"
+                if net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium >"$pw_deps" 2>&1; then
+                    grep -E '^[0-9]+ upgraded, [0-9]+ newly installed' "$pw_deps" | grep -vE '^0 upgraded, 0 newly installed' | sed 's/^/  Playwright system deps: /' || true
+                else
+                    cat "$pw_deps" >&2
+                    warn "Playwright system deps install failed or timed out - continuing"
+                fi
+                rm -f "$pw_deps"
+            fi
         fi
         # Output shown only on failure: outside a project `npx playwright install` prints a 13-line
         # "install your project's dependencies first" box on EVERY run, which is not about this install.
