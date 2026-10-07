@@ -1,0 +1,33 @@
+{{- /* toml-align: align the "=" of every block of consecutive `key = value` lines in
+       the TOML text passed as data, one column per block (the widest key plus its
+       indentation). A block ends at any other line: a [table] header, a comment, a
+       blank line. A single line is normalised to `key = value`. Used on the sections
+       chezmoi's toToml writes (it never aligns); the hand-written sections of
+       .chezmoi.toml.tmpl compute their own column. tests/config_toml_alignment_contract.sh
+       holds every rendered block to the rule. */ -}}
+{{- $re := `^(\s*(?:"[^"]*"|[A-Za-z0-9_.-]+))\s*=\s*(.*)$` -}}
+{{- $lines := splitList "\n" . -}}
+{{- $widths := list -}}
+{{- $w := 0 -}}
+{{- range $lines -}}
+{{-   if regexMatch $re . -}}
+{{-     $w = max $w (len (regexReplaceAll $re . "${1}")) -}}
+{{-   else if $w -}}
+{{-     $widths = append $widths $w -}}
+{{-     $w = 0 -}}
+{{-   end -}}
+{{- end -}}
+{{- if $w }}{{ $widths = append $widths $w }}{{ end -}}
+{{- $out := list -}}
+{{- $block := -1 -}}
+{{- $inBlock := false -}}
+{{- range $lines -}}
+{{-   if regexMatch $re . -}}
+{{-     if not $inBlock }}{{ $block = add $block 1 }}{{ $inBlock = true }}{{ end -}}
+{{-     $out = append $out (printf "%-*s = %s" (int (index $widths $block)) (regexReplaceAll $re . "${1}") (regexReplaceAll $re . "${2}")) -}}
+{{-   else -}}
+{{-     $inBlock = false -}}
+{{-     $out = append $out . -}}
+{{-   end -}}
+{{- end -}}
+{{- join "\n" $out -}}

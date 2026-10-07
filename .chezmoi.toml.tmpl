@@ -1,4 +1,8 @@
-{{/* Helpers for round-tripping a machine-local table with aligned "=" columns.
+{{/* Rule for this whole file (docs/invariants.md #15): in every block of two or more
+     consecutive `key = value` lines, the "=" signs share one column. Hand-written
+     blocks pad with printf "%-*s"; toToml output goes through toml-align.
+     tests/config_toml_alignment_contract.sh enforces it. */}}
+{{- /* Helpers for round-tripping a machine-local table with aligned "=" columns.
      toml-value renders one scalar or list. emit-toml-table renders a table:
      scalar keys first (padded to the widest key in THIS table), then nested
      tables, then arrays of tables. Input: dict path/table/depth/aot. Keys are
@@ -192,7 +196,7 @@
 #   forced = re-asserted every run; defaults / defaults_windows = written when absent;
 #   junk = files.exclude + search.exclude globs; unset = keys removed;
 #   terminal_colors = merged into workbench.colorCustomizations.
-{{ replace "[vscode" "[data.vscode" (toToml (dict "vscode" (dict "settings" $vscodeSettings))) }}
+{{ includeTemplate "toml-align" (replace "[vscode" "[data.vscode" (toToml (dict "vscode" (dict "settings" $vscodeSettings)))) }}
 
 {{/* vscode_overrides: machine-local extension drift from the repo baseline
      (extra_extensions / exclude_extensions). exclude_settings / extra_settings still
@@ -206,7 +210,7 @@
 # extension from reinstalling. exclude_settings removes a managed key; use
 # extra_settings to upsert a replacement. Nested values are valid TOML and
 # `chezmoi init` writes them as nested tables.
-{{ replace "[vscode_overrides" "[data.vscode_overrides" (toToml (dict "vscode_overrides" .vscode_overrides)) }}
+{{ includeTemplate "toml-align" (replace "[vscode_overrides" "[data.vscode_overrides" (toToml (dict "vscode_overrides" .vscode_overrides))) }}
 {{- else }}
   # [data.vscode_overrides]  (machine-local drift from the repo baseline;
   # extensions; settings are edited in [data.vscode.settings] above)
@@ -283,6 +287,8 @@
 {{- if and (not (hasKey . "signingKey")) (hasKey . "signingkey") }}{{ $w = max $w 10 }}{{ end }}
 {{- if hasKey . "agent_key_comments" }}{{ $w = max $w 18 }}{{ end }}
 {{- if hasKey . "organizations" }}{{ $w = max $w 13 }}{{ end }}
+{{- $acct := . }}
+{{- range $field := list "auth_fingerprint" "signing_fingerprint" "agent_signing_key_comment" }}{{ if hasKey $acct $field }}{{ $w = max $w (len $field) }}{{ end }}{{ end }}
   {{ printf "%-*s" (int $w) "name" }} = {{ .name | quote }}
   {{ printf "%-*s" (int $w) "email" }} = {{ .email | quote }}
   {{ printf "%-*s" (int $w) "username" }} = {{ if hasKey . "username" }}{{ .username | quote }}{{ else }}""{{ end }}
@@ -304,7 +310,7 @@
 {{- $account := . }}
 {{- range $field := list "auth_fingerprint" "signing_fingerprint" "agent_signing_key_comment" }}
 {{- if hasKey $account $field }}
-  {{ $field }} = {{ index $account $field | quote }}
+  {{ printf "%-*s" (int $w) $field }} = {{ index $account $field | quote }}
 {{- end }}
 {{- end }}
 {{- if hasKey . "organizations" }}
@@ -354,31 +360,34 @@
 {{- range .ssh_hosts }}
 
 [[data.ssh_hosts]]
-  name     = {{ .name | quote }}
-  hostname = {{ .hostname | quote }}
+{{- /* "=" column: widest key actually emitted for this host */}}
+{{- $w := 8 }}
+{{- if hasKey . "identity_fingerprint" }}{{ $w = 20 }}{{ end }}
+  {{ printf "%-*s" (int $w) "name" }} = {{ .name | quote }}
+  {{ printf "%-*s" (int $w) "hostname" }} = {{ .hostname | quote }}
 {{- if hasKey . "user" }}
-  user     = {{ .user | quote }}
+  {{ printf "%-*s" (int $w) "user" }} = {{ .user | quote }}
 {{- end }}
 {{- if hasKey . "port" }}
-  port     = {{ .port }}
+  {{ printf "%-*s" (int $w) "port" }} = {{ .port }}
 {{- end }}
 {{- if hasKey . "identity" }}
-  identity = {{ .identity | quote }}
+  {{ printf "%-*s" (int $w) "identity" }} = {{ .identity | quote }}
 {{- end }}
 {{- if hasKey . "identity_fingerprint" }}
-  identity_fingerprint = {{ .identity_fingerprint | quote }}
+  {{ printf "%-*s" (int $w) "identity_fingerprint" }} = {{ .identity_fingerprint | quote }}
 {{- end }}
 {{- if hasKey . "proxy" }}
-  proxy    = {{ .proxy | quote }}
+  {{ printf "%-*s" (int $w) "proxy" }} = {{ .proxy | quote }}
 {{- end }}
 {{- if hasKey . "comment" }}
-  comment  = {{ .comment | quote }}
+  {{ printf "%-*s" (int $w) "comment" }} = {{ .comment | quote }}
 {{- end }}
 {{- if hasKey . "os" }}
-  os       = {{ .os | quote }}
+  {{ printf "%-*s" (int $w) "os" }} = {{ .os | quote }}
 {{- end }}
 {{- if hasKey . "tmux" }}
-  tmux     = {{ if kindIs "string" .tmux }}{{ .tmux | quote }}{{ else }}{{ .tmux }}{{ end }}
+  {{ printf "%-*s" (int $w) "tmux" }} = {{ if kindIs "string" .tmux }}{{ .tmux | quote }}{{ else }}{{ .tmux }}{{ end }}
 {{- end }}
 {{- end }}
 {{- else }}

@@ -15,57 +15,57 @@
 # A tier you delete is treated as empty.
 
 # The two list tiers come first: in TOML a plain key after a [table] header belongs to that table.
-junk = ["**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/node_modules/**", "**/*.pyc"]
+junk  = ["**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/node_modules/**", "**/*.pyc"]
 unset = ["remote.SSH.configFile"]
 
 [forced]
-"editor.fontFamily" = "MesloLGS Nerd Font Mono"
+"editor.fontFamily"              = "MesloLGS Nerd Font Mono"
 "terminal.integrated.fontFamily" = "MesloLGS Nerd Font Mono"
 
 [defaults]
-"files.autoSave" = "afterDelay"
-"files.autoSaveDelay" = 500
-"files.eol" = "\n"
-"files.insertFinalNewline" = true
-"files.trimFinalNewlines" = true
-"files.trimTrailingWhitespace" = true
-"explorer.compactFolders" = false
-"editor.minimap.enabled" = false
-"editor.wordWrap" = "on"
-"editor.formatOnSave" = true
-"diffEditor.ignoreTrimWhitespace" = false
-"diffEditor.wordWrap" = "on"
-"workbench.startupEditor" = "none"
-"terminal.integrated.scrollback" = 30000
+"files.autoSave"                               = "afterDelay"
+"files.autoSaveDelay"                          = 500
+"files.eol"                                    = "\n"
+"files.insertFinalNewline"                     = true
+"files.trimFinalNewlines"                      = true
+"files.trimTrailingWhitespace"                 = true
+"explorer.compactFolders"                      = false
+"editor.minimap.enabled"                       = false
+"editor.wordWrap"                              = "on"
+"editor.formatOnSave"                          = true
+"diffEditor.ignoreTrimWhitespace"              = false
+"diffEditor.wordWrap"                          = "on"
+"workbench.startupEditor"                      = "none"
+"terminal.integrated.scrollback"               = 30000
 "terminal.integrated.shellIntegration.enabled" = true
-"terminal.integrated.fontSize" = 16
-"terminal.integrated.cursorStyle" = "bar"
-"terminal.integrated.commandsToSkipShell" = ["-workbench.action.toggleSidebarVisibility", "-workbench.action.togglePanel"]
-"terminal.integrated.copyOnSelection" = true
-"terminal.integrated.rightClickBehavior" = "paste"
-"cSpell.language" = "en,es"
+"terminal.integrated.fontSize"                 = 16
+"terminal.integrated.cursorStyle"              = "bar"
+"terminal.integrated.commandsToSkipShell"      = ["-workbench.action.toggleSidebarVisibility", "-workbench.action.togglePanel"]
+"terminal.integrated.copyOnSelection"          = true
+"terminal.integrated.rightClickBehavior"       = "paste"
+"cSpell.language"                              = "en,es"
 
 [defaults_windows]
 "terminal.integrated.enableWin32InputMode" = true
 
 [terminal_colors]
-"terminal.background" = "#1E1E2E"
-"terminal.foreground" = "#CDD6F4"
-"terminalCursor.foreground" = "#F5E0DC"
+"terminal.background"          = "#1E1E2E"
+"terminal.foreground"          = "#CDD6F4"
+"terminalCursor.foreground"    = "#F5E0DC"
 "terminal.selectionBackground" = "#585B70"
-"terminal.ansiBlack" = "#45475A"
-"terminal.ansiRed" = "#F38BA8"
-"terminal.ansiGreen" = "#A6E3A1"
-"terminal.ansiYellow" = "#F9E2AF"
-"terminal.ansiBlue" = "#89B4FA"
-"terminal.ansiMagenta" = "#F5C2E7"
-"terminal.ansiCyan" = "#94E2D5"
-"terminal.ansiWhite" = "#BAC2DE"
-"terminal.ansiBrightBlack" = "#585B70"
-"terminal.ansiBrightRed" = "#F38BA8"
-"terminal.ansiBrightGreen" = "#A6E3A1"
-"terminal.ansiBrightYellow" = "#F9E2AF"
-"terminal.ansiBrightBlue" = "#89B4FA"
-"terminal.ansiBrightMagenta" = "#F5C2E7"
-"terminal.ansiBrightCyan" = "#94E2D5"
-"terminal.ansiBrightWhite" = "#A6ADC8"
+"terminal.ansiBlack"           = "#45475A"
+"terminal.ansiRed"             = "#F38BA8"
+"terminal.ansiGreen"           = "#A6E3A1"
+"terminal.ansiYellow"          = "#F9E2AF"
+"terminal.ansiBlue"            = "#89B4FA"
+"terminal.ansiMagenta"         = "#F5C2E7"
+"terminal.ansiCyan"            = "#94E2D5"
+"terminal.ansiWhite"           = "#BAC2DE"
+"terminal.ansiBrightBlack"     = "#585B70"
+"terminal.ansiBrightRed"       = "#F38BA8"
+"terminal.ansiBrightGreen"     = "#A6E3A1"
+"terminal.ansiBrightYellow"    = "#F9E2AF"
+"terminal.ansiBrightBlue"      = "#89B4FA"
+"terminal.ansiBrightMagenta"   = "#F5C2E7"
+"terminal.ansiBrightCyan"      = "#94E2D5"
+"terminal.ansiBrightWhite"     = "#A6ADC8"

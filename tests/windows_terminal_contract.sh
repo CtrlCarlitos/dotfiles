@@ -25,7 +25,9 @@ config_tmpl="$repo_root/.chezmoi.toml.tmpl"
 [ -f "$tmpl" ] || { fail "Windows Terminal modify template missing"; exit 1; }
 grep -Fq 'chezmoi:modify-template' "$tmpl" || fail "settings.json must be a modify-template (merge), not an owned file"
 grep -Fq 'AppData/**' "$ignore" || fail ".chezmoiignore: AppData/** must be excluded on non-Windows"
-grep -Eq 'os[[:space:]]*=[[:space:]]*\{\{ \.os \| quote \}\}' "$config_tmpl" || fail "chezmoi.toml.tmpl: ssh_hosts os field would be dropped on re-init"
+# Re-emitted either as a literal key or through the "=" column padding (printf "%-*s",
+# docs/invariants.md #15); tests/config_toml_alignment_contract.sh round-trips the value.
+grep -Eq '(os[[:space:]]*|"os" \}\} )=[[:space:]]*\{\{ \.os \| quote \}\}' "$config_tmpl" || fail "chezmoi.toml.tmpl: ssh_hosts os field would be dropped on re-init"
 
 if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
     tmp=$(mktemp -d)

@@ -163,16 +163,16 @@
 # identity; only fields shown below survive `chezmoi init`.
 
 [[data.accounts]]
-  name = "Your Name"
-  email = "your.email@example.com"
+  name     = "Your Name"
+  email    = "your.email@example.com"
   username = "your-username"           # GitHub/GitLab username
   provider = "github"                  # "github" or "gitlab"
-  key = "id_ed25519"                   # SSH key filename in ~/.ssh/
+  key      = "id_ed25519"              # SSH key filename in ~/.ssh/
   # signingKey = "id_ed25519_sign"     # Optional: separate key for commit signing
   # If you use separate auth/sign keys, a passphrase on both is recommended.
   # agent_key_comments = ["your.email@example.com", "your.email@example.com-sign"]
   organizations = []                   # Orgs to rewrite URLs for
-  dirs = ["projects", ".local/share/chezmoi"]  # Directories using this identity (auto-created)
+  dirs          = ["projects", ".local/share/chezmoi"]  # Directories using this identity (auto-created)
 
 
 # MULTI-ACCOUNT EXAMPLE (uncomment and customize):
