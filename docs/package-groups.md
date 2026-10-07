@@ -187,6 +187,9 @@ Chocolatey's WSL record (`--skip-autouninstaller`: WSL itself stays) are dropped
 question. A failed winget install prints the `choco install` that puts the app back. PowerShell 7
 cannot replace itself: run the script once more from Windows PowerShell (`powershell.exe`) for it.
 Moving Node from 26 to 24 LTS rebuilds the global npm tools' native modules (`npm rebuild -g`)
-right after. Chocolatey keeps what other Chocolatey packages depend on (`python3`/`python314`
-under `python`). `tests/migrate_to_winget_contract.sh` runs the plan and each step
-against fakes.
+right after. A tool that a package staying on Chocolatey depends on stays too, and the plan says
+which one (`fzf`, `ripgrep` and `unzip` under `opencode`). A meta package and its `.install`
+package leave in one `choco uninstall` (alone, the meta package waits on a prompt). Chocolatey's
+exit code is not trusted on its own: a package that is gone despite a non-zero exit (a warning
+from its uninstall script) still gets its winget copy. `tests/migrate_to_winget_contract.sh`
+runs the plan and each step against fakes.

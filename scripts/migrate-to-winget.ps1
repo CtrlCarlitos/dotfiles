@@ -33,7 +33,18 @@ if ($catalogLines.Count -eq 0) { Write-Host "Could not read the package catalog 
 $installed = @(choco list --limit-output | ForEach-Object { ($_ -split '\|')[0] })
 try { $script:WingetMigrationNodeMajor = [int]((chezmoi execute-template '{{ .versions.node_major }}' | Out-String).Trim()) } catch { $script:WingetMigrationNodeMajor = 0 }
 
-$plan = @(Get-WingetMigrationPlan -CatalogLine $catalogLines -Installed $installed)
+# Who depends on what, from the installed packages' .nuspec files.
+$dependedOn = @{}
+$chocoLib = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { 'C:\ProgramData\chocolatey\lib' }
+foreach ($nuspec in @(Get-ChildItem -Path $chocoLib -Filter *.nuspec -Recurse -Depth 1 -ErrorAction SilentlyContinue)) {
+    $owner = $nuspec.Directory.Name
+    foreach ($m in [regex]::Matches((Get-Content -Raw -LiteralPath $nuspec.FullName), '<dependency\s+id="([^"]+)"')) {
+        $dep = $m.Groups[1].Value
+        if (-not $dependedOn.ContainsKey($dep)) { $dependedOn[$dep] = @() }
+        $dependedOn[$dep] += $owner
+    }
+}
+$plan = @(Get-WingetMigrationPlan -CatalogLine $catalogLines -Installed $installed -DependedOn $dependedOn)
 if ($plan.Count -eq 0) { Write-Host "Nothing to move: no Chocolatey copy of a winget-managed tool, nothing to drop."; exit 0 }
 
 $batch = @($plan | Where-Object { $_.Action -eq 'move' -and -not $_.Risk })
@@ -43,6 +54,7 @@ Write-Host "Chocolatey -> winget plan:"
 if ($batch.Count) { Write-Host "  Move as one batch ($($batch.Count)): $(($batch | ForEach-Object { $_.Choco }) -join ', ')" }
 foreach ($c in $careful) { Write-Host "  Move, asked on its own: $($c.Choco) -> $($c.Winget)  ($($c.Risk))" }
 foreach ($d in $drops) { Write-Host "  Drop: $($d.Choco)  ($($d.Risk))" }
+foreach ($k in @($plan | Where-Object { $_.Action -eq 'keep' })) { Write-Host "  Kept on Chocolatey: $($k.Choco)  ($($k.Risk))" }
 if ($ListOnly) { exit 0 }
 
 $results = @()

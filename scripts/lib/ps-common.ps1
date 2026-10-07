@@ -898,19 +898,38 @@ $script:WingetMigrationRecordOnly = @('wsl2')
 # The plan, from catalog lines "choco_was|winget|id|winget_args|migrate_risk" and the installed
 # Chocolatey ids. Moves (with a risk note when the catalog has one) first, drops after.
 function Get-WingetMigrationPlan {
-    param([string[]]$CatalogLine, [string[]]$Installed)
+    # DependedOn: Chocolatey package -> the installed Chocolatey packages that depend on it (from
+    # their .nuspec files). Chocolatey refuses to uninstall a dependency (opencode needs fzf,
+    # ripgrep and unzip), so one whose dependent stays on Chocolatey is kept, with the reason.
+    param([string[]]$CatalogLine, [string[]]$Installed, [hashtable]$DependedOn = @{})
     $have = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($i in $Installed) { if ($i) { [void]$have.Add($i) } }
+    $leaving = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in $CatalogLine) { if ($line) { $c = ($line -split '\|', 2)[0]; [void]$leaving.Add(($c -replace '\.install$', '')); [void]$leaving.Add(($c -replace '\.install$', '') + '.install') } }
+    foreach ($name in $script:WingetMigrationDrops.Keys) { [void]$leaving.Add($name) }
     $plan = @()
     foreach ($line in $CatalogLine) {
         if (-not $line) { continue }
         $f = $line -split '\|', 5
         if ($f.Count -lt 3 -or -not $have.Contains($f[0])) { continue }
+        $staying = @()
+        foreach ($k in $DependedOn.Keys) {
+            if ($k -ieq $f[0]) { $staying = @($DependedOn[$k] | Where-Object { $have.Contains($_) -and -not $leaving.Contains($_) }) }
+        }
+        if ($staying.Count -gt 0) {
+            $plan += [pscustomobject]@{
+                Action = 'keep'; Choco = $f[0]; Winget = $f[1]; Id = $f[2]; Args = ''
+                Risk = "Chocolatey's $($staying -join ', ') depends on it"; Companion = ''
+            }
+            continue
+        }
         $plan += [pscustomobject]@{
             Action = 'move'; Choco = $f[0]; Winget = $f[1]; Id = $f[2]
             Args = $(if ($f.Count -ge 4) { $f[3] } else { '' })
             Risk = $(if ($f.Count -ge 5) { $f[4] } else { '' })
-            Companion = $(if ($f[0] -notmatch '\.install$' -and $have.Contains("$($f[0]).install")) { "$($f[0]).install" } else { '' })
+            # the other half of a meta/.install pair: git.install's meta `git`, cmake's `cmake.install`
+            Companion = $(if ($f[0] -match '\.install$') { $meta = $f[0] -replace '\.install$', ''; if ($have.Contains($meta)) { $meta } else { '' } }
+                          elseif ($have.Contains("$($f[0]).install")) { "$($f[0]).install" } else { '' })
         }
     }
     foreach ($name in $script:WingetMigrationDrops.Keys) {
@@ -935,17 +954,36 @@ function Invoke-WingetMigrationItem {
             Write-Host "  - $($Item.Choco): skipped - PowerShell 7 cannot replace itself; run this from Windows PowerShell (powershell.exe) to move it" -ForegroundColor Yellow
             return 'skipped'
         }
-        $chocoArgs = @('uninstall', $Item.Choco, '-y', '--no-progress')
+        if ($Item.Action -eq 'keep') {
+            Write-Host "  - $($Item.Choco): kept on Chocolatey ($($Item.Risk))" -ForegroundColor Yellow
+            return 'skipped'
+        }
+        # A meta package and its .install go in ONE call: alone, the meta package asks whether to
+        # remove its dependency and waits 20 s for an answer that never comes.
+        # The meta package goes first, so its dependency is no longer depended on.
+        $chocoArgs = @('uninstall') + @(@($Item.Companion, $Item.Choco) | Where-Object { $_ } | Sort-Object { $_ -match '\.install$' })
+        $chocoArgs += @('-y', '--no-progress')
         if ($script:WingetMigrationRecordOnly -contains $Item.Choco) { $chocoArgs += '--skip-autouninstaller' }
         & choco @chocoArgs *> $null
         $chocoExit = [int]$LASTEXITCODE
         if (@(0, 1605, 1614, 1641, 3010) -notcontains $chocoExit) {
-            Write-Host "  - $($Item.Choco): choco uninstall failed (exit $chocoExit) - left as it is" -ForegroundColor Red
-            return 'failed'
+            # The exit code is not the truth: neovim's beforeModify script warned, choco exited 1,
+            # and the package WAS gone - so the winget install was skipped and neovim was lost
+            # (2026-10-06). Ask Chocolatey whether it is still there.
+            $still = (& choco list --limit-output --exact $Item.Choco 2>$null | Out-String)
+            if ($still -match "(?im)^$([regex]::Escape($Item.Choco))\|") {
+                Write-Host "  - $($Item.Choco): choco uninstall failed (exit $chocoExit) - left as it is" -ForegroundColor Red
+                return 'failed'
+            }
         }
-        if ($Item.Companion) { & choco uninstall $Item.Companion -y --no-progress *> $null }
         if ($Item.Action -eq 'drop') {
             Write-Host "  - $($Item.Choco): removed ($($Item.Risk))" -ForegroundColor Green
+            return 'ok'
+        }
+        # winget may already have its own copy (installed next to Chocolatey's): nothing to install.
+        $already = (& winget list --id $Item.Winget --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
+        if ($already -match [regex]::Escape($Item.Winget)) {
+            Write-Host "  - $($Item.Choco): removed; winget's $($Item.Winget) was already installed" -ForegroundColor Green
             return 'ok'
         }
         $extra = @("$($Item.Args)" -split ' ' | Where-Object { $_ })
