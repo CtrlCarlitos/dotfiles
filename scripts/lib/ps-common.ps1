@@ -976,8 +976,10 @@ function Invoke-WingetMigrationItem {
 # same major, so bumping node_major moves every platform together. Returns $true when the pin is
 # in place (already was, or set now). A pin for another major is replaced.
 function Set-NodeLtsPin {
+    [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][int]$Major)
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $false }
+    if (-not $PSCmdlet.ShouldProcess("OpenJS.NodeJS.LTS", "Pin to $Major.*")) { return $false }
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
