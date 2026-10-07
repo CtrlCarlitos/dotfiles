@@ -29,6 +29,8 @@ $script:SkillsSeenKeys = @()
 # Why the last Test-SkillsUpToDate said "not current", printed with the install line so a
 # reinstall on every run can be told apart from a real upstream change.
 $script:SkillsStaleReason = ''
+# Upstream HEADs fetched by Read-SkillsUpstreamHead, by owner/repo.
+$script:SkillsHeadCache = @{}
 
 # USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
 function Get-SkillsHome {
@@ -45,6 +47,7 @@ function Get-SkillsSourceStatePath {
 # replace it; a process with a hard wait, because git has no timeout of its own.
 function Get-SkillsRemoteHead {
     param([string]$Repo)
+    if ($script:SkillsHeadCache.ContainsKey($Repo)) { return [string]$script:SkillsHeadCache[$Repo] }
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = 'git'
@@ -63,6 +66,40 @@ function Get-SkillsRemoteHead {
         return ($line -split "\s+")[0]
     }
     catch { return '' }
+}
+
+# Every source's upstream HEAD in one parallel round, answered from the cache by
+# Get-SkillsRemoteHead (twin of skills_prefetch_heads): eight sequential ls-remotes, two of them
+# for repos already asked, took 13-35 s. One 20 s deadline for all; anything slower is ''.
+function Read-SkillsUpstreamHead {
+    param([string[]]$Repo)
+    $running = @{}
+    foreach ($r in @($Repo | Select-Object -Unique)) {
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = 'git'
+            $psi.Arguments = "ls-remote https://github.com/$r.git HEAD"
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $running[$r] = [System.Diagnostics.Process]::Start($psi)
+        }
+        catch { $script:SkillsHeadCache[$r] = '' }
+    }
+    $deadline = (Get-Date).AddSeconds(20)
+    foreach ($r in @($running.Keys)) {
+        $process = $running[$r]
+        $left = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+        if (-not $process.WaitForExit($left)) {
+            try { $process.Kill() } catch { $null = $_ }
+            $script:SkillsHeadCache[$r] = ''
+            continue
+        }
+        $line = ($process.StandardOutput.ReadToEnd() -split "`r?`n" | Select-Object -First 1)
+        if ($process.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($line)) { $script:SkillsHeadCache[$r] = '' }
+        else { $script:SkillsHeadCache[$r] = ($line -split "\s+")[0] }
+    }
 }
 
 function Test-SkillsUpToDate {

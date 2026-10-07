@@ -296,12 +296,36 @@ skills_source_state() {
 SKILLS_SEEN_KEYS=()
 SKILLS_STALE_REASON=""
 
+# skills_remote_head <owner/repo> - upstream HEAD, '' when unknown. Answered from the cache
+# skills_prefetch_heads filled when it has the repo (one parallel round for every source instead
+# of eight sequential ls-remotes - two repos were asked twice), else asked now.
+SKILLS_HEAD_DIR=""
+skills_remote_head() {
+    local repo="$1" cached
+    if [ -n "$SKILLS_HEAD_DIR" ]; then
+        cached="$SKILLS_HEAD_DIR/${repo//\//_}"
+        if [ -f "$cached" ]; then cat "$cached"; return 0; fi
+    fi
+    net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1
+}
+
+# skills_prefetch_heads <owner/repo...> - ask every repo at once, in the background; each answer
+# (possibly empty: unreachable) lands in a file skills_remote_head reads. Best effort.
+skills_prefetch_heads() {
+    local repo
+    SKILLS_HEAD_DIR="$(mktemp -d 2>/dev/null)" || { SKILLS_HEAD_DIR=""; return 0; }
+    for repo in "$@"; do
+        ( net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1 >"$SKILLS_HEAD_DIR/${repo//\//_}" ) &
+    done
+    wait
+}
+
 skills_up_to_date() {
     local repo="$1"; shift
     local skill recorded
     SKILLS_PENDING_KEY="$repo|$*|${AGENTS[*]}"
     SKILLS_SEEN_KEYS+=("$SKILLS_PENDING_KEY")
-    SKILLS_PENDING_HEAD="$(net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1)" || SKILLS_PENDING_HEAD=""
+    SKILLS_PENDING_HEAD="$(skills_remote_head "$repo")" || SKILLS_PENDING_HEAD=""
     # Why the answer is "not current", printed with the install line (twin of
     # $script:SkillsStaleReason): a reinstall on every run then says why.
     SKILLS_STALE_REASON=""
@@ -378,6 +402,8 @@ skills_add_all() {
     # The npx wrapper is identical for every consumer, so the function that
     # uses it owns the definition (it used to sit in each consumer and drift).
     local -a SK=(npx --yes --loglevel=error skills@latest)
+    # Every source's upstream HEAD in one parallel round (see skills_remote_head).
+    skills_prefetch_heads mattpocock/skills anthropics/skills vercel-labs/skills vercel-labs/agent-browser CtrlCarlitos/skills Leonxlnx/taste-skill
 
     # Matt Pocock's engineering/productivity skills - 12 installed as-is (pr and retro added
     # 2026-10-05, #269; the count below is the array length, never a literal).
@@ -547,6 +573,7 @@ skills_add_all() {
     #  failed silently on every run.)
 
     skills_prune_state
+    if [ -n "$SKILLS_HEAD_DIR" ]; then rm -rf "$SKILLS_HEAD_DIR"; SKILLS_HEAD_DIR=""; fi
 }
 
 #-------------------------------------------------------------------------------

@@ -141,7 +141,9 @@ It prints the size before and after and restarts nothing. `-Yes` skips the quest
 most out of it. `Optimize-VHD` is in the Hyper-V PowerShell module, a Windows feature: the installer
 (`dev_desktop`) enables only that module (`Microsoft-Hyper-V-Management-PowerShell`) when the cmdlet is
 missing, never the Hyper-V platform (Docker runs on WSL 2). Windows Home has no such feature and uses
-diskpart. `tests/docker_compact_contract.sh` runs the flow against fakes; it has not compacted a real disk.
+diskpart. `tests/docker_compact_contract.sh` runs the flow against fakes. First real run (2026-10-06, after
+removing ~300 `vsc-*` dev-container images and `docker builder prune`): 158.2 GB -> 63.5 GB in about five
+minutes, through `Optimize-VHD` with only the Hyper-V PowerShell module enabled.
 
 **VS Code is closed first.** A VS Code window attached to a dev container loses it the moment Docker
 stops, so when you accept the Docker Desktop stop and VS Code (`Code.exe`, or `Code - Insiders`) is
