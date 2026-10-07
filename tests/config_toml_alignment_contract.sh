@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# chezmoi.toml alignment rule: in every block of two or more consecutive
-# `key = value` lines, the "=" signs share one column (a block ends at a [table]
-# header, a comment or a blank line; a single line can be anything). The file is
-# rewritten by `chezmoi init` on every `dot up`, so the rule is held where it is
-# produced:
-#   1. the repo's chezmoi.toml-shaped files: the VS Code settings seed, the
-#      documented example, the CI config fixtures;
+# TOML alignment rule: in every block of two or more consecutive `key = value`
+# lines, the "=" signs share one column (a block ends at a [table] header, a
+# comment or a blank line; a single line can be anything). chezmoi.toml is
+# rewritten by `chezmoi init` on every `dot up`, so for it the rule is held where
+# it is produced:
+#   1. every TOML file in the repo (git ls-files *.toml): .chezmoiexternal.toml,
+#      starship.toml, .gitleaks.toml, the VS Code settings seed, the documented
+#      example, the CI config fixtures...;
 #   2. .chezmoi.toml.tmpl rendered from a fixture carrying every key it emits
 #      (accounts with every fingerprint field, SSH hosts with every optional key,
 #      VS Code settings and overrides with nested values) - every block aligned,
@@ -46,9 +47,10 @@ for path in sys.argv[1:]:
 print("\n".join(bad))
 PYEOF
 
-# --- 1. the repo's chezmoi.toml-shaped files ------------------------------------------
-out="$(python3 "$tmp/check.py" "$repo_root/.chezmoitemplates/vscode-settings.toml" \
-    "$repo_root/docs/chezmoi.toml.example" "$repo_root"/tests/fixtures/chezmoi/*.toml)"
+# --- 1. every TOML file in the repo ---------------------------------------------------
+mapfile -t toml_files < <(git -C "$repo_root" ls-files '*.toml' '*.toml.example' | sed "s|^|$repo_root/|")
+[ "${#toml_files[@]}" -ge 10 ] || fail "expected at least 10 TOML files in the repo, found ${#toml_files[@]} (git ls-files broken?)"
+out="$(python3 "$tmp/check.py" "${toml_files[@]}")"
 [ -z "$out" ] || fail "$out"
 pass
 
