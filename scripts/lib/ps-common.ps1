@@ -872,6 +872,124 @@ function Get-DockerDesktopOwner {
     return ''
 }
 
+# --- Chocolatey -> winget (scripts/migrate-to-winget.ps1) ----------------------------------------
+# winget is the primary Windows manager; a catalog record that moved carries `winget:` plus
+# `choco_was:` (its old Chocolatey name). An app Chocolatey installed cannot be adopted by winget
+# ("install technology is different"), so moving it is uninstall + install - per app, asked.
+
+# Tools dropped outright (no winget replacement installed): name -> why.
+$script:WingetMigrationDrops = [ordered]@{
+    'winmerge'                = 'replaced by Meld'
+    'notepadplusplus.install' = 'replaced by Geany'
+    'notepadplusplus'         = 'replaced by Geany'
+    'winscp.install'          = 'replaced by Termius'
+    'winscp'                  = 'replaced by Termius'
+    'chocolateygui'           = 'Chocolatey is the secondary manager now'
+    'cutepdf'                 = 'replaced by Microsoft Print to PDF (built into Windows)'
+    'Ghostscript.app'         = 'came with CutePDF'
+    'autohotkey.portable'     = "Ghostscript's installer helper"
+    'wsl2'                    = 'record only: WSL stays installed; wsl --update keeps it current'
+}
+# versions.node_major, set by migrate-to-winget.ps1: the Node pin it leaves after moving Node.
+$script:WingetMigrationNodeMajor = 0
+# Dropped with --skip-autouninstaller: Chocolatey forgets the package, the software stays.
+$script:WingetMigrationRecordOnly = @('wsl2')
+
+# The plan, from catalog lines "choco_was|winget|id|winget_args|migrate_risk" and the installed
+# Chocolatey ids. Moves (with a risk note when the catalog has one) first, drops after.
+function Get-WingetMigrationPlan {
+    param([string[]]$CatalogLine, [string[]]$Installed)
+    $have = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($i in $Installed) { if ($i) { [void]$have.Add($i) } }
+    $plan = @()
+    foreach ($line in $CatalogLine) {
+        if (-not $line) { continue }
+        $f = $line -split '\|', 5
+        if ($f.Count -lt 3 -or -not $have.Contains($f[0])) { continue }
+        $plan += [pscustomobject]@{
+            Action = 'move'; Choco = $f[0]; Winget = $f[1]; Id = $f[2]
+            Args = $(if ($f.Count -ge 4) { $f[3] } else { '' })
+            Risk = $(if ($f.Count -ge 5) { $f[4] } else { '' })
+            Companion = $(if ($f[0] -notmatch '\.install$' -and $have.Contains("$($f[0]).install")) { "$($f[0]).install" } else { '' })
+        }
+    }
+    foreach ($name in $script:WingetMigrationDrops.Keys) {
+        if (-not $have.Contains($name)) { continue }
+        $plan += [pscustomobject]@{
+            Action = 'drop'; Choco = $name; Winget = ''; Id = $name; Args = ''
+            Risk = $script:WingetMigrationDrops[$name]; Companion = ''
+        }
+    }
+    return $plan
+}
+
+# One item. Moves: choco uninstall (and its .install companion), then winget install; on a failed
+# install the way back is printed. Drops: choco uninstall (record-only ones keep the software).
+# Returns 'ok', 'failed' or 'skipped'.
+function Invoke-WingetMigrationItem {
+    param([Parameter(Mandatory)]$Item)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($Item.Action -eq 'move' -and $Item.Winget -eq 'Microsoft.PowerShell' -and $PSVersionTable.PSEdition -eq 'Core') {
+            Write-Host "  - $($Item.Choco): skipped - PowerShell 7 cannot replace itself; run this from Windows PowerShell (powershell.exe) to move it" -ForegroundColor Yellow
+            return 'skipped'
+        }
+        $chocoArgs = @('uninstall', $Item.Choco, '-y', '--no-progress')
+        if ($script:WingetMigrationRecordOnly -contains $Item.Choco) { $chocoArgs += '--skip-autouninstaller' }
+        & choco @chocoArgs *> $null
+        $chocoExit = [int]$LASTEXITCODE
+        if (@(0, 1605, 1614, 1641, 3010) -notcontains $chocoExit) {
+            Write-Host "  - $($Item.Choco): choco uninstall failed (exit $chocoExit) - left as it is" -ForegroundColor Red
+            return 'failed'
+        }
+        if ($Item.Companion) { & choco uninstall $Item.Companion -y --no-progress *> $null }
+        if ($Item.Action -eq 'drop') {
+            Write-Host "  - $($Item.Choco): removed ($($Item.Risk))" -ForegroundColor Green
+            return 'ok'
+        }
+        $extra = @("$($Item.Args)" -split ' ' | Where-Object { $_ })
+        & winget install --id $Item.Winget --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra *> $null
+        $wingetExit = [int]$LASTEXITCODE
+        if ($wingetExit -ne 0) {
+            Write-Host "  - $($Item.Choco): winget install $($Item.Winget) failed (exit $wingetExit) - it is NOT installed now; put it back with: choco install $($Item.Choco) -y" -ForegroundColor Red
+            return 'failed'
+        }
+        Write-Host "  - $($Item.Choco) -> winget $($Item.Winget)" -ForegroundColor Green
+        if ($Item.Winget -eq 'OpenJS.NodeJS.LTS') {
+            # A different Node major breaks native modules of the global npm tools (graft's
+            # tree-sitter parsers): rebuild them for the Node now installed.
+            $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
+            & npm rebuild -g *> $null
+            if ($LASTEXITCODE -ne 0) { Write-Host "    npm rebuild -g failed (exit $LASTEXITCODE) - run it once by hand" -ForegroundColor Yellow }
+            else { Write-Host "    native npm tools rebuilt for the new Node (npm rebuild -g)" }
+            if ($script:WingetMigrationNodeMajor -gt 0) { $null = Set-NodeLtsPin -Major $script:WingetMigrationNodeMajor }
+        }
+        return 'ok'
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
+# --- Node.js: the same major everywhere ------------------------------------------------------------
+# Linux/WSL (NodeSource's node_<major>.x repo) and macOS (node@<major>) stay on versions.node_major;
+# winget's OpenJS.NodeJS.LTS follows whatever is LTS today. A gating pin "<major>.*" holds it on the
+# same major, so bumping node_major moves every platform together. Returns $true when the pin is
+# in place (already was, or set now). A pin for another major is replaced.
+function Set-NodeLtsPin {
+    param([Parameter(Mandatory)][int]$Major)
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $pins = (& winget pin list --id OpenJS.NodeJS.LTS --exact --accept-source-agreements 2>$null | Out-String)
+        if ($pins -match "OpenJS\.NodeJS\.LTS\s.*\b$Major\.\*") { return $true }
+        if ($pins -match 'OpenJS\.NodeJS\.LTS\s') { & winget pin remove --id OpenJS.NodeJS.LTS --exact *> $null }
+        & winget pin add --id OpenJS.NodeJS.LTS --exact --version "$Major.*" --accept-source-agreements *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
 # --- Docker Desktop: compacting its data disk (`dot docker-compact`) -------------------------------
 # docker_data.vhdx grows with every image and build layer and never shrinks on its own: removing
 # images frees space inside it, not on the drive. Compacting needs Docker Desktop stopped and WSL

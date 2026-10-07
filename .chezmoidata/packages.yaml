@@ -16,14 +16,20 @@
 #            key here (their `note` says so).
 #   brew     Homebrew formula
 #   cask     Homebrew cask (macOS desktop apps and fonts)
-#   choco    Chocolatey package (Windows)
+#   winget   winget package id (Windows). winget is the primary Windows manager;
+#            Chocolatey is the fallback for what winget lacks or carries older.
+#   choco    Chocolatey package (Windows), only where winget has no (current) package
+#   winget_args  extra `winget install` arguments (e.g. "--scope machine": keep an app
+#            machine-wide, where Chocolatey put it, instead of winget's per-user default)
+#   choco_was  the Chocolatey name this tool had before it moved to winget:
+#            scripts/migrate-to-winget.ps1 uses it to find and replace that copy
 #   npm      global npm package, the same name on every OS (needs Node). `dot up`
 #            installs it when missing; `dot upgrade` updates it when installed.
 #   note     why this tool, or a caveat worth keeping next to its name
-#   migrate  false = scripts/migrate-to-choco.ps1 must never uninstall/reinstall
+#   migrate  false = the migration scripts must never uninstall/reinstall
 #            this one (migrate_reason says why)
-#   migrate_risk  shown by migrate-to-choco before it asks; the tool IS a
-#            candidate but uninstalling it has a consequence worth reading
+#   migrate_risk  shown by migrate-to-winget (and migrate-to-choco) before it
+#            asks; the tool IS a candidate but uninstalling it has a consequence
 #
 # Order matters within a group: it is the install order on every manager.
 
@@ -34,28 +40,33 @@ catalog:
       group: core
       apt: git
       brew: git
-      choco: git.install
+      winget: Git.Git
+      choco_was: git.install
       migrate_risk: "chezmoi's own source directory is a git repo and open shells may be using git; finish other work first"
     - id: curl
       group: core
       apt: curl
       brew: curl
-      choco: curl
+      winget: cURL.cURL
+      choco_was: curl
     - id: wget
       group: core
       apt: wget
       brew: wget
-      choco: wget
+      winget: JernejSimoncic.Wget
+      choco_was: wget
     - id: jq
       group: core
       apt: jq
       brew: jq
-      choco: jq
+      winget: jqlang.jq
+      choco_was: jq
     - id: fzf
       group: core
       apt: fzf
       brew: fzf
-      choco: fzf
+      winget: junegunn.fzf
+      choco_was: fzf
     - id: zsh
       group: core
       apt: zsh
@@ -67,13 +78,15 @@ catalog:
     - id: neovim
       group: core
       brew: neovim
-      choco: neovim
+      winget: Neovim.Neovim
+      choco_was: neovim
       note: "apt: installed by a procedure with a fallback (the release's neovim may be too old)"
     - id: ripgrep
       group: core
       apt: ripgrep
       brew: ripgrep
-      choco: ripgrep
+      winget: BurntSushi.ripgrep.MSVC
+      choco_was: ripgrep
     - id: htop
       group: core
       apt: htop
@@ -81,28 +94,33 @@ catalog:
     - id: gh
       group: core
       brew: gh
-      choco: gh
+      winget: GitHub.cli
+      choco_was: gh
       note: "apt: installed from GitHub's own repo by a procedure"
     - id: tree
       group: core
       apt: tree
       brew: tree
-      choco: tree
+      winget: GnuWin32.Tree
+      choco_was: tree
     - id: 7zip
       group: core
       apt: p7zip-full
       brew: sevenzip
-      choco: 7zip.install
+      winget: 7zip.7zip
+      choco_was: 7zip.install
     - id: cmake
       group: core
       apt: cmake
       brew: cmake
-      choco: cmake
+      winget: Kitware.CMake
+      choco_was: cmake
     - id: ffmpeg
       group: core
       apt: ffmpeg
       brew: ffmpeg
-      choco: ffmpeg
+      winget: Gyan.FFmpeg
+      choco_was: ffmpeg
     - id: python
       group: core
       apt: python3
@@ -114,7 +132,10 @@ catalog:
     - id: node
       group: core
       brew: node@24
-      note: "apt: NodeSource setup script by procedure; choco: Install-Node pins 24.x by procedure"
+      winget: OpenJS.NodeJS.LTS
+      choco_was: nodejs
+      migrate_risk: "Node 26 (Chocolatey floated past the 24 LTS pin) -> 24 LTS; native npm tools are rebuilt (npm rebuild -g) right after"
+      note: "apt: NodeSource setup script by procedure; winget: Install-Node installs OpenJS.NodeJS.LTS by procedure (the LTS line, versions.node_major); choco only where winget is missing"
     - id: coreutils
       group: core
       brew: coreutils
@@ -144,17 +165,40 @@ catalog:
       group: core
       apt: ssh-agent-filter
       note: "ssh-agent-relay's per-account key filtering"
+    - id: go
+      group: core
+      apt: golang-go
+      brew: go
+      winget: GoLang.Go
+      choco_was: golang
+      note: "the Go toolchain (agent-guardrails builds with it); apt: the archive's golang-go, older than upstream"
+    - id: terraform
+      group: core
+      brew: hashicorp/tap/terraform
+      winget: Hashicorp.Terraform
+      choco_was: terraform
+      note: "apt: HashiCorp's apt repo by procedure; brew: HashiCorp's tap (Homebrew core froze terraform at 1.5.7 after the license change)"
+    - id: mkcert
+      group: core
+      apt: mkcert
+      brew: mkcert
+      winget: FiloSottile.mkcert
+      choco_was: mkcert
+      note: "locally trusted TLS certificates for local development; kept until caddy's own local CA replaces it"
     - id: gsudo
       group: core
-      choco: gsudo
+      winget: gerardog.gsudo
+      choco_was: gsudo
     - id: powershell-core
       group: core
-      choco: powershell-core
-      migrate: false
-      migrate_reason: "migrate-to-choco may be running in it"
+      winget: Microsoft.PowerShell
+      winget_args: "--scope machine"
+      choco_was: powershell-core
+      migrate_risk: "PowerShell 7 cannot replace itself - run migrate-to-winget from Windows PowerShell (powershell.exe) to move it"
     - id: psmux
       group: core
-      choco: psmux
+      winget: marlocarlo.psmux
+      choco_was: psmux
       note: >-
         The native Windows tmux (Rust, github.com/psmux/psmux) - official
         Chocolatey package, ships psmux/pmux/tmux commands. Listed right
@@ -165,9 +209,12 @@ catalog:
         stay Windows-ignored.
     - id: wsl2
       group: core
-      choco: wsl2
-      migrate: false
-      migrate_reason: "uninstalling it tears down WSL, which the relay and every distro depend on"
+      note: >-
+        Windows: no package manager. The installer runs `wsl --install
+        --no-distribution` when WSL is missing; `dot upgrade` runs `wsl
+        --update`, WSL's own updater (winget's Microsoft.WSL lags it). The old
+        Chocolatey record is dropped with --skip-autouninstaller, which keeps
+        WSL itself (scripts/migrate-to-winget.ps1).
     - id: npiperelay
       group: core
       choco: npiperelay
@@ -181,44 +228,59 @@ catalog:
       group: modern_cli
       apt: bat
       brew: bat
-      choco: bat
+      winget: sharkdp.bat
+      choco_was: bat
       note: "apt: binary installs as batcat, aliased to bat; shares its apt install line with fd - a multi-package apt install fails wholesale if one name is unavailable on a release"
+    - id: less
+      group: modern_cli
+      apt: less
+      brew: less
+      winget: jftuga.less
+      choco_was: less
+      note: "bat's pager on Windows: Chocolatey's bat pulled it in as a dependency, winget's bat does not"
     - id: eza
       group: modern_cli
       brew: eza
-      choco: eza
+      winget: eza-community.eza
+      choco_was: eza
       note: "apt: from the gierens repo with its signing key, by procedure"
     - id: fd
       group: modern_cli
       apt: fd-find
       brew: fd
-      choco: fd
+      winget: sharkdp.fd
+      choco_was: fd
       note: "apt: package is fd-find, binary installs as fdfind (aliased to fd) - same naming conflict as batcat"
     - id: delta
       group: modern_cli
       brew: git-delta
-      choco: delta
+      winget: dandavison.delta
+      choco_was: delta
       note: "apt: GitHub release .deb by procedure"
     - id: starship
       group: modern_cli
       brew: starship
-      choco: starship
+      winget: Starship.Starship
+      choco_was: starship
       note: "apt: upstream install script by procedure"
     - id: zoxide
       group: modern_cli
       brew: zoxide
-      choco: zoxide
+      winget: ajeetdsouza.zoxide
+      choco_was: zoxide
       note: "apt: package where the release has it, upstream script as fallback - by procedure"
     - id: direnv
       group: modern_cli
       apt: direnv
       brew: direnv
-      choco: direnv
+      winget: direnv.direnv
+      choco_was: direnv
       note: "hooked from .zshrc (direnv hook zsh); .envrc files are allowed per project, never by the installer"
     - id: lazygit
       group: modern_cli
       brew: lazygit
-      choco: lazygit
+      winget: JesseDuffield.lazygit
+      choco_was: lazygit
       note: "apt: GitHub release tarball by procedure"
     - id: gum
       group: modern_cli
@@ -227,34 +289,40 @@ catalog:
     - id: tealdeer
       group: modern_cli
       brew: tealdeer
-      choco: tealdeer
+      winget: dbrgn.tealdeer
+      choco_was: tealdeer
       note: "apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar)"
     - id: dust
       group: modern_cli
       brew: dust
-      choco: dust
+      winget: bootandy.dust
+      choco_was: dust
       note: "apt: GitHub release .deb by procedure"
     - id: duf
       group: modern_cli
       apt: duf
       brew: duf
-      choco: duf
+      winget: muesli.duf
+      choco_was: duf
       note: "aliased over df when present"
     - id: procs
       group: modern_cli
       brew: procs
-      choco: procs
+      winget: dalance.procs
+      choco_was: procs
       note: "apt: GitHub release by procedure"
     - id: shellcheck
       group: modern_cli
       apt: shellcheck
       brew: shellcheck
-      choco: shellcheck
+      winget: koalaman.shellcheck
+      choco_was: shellcheck
       note: "CI and .pre-commit-config.yaml lint shell with it - a fresh machine needs it locally, not only in CI"
     - id: shfmt
       group: modern_cli
       brew: shfmt
-      choco: shfmt
+      winget: mvdan.shfmt
+      choco_was: shfmt
       note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
     - id: markdownlint-cli2
       group: modern_cli
@@ -263,7 +331,8 @@ catalog:
     - id: lychee
       group: modern_cli
       brew: lychee
-      choco: lychee
+      winget: lycheeverse.lychee
+      choco_was: lychee
       note: "broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
     - id: vale
       group: modern_cli
@@ -272,7 +341,8 @@ catalog:
       note: "prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
     - id: pstop
       group: modern_cli
-      choco: pstop
+      winget: marlocarlo.pstop
+      choco_was: pstop
 
     # Network diagnostics: the familiar ifconfig/dig/traceroute set (#177).
     # macOS already ships ifconfig, netstat, dig, traceroute, tcpdump and
@@ -331,33 +401,33 @@ catalog:
     # Windows-only utilities first, then the cross-platform apps.
     - id: powertoys
       group: dev_desktop
-      choco: powertoys
+      winget: Microsoft.PowerToys
+      choco_was: powertoys
     - id: files
       group: dev_desktop
-      choco: files
-    - id: chocolateygui
-      group: dev_desktop
-      choco: chocolateygui
+      winget: FilesCommunity.Files
+      choco_was: files
     - id: cpu-z
       group: dev_desktop
-      choco: cpu-z.install
+      winget: CPUID.CPU-Z
+      choco_was: cpu-z.install
     - id: crystaldiskinfo
       group: dev_desktop
-      choco: crystaldiskinfo.install
+      winget: CrystalDewWorld.CrystalDiskInfo
+      choco_was: crystaldiskinfo.install
     - id: crystaldiskmark
       group: dev_desktop
-      choco: crystaldiskmark
-    - id: cutepdf
-      group: dev_desktop
-      choco: cutepdf
+      winget: CrystalDewWorld.CrystalDiskMark
+      choco_was: crystaldiskmark
     - id: everything
       group: dev_desktop
-      choco: Everything
+      winget: voidtools.Everything
+      choco_was: Everything
     - id: ghostscript
       group: dev_desktop
       apt: ghostscript
       cask: ghostscript
-      choco: Ghostscript.app
+      note: "Windows: none - it came with CutePDF, which Microsoft Print to PDF replaced"
     - id: docker-desktop
       group: dev_desktop
       cask: docker
@@ -371,14 +441,17 @@ catalog:
     - id: vscode
       group: dev_desktop
       cask: visual-studio-code
-      choco: vscode.install
+      winget: Microsoft.VisualStudioCode
+      winget_args: "--scope machine"
+      choco_was: vscode.install
       migrate_risk: "VS Code is probably open; close it, or the reinstall will fail or restart it"
       note: "apt: Microsoft's repo by procedure"
     - id: geany
       group: dev_desktop
       apt: geany
       cask: geany
-      choco: geany
+      winget: Geany.Geany
+      choco_was: geany
       note: >-
         Replaces Notepad++ (Windows-only): free, open source, and the same
         "lightweight quick-edit GUI editor" role on all three platforms.
@@ -386,15 +459,18 @@ catalog:
       group: dev_desktop
       apt: obs-studio
       cask: obs
-      choco: obs-studio.install
+      winget: OBSProject.OBSStudio
+      choco_was: obs-studio.install
     - id: qbittorrent
       group: dev_desktop
       apt: qbittorrent
       cask: qbittorrent
-      choco: qbittorrent
+      winget: qBittorrent.qBittorrent
+      choco_was: qbittorrent
     - id: sharex
       group: dev_desktop
-      choco: sharex
+      winget: ShareX.ShareX
+      choco_was: sharex
     - id: meld
       group: dev_desktop
       apt: meld
@@ -407,25 +483,35 @@ catalog:
         a Chocolatey-installed copy (different installer technology).
     - id: wiztree
       group: dev_desktop
-      choco: wiztree
+      winget: AntibodySoftware.WizTree
+      choco_was: wiztree
     - id: termius
       group: dev_desktop
       cask: termius
-      choco: termius
+      winget: Termius.Termius
+      choco_was: termius
       migrate_risk: "signed-in state lives in the profile; the app itself is replaced"
       note: >-
         Replaces FileZilla: one SSH/SFTP client on all three platforms.
         FileZilla's Homebrew cask was pulled outright (adware concerns).
         apt: vendor .deb download by procedure.
+    - id: telegram
+      group: dev_desktop
+      apt: telegram-desktop
+      cask: telegram
+      winget: Telegram.TelegramDesktop
+      choco_was: telegram.install
     - id: vlc
       group: dev_desktop
       apt: vlc
       cask: vlc
-      choco: vlc
+      winget: VideoLAN.VLC
+      choco_was: vlc
     - id: handy
       group: dev_desktop
       cask: handy
-      choco: handy
+      winget: cjpais.Handy
+      choco_was: handy
       migrate_risk: "activation and settings may live in the install directory and can be lost"
       note: >-
         Speech-to-text (handy.computer). Whisper/Parakeet model choice is GUI-only,
@@ -467,30 +553,36 @@ catalog:
     - id: tailscale
       group: remote_access
       cask: tailscale-app
-      choco: tailscale
+      winget: Tailscale.Tailscale
+      choco_was: tailscale
       migrate_risk: "LIVE VPN - uninstalling drops your tailnet connection until the reinstall completes"
       note: "apt: Tailscale's repo by procedure. migrate-to-choco requires typing the name to confirm this one."
     - id: cloudflared
       group: remote_access
       brew: cloudflared
-      choco: cloudflared
+      winget: Cloudflare.cloudflared
+      choco_was: cloudflared
       note: "apt: Cloudflare's repo by procedure"
 
     # ---------------------------------------------------- agent groups
     - id: act
       group: agent_toolkit
-      choco: act-cli
+      winget: nektos.act
+      choco_was: act-cli
       note: "brew/apt: installed by procedure in the agent_toolkit block"
     - id: antigravity-cli
       group: antigravity_cli
       choco: antigravity-cli
     - id: claude-desktop
       group: claude_desktop
-      choco: claude
+      winget: Anthropic.Claude
+      choco_was: claude
       migrate_risk: "app data stays in the profile; only the app itself is replaced"
     - id: antigravity-desktop
       group: antigravity_desktop
-      choco: antigravity
+      winget: Google.Antigravity
+      choco_was: antigravity
     - id: opencode-desktop
       group: opencode_desktop
-      choco: opencode-desktop
+      winget: SST.OpenCodeDesktop
+      choco_was: opencode-desktop

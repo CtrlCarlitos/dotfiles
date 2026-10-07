@@ -44,10 +44,10 @@ fi
 if grep -Fq 'MIGRATE-UNIVERSE-MARKER' "$installer" "$script"; then
     fail "the MIGRATE-UNIVERSE-MARKER comment is back - it enforced nothing; the catalog is the contract"
 fi
-# The universe is the catalog's choco names (minus migrate: false). These
-# five span core, modern_cli, dev_desktop and remote_access, so losing any
-# of them from the catalog would mean a whole group had gone missing.
-for pkg in tailscale gsudo pstop handy tree; do
+# The universe is the catalog's choco names (minus migrate: false) - since winget became the
+# primary Windows manager, only what winget lacks or carries older. These span core, modern_cli,
+# fonts and antigravity_cli, so losing any of them would mean a whole group had gone missing.
+for pkg in python vale nerd-fonts-meslo antigravity-cli; do
     grep -Fq "choco: $pkg" "$repo_root/.chezmoidata/packages.yaml" ||
         fail ".chezmoidata/packages.yaml: universe lost '$pkg'"
 done

@@ -93,13 +93,41 @@ Add-DotTimingMark -Name 'winget'
 # with undetermined installed versions are skipped without it.
 if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading winget packages (winget upgrade --all)..." -ForegroundColor Yellow
+    # Node stays on versions.node_major, like Linux/WSL and macOS (read now, so a bump in the repo
+    # moves Windows on the next run without waiting for the installer).
+    $nodeMajor = 0
+    try { $nodeMajor = [int]((chezmoi execute-template '{{ .versions.node_major }}' | Out-String).Trim()) } catch { Write-Verbose "node_major probe failed: $($_.Exception.Message)" }
+    if ($nodeMajor -gt 0 -and -not (Set-NodeLtsPin -Major $nodeMajor)) {
+        Write-Host "  Warning: could not pin Node.js to $nodeMajor.x in winget - it may move to a newer LTS" -ForegroundColor Yellow
+    }
     $wingetRunningNote = ''
     if ($dockerKept) { $wingetRunningNote = "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
     $wingetHold = @()
-    if ($dockerKept) { $wingetHold = @('Docker.DockerDesktop') }   # running: its installer would fail mid-sweep
+    if ($dockerKept) { $wingetHold += 'Docker.DockerDesktop' }   # running: its installer would fail mid-sweep
+    # Claude Desktop and Claude Code share the process name claude.exe, and its installer closes
+    # claude.exe (Chocolatey's force-killed every one, Claude Code sessions included). While any
+    # runs, Claude Desktop waits for the next run - the same rule the choco sweep keeps.
+    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) {
+        $wingetHold += 'Anthropic.Claude'
+        Write-Host "  Claude Desktop held out of this sweep - a claude.exe is running and its installer closes every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
+    }
     $null = Invoke-WingetUpgradeAll -RunningNote $wingetRunningNote -HoldId $wingetHold   # it prints its own summary and warnings
 } else {
     Write-Host "  winget not found - skipping winget packages." -ForegroundColor Yellow
+}
+
+Add-DotTimingMark -Name 'WSL'
+# --- 1a2. WSL updates itself: no package manager owns it (catalog note on wsl2). A running distro
+# keeps the old version until WSL restarts; nothing is shut down here.
+if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
+    Write-Host "  Updating WSL (wsl --update)..." -ForegroundColor Yellow
+    $previousWslUtf8 = $env:WSL_UTF8
+    $env:WSL_UTF8 = '1'   # wsl.exe writes UTF-16 otherwise (a NUL between every letter)
+    try {
+        $wslOut = @(& wsl.exe --update 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        if ($LASTEXITCODE -ne 0) { Write-Host "  wsl --update exited with code $LASTEXITCODE - continuing" -ForegroundColor Yellow }
+        foreach ($line in $wslOut) { Write-Host "  $line" }
+    } finally { $env:WSL_UTF8 = $previousWslUtf8 }
 }
 
 Add-DotTimingMark -Name 'VS Code extensions'

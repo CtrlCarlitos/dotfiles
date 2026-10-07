@@ -754,6 +754,14 @@ install_apt() {
             gh || warn "GitHub CLI install failed - continuing"
     fi
 
+    # Terraform - HashiCorp's apt repo (the license change left it out of the Ubuntu archive).
+    if ! command -v terraform &>/dev/null; then
+        info "Installing Terraform..."
+        add_apt_repo hashicorp "https://apt.releases.hashicorp.com/gpg" \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+            terraform || warn "Terraform install failed - continuing"
+    fi
+
     # Node.js (the versions.node_major pin, #125)
     install_node
 
@@ -803,7 +811,7 @@ install_apt() {
     # Modern CLI tools. Plain-apt names render from .chezmoidata/packages.yaml
     # (#127) like every other list; the tools needing a repo/key/.deb stay as
     # procedures below. bat + fd share one line - the catalog's bat note says why.
-    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "bat" true "fd" true) "catalog" .catalog.packages) }} || true
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "bat" true "less" true "fd" true) "catalog" .catalog.packages) }} || true
 
     # Network diagnostics (#177): the net-tools/dns set, one batch, same
     # `|| true` contract as the line above - a name missing on an older

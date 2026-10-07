@@ -27,7 +27,10 @@ for tool in lychee vale; do
     rec="$(record "$tool")"
     printf '%s\n' "$rec" | grep -Fqx '      group: modern_cli' || fail "catalog: $tool must be in modern_cli"
     printf '%s\n' "$rec" | grep -Fqx "      brew: $tool" || fail "catalog: $tool needs its brew formula"
-    printf '%s\n' "$rec" | grep -Fqx "      choco: $tool" || fail "catalog: $tool needs its choco package"
+    case "$tool" in
+        lychee) printf '%s\n' "$rec" | grep -Fqx "      winget: lycheeverse.lychee" || fail "catalog: lychee needs its winget package" ;;
+        vale) printf '%s\n' "$rec" | grep -Fqx "      choco: vale" || fail "catalog: vale needs its choco package (winget's lags)" ;;
+    esac
     if printf '%s\n' "$rec" | grep -q '^      apt:'; then fail "catalog: $tool is not in the Ubuntu archive - no apt key"; fi
 done
 pass
@@ -49,7 +52,8 @@ if command -v chezmoi >/dev/null 2>&1; then
     grep -Eq '^ *brew install .*\blychee\b.*\bvale\b' "$fx/darwin.sh" || fail "macOS render: lychee and vale must come from brew"
     render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$on}" --file "$ps_t" >"$fx/win.ps1"
     grep -Fq "Install-NpmCatalogTool -Package @('markdownlint-cli2' -split ' '" "$fx/win.ps1" || fail "windows render: markdownlint-cli2 is not installed through Install-NpmCatalogTool"
-    for tool in lychee vale; do grep -Eq "['\"]${tool}['\"]" "$fx/win.ps1" || fail "windows render: $tool is not in the choco list"; done
+    grep -Fq '$wingetPackages += "lycheeverse.lychee||lychee"' "$fx/win.ps1" || fail "windows render: lychee is not in the winget list"
+    grep -Fq '$packages += "vale"' "$fx/win.ps1" || fail "windows render: vale is not in the choco list"
     pass
 else
     printf 'note: chezmoi not installed - render checks skipped\n'

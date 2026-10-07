@@ -34,7 +34,8 @@ pass
 
 # --- dot upgrade wiring ---------------------------------------------------------------------------
 grep -Fq "if (\$dockerOwner -eq 'choco')" "$du" || fail "dotupgrade.ps1 must say when Docker Desktop is still Chocolatey's"
-grep -Fq "if (\$dockerKept) { \$wingetHold = @('Docker.DockerDesktop') }" "$du" || fail "dotupgrade.ps1 must hold a kept-running Docker Desktop out of the winget sweep"
+grep -Fq "if (\$dockerKept) { \$wingetHold += 'Docker.DockerDesktop' }" "$du" || fail "dotupgrade.ps1 must hold a kept-running Docker Desktop out of the winget sweep"
+grep -Fq "\$wingetHold += 'Anthropic.Claude'" "$du" || fail "dotupgrade.ps1 must hold Claude Desktop out of the winget sweep while a claude.exe runs"
 grep -Fq -- '-HoldId $wingetHold' "$du" || fail "dotupgrade.ps1 must pass the hold to Invoke-WingetUpgradeAll"
 grep -Fq -- 'Get-DockerDesktopUpgrade -Owner $dockerOwner' "$du" || fail "dotupgrade.ps1 must probe only the manager that owns Docker Desktop"
 pass
