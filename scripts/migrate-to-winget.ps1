@@ -28,7 +28,9 @@ if (-not (Test-IsAdmin) -and -not $ListOnly) {
 Repair-InBoxModulePath
 
 $template = '{{ range .catalog.packages }}{{ if and (hasKey . "winget") (hasKey . "choco_was") }}{{ .choco_was }}|{{ .winget }}|{{ .id }}|{{ get . "winget_args" }}|{{ get . "migrate_risk" }}{{ "\n" }}{{ end }}{{ end }}'
-$catalogLines = @((chezmoi execute-template $template | Out-String) -split "`r?`n" | Where-Object { $_ })
+# On STDIN, not as an argument: Windows PowerShell 5.1 strips the double quotes inside a native
+# argument, and `hasKey . "winget"` reached chezmoi as `hasKey . winget` ("function winget not defined").
+$catalogLines = @(($template | chezmoi execute-template | Out-String) -split "`r?`n" | Where-Object { $_ })
 if ($catalogLines.Count -eq 0) { Write-Host "Could not read the package catalog (chezmoi execute-template)." -ForegroundColor Red; exit 1 }
 $installed = @(choco list --limit-output | ForEach-Object { ($_ -split '\|')[0] })
 try { $script:WingetMigrationNodeMajor = [int]((chezmoi execute-template '{{ .versions.node_major }}' | Out-String).Trim()) } catch { $script:WingetMigrationNodeMajor = 0 }
