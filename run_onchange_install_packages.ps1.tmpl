@@ -97,7 +97,7 @@ if ($PSVersionTable.PSVersion.Major -le 5) {
 $ProgressPreference = 'SilentlyContinue'
 # Native tools (agent-browser, guardrail) print UTF-8 (check marks, em dashes);
 # PowerShell decodes their output with the console's OEM code page, which
-# rendered "✓" as "Γ£ô" in the apply log. Process-local, so nothing outside
+# rendered a check mark as three Windows-1252 characters in the apply log. Process-local, so nothing outside
 # this run changes. try: a host without a console handle throws here.
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { Write-Verbose "console encoding unchanged: $($_.Exception.Message)" }
 # The skills helpers (Invoke-SkillsSource, Write-AgentBrowserDoctorSummary, ...) are inlined
@@ -169,7 +169,7 @@ function Invoke-WithTimeout {
     if ($NoStream) { return $collected }
 }
 
-{{/* 16-group package taxonomy (spec §2, docs/research/package-groups-spec.md).
+{{/* 16-group package taxonomy (spec section 2, docs/research/package-groups-spec.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
@@ -390,7 +390,7 @@ if (-not $wslReady -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
 }
 Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue
 
-# Node.js (versions.node_major pin, #125) - a core fundamental (spec §2). The npm-dependent groups
+# Node.js (versions.node_major pin, #125) - a core fundamental (spec section 2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
 # also work with core off.
 Install-Node
@@ -506,7 +506,7 @@ Install-Gum
 {{- end }}
 
 {{- if $claude_desktop }}
-# Claude Desktop (spec §5) - official Chocolatey package, rides the capped
+# Claude Desktop (spec section 5) - official Chocolatey package, rides the capped
 # choco loop like every other package. Claude Code (the CLI) is a separate
 # claude_cli group - different software, different gate.
 {{ includeTemplate "choco-packages" (dict "group" "claude_desktop" "catalog" .catalog.packages) }}
@@ -514,7 +514,7 @@ Install-Gum
 {{- end }}
 
 {{- if $antigravity_desktop }}
-# Antigravity 2.0 desktop app (spec §5) - official Chocolatey package,
+# Antigravity 2.0 desktop app (spec section 5) - official Chocolatey package,
 # proven in this repo's CI history (the pre-removal full-install runs
 # installed it via choco). Windows floats on choco's version - no pinned
 # hub-channel URL here, unlike the sh template's dmg/tar.gz pins.
@@ -523,7 +523,7 @@ Install-Gum
 {{- end }}
 
 {{- if $opencode_desktop }}
-# OpenCode Desktop (spec §5) - official Chocolatey package (opencode-desktop,
+# OpenCode Desktop (spec section 5) - official Chocolatey package (opencode-desktop,
 # confirmed current on community.chocolatey.org at 1.18.30, matching the
 # upstream anomalyco/opencode release train). Rides the capped choco loop
 # like every other desktop package; the OpenCode CLI is a separate
@@ -1080,7 +1080,7 @@ if (-not $vsApply) {
 
 
 {{- if $agent_toolkit }}
-# Agent Toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
+# Agent Toolkit (spec section 2: the cross-vendor agent layer - Serena, Graft,
 # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
 # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli: vendor
 # products live in vendor groups per the spec's placement rule. act joins
@@ -1556,7 +1556,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         # Both writes below must be BOM-less UTF-8: PS 5.1's
         # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
         # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
-        # "invalid character 'ï' looking for beginning of value" failed
+        # "invalid character (the BOM's first byte) looking for beginning of value" failed
         # every Windows CI run's opencode wiring while the BOM-less Linux
         # side merged fine. Same WriteAllLines idiom as the mp-code-review
         # patcher below.
@@ -1757,7 +1757,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 # and $env:USERPROFILE\.codex\skills; the verified Claude copy is then fanned
 # out to Antigravity. --copy = real dirs, not symlinks.
 #
-# Cross-cutting pass (spec §2 wiring rule): fires when ANY of its target
+# Cross-cutting pass (spec section 2 wiring rule): fires when ANY of its target
 # groups (claude_cli / antigravity_cli / agent_toolkit / opencode_cli /
 # chatgpt_cli) is
 # enabled - the CLIs it writes to may have arrived from any of those gates,
@@ -1927,7 +1927,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     }
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
-    #  writing-for-agents, which is already in the batch above — the old name
+    #  writing-for-agents, which is already in the batch above - the old name
     #  failed silently on every run.)
 
     Invoke-SkillsStatePrune

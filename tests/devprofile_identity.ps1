@@ -25,10 +25,10 @@ if (-not $GetAccountsSrc.Success) { Write-Error 'Get-AccountList not found in de
 if (-not $TestIdentitySrc.Success) { Write-Error 'Test-Identity not found in devprofile.ps1'; exit 1 }
 
 # Same display helpers the script defines (the extracted functions call them).
-function Write-Info    { param([string]$Message) Write-Host "▸ $Message" }
-function Write-Success { param([string]$Message) Write-Host "✓ $Message" }
+function Write-Info    { param([string]$Message) Write-Host "$([char]0x25B8) $Message" }
+function Write-Success { param([string]$Message) Write-Host "$([char]0x2713) $Message" }
 function Write-Warn    { param([string]$Message) Write-Host "! $Message" }
-function Write-Err     { param([string]$Message) Write-Host "✗ $Message" }
+function Write-Err     { param([string]$Message) Write-Host "$([char]0x2717) $Message" }
 
 $script:Failed = 0
 function Fail([string]$m) {

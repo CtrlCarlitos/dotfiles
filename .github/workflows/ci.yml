@@ -131,12 +131,10 @@ jobs:
           # shellcheck loop uses. Rule exclusions, each deliberate:
           #   PSAvoidUsingWriteHost          profiles/installers print to the
           #                                  host on purpose (color, 5.1 quirks).
-          #   PSUseBOMForUnicodeEncodedFile  the repo charset standard is
-          #                                  UTF-8 *without* BOM (.editorconfig
-          #                                  `charset = utf-8`, enforced by the
-          #                                  init-line-endings tooling). Non-ASCII
-          #                                  glyphs are cosmetic output, never
-          #                                  parsed input.
+          # PSUseBOMForUnicodeEncodedFile stays ON: Windows PowerShell 5.1 reads a
+          # BOM-less file as Windows-1252, and a UTF-8 glyph's bytes can include a
+          # "smart quote" that silently re-splits strings (docs/invariants.md #16).
+          # Sources are ASCII (glyphs from code points) or carry a BOM.
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
           Import-Module PSScriptAnalyzer
           $failed = 0
@@ -148,7 +146,7 @@ jobs:
               [IO.File]::WriteAllText($target, $stripped, [Text.UTF8Encoding]::new($false))
             }
             $findings = Invoke-ScriptAnalyzer -Path $target -Severity Error,Warning `
-              -ExcludeRule PSAvoidUsingWriteHost, PSUseBOMForUnicodeEncodedFile
+              -ExcludeRule PSAvoidUsingWriteHost
             if ($findings) {
               $findings | ForEach-Object {
                 Write-Host "##[error]${f}:$($_.Extent.StartLineNumber) $($_.RuleName): $($_.Message)"

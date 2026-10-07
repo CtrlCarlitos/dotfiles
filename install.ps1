@@ -78,7 +78,7 @@ $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 $IsNonInteractive = ($env:CI -eq 'true') -or ($env:CHEZMOI_TEST_MINIMAL -eq 'true')
 
 # Devcontainer detection (mirrors install.sh): skip gum bootstrap AND the
-# package menu entirely — the non-interactive path renders all groups false
+# package menu entirely - the non-interactive path renders all groups false
 # (config-only apply), and downloading gum just to have the menu self-skip
 # wastes bandwidth on every container start. Tools in devcontainers come
 # from devcontainer-features during image build, not from here.

@@ -1,11 +1,11 @@
 #Requires -Version 5.1
-# Tests for scripts/select-packages.ps1 — the gum package-group menu (Windows
+# Tests for scripts/select-packages.ps1 - the gum package-group menu (Windows
 # twin). Mirrors tests/select_packages.sh: fake gum on PATH serves canned
 # `choose` results and tees argv to $env:FAKE_GUM_LOG; a child pwsh runs the
 # script under test with HOME/USERPROFILE pointed at temp dirs.
 #
 # The script under test gates on stdin being a real console
-# ([Console]::IsInputRedirected -eq $false — the [ -t 0 ] twin) plus
+# ([Console]::IsInputRedirected -eq $false - the [ -t 0 ] twin) plus
 # -not $env:CI, so interactive scenarios run the child under a pty via a
 # python3 helper (which also sets a 24x80 winsize: pwsh livelocks on a 0x0
 # pty, exactly what util-linux `script` allocates when its own stdin is not
@@ -40,7 +40,7 @@ function Fail([string]$name, [string]$detail) {
     if ($detail) { Write-Host $detail -ForegroundColor DarkGray }
 }
 
-# The 16 groups in taxonomy order — plan Global Constraints.
+# The 16 groups in taxonomy order - plan Global Constraints.
 $TestGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
     'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
     'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
@@ -100,7 +100,7 @@ fi
 
 # Interactive runs need a real console stdin for the gate. Non-Windows
 # harnesses often have none (CI, agent shells), so spawn the child under a
-# pty. The helper sets a 24x80 winsize before exec — pwsh livelocks on a 0x0
+# pty. The helper sets a 24x80 winsize before exec - pwsh livelocks on a 0x0
 # pty, which is what util-linux `script` leaves when its own stdin is not a
 # terminal, so `script` cannot be used here. Windows (or python3-less hosts)
 # fall back to direct invocation, which works whenever the harness itself
@@ -116,7 +116,7 @@ if (-not $IsWinHost) {
         @'
 import fcntl, os, pty, select, signal, struct, sys, termios, time
 
-# ptyrun.py TIMEOUT CMD... — run CMD under a 24x80 pty, echo its output, exit
+# ptyrun.py TIMEOUT CMD... - run CMD under a 24x80 pty, echo its output, exit
 # with the child's exit code (killed past TIMEOUT).
 timeout = float(sys.argv[1])
 cmd = sys.argv[2:]

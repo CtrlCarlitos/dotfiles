@@ -11,7 +11,21 @@ re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 $ProgressPreference = 'SilentlyContinue'
 # Shared helpers (the current-version checks below); the file sits next to this script.
 if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-common.ps1') }
-Write-Host "🤖 Updating AI Coding Tools..." -ForegroundColor Cyan
+# Glyphs from code points: this file stays ASCII. Windows PowerShell 5.1 reads a BOM-less file
+# as Windows-1252, where a UTF-8 emoji's bytes can include 0x93 - a "smart quote" that ends a
+# string ("The term 'upgrading' is not recognized", 2026-10-07). See docs/invariants.md #16.
+$G = @{
+    robot    = [char]::ConvertFromUtf32(0x1F916)
+    package  = [char]::ConvertFromUtf32(0x1F4E6)
+    warning  = [string][char]0x26A0 + [char]0xFE0F
+    sparkles = [string][char]0x2728
+    brain    = [char]::ConvertFromUtf32(0x1F9E0)
+    globe    = [char]::ConvertFromUtf32(0x1F310)
+    puzzle   = [char]::ConvertFromUtf32(0x1F9E9)
+    seedling = [char]::ConvertFromUtf32(0x1F331)
+    check    = [string][char]0x2705
+}
+Write-Host "$($G.robot) Updating AI Coding Tools..." -ForegroundColor Cyan
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
 # upgrade`) exports DOTUPGRADE_DEFER with the tools whose package dirs
@@ -30,7 +44,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'codex') {
         Write-Host "  codex deferred - a codex session is live (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
-        Write-Host "📦 Updating NPM packages..." -ForegroundColor Yellow
+        Write-Host "$($G.package) Updating NPM packages..." -ForegroundColor Yellow
         # Package name from .chezmoidata/agents.yaml, read at runtime like the
         # guardrail pin below. No literal fallback - that would be a copy.
         $codexPkg = ''
@@ -61,13 +75,13 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         }
     }
 } else {
-    Write-Host "⚠️  npm not found. Skipping npm packages." -ForegroundColor Red
+    Write-Host "$($G.warning)  npm not found. Skipping npm packages." -ForegroundColor Red
 }
 if (Get-Command choco -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'opencode') {
         Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
     } else {
-        Write-Host "📦 Updating OpenCode (choco)..." -ForegroundColor Yellow
+        Write-Host "$($G.package) Updating OpenCode (choco)..." -ForegroundColor Yellow
         $null = Invoke-ChocoUpgradeAll -Arguments @('upgrade', 'opencode', '-y', '--no-progress')
     }
     # Remove any legacy npm-global opencode-ai shim (dead binary) so it can't
@@ -81,7 +95,7 @@ Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates
 # (checksum verify each run); this just refreshes the plugin.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
-    Write-Host "✨ Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
+    Write-Host "$($G.sparkles) Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
     agy plugin install https://github.com/obra/superpowers 2>$null
 }
 
@@ -114,7 +128,7 @@ if (($null -ne $curatedCatalog) -and (Test-Path -LiteralPath $curatedCatalog -Pa
 }
 
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
+    Write-Host "$($G.sparkles) Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
     # From .chezmoidata/agents.yaml, read at runtime (see $codexPkg above).
     try { $skAgents = @((('{{ join "," .agents.skills.agents }}' | chezmoi execute-template | Out-String).Trim()) -split ',') } catch { $skAgents = @() }
     # Shared with the installer (inlined there at render time): the "already installed from this
@@ -125,7 +139,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Read-SkillsUpstreamHead -Repo @('mattpocock/skills', 'anthropics/skills', 'vercel-labs/skills', 'vercel-labs/agent-browser', 'CtrlCarlitos/skills', 'Leonxlnx/taste-skill')
     Invoke-SkillsSource -Label 'Matt Pocock skills' -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'pr', 'retro') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add mattpocock/skills -s codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents pr retro -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  Matt Pocock skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
 
@@ -147,7 +161,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
                 [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
             }
             npx --yes --loglevel=error skills@latest add "$skStage" -s mp-code-review -a $skAgents -g -y --copy 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+            if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
             if ($LASTEXITCODE -eq 0) { Save-SkillsSource; Write-Host "  mp-code-review: installed" }
         }
         Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -155,42 +169,42 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
 
     Invoke-SkillsSource -Label 'frontend-design' -Repo 'anthropics/skills' -Skills @('frontend-design') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  frontend-design update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  frontend-design update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
 
     # find-skills (vercel-labs/skills, 3.4M installs) - search/install skills from skills.sh mid-session
     Invoke-SkillsSource -Label 'find-skills' -Repo 'vercel-labs/skills' -Skills @('find-skills') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add vercel-labs/skills -s find-skills -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  find-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  find-skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # agent-browser (vercel-labs/agent-browser, 843.8K installs) - navigate, click, fill, scrape, screenshot
     Invoke-SkillsSource -Label 'agent-browser' -Repo 'vercel-labs/agent-browser' -Skills @('agent-browser') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add vercel-labs/agent-browser -s agent-browser -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  agent-browser update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  agent-browser update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # skill-creator (CtrlCarlitos/skills) - our drop-in fork of Anthropic's skill-creator with Windows fixes (pipe reader, UTF-8 file I/O, --project-root); pinned upstream commit + patch queue in that repo, drop when anthropics/skills#1827 lands
     Invoke-SkillsSource -Label 'skill-creator' -Repo 'CtrlCarlitos/skills' -Skills @('skill-creator') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s skill-creator -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # taste skills (Leonxlnx/taste-skill) - design-taste-frontend (new-page visual direction) + redesign-existing-projects (audit + fix existing UI)
     Invoke-SkillsSource -Label 'taste skills' -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # code-search (CtrlCarlitos/skills) - search-tool escalation: graft > serena > rg > grep, probed once per session
     Invoke-SkillsSource -Label 'code-search' -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "⚠️  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to
-    #  writing-for-agents, which is already in the batch above — the old name
+    #  writing-for-agents, which is already in the batch above - the old name
     #  failed silently on every run.)
 
     Invoke-SkillsStatePrune
@@ -297,7 +311,7 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'codex') {
         Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
     } else {
-        Write-Host "✨ Updating Superpowers (Codex)..." -ForegroundColor Yellow
+        Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
         codex plugin add superpowers@openai-curated-remote 2>$null
     }
 }
@@ -429,7 +443,7 @@ if ($guardrailState -and -not $guardrailVersion) {
 Add-DotTimingMark -Name 'Claude Code'
 # 2. Claude Code (Native)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-    Write-Host "🧠 Updating Claude Code..." -ForegroundColor Yellow
+    Write-Host "$($G.brain) Updating Claude Code..." -ForegroundColor Yellow
     # Re-run strict native installer. URL from .chezmoidata.yaml
     # versions.claude_install_ps1 (#125) - the same key the installer template
     # renders - read at runtime like the guardrail pin below, so `dot upgrade`
@@ -460,7 +474,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     }
 
     # Superpowers skills plugin
-    Write-Host "✨ Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
+    Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
     claude plugin update superpowers -y 2>$null
 }
 
@@ -469,7 +483,7 @@ Add-DotTimingMark -Name 'Superpowers (OpenCode)'
 # Not a version-pinned npm dep, so re-running the install pulls the latest
 # commit. Uses the same Windows-specific --prefix workaround as the installer.
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
-    Write-Host "✨ Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
+    Write-Host "$($G.sparkles) Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
     # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
     # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
     npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
@@ -479,14 +493,14 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
 Add-DotTimingMark -Name 'Playwright Chromium'
 # 4. Playwright Chromium (headless browser for agent automation)
 if (Get-Command npx -ErrorAction SilentlyContinue) {
-    Write-Host "🌐 Updating Playwright Chromium..." -ForegroundColor Yellow
+    Write-Host "$($G.globe) Updating Playwright Chromium..." -ForegroundColor Yellow
     npx --yes playwright install chromium 2>$null
 }
 
 Add-DotTimingMark -Name 'agent-browser'
 # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
-    Write-Host "🌐 Updating agent-browser..." -ForegroundColor Yellow
+    Write-Host "$($G.globe) Updating agent-browser..." -ForegroundColor Yellow
     # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
     # The browser setup and the verification below still run.
     if (Test-NpmGlobalCurrent 'agent-browser') {
@@ -518,9 +532,9 @@ Add-DotTimingMark -Name 'Serena and Graft'
 # resolve from (2026-09-20 live incidents).
 if (Get-Command serena -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'serena') {
-        Write-Host "🧩 Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
+        Write-Host "$($G.puzzle) Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
-        Write-Host "🧩 Updating Serena..." -ForegroundColor Yellow
+        Write-Host "$($G.puzzle) Updating Serena..." -ForegroundColor Yellow
         try {
             uv tool upgrade serena-agent 2>$null
             if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: serena upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
@@ -531,9 +545,9 @@ if (Get-Command serena -ErrorAction SilentlyContinue) {
 }
 if (Get-Command graft -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'graft') {
-        Write-Host "🌱 Graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)." -ForegroundColor Yellow
+        Write-Host "$($G.seedling) Graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
-        Write-Host "🌱 Updating Graft..." -ForegroundColor Yellow
+        Write-Host "$($G.seedling) Updating Graft..." -ForegroundColor Yellow
         # npm 12 skips install scripts unless allow-listed, so a bare
         # `graft upgrade` leaves a graft whose tree-sitter parsers were never
         # compiled (crashes at startup; seen on WSL 2026-10-02). Hand npm the
@@ -600,4 +614,4 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
 }
 
 Write-DotTimingSummary -Title 'AI tools'
-Write-Host "✅ AI Tools Update Complete!" -ForegroundColor Green
+Write-Host "$($G.check) AI Tools Update Complete!" -ForegroundColor Green

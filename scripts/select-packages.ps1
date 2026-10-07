@@ -1,28 +1,28 @@
 #Requires -Version 5.1
 #
-# select-packages.ps1 — interactive package-group menu (gum), Windows twin of
+# select-packages.ps1 - interactive package-group menu (gum), Windows twin of
 # scripts/select-packages.sh. Persists the 16-group selection to
 # [data.packages] in $env:USERPROFILE\.config\chezmoi\chezmoi.toml
 # ($env:HOME/.config/... on Linux/macOS pwsh).
 #
 # Run standalone to re-choose groups at any time, or from install.ps1 before
-# `chezmoi init --apply` (spec §4). Design contracts (shared with the .sh twin):
+# `chezmoi init --apply` (spec section 4). Design contracts (shared with the .sh twin):
 #
 #   - CI-safe: without an interactive stdin ($env:CI set, or stdin
-#     piped/redirected as under CI — [Console]::IsInputRedirected) or gum on
-#     PATH this is a no-op that exits 0 printing "skipping menu" — pre-seeded
+#     piped/redirected as under CI - [Console]::IsInputRedirected) or gum on
+#     PATH this is a no-op that exits 0 printing "skipping menu" - pre-seeded
 #     CI configs never prompt. (Same contract as the .sh twin's [ -t 0 ] gate;
-#     UserInteractive was wrong: GitHub Actions runners report it TRUE —
+#     UserInteractive was wrong: GitHub Actions runners report it TRUE -
 #     run 34730549901's full-install hung gum on redirected stdin for 2h.)
 #   - The menu OWNS [data.packages]: a rewrite replaces the whole section
-#     (hand-edited keys inside it are intentionally overwritten — re-running
+#     (hand-edited keys inside it are intentionally overwritten - re-running
 #     the menu means re-choosing). Everything outside the section is
 #     byte-preserved (accounts etc.). Unlike the .sh twin (which re-emits the
-#     section at EOF), this twin swaps the section IN PLACE via regex —
+#     section at EOF), this twin swaps the section IN PLACE via regex -
 #     equally valid TOML, and the surrounding layout stays untouched.
 #   - Presets are pre-check sets for the menu only, never persisted.
 #
-# gum invocation shapes (verified against gum 2.0.1 — v2 has no --multi flag;
+# gum invocation shapes (verified against gum 2.0.1 - v2 has no --multi flag;
 # --no-limit is the multi-select, --selected is comma-separated and matches the
 # option strings exactly):
 #   preset: gum choose --header "..." "minimal" "standard" "full" "custom"
@@ -40,13 +40,13 @@ $configDir = Join-Path $homeDir '.config/chezmoi'
 $configFile = Join-Path $configDir 'chezmoi.toml'
 
 # The 16 package groups, taxonomy order (docs/research/package-groups-spec.md
-# §2). The single vocabulary shared with the config template, installers, CI.
+# section 2). The single vocabulary shared with the config template, installers, CI.
 $pkgGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
     'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
     'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
     'remote_access', 'remote_access_server', 'guardrail')
 
-# Preset → pre-check sets (spec §3). Presets are NOT persisted.
+# Preset -> pre-check sets (spec section 3). Presets are NOT persisted.
 function Get-PresetSet([string]$preset) {
     switch ($preset) {
         'minimal' { return @('core') }
@@ -60,7 +60,7 @@ function Get-PresetSet([string]$preset) {
 
 $gum = Get-Command gum -ErrorAction SilentlyContinue
 # Stdin-tty gate, matching the .sh twin's [ -t 0 ]: IsInputRedirected is $true
-# whenever stdin is piped/redirected — every CI shape, even where
+# whenever stdin is piped/redirected - every CI shape, even where
 # UserInteractive is $true (GH Actions window station) and $env:CI is blanked
 # (run 34730549901). $env:CI remains as a belt-and-suspenders hint.
 if ([Console]::IsInputRedirected -or $env:CI -or -not $gum) {
@@ -97,7 +97,7 @@ if (Test-Path -LiteralPath $configFile) {
 $precheck = @()
 if ($hasSection) {
     # Re-run: the user's current keys ARE the pre-check (one Enter accepts
-    # unchanged). No preset prompt — presets are first-run scaffolding only.
+    # unchanged). No preset prompt - presets are first-run scaffolding only.
     $precheck = @($pkgGroups | Where-Object { $trueKeys -contains $_ })
 } else {
     $preset = ''
@@ -130,7 +130,7 @@ try {
 } catch {
     $chosenRaw = @()
 }
-# gum exits non-zero on cancel/empty selection ("nothing selected") — that's
+# gum exits non-zero on cancel/empty selection ("nothing selected") - that's
 # an abort, not a hard failure: leave the config untouched.
 if ($LASTEXITCODE -ne 0 -or $chosenRaw.Count -eq 0) {
     Warn 'menu canceled - config unchanged'
@@ -158,7 +158,7 @@ if (-not (Test-Path -LiteralPath $configFile)) {
 } elseif ($hasSection) {
     # In-place section swap. The pattern consumes everything up to (not
     # including) the next section header, including the blank separator line
-    # before it — the replacement re-adds that blank when another section
+    # before it - the replacement re-adds that blank when another section
     # follows. MatchEvaluator (not a plain string replacement) so the block
     # itself never goes through $substitution processing.
     $replacePattern = '(?ms)^[ \t]*\[data\.packages\][ \t]*\r?\n.*?(?=^[ \t]*\[|\z)'
