@@ -9,6 +9,9 @@ set -euo pipefail
 #      warn/fail check. Output that is not the expected JSON is printed raw, never dropped.
 #   2. fetch_and_verify's curl printed two progress tables per run (WSL log). Now -sS: quiet,
 #      still reports errors.
+#   3. Playwright's `install-deps` printed ~40 "already the newest version" lines on every
+#      WSL run. Now its output goes to a file: shown on failure, apt's summary line only when
+#      something was installed, everything with DOT_APT_VERBOSE=1 (executed, fake npx).
 # Both languages are EXECUTED. (Claude Code is deliberately NOT updated with `claude update`:
 # dot upgrade is meant to run with every agent closed, so the installer is the one path.)
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +26,41 @@ lib="$repo_root/scripts/lib/agent-skills.sh"
 # --- 2. curl is quiet ---------------------------------------------------------------------
 if grep -nE 'curl -fLo' "$lib" >/dev/null; then fail "fetch_and_verify still uses a progress-printing curl (-fLo); use -fsSL -o"; else pass; fi
 grep -Fq 'curl -fsSL -o "$dest/SHA256SUMS"' "$lib" || fail "fetch_and_verify must fetch SHA256SUMS with curl -fsSL -o"
+
+# --- 3. Playwright install-deps is quiet (executed) ------------------------------------------
+awk '/# Quiet like the installer.s own apt calls/{f=1} f{print} f && /^        fi$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl" >"$tmp/pwdeps.sh"
+grep -q 'playwright install-deps chromium' "$tmp/pwdeps.sh" || fail "installer: the Playwright install-deps block was not found"
+cat >"$tmp/fake-npx" <<'EOF'
+#!/bin/sh
+printf 'Hit:1 http://archive.ubuntu.com/ubuntu noble InRelease\nlibnss3 is already the newest version (2:3.98).\n%s\n' "$PW_SUMMARY"
+exit "${PW_EXIT:-0}"
+EOF
+chmod +x "$tmp/fake-npx"
+pw_run() { # <summary> <exit> [verbose]; the block runs in a subshell, inside a function (it uses local)
+    (
+        trap - EXIT   # called inside $( ): the parent's cleanup must not run when this subshell ends
+        export PW_SUMMARY="$1" PW_EXIT="$2"
+        DOT_APT_VERBOSE="${3:-0}"
+        net_timeout_tty() { shift; "$@"; }
+        warn() { echo "WARN: $*" >&2; }
+        PKG_MANAGER=apt; NPX_BIN="$tmp/fake-npx"; npm_sudo=""
+        pw_block() {
+            # shellcheck disable=SC1091
+            . "$tmp/pwdeps.sh"
+        }
+        pw_block
+    ) 2>&1
+}
+out="$(pw_run '0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.' 0)"
+[ -z "$out" ] || fail "install-deps with nothing to do must print nothing (got: $out)"
+out="$(pw_run '0 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.' 0)"
+[ "$out" = '  Playwright system deps: 0 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.' ] || fail "install-deps that installed something must print apt's summary only (got: $out)"
+out="$(pw_run 'E: Unable to locate package libfoo' 100)"
+printf '%s' "$out" | grep -Fq 'E: Unable to locate package libfoo' || fail "a failed install-deps must show its output (got: $out)"
+printf '%s' "$out" | grep -Fq 'WARN: Playwright system deps install failed' || fail "a failed install-deps must warn (got: $out)"
+out="$(pw_run '0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.' 0 1)"
+printf '%s' "$out" | grep -Fq 'already the newest version' || fail "DOT_APT_VERBOSE=1 must show install-deps' output (got: $out)"
+pass
 
 # --- 1. agent-browser doctor summary (bash) -------------------------------------------------
 if command -v jq >/dev/null 2>&1; then
