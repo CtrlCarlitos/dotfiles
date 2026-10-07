@@ -216,6 +216,7 @@ dot() {
         restore)  shift; bash "$repo_scripts/dotrestore.sh" "$@" ;;
         doctor)   shift; bash "$repo_scripts/dotfiles-doctor.sh" "$@" ;;
         remote)  shift; bash "$repo_scripts/remote-access.sh" "$@" ;;
+        ssh)     shift; bash "$repo_scripts/dot-ssh.sh" "$@" ;;
         version)  shift; bash "$repo_scripts/dotversion.sh" "$@" ;;
         *)
             local unknown=0
@@ -232,6 +233,7 @@ dot() {
             printf '  %-20s  %s\n' 'dot restore' 'restore a backup'
             printf '  %-20s  %s\n' 'dot doctor' 'dotfiles health check'
             printf '  %-20s  %s\n' 'dot remote' 'remote-access setup/status/fix/keys'
+            printf '  %-20s  %s\n' 'dot ssh' 'pick an SSH host and connect (--list, or a name)'
             printf '  %-20s  %s\n' 'dot version' 'which version of the dotfiles repo this is'
             return $((unknown * 2))
             ;;

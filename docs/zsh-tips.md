@@ -194,6 +194,7 @@ dot backup    # encrypted portable backup
 dot restore   # restore a backup
 dot doctor    # health check
 dot remote    # remote-access setup/status/fix/keys
+dot ssh       # pick an SSH host and connect (fzf); dot ssh <name>, dot ssh --list
 dot version   # dotfiles vYYYY.MM.DD (sha)
 ```
 

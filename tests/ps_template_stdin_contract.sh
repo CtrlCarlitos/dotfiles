@@ -18,7 +18,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --- 1. static ---------------------------------------------------------------------
 hits="$(git -C "$repo_root" ls-files '*.ps1' ':!tests/*' | while IFS= read -r f; do
-    grep -nE "execute-template( +--[a-z-]+ +[^ ]+)* +('[^']*\"|\\\$[A-Za-z])" "$repo_root/$f" | sed "s|^|$f:|" || true
+    # `execute-template --file <path>` passes a PATH, not a template text: never flagged.
+    grep -nE "execute-template( +--[a-z-]+ +[^ ]+)* +('[^']*\"|\\\$[A-Za-z])" "$repo_root/$f" | grep -v 'execute-template --file ' | sed "s|^|$f:|" || true
 done)"
 [ -z "$hits" ] || fail "templates with a double quote (or in a variable) must reach chezmoi on stdin - pipe them:
 $hits"

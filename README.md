@@ -242,6 +242,7 @@ dot backup    # encrypted portable backup of config + SSH keys
 dot restore   # restore a backup: dot restore <archive.7z>
 dot doctor    # dotfiles health check; add --fix to repair what it can
 dot remote    # remote access: setup / status / fix / keys (docs/remote-access.md)
+dot ssh       # pick one of your [[data.ssh_hosts]] and connect (fzf); dot ssh <name>, --list
 dot version   # which version of this repo is installed: tag, commits past it, short sha
 ```
 
