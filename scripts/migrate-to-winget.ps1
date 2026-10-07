@@ -53,11 +53,13 @@ $batch = @($plan | Where-Object { $_.Action -eq 'move' -and -not $_.Risk })
 # Moved last: a tool another moving Chocolatey package depends on (fzf and ripgrep under opencode).
 $careful = @($plan | Where-Object { $_.Action -eq 'move' -and $_.Risk })
 $drops = @($plan | Where-Object { $_.Action -eq 'drop' })
+$orphans = @($plan | Where-Object { $_.Action -eq 'orphan' })
 Write-Host "Chocolatey -> winget plan:"
 if ($batch.Count) { Write-Host "  Move as one batch ($($batch.Count)): $(($batch | ForEach-Object { $_.Choco }) -join ', ')" }
 foreach ($b in @($batch | Where-Object { @($_.After).Count -gt 0 })) { Write-Host "  (in the batch) $($b.Choco) moves after $(@($b.After) -join ', ')" }
 foreach ($c in $careful) { Write-Host "  Move, asked on its own: $($c.Choco) -> $($c.Winget)  ($($c.Risk))" }
 foreach ($d in $drops) { Write-Host "  Drop: $($d.Choco)  ($($d.Risk))" }
+foreach ($o in $orphans) { Write-Host "  Remove afterwards (nothing else uses it): $($o.Choco)  ($($o.Risk))" }
 foreach ($k in @($plan | Where-Object { $_.Action -eq 'keep' })) { Write-Host "  Kept on Chocolatey: $($k.Choco)  ($($k.Risk))" }
 if ($ListOnly) { exit 0 }
 
@@ -69,6 +71,7 @@ if ($batch.Count -and (Read-Host "Move the batch of $($batch.Count) tools now? [
 foreach ($c in $careful) {
     if ((Read-Host "Move $($c.Choco) -> $($c.Winget)? $($c.Risk) [y/N]").Trim().ToLower() -eq 'y') { $results += Invoke-WingetMigrationItem -Item $c }
 }
+if ($orphans.Count -and (Read-Host "Remove $(($orphans | ForEach-Object { $_.Choco }) -join ', ') once nothing uses it? [y/N]").Trim().ToLower() -eq 'y') { $late += $orphans }
 # The tools other moving packages depend on, once those are gone. A dependent you kept stays on
 # Chocolatey, and so does this one (Chocolatey would refuse to remove it).
 $chocoNow = @(choco list --limit-output | ForEach-Object { ($_ -split '\|')[0] })

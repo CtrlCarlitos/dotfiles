@@ -53,6 +53,11 @@ if command -v pwsh >/dev/null 2>&1; then
 param([string]$Lib)
 Set-StrictMode -Version Latest
 . $Lib
+# Never the real tools: until the fakes below are defined, any call fails loudly (a case placed
+# above them once ran the real `choco uninstall unzip`; an unelevated shell is all that stopped it).
+function choco { throw "real choco called before the fakes: $args" }
+function winget { throw "real winget called before the fakes: $args" }
+function npm { throw "real npm called before the fakes: $args" }
 $catalog = @(
     'git.install|Git.Git|git||chezmoi uses git',
     'bat|sharkdp.bat|bat||',
@@ -76,6 +81,12 @@ $withOc = @($catalog + 'opencode|SST.opencode|opencode-cli||close every opencode
 $planOc = @(Get-WingetMigrationPlan -CatalogLine $withOc -Installed $installed -DependedOn @{ fzf = @('opencode'); 'git.install' = @('git') })
 Write-Output ('oc-fzf=' + (($planOc | Where-Object Choco -eq 'fzf' | ForEach-Object { "$($_.Action) after $(@($_.After) -join ',')" })))
 Write-Output ('oc-keeps=[' + (@($planOc | Where-Object Action -eq 'keep').Count) + ']')
+# unzip: only opencode used it - offered for removal after opencode leaves; never while opencode
+# stays, and never a catalog tool (fzf is one, so it is moved, not orphaned)
+$withUnzip = @($installed + 'unzip')
+$deps = @{ fzf = @('opencode'); unzip = @('opencode') }
+Write-Output ('orphan-unzip=' + ((@(Get-WingetMigrationPlan -CatalogLine $withOc -Installed $withUnzip -DependedOn $deps) | Where-Object Action -eq 'orphan' | ForEach-Object { "$($_.Choco) after $(@($_.After) -join ',')" }) -join ';'))
+Write-Output ('orphan-none-when-kept=[' + ((@(Get-WingetMigrationPlan -CatalogLine $catalog -Installed $withUnzip -DependedOn $deps) | Where-Object Action -eq 'orphan' | ForEach-Object { $_.Choco }) -join ',') + ']')
 Write-Output ('plan-moves=' + (($plan | Where-Object Action -eq 'move' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-drops=' + (($plan | Where-Object Action -eq 'drop' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-companion=' + (($plan | Where-Object Choco -eq 'cmake').Companion))
@@ -92,6 +103,8 @@ function winget {
     $script:calls += 'winget ' + ($args -join ' '); $global:LASTEXITCODE = $script:wingetExit
 }
 function npm { $script:calls += 'npm ' + ($args -join ' '); $global:LASTEXITCODE = 0 }
+# graft's allow-list comes from chezmoi data (the template arrives on stdin)
+function chezmoi { $null = @($input); 'tree-sitter,tree-sitter-bash' }
 function Run($item) { $script:calls = @(); $r = Invoke-WingetMigrationItem -Item $item 6>$null; return "$r|" + ($script:calls -join ' ; ') }
 Write-Output ('move-cmake=' + (Run ($plan | Where-Object Choco -eq 'cmake')))
 Write-Output ('move-git=' + (Run ($plan | Where-Object Choco -eq 'git.install')))
@@ -114,6 +127,8 @@ Write-Output ('move-node=' + (Run ($plan | Where-Object Choco -eq 'nodejs')))
 # winget already has its own copy (installed next to Chocolatey's): only Chocolatey's goes
 $script:wingetHas = @('Name Id Version', 'jq jqlang.jq 1.8.2')
 Write-Output ('move-already=' + (Run ([pscustomobject]@{ Action = 'move'; Choco = 'jq'; Winget = 'jqlang.jq'; Id = 'jq'; Args = ''; Risk = ''; Companion = '' })))
+# an orphaned dependency is removed like a drop (never before the fakes above: it calls choco)
+Write-Output ('orphan-removed=' + (Run ([pscustomobject]@{ Action = 'orphan'; Choco = 'unzip'; Winget = ''; Id = 'unzip'; Args = ''; Risk = 'only opencode used it'; Companion = ''; After = @('opencode') })))
 $script:wingetHas = @()
 # Set-NodeLtsPin: no pin -> add "24.*"; the right pin -> nothing; another major -> replaced
 $script:pinList = @()
@@ -132,6 +147,9 @@ PSEOF
     expect 'plan-git-after=[]'
     expect 'oc-fzf=move after opencode'
     expect 'oc-keeps=[0]'
+    expect 'orphan-unzip=unzip after opencode'
+    expect 'orphan-none-when-kept=[]'
+    expect 'orphan-removed=ok|choco uninstall unzip -y --no-progress'
     # the script runs those last, and keeps one whose dependent stayed on Chocolatey
     awk '/\$late \+= \$b/{a=NR} /foreach \(\$c in \$careful\)/{b=NR} /foreach \(\$l in \$late\)/{c=NR} END{exit !(a && b && c && a<c && b<c)}' "$repo_root/scripts/migrate-to-winget.ps1" ||
         fail "migrate-to-winget.ps1: tools other moving packages depend on must move after the batch and the careful items"
@@ -155,7 +173,12 @@ PSEOF
     expect 'move-pwsh=skipped|'
     expect 'move-already=ok|choco uninstall jq -y --no-progress'
     # a different Node major: the global npm tools' native modules are rebuilt right after
-    expect 'move-node=ok|choco uninstall nodejs nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity ; npm rebuild -g'
+    # a different Node major: graft (the global tool with native modules) is reinstalled - not
+    # `npm rebuild -g`, which fails with EEXIST on command shims an older npm wrote
+    expect 'move-node=ok|choco uninstall nodejs nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity ; npm ls -g --depth=0 @nanonets/graft ; npm install -g @nanonets/graft@latest --loglevel=error --no-progress'
+    if grep -Fq 'npm rebuild -g' "$repo_root/scripts/lib/ps-common.ps1"; then
+        grep -F 'npm rebuild -g' "$repo_root/scripts/lib/ps-common.ps1" | grep -vq '^ *#' && fail "ps-common.ps1: npm rebuild -g is back (it fails with EEXIST on older shims)"
+    fi
     pass
 else
     printf 'note: pwsh not installed - executed checks skipped\n'

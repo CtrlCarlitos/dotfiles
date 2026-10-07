@@ -186,9 +186,13 @@ PDF, with the Ghostscript and AutoHotkey packages that came with it), Chocolatey
 Chocolatey's WSL record (`--skip-autouninstaller`: WSL itself stays) are dropped after a last
 question. A failed winget install prints the `choco install` that puts the app back. PowerShell 7
 cannot replace itself: run the script once more from Windows PowerShell (`powershell.exe`) for it.
-Moving Node from 26 to 24 LTS rebuilds the global npm tools' native modules (`npm rebuild -g`)
-right after. A tool that a package staying on Chocolatey depends on stays too, and the plan says
-which one (`fzf`, `ripgrep` and `unzip` under `opencode`). A meta package and its `.install`
+Moving Node from 26 to 24 LTS reinstalls graft right after: it is the one global npm tool with
+native modules, and `npm rebuild -g` fails on command shims an older npm wrote. Chocolatey
+refuses to remove a package another one depends on, so dependencies are ordered: a tool that a
+moving package depends on moves after it (`fzf` and `ripgrep` after `opencode`); one that a
+package staying on Chocolatey depends on stays too, and the plan says which. A dependency only
+the moving packages used (`unzip` under `opencode`) is offered for removal once they are gone;
+a catalog tool never is. A meta package and its `.install`
 package leave in one `choco uninstall` (alone, the meta package waits on a prompt). Chocolatey's
 exit code is not trusted on its own: a package that is gone despite a non-zero exit (a warning
 from its uninstall script) still gets its winget copy. `tests/migrate_to_winget_contract.sh`

@@ -134,7 +134,7 @@ catalog:
       brew: node@24
       winget: OpenJS.NodeJS.LTS
       choco_was: nodejs
-      migrate_risk: "Node 26 (Chocolatey floated past the 24 LTS pin) -> 24 LTS; native npm tools are rebuilt (npm rebuild -g) right after"
+      migrate_risk: "Node 26 (Chocolatey floated past the 24 LTS pin) -> 24 LTS; graft (the global npm tool with native modules) is reinstalled right after"
       note: "apt: NodeSource setup script by procedure; winget: Install-Node installs OpenJS.NodeJS.LTS by procedure (the LTS line, versions.node_major); choco only where winget is missing"
     - id: coreutils
       group: core
