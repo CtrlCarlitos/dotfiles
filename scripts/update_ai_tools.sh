@@ -293,7 +293,21 @@ if command -v opencode &>/dev/null; then
         # above (#114).
         oc_inst="$(mktemp)"
         if curl -fsSL -o "$oc_inst" https://opencode.ai/install; then
-            bash "$oc_inst" || echo "   OpenCode installer failed - continuing"
+            # The installer prints a progress bar, an ASCII logo and a "to start" block; the
+            # version is the only news. Its whole output is shown only when it fails.
+            oc_out="$(mktemp)"
+            if bash "$oc_inst" >"$oc_out" 2>&1; then
+                oc_ver="$(opencode --version 2>/dev/null | head -n 1)" || oc_ver=""
+                if grep -q 'already installed' "$oc_out"; then
+                    echo "   OpenCode is current (${oc_ver:-installed})"
+                else
+                    echo "   OpenCode ${oc_ver:-updated} (installer re-run)"
+                fi
+            else
+                cat "$oc_out"
+                echo "   OpenCode installer failed - continuing"
+            fi
+            rm -f "$oc_out"
         else
             echo "   OpenCode installer download failed - continuing"
         fi

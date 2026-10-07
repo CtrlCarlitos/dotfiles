@@ -105,21 +105,31 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
 Add-DotTimingMark -Name 'VS Code extensions'
 # --- 1b. VS Code extensions: `dot up` only installs missing ones (no --force); updates are
 # this command's job. Skipped quietly when VS Code is absent; a failure never aborts.
-if (Get-Command code -ErrorAction SilentlyContinue) {
-    Write-Host "  Updating VS Code extensions..." -ForegroundColor Yellow
-    $previousErrorActionPreference = $ErrorActionPreference
+# Run in the background, alongside the AI tools below (nothing after it depends on it); waited
+# for, with a 5-minute limit, before the summary.
+$vsCodeExtensionUpdate = $null
+$codeCommand = Get-Command code -ErrorAction SilentlyContinue
+if ($codeCommand) {
+    Write-Host "  Updating VS Code extensions (in the background)..." -ForegroundColor Yellow
     try {
-        $ErrorActionPreference = "Continue"
-        & code --update-extensions *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "  VS Code extension update exited with code $LASTEXITCODE - continuing" -ForegroundColor Yellow }
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+        $vsCodeExtensionUpdate = Start-Process -FilePath $codeCommand.Source -ArgumentList '--update-extensions' -WindowStyle Hidden -PassThru
+    } catch {
+        Write-Host "  VS Code extension update did not start ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
     }
 }
 
 Add-DotTimingMark -Name 'AI tools'
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 & (Join-Path $PSScriptRoot 'update_ai_tools.ps1')
+
+if ($vsCodeExtensionUpdate) {
+    Add-DotTimingMark -Name 'VS Code extensions (waiting)'
+    if (-not $vsCodeExtensionUpdate.WaitForExit(300000)) {
+        Write-Host "  VS Code extension update still running after 5 minutes - left to finish on its own" -ForegroundColor Yellow
+    } elseif ($vsCodeExtensionUpdate.ExitCode -ne 0) {
+        Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
+    }
+}
 
 if ($dropDesktopShortcuts) {
     $removedShortcuts = @(Remove-NewDesktopShortcut -Before $shortcutsBefore)

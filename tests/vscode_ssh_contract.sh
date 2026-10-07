@@ -44,9 +44,16 @@ grep -Pzq 'try \{\r?\n                \$ErrorActionPreference = "Continue"\r?\n 
 # One local listing decides; `dot upgrade` owns updates.
 grep -Fq -- 'code --list-extensions' "$ps1_installer" || fail "$ps1_installer: must list installed extensions once and install only the missing"
 if grep -Fq -- 'install-extension $ext --force' "$ps1_installer"; then fail "$ps1_installer: --force re-installs every extension on every run"; fi
-for f in scripts/dotupgrade.ps1 scripts/dotupgrade.sh; do
-    grep -Fq -- 'code --update-extensions' "$repo_root/$f" || fail "$f: dot upgrade must own VS Code extension updates"
-done
+# ...in the background, alongside the AI tools (a minute on WSL on its own), and waited for after
+# them, before the summary.
+grep -Fq -- 'code --update-extensions >/dev/null 2>&1 &' "$repo_root/scripts/dotupgrade.sh" ||
+    fail "dotupgrade.sh: the VS Code extension update must run in the background"
+grep -Fq -- "-ArgumentList '--update-extensions' -WindowStyle Hidden -PassThru" "$repo_root/scripts/dotupgrade.ps1" ||
+    fail "dotupgrade.ps1: the VS Code extension update must run in the background"
+awk '/update_ai_tools.sh"$/{a=NR} /wait "\$vscode_ext_pid"/{b=NR} END{exit !(a && b && a<b)}' "$repo_root/scripts/dotupgrade.sh" ||
+    fail "dotupgrade.sh: the background extension update must be waited for after the AI tools"
+awk '/update_ai_tools.ps1.\)/{a=NR} /vsCodeExtensionUpdate.WaitForExit/{b=NR} END{exit !(a && b && a<b)}' "$repo_root/scripts/dotupgrade.ps1" ||
+    fail "dotupgrade.ps1: the background extension update must be waited for after the AI tools"
 
 # SSH: template renders [[data.ssh_hosts]] with the self-documenting comment.
 grep -Fq 'ssh_hosts' "$ssh_tmpl" || fail "ssh template: no ssh_hosts rendering"

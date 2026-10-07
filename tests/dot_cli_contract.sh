@@ -61,7 +61,7 @@ grep -Fq 'Get-LiveAgentProcess -Name opencode, claude, codex, agy, serena' "$up_
     fail "$up_ps1: no live-session scan"
 grep -Fq 'pgrep -x' "$up_sh" || fail "$up_sh: no live-session scan (pgrep)"
 grep -Fq 'brew upgrade' "$up_sh" || fail "$up_sh: no macOS sweep"
-grep -Fq 'apt-get upgrade' "$up_sh" || fail "$up_sh: no apt sweep"
+grep -Fq 'sudo apt-get "${apt_q[@]}" upgrade -y' "$up_sh" || fail "$up_sh: no apt sweep"
 
 # `dot up` never upgrades: the installers it runs may refresh an index and install what is
 # missing, but must carry no package sweep (the Linux one ran `apt upgrade -y` until 2026-10-05,

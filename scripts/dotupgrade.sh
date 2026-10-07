@@ -174,7 +174,11 @@ case "$(uname -s)" in
     Linux)
         if command -v apt-get &>/dev/null; then
             echo "  Upgrading apt packages..."
-            if sudo apt-get update; then
+            # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
+            # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
+            apt_q=(-qq)
+            if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
+            if sudo apt-get "${apt_q[@]}" update; then
                 if dock_docker_running; then
                     dock_pending="$(dock_pending_linux | tr '\n' ' ')"
                     if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
@@ -186,7 +190,13 @@ case "$(uname -s)" in
                         echo "  Docker packages held back for this run: ${dock_pending% }"
                     fi
                 fi
-                sudo apt-get upgrade -y
+                apt_list="$(apt-get -s upgrade 2>/dev/null | awk '/^Inst / { print $2 }' | tr '\n' ' ')" || apt_list=""
+                if [ -n "${apt_list// /}" ]; then
+                    echo "  apt: upgrading $(wc -w <<<"$apt_list") package(s): ${apt_list% }"
+                else
+                    echo "  apt: nothing to upgrade"
+                fi
+                sudo apt-get "${apt_q[@]}" upgrade -y
                 dock_unhold
             fi
         else
@@ -216,15 +226,24 @@ esac
 dot_timing_mark 'VS Code extensions'
 # --- 1b. VS Code extensions: `dot up` only installs missing ones; updates are this command's
 # job. Skipped quietly when VS Code is absent; a failure never aborts.
+# Run in the background, alongside the AI tools below: on WSL it took a minute on its own, and
+# nothing after it depends on it. Waited for (and reported) before the summary.
+vscode_ext_pid=""
 if command -v code &>/dev/null; then
-    echo "  Updating VS Code extensions..."
-    timeout 300 code --update-extensions >/dev/null 2>&1 || echo "  VS Code extension update did not finish cleanly - continuing."
+    echo "  Updating VS Code extensions (in the background)..."
+    timeout 300 code --update-extensions >/dev/null 2>&1 &
+    vscode_ext_pid=$!
 fi
 
 dot_timing_mark 'AI tools'
 # --- 2. AI tools: the update_ai_tools section, defer-aware. ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/update_ai_tools.sh"
+
+if [ -n "$vscode_ext_pid" ]; then
+    dot_timing_mark 'VS Code extensions (waiting)'
+    if ! wait "$vscode_ext_pid"; then echo "  VS Code extension update did not finish cleanly - continuing."; fi
+fi
 
 # --- Known outside-package-managers artifacts: no manager owns these, so
 # the sweep above cannot upgrade them (Linux: direct .debs with no repo -

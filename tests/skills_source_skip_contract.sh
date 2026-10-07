@@ -38,6 +38,7 @@ cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
     ls-remote)
+        if [ -n "${GIT_LOG:-}" ]; then echo "$2" >>"$GIT_LOG"; fi
         [ -n "${FAKE_HEAD:-}" ] || exit 2
         printf '%s\tHEAD\n' "$FAKE_HEAD"
         ;;
@@ -96,14 +97,21 @@ export FAKE_HEAD=aaaaaaa
 [ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
 if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
 # every "installed" line says why: a reinstall on every run must be explainable from the log
-grep -Fq "Matt Pocock's skills: installed (" "$tmp/last-run.txt" || fail "a: an install line must carry its reason (got: $(grep -F 'installed' "$tmp/last-run.txt" | head -2 | tr '
-' ' '))"
+grep -Fq "Matt Pocock's skills: installed (" "$tmp/last-run.txt" || fail "a: an install line must carry its reason (got: $(grep -F 'installed' "$tmp/last-run.txt" | head -2 | tr '\n' ' '))"
 grep -q "missing from\|no install recorded" "$tmp/last-run.txt" || fail "a: a fresh install's reason must be a missing skill or no record"
 grep -Fq 'mp-code-review: installed' "$tmp/last-run.txt" || fail "a: the staged mp-code-review install must say so (every other source prints a line; got: $(grep -c . "$tmp/last-run.txt") lines)"
 
 [ "$(run_all)" = 'adds=0 installed=20' ] || fail "b: unchanged head must install nothing and still report 20 (got $(run_all))"
 [ "$(grep -c ': up to date' "$tmp/last-run.txt" || true)" = 8 ] || fail "b: every source must say '<name>: up to date' exactly once (got: $(grep -c ': up to date' "$tmp/last-run.txt" || true))"
 if grep -q 'Installing ' "$tmp/last-run.txt"; then fail "b: a skipped source must not print 'Installing ...' first (the duplicate-message bug)"; else pass; fi
+# every upstream is asked once per run, in one parallel round: 6 repos, not 8 sequential calls
+export GIT_LOG="$tmp/git.log"
+: >"$GIT_LOG"
+run_all >/dev/null
+if [ "$(wc -l <"$GIT_LOG" | tr -d ' ')" != 6 ] || [ "$(sort -u "$GIT_LOG" | wc -l | tr -d ' ')" != 6 ]; then
+    fail "b: each upstream repo must be asked exactly once per run (asked: $(tr '\n' ' ' <"$GIT_LOG"))"
+fi
+unset GIT_LOG
 
 FAKE_HEAD=bbbbbbb
 [ "$(run_all)" = 'adds=8 installed=20' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
@@ -231,5 +239,17 @@ PSEOF
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'
 fi
+
+# PowerShell: every upstream HEAD is fetched in one parallel round before the first source is
+# checked, and Get-SkillsRemoteHead answers from that cache (no second ls-remote per repo).
+for f in "$repo_root/run_onchange_install_packages.ps1.tmpl" "$repo_root/scripts/update_ai_tools.ps1"; do
+    awk '/Start-SkillsHeadPrefetch -Repo/{a=NR} /Invoke-SkillsSource -Label/{if(!b)b=NR} END{exit !(a && b && a<b)}' "$f" ||
+        fail "$f: Start-SkillsHeadPrefetch must run before the first Invoke-SkillsSource"
+done
+if command -v pwsh >/dev/null 2>&1; then
+    cached="$(pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . '$(winpath "$repo_root/scripts/lib/ps-skills.ps1")'; \$script:SkillsHeadCache['o/r'] = 'abc123'; function git { throw 'git must not run for a cached repo' }; Get-SkillsRemoteHead -Repo 'o/r'" 2>&1 | tr -d '\r')"
+    [ "$cached" = abc123 ] || fail "Get-SkillsRemoteHead must answer a prefetched repo from the cache (got: $cached)"
+fi
+pass
 
 finish
