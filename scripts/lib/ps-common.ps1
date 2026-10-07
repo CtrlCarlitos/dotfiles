@@ -913,13 +913,19 @@ function Get-WingetMigrationPlan {
         $f = $line -split '\|', 5
         if ($f.Count -lt 3 -or -not $have.Contains($f[0])) { continue }
         $staying = @()
+        $after = @()
         foreach ($k in $DependedOn.Keys) {
-            if ($k -ieq $f[0]) { $staying = @($DependedOn[$k] | Where-Object { $have.Contains($_) -and -not $leaving.Contains($_) }) }
+            if ($k -ieq $f[0]) {
+                $staying = @($DependedOn[$k] | Where-Object { $have.Contains($_) -and -not $leaving.Contains($_) })
+                # Dependents that are moving too: Chocolatey refuses to remove this one while they
+                # are installed, so it goes after them (opencode before its fzf and ripgrep).
+                $after = @($DependedOn[$k] | Where-Object { $have.Contains($_) -and $leaving.Contains($_) })
+            }
         }
         if ($staying.Count -gt 0) {
             $plan += [pscustomobject]@{
                 Action = 'keep'; Choco = $f[0]; Winget = $f[1]; Id = $f[2]; Args = ''
-                Risk = "Chocolatey's $($staying -join ', ') depends on it"; Companion = ''
+                Risk = "Chocolatey's $($staying -join ', ') depends on it"; Companion = ''; After = @()
             }
             continue
         }
@@ -930,13 +936,14 @@ function Get-WingetMigrationPlan {
             # the other half of a meta/.install pair: git.install's meta `git`, cmake's `cmake.install`
             Companion = $(if ($f[0] -match '\.install$') { $meta = $f[0] -replace '\.install$', ''; if ($have.Contains($meta)) { $meta } else { '' } }
                           elseif ($have.Contains("$($f[0]).install")) { "$($f[0]).install" } else { '' })
+            After = @($after | Where-Object { $_ -ine "$($f[0]).install" -and $_ -ine ($f[0] -replace '\.install$', '') })
         }
     }
     foreach ($name in $script:WingetMigrationDrops.Keys) {
         if (-not $have.Contains($name)) { continue }
         $plan += [pscustomobject]@{
             Action = 'drop'; Choco = $name; Winget = ''; Id = $name; Args = ''
-            Risk = $script:WingetMigrationDrops[$name]; Companion = ''
+            Risk = $script:WingetMigrationDrops[$name]; Companion = ''; After = @()
         }
     }
     return $plan

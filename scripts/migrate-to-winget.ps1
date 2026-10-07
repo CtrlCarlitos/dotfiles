@@ -50,21 +50,36 @@ $plan = @(Get-WingetMigrationPlan -CatalogLine $catalogLines -Installed $install
 if ($plan.Count -eq 0) { Write-Host "Nothing to move: no Chocolatey copy of a winget-managed tool, nothing to drop."; exit 0 }
 
 $batch = @($plan | Where-Object { $_.Action -eq 'move' -and -not $_.Risk })
+# Moved last: a tool another moving Chocolatey package depends on (fzf and ripgrep under opencode).
 $careful = @($plan | Where-Object { $_.Action -eq 'move' -and $_.Risk })
 $drops = @($plan | Where-Object { $_.Action -eq 'drop' })
 Write-Host "Chocolatey -> winget plan:"
 if ($batch.Count) { Write-Host "  Move as one batch ($($batch.Count)): $(($batch | ForEach-Object { $_.Choco }) -join ', ')" }
+foreach ($b in @($batch | Where-Object { @($_.After).Count -gt 0 })) { Write-Host "  (in the batch) $($b.Choco) moves after $(@($b.After) -join ', ')" }
 foreach ($c in $careful) { Write-Host "  Move, asked on its own: $($c.Choco) -> $($c.Winget)  ($($c.Risk))" }
 foreach ($d in $drops) { Write-Host "  Drop: $($d.Choco)  ($($d.Risk))" }
 foreach ($k in @($plan | Where-Object { $_.Action -eq 'keep' })) { Write-Host "  Kept on Chocolatey: $($k.Choco)  ($($k.Risk))" }
 if ($ListOnly) { exit 0 }
 
 $results = @()
+$late = @()
 if ($batch.Count -and (Read-Host "Move the batch of $($batch.Count) tools now? [y/N]").Trim().ToLower() -eq 'y') {
-    foreach ($b in $batch) { $results += Invoke-WingetMigrationItem -Item $b }
+    foreach ($b in $batch) { if (@($b.After).Count -gt 0) { $late += $b } else { $results += Invoke-WingetMigrationItem -Item $b } }
 }
 foreach ($c in $careful) {
     if ((Read-Host "Move $($c.Choco) -> $($c.Winget)? $($c.Risk) [y/N]").Trim().ToLower() -eq 'y') { $results += Invoke-WingetMigrationItem -Item $c }
+}
+# The tools other moving packages depend on, once those are gone. A dependent you kept stays on
+# Chocolatey, and so does this one (Chocolatey would refuse to remove it).
+$chocoNow = @(choco list --limit-output | ForEach-Object { ($_ -split '\|')[0] })
+foreach ($l in $late) {
+    $stillThere = @($l.After | Where-Object { $chocoNow -contains $_ })
+    if ($stillThere.Count -gt 0) {
+        Write-Host "  - $($l.Choco): kept on Chocolatey ($($stillThere -join ', ') still depends on it)" -ForegroundColor Yellow
+        $results += 'skipped'
+    } else {
+        $results += Invoke-WingetMigrationItem -Item $l
+    }
 }
 if ($drops.Count -and (Read-Host "Drop $(($drops | ForEach-Object { $_.Choco }) -join ', ')? [y/N]").Trim().ToLower() -eq 'y') {
     foreach ($d in $drops) { $results += Invoke-WingetMigrationItem -Item $d }

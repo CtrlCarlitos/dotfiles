@@ -586,3 +586,9 @@ catalog:
       group: opencode_desktop
       winget: SST.OpenCodeDesktop
       choco_was: opencode-desktop
+    - id: opencode-cli
+      group: opencode_cli
+      winget: SST.opencode
+      choco_was: opencode
+      note: "Windows only here: the Unix installers use OpenCode's own install script. Chocolatey's opencode package pulled fzf, ripgrep and unzip in as dependencies, which kept those on Chocolatey too"
+      migrate_risk: "close every opencode session first - its binary is replaced (fzf and ripgrep can move after it)"

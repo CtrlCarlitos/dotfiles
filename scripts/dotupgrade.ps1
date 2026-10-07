@@ -104,6 +104,8 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     if ($dockerKept) { $wingetRunningNote = "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
     $wingetHold = @()
     if ($dockerKept) { $wingetHold += 'Docker.DockerDesktop' }   # running: its installer would fail mid-sweep
+    # A live opencode session holds its binary open; replacing it races the running process.
+    if (@($defer) -contains 'opencode') { $wingetHold += 'SST.opencode' }
     # Claude Desktop and Claude Code share the process name claude.exe, and its installer closes
     # claude.exe (Chocolatey's force-killed every one, Claude Code sessions included). While any
     # runs, Claude Desktop waits for the next run - the same rule the choco sweep keeps.
