@@ -147,7 +147,8 @@ stop_codex_daemon() {
     [ -n "$pids" ] || return 0
     command -v codex >/dev/null 2>&1 && timeout 20 codex app-server daemon stop >/dev/null 2>&1
     # The polite stop did not take (or the CLI is too old to have it): the daemon is safe to end.
-    for pid in $(codex_daemon_pids); do kill -TERM "$pid" 2>/dev/null; done
+    # The tree: the daemon runs helpers (code-mode host, command runner, voice host).
+    for pid in $(codex_daemon_pids); do stop_pid_tree "$pid"; done
     echo "  Stopped Codex's app-server daemon (it restarts on demand, on the new version)."
 }
 live codex || stop_codex_daemon

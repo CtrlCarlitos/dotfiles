@@ -38,6 +38,8 @@ if (-not (Test-LiveProcess @('codex'))) {
 $defer = @()
 if (Test-LiveProcess @('codex'))  { $defer += 'codex' }
 if (Test-LiveProcess @('opencode','claude','codex','agy')) { $defer += 'graft' }
+# A graft MCP server an ended session left running still holds graft's files open.
+elseif (@(Get-OrphanAgentHelper | Where-Object { $_.Kind -eq 'graft MCP server' }).Count -gt 0) { $defer += 'graft' }
 if (Test-LiveProcess @('serena')) { $defer += 'serena' }
 if (Test-LiveProcess @('opencode')) { $defer += 'opencode' }
 $env:DOTUPGRADE_DEFER = ($defer -join ',')

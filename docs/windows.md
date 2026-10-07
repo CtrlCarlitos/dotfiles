@@ -216,10 +216,27 @@ Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and def
 ```
 
 The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE
-and OpenCode Desktop, recognised by their install folder (several share a process name with a CLI:
-claude, codex, opencode). Their installers cannot replace a running app, and Claude Desktop's
-closes every `claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a
-session: it never defers a CLI upgrade, and closing it loses nothing.
+and OpenCode Desktop, recognised by their install folder: every process running from it belongs
+to the app, its background helpers included (Antigravity's language servers, the Store app's
+command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
+Several share a process name with a CLI (claude, codex, opencode), so the name alone never
+decides. Their installers cannot replace a running app, and Claude Desktop's closes every
+`claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a session: it
+never defers a CLI upgrade, and closing it loses nothing.
+
+Background work is covered too:
+
+- A session's own background work - Claude Code's background tasks (what `/exit` asks about),
+  the MCP servers an agent starts (graft, Serena), the language servers OpenCode starts - is
+  its child process tree and stops with the session.
+- What an ENDED session left running (a background task kept alive, an orphaned graft MCP
+  server) is listed as "Background work still running after its session ended". A leftover
+  graft MCP server keeps graft's files open, so graft's upgrade waits while one runs.
+- `opencode serve` / `opencode web` is listed as "OpenCode server": it is a session (its
+  upgrade waits) but not an interactive one.
+- Codex's app-server daemon is not offered: with no Codex session left it is stopped
+  automatically, with its helpers (code-mode host, command runner, voice host); it restarts on
+  demand on the new version.
 
 `y` stops all of them, `s` asks per session and per app, anything else (the default) keeps today's
 defer-and-report. Stopping ends that session, so unsaved context is lost unless it can be
