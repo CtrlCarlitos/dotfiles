@@ -48,7 +48,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime
     # like the codex name. Updated only when installed and behind; `dot up` installs them.
     $npmTools = @()
-    try { $npmTools = @(((chezmoi execute-template '{{ range .catalog.packages }}{{ if hasKey . "npm" }}{{ .npm }} {{ end }}{{ end }}' | Out-String).Trim() -split ' ') | Where-Object { $_ }) } catch { Write-Verbose "npm tool list probe failed: $($_.Exception.Message)" }
+    # Templates with a double quote go to chezmoi on STDIN: Windows PowerShell 5.1 strips the
+    # quotes inside a native argument (`hasKey . "npm"` reached chezmoi as `hasKey . npm`).
+    try { $npmTools = @((('{{ range .catalog.packages }}{{ if hasKey . "npm" }}{{ .npm }} {{ end }}{{ end }}' | chezmoi execute-template | Out-String).Trim() -split ' ') | Where-Object { $_ }) } catch { Write-Verbose "npm tool list probe failed: $($_.Exception.Message)" }
     foreach ($npmTool in $npmTools) {
         npm ls -g --depth=0 $npmTool 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { continue }
@@ -114,7 +116,7 @@ if (($null -ne $curatedCatalog) -and (Test-Path -LiteralPath $curatedCatalog -Pa
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-Host "✨ Updating curated agent skills (Matt Pocock + Anthropic + Vercel Labs)..." -ForegroundColor Yellow
     # From .chezmoidata/agents.yaml, read at runtime (see $codexPkg above).
-    try { $skAgents = @(((chezmoi execute-template '{{ join "," .agents.skills.agents }}' | Out-String).Trim()) -split ',') } catch { $skAgents = @() }
+    try { $skAgents = @((('{{ join "," .agents.skills.agents }}' | chezmoi execute-template | Out-String).Trim()) -split ',') } catch { $skAgents = @() }
     # Shared with the installer (inlined there at render time): the "already installed from this
     # upstream commit?" check, so an unchanged source costs one git ls-remote instead of an npx fetch.
     if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
@@ -537,7 +539,7 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
         # compiled (crashes at startup; seen on WSL 2026-10-02). Hand npm the
         # installer's allow-list, read from the catalog like the codex package.
         $graftAllow = ''
-        try { $graftAllow = (chezmoi execute-template '{{ join "," .agents.npm.graft_allow_scripts }}' | Out-String).Trim() } catch { Write-Verbose "graft allow-scripts probe failed: $($_.Exception.Message)" }
+        try { $graftAllow = ('{{ join "," .agents.npm.graft_allow_scripts }}' | chezmoi execute-template | Out-String).Trim() } catch { Write-Verbose "graft allow-scripts probe failed: $($_.Exception.Message)" }
         # Only upgrade when the installed graft is not already the latest published one.
         $graftCurrent = ''
         try { $graftCurrent = Get-GraftCurrentVersion -VersionOutput ((graft version 2>$null) | Out-String) } catch { Write-Verbose "graft version probe failed: $($_.Exception.Message)" }
