@@ -547,6 +547,79 @@ function Invoke-LiveSessionStop {
     return $stopped
 }
 
+# --- Codex's platform binary (dot upgrade) --------------------------------------------------
+# Codex ships its native binary as an optional dependency per platform
+# (@openai/codex-win32-x64 -> npm:@openai/codex@<version>-win32-x64), published minutes AFTER
+# the main package. npm skips a missing optional dependency silently: a `dot upgrade` in that
+# gap removed the old binary, installed none, and every codex command died with "Missing
+# optional dependency" (2026-10-07) - while the version check said "codex is current".
+function Get-NpmPlatformTag {
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+    return "win32-$arch"
+}
+
+# $false only when <Package>@<Version> names a binary package for this platform that the
+# registry does not have yet. Unknown counts as published - the install goes ahead.
+function Test-NpmPlatformPublished {
+    param([Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][string]$Version)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $tag = Get-NpmPlatformTag
+        $json = (& npm view "$Package@$Version" optionalDependencies --json 2>$null | Out-String).Trim()
+        if (-not $json) { return $true }
+        $deps = $null
+        try { $deps = $json | ConvertFrom-Json } catch { return $true }
+        $prop = $deps.PSObject.Properties | Where-Object { $_.Name -eq "$Package-$tag" } | Select-Object -First 1
+        if (-not $prop) { return $true }
+        $spec = [string]$prop.Value
+        $spec = if ($spec -like 'npm:*') { $spec.Substring(4) } else { "$Package-$tag@$spec" }
+        $found = (& npm view $spec version 2>$null | Out-String).Trim()
+        return [bool]$found
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
+function Test-CodexWork {
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & codex --version *> $null; return ($LASTEXITCODE -eq 0) }
+    catch { return $false }
+    finally { $ErrorActionPreference = $previous }
+}
+
+# Current AND runnable -> nothing; the latest's binary for this platform not published yet ->
+# keep what is installed; otherwise install, then make sure it starts.
+function Update-CodexNpm {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$Package)
+    if ((Test-CodexWork) -and (Test-NpmGlobalCurrent $Package)) {
+        Write-Host "  codex is current ($script:NpmCurrentVersion)"
+        return
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $want = (& npm view $Package version 2>$null | Out-String).Trim()
+    $ErrorActionPreference = $previous
+    $tag = Get-NpmPlatformTag
+    if ($want -and -not (Test-NpmPlatformPublished -Package $Package -Version $want)) {
+        if (Test-CodexWork) {
+            Write-Host "  codex $want is out, but its $tag binary is not published yet - keeping the installed one (the next dot upgrade takes it)" -ForegroundColor Yellow
+        } else {
+            Write-Host "  codex cannot start (its platform binary is missing) and $want's $tag binary is not published yet - re-run dot upgrade in a few minutes" -ForegroundColor Red
+        }
+        return
+    }
+    if (-not $PSCmdlet.ShouldProcess($Package, 'npm install -g')) { return }
+    $ErrorActionPreference = 'Continue'
+    & npm install -g "$($Package)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+    $ErrorActionPreference = $previous
+    if (-not (Test-CodexWork)) {
+        Write-Host "  codex was installed but cannot start (npm skipped its platform binary) - re-run dot upgrade in a few minutes" -ForegroundColor Red
+    }
+}
+
 # --- "Is it already current?" (dot upgrade) ----------------------------------------------
 # `graft upgrade` ran every time (0.21.1 -> 0.21.1 took 41 s on WSL) and the codex
 # `npm install -g` another ~9 s. Ask first; anything unknown (empty answers, an unreachable
