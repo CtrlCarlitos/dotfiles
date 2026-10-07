@@ -103,6 +103,11 @@ $script:sweep = @()
 $script:listing = @('No installed package found matching input criteria.')
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
 Write-Output ('idle-says-nothing=' + ($script:out -match 'Nothing to upgrade in winget'))
+# the sweep's own "nothing" wording stays in the log, not on screen next to the summary
+$script:sweep = @('No installed package found matching input criteria.')
+Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
+Write-Output ('idle-sweep-quiet=' + ((-not ($script:out -match 'No installed package found')) -and ($script:out -match 'Nothing to upgrade in winget')))
+$script:sweep = @()
 
 $script:sweepExit = 5
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
@@ -284,6 +289,7 @@ expect 'mixed-other=True'
 expect 'noblock-no-probe=True'
 expect 'pending-no-upgraded-claim=True'
 expect 'idle-says-nothing=True'
+expect 'idle-sweep-quiet=True'
 expect 'fail-warns=True'
 expect 'fail-exit=5'
 expect 'log-header=True'

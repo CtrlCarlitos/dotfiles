@@ -78,7 +78,7 @@ status, not just permissions.
 | `dco` / `dcupd` / `dcdn` / `dclf` | `docker compose` / `up -d` / `down` / `logs -f` (Oh-My-Zsh `docker-compose` plugin) |
 | `dp` (or `devprofile`) | Show/switch which git identity is active — bare `dp` shows the current one |
 | `reload` / `zshrc` / `aliases` | Reload `.zshrc` / edit `.zshrc` / edit `.aliases.zsh` |
-| `dot up` | `chezmoi update --apply` + config re-init — pull and apply the latest dotfiles (never upgrades) |
+| `dot up` | pull, config re-init, one `chezmoi apply` — the latest dotfiles (never upgrades) |
 | `dot upgrade` | upgrade all tooling (packages + AI tools, session-gated) |
 
 Oh-My-Zsh's `git` plugin also loads a full set of git shortcuts (`gst`, `gco`, `gcmsg`, `gp`, `gl`,

@@ -184,29 +184,23 @@ alias agy='agy --dangerously-skip-permissions'
 # `dot backup` / `dot restore` / `dot remote` / `dot version`;
 # wiring lives in dot_zshrc and scripts/dotupgrade.*)
 #-------------------------------------------------------------------------------
-# `dot up` NEVER upgrades: chezmoi update owns the pull; init re-runs the
-# config template AFTER the pull (init does not fetch); a final apply
-# fires only when init actually rewrote the config. `dot upgrade` is the
+# `dot up` NEVER upgrades: chezmoi update pulls WITHOUT applying, init re-runs
+# the config template on the pulled source (init does not fetch), then ONE
+# apply runs with the fresh config. Applying before init ran the installers
+# twice whenever the config template changed (once with the old config, once
+# after init) and printed chezmoi's "config file template has changed" warning. `dot upgrade` is the
 # single upgrade owner (apt/brew sweep + AI tools, live-session gated,
 # no-op inside devcontainers - image rebuilds own those).
 dot() {
-    local sub="${1:-}" cfg before after
+    local sub="${1:-}"
     # scripts/ lives in the SOURCE repo (never deployed to $HOME); DOTFILES_DIR
     # (exported by ~/.zshrc) is the source path and the layout's single source.
     local repo_scripts="${DOTFILES_DIR:-$(chezmoi source-path)}/scripts"
     case "$sub" in
         up)
-            chezmoi update --apply || return
-            cfg="$HOME/.config/chezmoi/chezmoi.toml"
-            before=""; [ -f "$cfg" ] && before="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
+            chezmoi update --apply=false || return
             chezmoi init || return
-            after=""; [ -f "$cfg" ] && after="$(md5 -q "$cfg" 2>/dev/null || md5sum "$cfg" | cut -d' ' -f1)"
-            # An if, not `[ ... ] && cmd`: the config being unchanged is the
-            # NORMAL path, and the failed test there made the whole function
-            # return 1 - breaking every `dot up && ...` chain (#116).
-            if [ "$before" != "$after" ]; then
-                chezmoi apply
-            fi
+            chezmoi apply || return
             # zsh caches every PATH dir's listing on first command lookup
             # (HASH_LIST_ALL): installs from this run stay invisible to THIS
             # shell until the cache is dropped - `codex` was "not found" in a

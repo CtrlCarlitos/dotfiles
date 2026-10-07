@@ -493,14 +493,18 @@ function Invoke-GraftNpmInstall {
 # Claude Code's CLI has the same image name, so a live Claude Code session dies with it
 # (seen in the dot upgrade log: "Terminating Claude process..."). While any claude.exe is
 # running that one package is left out of the sweep; the next quiet dot upgrade takes it.
+# Only a package Chocolatey actually has is excluded (its lib\<name> folder): once Claude
+# Desktop or Docker Desktop moved to winget, the --except made Chocolatey warn "Some packages
+# specified in the 'except' list were not found" on every run.
 function Get-ChocoUpgradeArgument {
-    param([switch]$KeepDockerDesktop)
+    param([switch]$KeepDockerDesktop, [string]$ChocoLib)
+    if (-not $ChocoLib) { $ChocoLib = Join-Path $(if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }) 'lib' }
     $chocoArguments = @('upgrade', 'all', '-y', '--no-progress')
     $except = @()
-    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) { $except += 'claude' }
+    if ((Test-Path -LiteralPath (Join-Path $ChocoLib 'claude')) -and @(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) { $except += 'claude' }
     # Docker Desktop's installer cannot replace a running app: when the operator kept it running,
     # leave its package out instead of letting the installer fail or hang.
-    if ($KeepDockerDesktop) { $except += 'docker-desktop' }
+    if ($KeepDockerDesktop -and (Test-Path -LiteralPath (Join-Path $ChocoLib 'docker-desktop'))) { $except += 'docker-desktop' }
     if ($except.Count -gt 0) { $chocoArguments += ('--except=' + ($except -join ',')) }
     return $chocoArguments
 }
@@ -694,6 +698,8 @@ function Invoke-WingetUpgradeAll {
             if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
             # the blocked note is explained (or repeated) by the summary below
             if ($line -match '\d+ package\(s\) have upgrades blocked') { return }
+            # winget's wording for "nothing to upgrade"; the summary below says it plainly
+            if ($line -match '^\s*No installed package found matching input criteria') { return }
             Write-Host $line
         }
         $code = [int]$LASTEXITCODE

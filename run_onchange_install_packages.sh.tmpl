@@ -32,7 +32,7 @@ fi
 {{- /* VS Code settings: this machine's chezmoi.toml [data.vscode.settings] (seeded by
        `chezmoi init` from .chezmoitemplates/vscode-settings.toml). Every tier is read with an
        empty fallback: a tier deleted there is empty, and a config written before the move
-       (the first `chezmoi update --apply` of `dot up` runs before its `chezmoi init`)
+       (a config written before the settings moved, until its first `chezmoi init`)
        renders with no settings and a note instead of failing. */ -}}
 {{ $vsCfg := dict -}}
 {{- $vsCfgMissing := true -}}
@@ -1077,8 +1077,8 @@ configure_vscode() {
     # class). Semantics identical to the .ps1 twin: FORCED font keys,
     # UPSERT-if-absent defaults, MERGE-only sub-keys for excludes.
     configure_vscode_font() {
-        # The first `chezmoi update --apply` of `dot up` renders with the config from before the
-        # settings moved there; `dot up` runs `chezmoi init` next, and the apply after it has them.
+        # A config written before the settings moved there has none until its next `chezmoi init`
+        # (`dot up` runs init before it applies).
         # A shell test, not a template `if`: CI lints this template with its actions stripped.
         local vs_cfg_missing="{{ $vsCfgMissing }}"
         if [ "$vs_cfg_missing" = true ]; then

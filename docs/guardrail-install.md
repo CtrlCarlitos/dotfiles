@@ -149,7 +149,7 @@ shell gets exit 2). Bump the pin instead of working around that.
    runtime via `chezmoi execute-template`. `tests/update_guardrail_versions.sh`
    checks that no consumer hardcodes a tag.
 3. Commit and merge, then on each machine run `dot up` (an elevated shell on
-   Windows). It is `chezmoi update --apply`; the pin renders into the
+   Windows). It pulls, re-inits and applies once; the pin renders into the
    `run_onchange` installer, so the changed pin re-fires it in that same run,
    and it runs the new tag's installer. The installer updates the binary and
    runs `guardrail setup` to reconcile the registered handlers. `dot upgrade`
