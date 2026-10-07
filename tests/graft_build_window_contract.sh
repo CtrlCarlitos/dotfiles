@@ -7,7 +7,7 @@ set -euo pipefail
 # its own: with Windows Terminal as the default terminal, a "node.exe" Terminal window flashed
 # at the end of every agent turn that edited files (captured 2026-10-07, graft 0.21.1).
 # Repair-GraftBuildWindow (scripts/lib/ps-skills.ps1) adds windowsHide: true to that one call
-# until graft ships the fix. This pins, EXECUTED against fixture copies of the file:
+# until graft ships the fix (https://github.com/trailhq/Graft/issues/567). This pins, EXECUTED against fixture copies of the file:
 #   a. the 0.21.1 line          -> patched, windowsHide present, the rest byte-identical
 #   b. run again                -> ok (idempotent), file unchanged
 #   c. graft changed the line   -> changed, file untouched

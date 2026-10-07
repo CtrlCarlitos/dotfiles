@@ -273,7 +273,8 @@ function Select-GuardrailConsoleLine {
 # a console of its own. With Windows Terminal as the default terminal that console opens as a
 # Terminal window titled "C:\Program Files\nodejs\node.exe", at the end of every agent turn
 # that edited files, and closes when the build ends: the black flash (seen 2026-10-07, graft
-# 0.21.1; reported upstream to NanoNets/context-graph-engine). This adds windowsHide: true to
+# 0.21.1; reported upstream: https://github.com/trailhq/Graft/issues/567 - drop this once that
+# ships). This adds windowsHide: true to
 # that one call. Idempotent. Once graft hides it itself, or the line changes, it does nothing
 # and says which ('ok' / 'changed'); nothing else in the package is touched.
 # Returns: patched | ok | changed | absent | no-npm | skipped.
