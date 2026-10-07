@@ -68,6 +68,8 @@ sh_case() { # $1 = process table, $2 = CODEX_STOP_FAILS; prints "calls|kills|mes
     (
         export PROC_TABLE="$tmp/table" CALLS="$tmp/calls" CODEX_STOP_FAILS="$2" PATH="$tmp/bin:$PATH"
         kill() { echo "kill $*" >>"$tmp/kills"; }
+        # the daemon goes as a tree (its helpers: code-mode host, command runner, voice host)
+        stop_pid_tree() { echo "tree $*" >>"$tmp/kills"; }
         eval "$(cat "$tmp/daemon.sh")"
         msg="$(stop_codex_daemon)"
         printf '%s|%s|%s\n' "$(tr '\n' ';' <"$tmp/calls")" "$(tr '\n' ';' <"$tmp/kills")" "${msg:+stopped}"
@@ -78,12 +80,12 @@ cli='codex 200 /usr/lib/node_modules/@openai/codex/bin/codex'
 
 [ "$(sh_case "$daemon" 0)" = "codex app-server daemon stop;||stopped" ] \
     || fail "sh: a running daemon is stopped through the CLI (got $(sh_case "$daemon" 0))"
-[ "$(sh_case "$daemon" 1)" = "codex app-server daemon stop;|kill -TERM 100;|stopped" ] \
+[ "$(sh_case "$daemon" 1)" = "codex app-server daemon stop;|tree 100;|stopped" ] \
     || fail "sh: when the CLI stop does not take, the daemon pid is ended (got $(sh_case "$daemon" 1))"
 [ "$(sh_case "$cli" 0)" = "||" ] || fail "sh: a Codex CLI session alone is never touched (got $(sh_case "$cli" 0))"
 r="$(sh_case "$daemon
 $cli" 1)"
-[ "$r" = "codex app-server daemon stop;|kill -TERM 100;|stopped" ] || fail "sh: only the daemon pid is ended, never the CLI (got $r)"
+[ "$r" = "codex app-server daemon stop;|tree 100;|stopped" ] || fail "sh: only the daemon pid is ended, never the CLI (got $r)"
 [ "$(sh_case "" 0)" = "||" ] || fail "sh: nothing running means nothing happens"
 pass
 
@@ -107,6 +109,9 @@ function Start-Process {
     $p | Add-Member -MemberType ScriptMethod -Name Kill -Value { }
     $p
 }
+# The stubborn daemon goes as a TREE: it runs helpers (codex-code-mode-host, codex-command-runner,
+# codex-voice-host) that a plain Stop-Process would leave behind.
+function taskkill { $script:calls.Add("taskkill $($args -join ' ')"); $global:LASTEXITCODE = 0 }
 function Stop-Process { param($Id, [switch]$Force) $script:calls.Add("stop $Id") }
 function P($id, $path) { [pscustomobject]@{ ProcessName = 'codex'; Id = $id; Path = $path } }
 function Case($label, $rows, $fails) {
@@ -127,9 +132,9 @@ PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
     expect 'daemon=1|start app-server daemon stop'
-    expect 'daemon-stubborn=1|start app-server daemon stop;stop 100'
+    expect 'daemon-stubborn=1|start app-server daemon stop;taskkill /PID 100 /T /F'
     expect 'cli-only=0|'
-    expect 'both-stubborn=1|start app-server daemon stop;stop 100'
+    expect 'both-stubborn=1|start app-server daemon stop;taskkill /PID 100 /T /F'
     expect 'unreadable=0|'
     expect 'nothing=0|'
     pass

@@ -116,9 +116,18 @@ $script:stopped = @()
 $script:interactive = $true
 $script:prompts = 0
 function Get-Process {
-    param([Parameter(Position = 0)][string[]]$Name)
+    param([Parameter(Position = 0)][string[]]$Name, [int]$Id)
+    if ($Id) { return @($script:table | Where-Object { $_.Id -eq $Id }) }
+    if (-not $Name) { return @($script:table) }
     foreach ($n in $Name) { $script:table | Where-Object { $_.ProcessName -eq $n } }
 }
+# command lines and parents (Get-OrphanAgentHelper, the OpenCode server label); services
+$script:ptable = @()
+function Get-ProcessTable { return @($script:ptable) }
+$script:services = @{}
+$script:serviceStops = @()
+function Get-Service { param([string]$Name) if ($script:services.ContainsKey($Name)) { [pscustomobject]@{ Name = $Name; Status = $script:services[$Name] } } }
+function Stop-Service { param([string]$Name, [switch]$Force) $script:serviceStops += $Name }
 function Test-InteractiveConsole { return $script:interactive }
 function Read-Host { param($Prompt) $script:prompts++; return [string]$script:answers.Dequeue() }
 function Stop-AgentProcess { param($Process, [switch]$ResetTerminal) if ($ResetTerminal) { $script:resets++ }; $script:stopped += $Process.Id; return $true }
@@ -175,6 +184,48 @@ Write-Output ('desk-apps=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.L
 Write-Output ('desk-sessions=' + ((@(Get-LiveAgentProcess -Name @('opencode', 'claude', 'codex', 'agy', 'serena')) | ForEach-Object { $_.Id }) -join ','))
 $script:table = @($codexApp, $codexAppCli, $ocDesk)
 Write-Output ('desk-defers-nothing=' + (Test-LiveProcess @('codex', 'opencode', 'claude')))
+
+# Every process in an app's folder belongs to it - Antigravity's language server too.
+$agLs = P 'language_server' 803 'C:\Users\u\AppData\Local\Programs\antigravity\resources\bin\language_server.exe'
+$script:table = @($agDesk, $agLs)
+Write-Output ('desk-helpers=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.Label):$((@($_.Processes) | ForEach-Object { $_.Id }) -join '+')" }) -join ','))
+# The Codex Store app's sandbox service is stopped with the app; listed even with no window open.
+$script:services = @{ 'CodexSandboxService.OpenAI.Codex' = 'Running' }
+$script:serviceStops = @()
+Case 'desk-service' @() @('y')
+Write-Output ('desk-service-stopped=' + ($script:serviceStops -join ','))
+$script:services = @{ 'CodexSandboxService.OpenAI.Codex' = 'Stopped' }
+Case 'desk-service-idle' @() @('y')
+$script:services = @{}
+
+# Background work an ENDED session left: offered; the same work under a live session is not.
+# not R: that is a built-in alias (Invoke-History), and aliases win over functions
+function Row($id, $parent, $name, $cmd, $path = '') { [pscustomobject]@{ Id = $id; ParentId = $parent; Name = $name; Path = $path; CommandLine = $cmd } }
+$bgShell = Row 900 4242 'cmd.exe' 'cmd.exe /d /s /c "pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH""'
+$bgChild = Row 901 900 'pwsh.exe' 'pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH"'
+$graftTop = Row 910 4343 'cmd.exe' 'cmd.exe /d /s /c "npx ^"-y^" ^"@nanonets/graft^" ^"mcp^""'
+$graftNode = Row 911 910 'node.exe' 'node npx-cli.js -y @nanonets/graft mcp'
+$liveClaude = Row 200 1 'claude.exe' 'claude' 'C:\Users\u\.local\bin\claude.exe'
+$ownedShell = Row 920 200 'cmd.exe' 'cmd.exe /d /s /c "pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH""'
+$deskClaude = Row 501 1 'claude.exe' 'claude' 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.26454.0\claude.exe'
+$deskChild = Row 930 501 'cmd.exe' 'cmd.exe /c "pwsh -Command "$__claudeCodeScript = 1""'
+$script:ptable = @($bgShell, $bgChild, $graftTop, $graftNode, $liveClaude, $ownedShell, $deskClaude, $deskChild)
+Write-Output ('orphans=' + ((@(Get-OrphanAgentHelper) | ForEach-Object { "$($_.Kind)@$($_.Id)" }) -join ','))
+$script:table = @((P 'cmd' 900 'C:\Windows\System32\cmd.exe'), (P 'cmd' 910 'C:\Windows\System32\cmd.exe'))
+$script:stopped = @(); $script:prompts = 0
+$script:answers = [System.Collections.Queue]::new(); $script:answers.Enqueue('y')
+$result = @(Invoke-LiveSessionStop -Name @('opencode', 'claude', 'codex', 'agy', 'serena'))
+Write-Output ('orphans-stopped=' + ($script:stopped -join ',') + '|prompts=' + $script:prompts)
+$script:ptable = @()
+
+# OpenCode's server is labelled as one (still a session: it defers OpenCode's upgrade).
+$ocServe = P 'opencode' 950 'C:\Users\u\AppData\Local\Microsoft\WinGet\Links\opencode.exe'
+$script:ptable = @(Row 950 1 'opencode.exe' 'opencode.exe serve --port 4096 --hostname 127.0.0.1')
+$script:table = @($ocServe)
+$script:answers = [System.Collections.Queue]::new(); $script:answers.Enqueue('n')
+$label = (Invoke-LiveSessionStop -Name @('opencode') 6>&1 | Out-String)
+Write-Output ('server-label=' + ($label -match 'OpenCode server \(opencode serve\) - opencode \(pid 950'))
+$script:ptable = @()
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
@@ -200,6 +251,14 @@ PSEOF
     expect 'desk-apps=Claude Desktop:1,ChatGPT / Codex:2,Antigravity:1,OpenCode Desktop:1'
     expect 'desk-sessions=702,200'
     expect 'desk-defers-nothing=False'
+    expect 'desk-helpers=Antigravity:801+803'
+    expect 'desk-service=0||prompts=1'
+    expect 'desk-service-stopped=CodexSandboxService.OpenAI.Codex'
+    expect 'desk-service-idle=0||prompts=0'
+    # top of each orphaned chain only; owned by a live session (or by Claude DESKTOP, not a session) differs
+    expect 'orphans=Claude Code background task@900,graft MCP server@910,Claude Code background task@930'
+    expect 'orphans-stopped=900,910|prompts=1'
+    expect 'server-label=True'
     # A console agent ended by taskkill never switches off its TUI's terminal modes; they print as
     # stray characters. Stop-AgentProcess -ResetTerminal writes the switch-offs to its console
     # FIRST (and only then), and the sequence covers mouse, focus, paste, kitty keys, cursor.

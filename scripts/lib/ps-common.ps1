@@ -228,29 +228,89 @@ $script:NonSessionPathPattern = @{
 # The agent desktop apps (dot upgrade). Their installers cannot replace a running app, and
 # Claude Desktop shares claude.exe with Claude Code, so while any claude.exe runs the winget
 # sweep holds it - the stop offer used to list only the CLI sessions, and Claude Desktop held
-# itself out after the operator said yes (2026-10-07). Matched by name AND install folder:
-# several share a process name with a CLI (claude, codex, opencode).
+# itself out after the operator said yes (2026-10-07). Matched by install folder - EVERY
+# process running from it, so the background helpers go too (Antigravity's
+# language_server.exe, the IDE's language_server_windows_x64.exe, the Store app's
+# codex-command-runner) - never by name alone: several share a name with a CLI (claude, codex,
+# opencode). Service: a Windows service the app installs (stopped with it when running).
 $script:AgentDesktopApp = @(
-    [pscustomobject]@{ Label = 'Claude Desktop';   Name = @('claude');                                  Path = '\\AnthropicClaude\\' }
-    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Name = @('ChatGPT', 'codex', 'codex-command-runner'); Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)' }
-    [pscustomobject]@{ Label = 'Antigravity';      Name = @('Antigravity');                             Path = '\\Programs\\antigravity\\' }
-    [pscustomobject]@{ Label = 'Antigravity IDE';  Name = @('Antigravity IDE');                         Path = '\\Programs\\Antigravity IDE\\' }
-    [pscustomobject]@{ Label = 'OpenCode Desktop'; Name = @('OpenCode');                                Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\' }
+    [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = '' }
+    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex' }
+    [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = '' }
+    [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = '' }
+    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = '' }
 )
 
-# One entry per RUNNING desktop app: its label and all its processes. A process whose path
-# cannot be read is not claimed by any app (it stays whatever the session scan makes of it).
+# One entry per RUNNING desktop app: its label, all its processes, and its service when that
+# runs. A process whose path cannot be read is not claimed by any app.
 function Get-AgentDesktopApp {
     param([int[]]$ExcludeId = @())
+    $all = @(Get-Process -ErrorAction SilentlyContinue)
     foreach ($app in $script:AgentDesktopApp) {
-        $procs = @(foreach ($n in $app.Name) {
-            foreach ($process in @(Get-Process $n -ErrorAction SilentlyContinue)) {
-                $path = $null
-                try { $path = $process.Path } catch { $path = $null }
-                if ($path -and $path -match $app.Path -and $ExcludeId -notcontains $process.Id) { $process }
-            }
+        $procs = @(foreach ($process in $all) {
+            $path = $null
+            try { $path = $process.Path } catch { $path = $null }
+            if ($path -and $path -match $app.Path -and $ExcludeId -notcontains $process.Id) { $process }
         })
-        if ($procs.Count -gt 0) { [pscustomobject]@{ Label = $app.Label; Processes = $procs } }
+        $service = ''
+        if ($app.Service) {
+            $svc = Get-Service -Name $app.Service -ErrorAction SilentlyContinue
+            if ($svc -and "$($svc.Status)" -eq 'Running') { $service = $app.Service }
+        }
+        if ($procs.Count -gt 0 -or $service) { [pscustomobject]@{ Label = $app.Label; Processes = $procs; Service = $service } }
+    }
+}
+
+# --- Background work an ENDED session left running (dot upgrade) -------------------------------
+# A Claude Code background task (the shells `/exit` asks about) and the MCP servers an agent
+# starts (graft's `npx @nanonets/graft mcp` chain) are children of their session, so stopping
+# the session takes them along. When the session ended WITHOUT them - a background task left
+# running, an MCP server orphaned - nothing listed them, and a leftover graft MCP server keeps
+# graft's files open while npm replaces them. Found by command line; only those with no live
+# agent session above them; only the top of each chain (its tree goes with it).
+function Get-ProcessTable {
+    @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
+        [pscustomobject]@{ Id = [int]$_.ProcessId; ParentId = [int]$_.ParentProcessId; Name = [string]$_.Name; Path = [string]$_.ExecutablePath; CommandLine = [string]$_.CommandLine }
+    })
+}
+
+function Get-AgentHelperKind {
+    param([string]$CommandLine)
+    if ($CommandLine -match '__claudeCodeScript|CLAUDE_CODE_SHELL') { return 'Claude Code background task' }
+    if ($CommandLine -match '@nanonets[\\/]graft|(^|[\\/"\s])graft(\.cmd)?"?\s+mcp\b') {
+        if ($CommandLine -match '\bmcp\b') { return 'graft MCP server' }
+    }
+    return ''
+}
+
+function Get-OrphanAgentHelper {
+    param([int[]]$ExcludeId = @())
+    $table = @(Get-ProcessTable)
+    $byId = @{}
+    foreach ($row in $table) { $byId[$row.Id] = $row }
+    $isSession = {
+        param($row)
+        if ($row.Name -notmatch '^(claude|codex|opencode|agy|serena)(\.exe)?$') { return $false }
+        $stem = ($row.Name -replace '\.exe$', '').ToLower()
+        if ($row.Path -and $script:NonSessionPathPattern.ContainsKey($stem)) {
+            foreach ($pattern in $script:NonSessionPathPattern[$stem]) { if ($row.Path -match $pattern) { return $false } }
+        }
+        return $true
+    }
+    foreach ($row in $table) {
+        $kind = Get-AgentHelperKind -CommandLine $row.CommandLine
+        if (-not $kind -or $ExcludeId -contains $row.Id) { continue }
+        # the top of the chain only: its parent is not the same kind of helper
+        if ($byId.ContainsKey($row.ParentId) -and (Get-AgentHelperKind -CommandLine $byId[$row.ParentId].CommandLine) -eq $kind) { continue }
+        $owned = $false
+        $seen = @{}
+        $id = $row.ParentId
+        while ($id -gt 0 -and $byId.ContainsKey($id) -and -not $seen.ContainsKey($id)) {
+            $seen[$id] = $true
+            if (& $isSession $byId[$id]) { $owned = $true; break }
+            $id = $byId[$id].ParentId
+        }
+        if (-not $owned) { [pscustomobject]@{ Kind = $kind; Id = $row.Id; CommandLine = $row.CommandLine } }
     }
 }
 
@@ -305,7 +365,9 @@ function Stop-CodexDaemon {
     }
     # The polite stop did not take (or the CLI is too old to have it): the daemon is safe to end.
     foreach ($left in @(Get-CodexDaemonProcess)) {
-        try { Stop-Process -Id $left.Id -Force -ErrorAction Stop } catch { Write-Verbose "daemon pid $($left.Id): $($_.Exception.Message)" }
+        # The tree: the daemon runs helpers (codex-code-mode-host, codex-command-runner,
+        # codex-voice-host) that a plain Stop-Process would leave behind.
+        & taskkill /PID $left.Id /T /F *> $null
     }
     return $running.Count
 }
@@ -412,22 +474,45 @@ function Invoke-LiveSessionStop {
     if ($env:DOTUPGRADE_NO_PROMPT -eq '1') { return @() }
     $procs = @(Get-StoppableAgentProcess -Name $Name -ExcludeId $ExcludeId)
     $apps = @(Get-AgentDesktopApp -ExcludeId $ExcludeId)
-    if ($procs.Count -eq 0 -and $apps.Count -eq 0) { return @() }
+    $orphans = @(Get-OrphanAgentHelper -ExcludeId $ExcludeId)
+    if ($procs.Count -eq 0 -and $apps.Count -eq 0 -and $orphans.Count -eq 0) { return @() }
     if (-not (Test-InteractiveConsole)) { return @() }
 
-    # One list: each session, then each desktop app as a whole (all of its processes).
+    # One list: each session, each desktop app as a whole, each helper an ended session left.
+    # `opencode serve` / `opencode web` is OpenCode's server, not an interactive session: say so.
+    $commandLines = @{}
+    if (@($procs | Where-Object { $_.ProcessName -eq 'opencode' }).Count -gt 0) {
+        foreach ($row in @(Get-ProcessTable)) { $commandLines[$row.Id] = $row.CommandLine }
+    }
     $items = @()
-    foreach ($p in $procs) { $items += [pscustomobject]@{ Label = (Format-LiveProcess $p); Processes = @($p); Desktop = $false } }
-    foreach ($a in $apps) { $items += [pscustomobject]@{ Label = "$($a.Label) (desktop app, $(@($a.Processes).Count) process(es))"; Processes = @($a.Processes); Desktop = $true } }
-    if ($procs.Count -gt 0) {
+    foreach ($p in $procs) {
+        $label = Format-LiveProcess $p
+        if ($p.ProcessName -eq 'opencode' -and "$($commandLines[[int]$p.Id])" -match '\s(serve|web)\b') { $label = "OpenCode server (opencode $($Matches[1])) - $label" }
+        $items += [pscustomobject]@{ Label = $label; Processes = @($p); Kind = 'session'; Service = '' }
+    }
+    foreach ($a in $apps) {
+        $what = @("$(@($a.Processes).Count) process(es)")
+        if ($a.Service) { $what += "service $($a.Service)" }
+        $items += [pscustomobject]@{ Label = "$($a.Label) (desktop app, $($what -join ', '))"; Processes = @($a.Processes); Kind = 'desktop'; Service = $a.Service }
+    }
+    foreach ($o in $orphans) {
+        $p = Get-Process -Id $o.Id -ErrorAction SilentlyContinue
+        if ($p) { $items += [pscustomobject]@{ Label = "$($o.Kind) left by an ended session (pid $($o.Id))"; Processes = @($p); Kind = 'orphan'; Service = '' } }
+    }
+    if (@($items | Where-Object { $_.Kind -eq 'session' }).Count -gt 0) {
         Write-Host "  These sessions block part of the upgrade:" -ForegroundColor Yellow
-        foreach ($i in @($items | Where-Object { -not $_.Desktop })) { Write-Host "    $($i.Label)" }
+        foreach ($i in @($items | Where-Object { $_.Kind -eq 'session' })) { Write-Host "    $($i.Label)" }
         Write-Host "  Stopping one ends that session; unsaved context is lost unless it can be resumed." -ForegroundColor Yellow
     }
-    if ($apps.Count -gt 0) {
+    if (@($items | Where-Object { $_.Kind -eq 'desktop' }).Count -gt 0) {
         Write-Host "  These desktop apps are running - their updates wait until they are closed:" -ForegroundColor Yellow
-        foreach ($i in @($items | Where-Object { $_.Desktop })) { Write-Host "    $($i.Label)" }
+        foreach ($i in @($items | Where-Object { $_.Kind -eq 'desktop' })) { Write-Host "    $($i.Label)" }
     }
+    if (@($items | Where-Object { $_.Kind -eq 'orphan' }).Count -gt 0) {
+        Write-Host "  Background work still running after its session ended:" -ForegroundColor Yellow
+        foreach ($i in @($items | Where-Object { $_.Kind -eq 'orphan' })) { Write-Host "    $($i.Label)" }
+    }
+    if ($items.Count -eq 0) { return @() }
     $answer = (Read-DotAnswer "  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer").Trim().ToLower()
 
     $chosen = @()
@@ -442,7 +527,8 @@ function Invoke-LiveSessionStop {
     $stopped = @()
     $closedApps = @()
     foreach ($i in $chosen) {
-        if ($i.Desktop) {
+        if ($i.Service) { Stop-Service -Name $i.Service -Force -ErrorAction SilentlyContinue }
+        if ($i.Kind -eq 'desktop') {
             # The window first (a clean shutdown), then whatever of the app is left.
             foreach ($p in @($i.Processes | Sort-Object { try { [int]($_.MainWindowHandle -eq [IntPtr]::Zero) } catch { 1 } })) {
                 if (Stop-AgentProcess -Process $p) { $stopped += $p }
