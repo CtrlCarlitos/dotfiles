@@ -581,6 +581,9 @@ if (Get-Command graft -ErrorAction SilentlyContinue) {
                 Write-Host "  Warning: graft does not start after the upgrade - reinstall with NPM_CONFIG_ALLOW_SCRIPTS set to the installer's allow-list: npm install -g @nanonets/graft@latest" -ForegroundColor Red
             }
         }
+        # graft's background build must not flash a terminal window (scripts/lib/ps-skills.ps1).
+        if (-not (Get-Command Repair-GraftBuildWindow -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+        if (Get-Command Repair-GraftBuildWindow -ErrorAction SilentlyContinue) { Write-GraftBuildWindowResult -Result (Repair-GraftBuildWindow) }
         # graft writes its Codex hook entries with backslash paths and no
         # commandWindows fallback - git bash (Codex's shell here) eats the
         # backslashes, so every hook event dies with "Cannot find module"
