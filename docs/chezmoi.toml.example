@@ -110,10 +110,31 @@
     # Defaults above = the "standard" preset (docs/package-groups.md).
 
 # ==============================================================================
+# VS CODE SETTINGS
+# ==============================================================================
+# This machine's VS Code settings, by tier. `chezmoi init` (which `dot up` runs)
+# writes them from .chezmoitemplates/vscode-settings.toml when this table is
+# absent, and otherwise writes back what is here - so edit them here. A tier you
+# delete is treated as empty. Tier semantics and the reason for each key:
+# docs/vscode.md. Shortened:
+# [data.vscode.settings]
+#   junk  = ["**/__pycache__/**", "**/node_modules/**"]   # files.exclude + search.exclude
+#   unset = ["remote.SSH.configFile"]                     # removed when present
+#   [data.vscode.settings.forced]                         # re-asserted every run
+#     "editor.fontFamily" = "MesloLGS Nerd Font Mono"
+#   [data.vscode.settings.defaults]                       # written when absent
+#     "files.autoSave" = "afterDelay"
+#   [data.vscode.settings.defaults_windows]               # the same, Windows only
+#     "terminal.integrated.enableWin32InputMode" = true
+#   [data.vscode.settings.terminal_colors]                # merged into colorCustomizations
+#     "terminal.background" = "#1E1E2E"
+
+# ==============================================================================
 # VS CODE MACHINE-LOCAL OVERRIDES
 # ==============================================================================
-# Use this table for values that vary on this machine. It intentionally does
-# not reuse [data.vscode]: chezmoi does not deep-merge same-named tables.
+# Use this table for extensions that vary on this machine. It is not
+# [data.vscode].extensions: a list set in the config replaces the repo's whole
+# list. (The settings themselves are in [data.vscode.settings] - see above.)
 # exclude_settings strips any tier (including forced font keys); extra_settings
 # joins the upsert tier (change a value = exclude + add). Nested objects and
 # arrays are valid TOML; `chezmoi init` normalizes objects into nested tables.

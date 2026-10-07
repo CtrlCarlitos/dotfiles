@@ -3,7 +3,7 @@
 Repo-curated machine baseline + per-machine drift, applied by the package
 installers. They're `run_onchange_` scripts, so they run when their rendered
 content changes: after a repo update that touches them, or a change to your package
-selection or `[data.vscode_overrides]`. They don't run on every apply. Opt out wholesale with:
+selection, `[data.vscode.settings]` or `[data.vscode_overrides]`. They don't run on every apply. Opt out wholesale with:
 
 ```toml
 [data.packages]
@@ -16,15 +16,52 @@ vscode_settings = false
 |---|---|
 | Extension baseline (24 curated + 1 Windows-only) | `.chezmoidata.yaml` → `vscode.extensions` (+ `extensions_windows`) |
 | Whole-feature gate | `~/.config/chezmoi/chezmoi.toml` → `[data.packages]` → `vscode_settings` |
-| Settings baseline (forced/upsert/merge/unset tiers) | `.chezmoidata.yaml` → `vscode.settings` — both installer templates render from it |
+| Settings (forced/upsert/merge/unset tiers) | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode.settings]`, seeded from `.chezmoitemplates/vscode-settings.toml` — both installer templates render from it |
 | Keybindings (agent keys, pane/tab parity chords) | `.chezmoitemplates/vscode-keybindings.json`, applied by per-OS `modify_keybindings.json` wrappers |
 | Machine overrides | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode_overrides]` |
 
-**Why a different key (`vscode_overrides`, not `vscode`)**: chezmoi does not
-deep-merge same-named data tables — a config `[data.vscode]` table is
-wholesale-shadowed by the `.chezmoidata.yaml` `vscode` table (confirmed
-live). Overrides therefore live under their own key and the merge happens
-in the installers.
+**Why the extension drift has its own key (`vscode_overrides`)**: chezmoi merges
+the config's data with `.chezmoidata.yaml` table by table, key by key (the config
+wins a conflict), but a **list** set in the config replaces the repo's list. An
+`extensions = [...]` under `[data.vscode]` would drop the whole curated baseline,
+so extension drift lives under its own key and the merge happens in the
+installers. The settings, on the other hand, are in the config only: if they were
+also in `.chezmoidata.yaml`, a key you deleted from `chezmoi.toml` would come back
+from the merge.
+
+## Your settings in chezmoi.toml
+
+The settings are per machine, in `[data.vscode.settings]` of
+`~/.config/chezmoi/chezmoi.toml`. `chezmoi init` (which `dot up` runs) writes them:
+
+- **No table yet** (a new machine, or one set up before the move): the seed,
+  `.chezmoitemplates/vscode-settings.toml`.
+- **A table already there:** written back as it is. An edited value, an added key,
+  a deleted key or a deleted tier all survive.
+
+So a change to the seed reaches **new machines only**; an existing machine changes
+when you edit its `chezmoi.toml`. `chezmoi init` writes the table with sorted keys
+and no comments, so the reasons live here. A tier you delete is treated as empty.
+The first `dot up` after the move applies once before its `chezmoi init`; that run
+prints `VS Code settings: not in chezmoi.toml yet` and skips the settings, and the
+apply after the init writes them.
+
+```toml
+[data.vscode.settings]
+  junk  = ["**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/node_modules/**", "**/*.pyc"]
+  unset = ["remote.SSH.configFile"]
+  [data.vscode.settings.defaults]
+    "files.autoSaveDelay" = 500
+  [data.vscode.settings.defaults_windows]
+    "terminal.integrated.enableWin32InputMode" = true
+  [data.vscode.settings.forced]
+    "editor.fontFamily" = "MesloLGS Nerd Font Mono"
+  [data.vscode.settings.terminal_colors]
+    "terminal.background" = "#1E1E2E"
+```
+
+`[data.vscode_overrides]` `exclude_settings` / `extra_settings` still work, but
+editing the tiers here directly is simpler.
 
 ## Settings tiers
 

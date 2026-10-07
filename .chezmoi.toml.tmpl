@@ -175,12 +175,30 @@
     # vscode_settings = false    # opt out of settings + extension management
 {{- end }}
 
-{{/* vscode_overrides: machine-local VS Code drift from the repo baseline.
-     Use this table for extensions/settings that vary per machine. Do NOT use
-     [data.vscode]: chezmoi replaces same-named data tables instead of merging
-     them, which would shadow the repo baseline. extra_settings supports
-     scalars, arrays, and nested TOML tables (including language scopes like
-     [python]); see docs/vscode.md for field semantics and examples. */}}
+{{/* vscode.settings: this machine's VS Code settings, by tier. Written back as the
+     machine has them (an edit survives every `chezmoi init`, which `dot up` runs);
+     seeded from .chezmoitemplates/vscode-settings.toml only when absent, so a change
+     to the seed reaches new machines only. Both paths go through toToml, so the
+     layout is the same either way (keys sorted, no comments - the rationale is in
+     docs/vscode.md). The extensions stay in .chezmoidata.yaml under the same
+     `vscode` key: chezmoi deep-merges the two, so the settings must not be there. */}}
+{{- $vscodeSettings := dict }}
+{{- if and (hasKey . "vscode") (kindIs "map" .vscode) (hasKey .vscode "settings") }}
+{{-   $vscodeSettings = .vscode.settings }}
+{{- else }}
+{{-   $vscodeSettings = includeTemplate "vscode-settings.toml" . | fromToml }}
+{{- end }}
+# VS Code settings for this machine, by tier (docs/vscode.md):
+#   forced = re-asserted every run; defaults / defaults_windows = written when absent;
+#   junk = files.exclude + search.exclude globs; unset = keys removed;
+#   terminal_colors = merged into workbench.colorCustomizations.
+{{ replace "[vscode" "[data.vscode" (toToml (dict "vscode" (dict "settings" $vscodeSettings))) }}
+
+{{/* vscode_overrides: machine-local extension drift from the repo baseline
+     (extra_extensions / exclude_extensions). exclude_settings / extra_settings still
+     work, but with the settings themselves in [data.vscode.settings] above, editing
+     those is simpler. extra_settings supports scalars, arrays, and nested TOML tables
+     (including language scopes like [python]); see docs/vscode.md. */}}
 {{- if hasKey . "vscode_overrides" }}
 # VS Code Machine-Local Overrides
 # These values complement the repository baseline for this machine only.
@@ -191,7 +209,7 @@
 {{ replace "[vscode_overrides" "[data.vscode_overrides" (toToml (dict "vscode_overrides" .vscode_overrides)) }}
 {{- else }}
   # [data.vscode_overrides]  (machine-local drift from the repo baseline;
-  # different key on purpose - chezmoi does not deep-merge same-named tables)
+  # extensions; settings are edited in [data.vscode.settings] above)
   #   extra_extensions   = ["hashicorp.terraform"]              # add to baseline
   #   exclude_extensions = ["ms-python.pylint"]                 # stop reinstalling here
   #   exclude_settings   = ["terminal.integrated.fontFamily"]   # stop forcing a key

@@ -29,6 +29,17 @@ fi
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
       non-interactive/bare-init applies install nothing beyond what's seeded. */}}
+{{- /* VS Code settings: this machine's chezmoi.toml [data.vscode.settings] (seeded by
+       `chezmoi init` from .chezmoitemplates/vscode-settings.toml). Every tier is read with an
+       empty fallback: a tier deleted there is empty, and a config written before the move
+       (the first `chezmoi update --apply` of `dot up` runs before its `chezmoi init`)
+       renders with no settings and a note instead of failing. */ -}}
+{{ $vsCfg := dict -}}
+{{- $vsCfgMissing := true -}}
+{{- if and (hasKey . "vscode") (kindIs "map" .vscode) (hasKey .vscode "settings") -}}
+{{-   $vsCfg = .vscode.settings -}}
+{{-   $vsCfgMissing = false -}}
+{{- end -}}
 {{ $core := false -}}
 {{- $modern_cli := false -}}
 {{- $fonts := false -}}
@@ -1066,6 +1077,14 @@ configure_vscode() {
     # class). Semantics identical to the .ps1 twin: FORCED font keys,
     # UPSERT-if-absent defaults, MERGE-only sub-keys for excludes.
     configure_vscode_font() {
+        # The first `chezmoi update --apply` of `dot up` renders with the config from before the
+        # settings moved there; `dot up` runs `chezmoi init` next, and the apply after it has them.
+        # A shell test, not a template `if`: CI lints this template with its actions stripped.
+        local vs_cfg_missing="{{ $vsCfgMissing }}"
+        if [ "$vs_cfg_missing" = true ]; then
+            info "VS Code settings: not in chezmoi.toml yet - chezmoi init adds them ([data.vscode.settings]); skipped this run"
+            return
+        fi
         command -v python3 &>/dev/null || { warn "vscode: python3 required to edit settings.json - skipping"; return; }
         local settings
         case "$(uname -s)" in
@@ -1084,9 +1103,11 @@ configure_vscode() {
         #             project .vscode/settings.json still layers on top)
         #   MERGE   - object keys (files.exclude/search.exclude) gain only
         #             missing sub-keys
-        # Machine-local drift: chezmoi.toml [data.vscode_overrides] (a
-        # different key from the chezmoidata vscode table - chezmoi does not
-        # deep-merge same-named tables; the merge happens here). Rendered to
+        # Machine-local drift: chezmoi.toml [data.vscode_overrides]. chezmoi
+        # merges the config's tables with .chezmoidata key by key, but a LIST
+        # set in the config replaces the repo's (an `extensions` list there
+        # would drop the whole baseline), so the extension drift has its own
+        # key and the merge happens here. Rendered to
         # JSON and passed as argv:
         #   exclude_settings - drop baseline keys on THIS machine (excluding
         #                      a font key stops its forced re-assert)
@@ -1108,20 +1129,20 @@ EXTRA_JSON = """{{ if hasKey . "vscode_overrides" }}{{ if hasKey .vscode_overrid
 EXCLUDE = json.loads(EXCLUDE_JSON) if EXCLUDE_JSON else []
 EXTRA = json.loads(EXTRA_JSON) if EXTRA_JSON else {}
 
-# All four tiers come from .chezmoidata.yaml `vscode.settings`, the single
-# source both installer twins render (see #83). r""" so Python does not touch
+# All tiers come from this machine's chezmoi.toml [data.vscode.settings] ($vsCfg,
+# seeded by `chezmoi init`), the one source both installer twins render (#83). r""" so Python does not touch
 # the JSON's own escapes - files.eol is "\n" and must survive as one.
-FORCED = json.loads(r"""{{ .vscode.settings.forced | toJson }}""")
-DEFAULTS = json.loads(r"""{{ .vscode.settings.defaults | toJson }}""")
-JUNK = json.loads(r"""{{ .vscode.settings.junk | toJson }}""")
-TERMINAL_COLORS = json.loads(r"""{{ .vscode.settings.terminal_colors | toJson }}""")
+FORCED = json.loads(r"""{{ (get $vsCfg "forced" | default dict) | toJson }}""")
+DEFAULTS = json.loads(r"""{{ (get $vsCfg "defaults" | default dict) | toJson }}""")
+JUNK = json.loads(r"""{{ (get $vsCfg "junk" | default list) | toJson }}""")
+TERMINAL_COLORS = json.loads(r"""{{ (get $vsCfg "terminal_colors" | default dict) | toJson }}""")
 # defaults_windows is deliberately NOT rendered here: enableWin32InputMode is a
 # Windows-only fix and this twin never runs there.
 # MERGES: object key -> sub-keys (with values) added only when absent.
 MERGES = {"files.exclude": {s: True for s in JUNK},
           "search.exclude": {s: True for s in JUNK},
           "workbench.colorCustomizations": TERMINAL_COLORS}
-UNSET = json.loads(r"""{{ .vscode.settings.unset | toJson }}""")
+UNSET = json.loads(r"""{{ (get $vsCfg "unset" | default list) | toJson }}""")
 
 # Machine-local overrides: exclusions strip any tier (FORCED included -
 # excluding a font key stops its forced re-assert); extras join DEFAULTS.
@@ -1220,8 +1241,8 @@ PYEOF
             done <<'VSEXT'
 {{/* Machine-local drift lives in chezmoi.toml [data.vscode_overrides] -
       deliberately a DIFFERENT key from the .chezmoidata.yaml vscode table:
-      chezmoi does not deep-merge same-named data tables (config [data.X] is
-      wholesale-shadowed by chezmoidata X - confirmed live), so the merge
+      chezmoi merges tables key by key, but an `extensions` LIST in the config
+      would replace the repo's whole list (chezmoi v2.73), so the merge
       happens here instead. extra_extensions append to the repo baseline;
       exclude_extensions stop reinstalling on THIS machine only. */}}
 {{- $excluded := list }}
