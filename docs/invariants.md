@@ -333,7 +333,7 @@ executed, such as a forbidden literal (`forbid`) or a docs sentence.
 
 ---
 
-## 15. In chezmoi.toml, a block of two or more `key = value` lines shares one `=` column
+## 15. In TOML, a block of two or more `key = value` lines shares one `=` column
 
 `chezmoi init` rewrites `~/.config/chezmoi/chezmoi.toml` on every `dot up`, so the
 file looks exactly as `.chezmoi.toml.tmpl` writes it. A block is a run of
@@ -347,9 +347,10 @@ written by chezmoi's `toToml`, were not aligned at all.
 
 **Obey it.** A hand-written block computes its column from the keys it actually
 emits (`printf "%-*s"`, like `[[data.accounts]]` and `[[data.ssh_hosts]]`). Output
-of `toToml` goes through `.chezmoitemplates/toml-align`. The same holds for the
-repo's chezmoi.toml-shaped files: the VS Code seed, `docs/chezmoi.toml.example`
-and `tests/fixtures/chezmoi/`. `tests/config_toml_alignment_contract.sh` renders the
+of `toToml` goes through `.chezmoitemplates/toml-align`. The same holds for every
+TOML file in the repo: `.chezmoiexternal.toml`, `starship.toml`, `.gitleaks.toml`,
+the VS Code seed, `docs/chezmoi.toml.example`, `tests/fixtures/chezmoi/`. A comment
+inside a block splits it, so put an entry's comment above its `[table]` header. `tests/config_toml_alignment_contract.sh` renders the
 template from a fixture carrying every key it emits and fails on any ragged block.
 
 ---

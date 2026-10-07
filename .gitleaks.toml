@@ -19,6 +19,6 @@ useDefault = true
 
 [allowlist]
   description = "Test fixtures: intentionally fake identity data"
-  paths = [
+  paths       = [
     '''tests/fixtures/chezmoi/''',
   ]
