@@ -33,6 +33,59 @@ npm_global_current() {
     [ -n "$have" ] && [ "$have" = "$want" ] && CURRENT_NPM_VERSION="$have"
 }
 
+# Codex ships its native binary as an optional dependency per platform
+# (<pkg>-linux-x64 -> npm:<pkg>@<version>-linux-x64), published minutes AFTER
+# the main package. npm skips a missing optional dependency silently: a `dot upgrade` in that
+# gap removed the old binary, installed none, and every codex command died with "Missing
+# optional dependency <pkg>-linux-x64" (2026-10-07: 0.161.0 at 16:04, its Linux
+# binary at 16:16) - while the version check went on saying "codex is current".
+npm_platform_tag() {
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) echo linux-x64 ;;
+        Linux-aarch64 | Linux-arm64) echo linux-arm64 ;;
+        Darwin-x86_64) echo darwin-x64 ;;
+        Darwin-arm64) echo darwin-arm64 ;;
+    esac
+}
+# npm_platform_published <pkg> <version>: 1 only when <pkg>@<version> names a binary package
+# for this platform that the registry does not have yet. Unknown (no jq, no such dependency,
+# registry unreachable for the first query) counts as published - the install goes ahead.
+npm_platform_published() {
+    local pkg="$1" ver="$2" tag spec
+    tag="$(npm_platform_tag)"
+    [ -n "$tag" ] && command -v jq &>/dev/null || return 0
+    spec="$(npm view "$pkg@$ver" optionalDependencies --json 2>/dev/null | jq -b -r --arg k "$pkg-$tag" '.[$k] // empty' 2>/dev/null)" || spec=""
+    [ -n "$spec" ] || return 0
+    case "$spec" in
+        npm:*) spec="${spec#npm:}" ;;
+        *) spec="$pkg-$tag@$spec" ;;
+    esac
+    [ -n "$(npm view "$spec" version 2>/dev/null)" ]
+}
+codex_works() { command -v codex &>/dev/null && codex --version &>/dev/null; }
+# upgrade_codex_npm <pkg>: current AND runnable -> nothing; the latest's binary for this
+# platform not published yet -> keep what is installed; otherwise install, then make sure it
+# starts.
+upgrade_codex_npm() {
+    local pkg="$1" want
+    if codex_works && npm_global_current "$pkg"; then
+        echo "   codex is current ($CURRENT_NPM_VERSION)"
+        return 0
+    fi
+    want="$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]')" || want=""
+    if [ -n "$want" ] && ! npm_platform_published "$pkg" "$want"; then
+        if codex_works; then
+            echo "   codex $want is out, but its $(npm_platform_tag) binary is not published yet - keeping the installed one (the next dot upgrade takes it)"
+        else
+            echo "   codex cannot start (its platform binary is missing) and $want's $(npm_platform_tag) binary is not published yet - re-run dot upgrade in a few minutes"
+        fi
+        return 0
+    fi
+    $npm_sudo npm install -g "${pkg}@latest" --loglevel=error --no-progress || { echo "   Codex upgrade failed - continuing"; return 0; }
+    codex_works || echo "   codex was installed but cannot start (npm skipped its platform binary) - re-run dot upgrade in a few minutes"
+    return 0
+}
+
 # The npm sudo decision, once for every global npm step below. Same rule the
 # installer template makes (#114): sudo only for the system-owned /usr prefix -
 # a user-managed npm (nvm, homebrew) must never be sudo'd. The agent-browser
@@ -63,11 +116,7 @@ if command -v npm &>/dev/null; then
         if [ -z "$CODEX_PKG" ]; then
             echo "   codex package name unavailable from chezmoi data - skipping"
         else
-            if npm_global_current "$CODEX_PKG"; then
-                echo "   codex is current ($CURRENT_NPM_VERSION)"
-            else
-                $npm_sudo npm install -g "${CODEX_PKG}@latest" --loglevel=error --no-progress || echo "   Codex upgrade failed - continuing"
-            fi
+            upgrade_codex_npm "$CODEX_PKG"
         fi
     fi
     # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime

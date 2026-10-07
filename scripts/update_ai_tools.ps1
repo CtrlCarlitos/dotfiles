@@ -52,11 +52,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         if (-not $codexPkg) {
             Write-Host "  codex package name unavailable from chezmoi data - skipping" -ForegroundColor Red
         } else {
-            if (Test-NpmGlobalCurrent $codexPkg) {
-                Write-Host "  codex is current ($script:NpmCurrentVersion)"
-            } else {
-                npm install -g "$($codexPkg)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
-            }
+            # Never "current" while it cannot start; never upgraded to a release whose binary
+            # for this platform is not published yet (scripts/lib/ps-common.ps1).
+            Update-CodexNpm -Package $codexPkg
         }
     }
     # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime

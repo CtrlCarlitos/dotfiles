@@ -1697,7 +1697,14 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
     # Global NPM packages are usually added to PATH during Node.js install
     # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    # Missing, or present but unable to start (npm skipped its platform binary, published minutes
+    # after the main package - see Update-CodexNpm in scripts/lib/ps-common.ps1): install.
+    # try/catch: under Stop, a failing native's stderr can throw in Windows PowerShell 5.1.
+    $codexRuns = $false
+    if (Get-Command codex -ErrorAction SilentlyContinue) {
+        try { codex --version *> $null; $codexRuns = ($LASTEXITCODE -eq 0) } catch { $codexRuns = $false }
+    }
+    if (-not $codexRuns) {
          Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g {{ .agents.npm.codex }} --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
     }
     # Upgrades are `dot upgrade`'s sole domain (dot CLI spec,

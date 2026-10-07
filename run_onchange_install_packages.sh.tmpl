@@ -1741,7 +1741,9 @@ install_chatgpt_cli() {
         # The npm sudo decision is computed ONCE in main (#124).
 
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
-        command -v codex &>/dev/null || $npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
+        # Missing, or present but unable to start (npm skipped its platform binary - see
+        # update_ai_tools.sh): install.
+        { command -v codex &>/dev/null && codex --version &>/dev/null; } || $npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
     else
         warn "npm not found - skipping Codex CLI"
     fi
