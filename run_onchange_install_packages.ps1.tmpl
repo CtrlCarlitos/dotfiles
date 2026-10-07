@@ -1468,6 +1468,9 @@ if ($graftWorks) {
     Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
 }
 # graft-install-section: end (contract-test extraction boundary)
+# graft's background index build must not flash a terminal window (Repair-GraftBuildWindow,
+# scripts/lib/ps-skills.ps1, inlined above). Every run: a graft reinstall puts the line back.
+if (Get-Command graft -ErrorAction SilentlyContinue) { Write-GraftBuildWindowResult -Result (Repair-GraftBuildWindow) }
 {{- end }}
 
 {{- if $opencode_cli }}

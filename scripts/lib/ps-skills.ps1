@@ -267,3 +267,45 @@ function Select-GuardrailConsoleLine {
         }
     }
 }
+
+# graft's index refresh (dist/claude/sync-run.js) runs `graft build` with execFileSync from a
+# DETACHED process - one with no console - and without windowsHide, so Windows gives the build
+# a console of its own. With Windows Terminal as the default terminal that console opens as a
+# Terminal window titled "C:\Program Files\nodejs\node.exe", at the end of every agent turn
+# that edited files, and closes when the build ends: the black flash (seen 2026-10-07, graft
+# 0.21.1; reported upstream to NanoNets/context-graph-engine). This adds windowsHide: true to
+# that one call. Idempotent. Once graft hides it itself, or the line changes, it does nothing
+# and says which ('ok' / 'changed'); nothing else in the package is touched.
+# Returns: patched | ok | changed | absent | no-npm | skipped.
+function Repair-GraftBuildWindow {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$GraftRoot)
+    if (-not $GraftRoot) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $npmRoot = ''
+        try { $npmRoot = (& npm root -g 2>$null | Out-String).Trim() } catch { $npmRoot = '' }
+        $ErrorActionPreference = $previous
+        if (-not $npmRoot) { return 'no-npm' }
+        $GraftRoot = Join-Path $npmRoot '@nanonets\graft'
+    }
+    $file = Join-Path $GraftRoot 'dist\claude\sync-run.js'
+    if (-not (Test-Path -LiteralPath $file)) { return 'absent' }
+    $text = [IO.File]::ReadAllText($file)
+    if ($text -match 'windowsHide') { return 'ok' }
+    $old = "{ cwd: dir, stdio: 'ignore', timeout: 120000 }"
+    if (-not $text.Contains($old)) { return 'changed' }
+    if (-not $PSCmdlet.ShouldProcess($file, 'Add windowsHide: true to the graft build call')) { return 'skipped' }
+    $new = "{ cwd: dir, stdio: 'ignore', timeout: 120000, windowsHide: true }"
+    [IO.File]::WriteAllText($file, $text.Replace($old, $new), (New-Object System.Text.UTF8Encoding($false)))
+    return 'patched'
+}
+
+# The one line Repair-GraftBuildWindow's result is worth (silent when there is nothing to say).
+function Write-GraftBuildWindowResult {
+    param([string]$Result)
+    switch ($Result) {
+        'patched' { Write-Host "  graft: its background index build no longer opens a terminal window (local patch until graft ships the fix)" -ForegroundColor Green }
+        'changed' { Write-Host "  graft: sync-run.js changed - the hidden-window patch no longer applies; check whether graft fixed the flashing build window" -ForegroundColor Yellow }
+    }
+}
