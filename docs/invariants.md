@@ -350,8 +350,32 @@ emits (`printf "%-*s"`, like `[[data.accounts]]` and `[[data.ssh_hosts]]`). Outp
 of `toToml` goes through `.chezmoitemplates/toml-align`. The same holds for every
 TOML file in the repo: `.chezmoiexternal.toml`, `starship.toml`, `.gitleaks.toml`,
 the VS Code seed, `docs/chezmoi.toml.example`, `tests/fixtures/chezmoi/`. A comment
-inside a block splits it, so put an entry's comment above its `[table]` header. `tests/config_toml_alignment_contract.sh` renders the
-template from a fixture carrying every key it emits and fails on any ragged block.
+inside a block splits it, so put an entry's comment above its `[table]` header.
+`tests/config_toml_alignment_contract.sh` checks every TOML file and renders the
+template from a fixture carrying every key it emits; it fails on any ragged block.
+
+---
+
+## 16. PowerShell sources are ASCII (or carry a BOM)
+
+Windows PowerShell 5.1, which the `dot` command also runs under, reads a script
+without a byte-order mark as Windows-1252. A UTF-8 emoji, dash or arrow then decodes
+to several characters, and some of those bytes (0x84, 0x91-0x94) are "smart quotes"
+that PowerShell honours as string delimiters. Nothing fails to parse: the strings are
+silently re-split, and the script breaks at run time.
+
+**The incident.** `dot upgrade` under Windows PowerShell failed with "The term
+'upgrading' is not recognized": the 0x93 byte of a package emoji in
+`update_ai_tools.ps1` had closed a string many lines earlier. The file tokenized to
+3272 tokens under 5.1 and 3410 under PowerShell 7.
+
+**Obey it.** Write PowerShell in ASCII. Build an output glyph from its code point
+(`[char]::ConvertFromUtf32(0x1F916)`, `[char]0x2713`). `install.ps1` (run as
+`irm | iex`) and the `.ps1.tmpl` templates stay pure ASCII; another script that needs
+literal non-ASCII text carries a UTF-8 BOM, like `devprofile.ps1`.
+`tests/ps51_source_encoding_contract.sh` checks every PowerShell file and, on Windows,
+compares each script's tokens under 5.1 and 7. CI's PSScriptAnalyzer keeps
+PSUseBOMForUnicodeEncodedFile on.
 
 ---
 
