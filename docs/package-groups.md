@@ -149,13 +149,44 @@ they're just apps, so they're pure installs.
 ## Where the package names live
 
 Every package-manager name is in one file: `.chezmoidata/packages.yaml`, one
-record per tool with its `apt`, `brew`, `cask` and `choco` spellings (`fd` is
+record per tool with its `apt`, `brew`, `cask`, `winget` and `choco` spellings (`fd` is
 `fd-find` on apt; 7-Zip is `p7zip-full` / `sevenzip` / `7zip.install`). Both
 installers render their manager's lists from it, and
-`scripts/migrate-to-choco.ps1` reads the same records at runtime — so adding,
+`scripts/migrate-to-winget.ps1` (and the older `migrate-to-choco.ps1`) read the same records at runtime — so adding,
 renaming or dropping a package is one edit, and `tests/package_catalog_contract.sh`
 fails if a name reappears anywhere else.
 
 Tools that need more than a plain install (a repository, a signing key, a
 `.deb` download) stay as procedures in the installers; their catalog record
 says so in its `note` and carries no name for that manager.
+
+### Windows: winget first, Chocolatey as the fallback
+
+On Windows a record names **winget** (`winget:`, with optional `winget_args` such as
+`--scope machine` for VS Code and PowerShell, which Chocolatey had installed machine-wide)
+and only falls back to **Chocolatey** (`choco:`) where winget has no package or carries an older
+one: today the Antigravity CLI, the Meslo Nerd Font, npiperelay, Python and Vale. Node.js comes from
+winget's LTS package (`OpenJS.NodeJS.LTS`, the `versions.node_major` line): Chocolatey's `nodejs`
+had floated to 26 under `choco upgrade all`, past the 24 pin. winget's LTS package follows whatever
+is LTS today, so a gating pin (`winget pin add --version <node_major>.*`) holds it on the same major
+as Linux/WSL (NodeSource's `node_<major>.x` repo) and macOS (`node@<major>`); `dot upgrade` keeps the
+pin in step with `versions.node_major`, so one bump there moves all three. The
+installer installs Chocolatey's list first, then winget's, from one `winget list` inventory;
+`dot upgrade` sweeps both (`choco upgrade all`, `winget upgrade --all`). WSL belongs to neither:
+the installer runs `wsl --install --no-distribution` when it is missing and `dot upgrade` runs
+`wsl --update`.
+
+A tool that moved keeps its old Chocolatey name in `choco_was`. An app Chocolatey installed cannot
+be adopted by winget ("install technology is different"), so an existing machine moves with
+`scripts/migrate-to-winget.ps1` (elevated): `-ListOnly` prints the plan; otherwise the plain tools
+move as one batch after one question, each app with a `migrate_risk` note (VS Code, Git,
+Tailscale, Claude Desktop, Termius, Handy, PowerShell) is asked about on its own, and what dotfiles
+replaced (WinMerge -> Meld, Notepad++ -> Geany, WinSCP -> Termius, CutePDF -> Microsoft Print to
+PDF, with the Ghostscript and AutoHotkey packages that came with it), Chocolatey GUI and
+Chocolatey's WSL record (`--skip-autouninstaller`: WSL itself stays) are dropped after a last
+question. A failed winget install prints the `choco install` that puts the app back. PowerShell 7
+cannot replace itself: run the script once more from Windows PowerShell (`powershell.exe`) for it.
+Moving Node from 26 to 24 LTS rebuilds the global npm tools' native modules (`npm rebuild -g`)
+right after. Chocolatey keeps what other Chocolatey packages depend on (`python3`/`python314`
+under `python`). `tests/migrate_to_winget_contract.sh` runs the plan and each step
+against fakes.

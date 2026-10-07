@@ -62,7 +62,7 @@ cat = json.load(io.open(catalog_path, encoding="utf-8"))
 # semicolon; the span from one label to the next must say "procedure". A bare
 # mention ("never choco", "migrate-to-choco") is not a label.
 LABEL = re.compile(
-    r'(?:^|(?<=;)|(?<=\.\s))\s*((?:apt|brew|cask|choco)(?:/(?:apt|brew|cask|choco))*)\s*:')
+    r'(?:^|(?<=;)|(?<=\.\s))\s*((?:apt|brew|cask|choco|winget)(?:/(?:apt|brew|cask|choco|winget))*)\s*:')
 def procedures(note):
     out = set()
     marks = list(LABEL.finditer(note))
@@ -80,16 +80,16 @@ def cell(r, manager, proc):
     return "\u2014"
 
 lines = [
-    "| Tool | Group | apt (Linux/WSL) | brew | cask (macOS) | choco (Windows) | Notes |",
-    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    "| Tool | Group | apt (Linux/WSL) | brew | cask (macOS) | winget (Windows) | choco (Windows, fallback) | Notes |",
+    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
 ]
 for r in cat:
     note = r.get("note", "")
     proc = procedures(note)
-    lines.append("| `%s` | %s | %s | %s | %s | %s | %s |" % (
+    lines.append("| `%s` | %s | %s | %s | %s | %s | %s | %s |" % (
         r["id"], r.get("group", ""),
         cell(r, "apt", proc), cell(r, "brew", proc),
-        cell(r, "cask", proc), cell(r, "choco", proc),
+        cell(r, "cask", proc), cell(r, "winget", proc), cell(r, "choco", proc),
         note.replace("|", "\\|"),
     ))
 table = "\n".join(lines)

@@ -116,7 +116,7 @@ groups = set(open(tmp + "/groups.txt").read().split())
 if not groups: err("no promptBoolOnce groups found - parser is stale")
 
 # 1. shape
-ids, seen = set(), {"apt": {}, "brew": {}, "cask": {}, "choco": {}}
+ids, seen = set(), {"apt": {}, "brew": {}, "cask": {}, "choco": {}, "winget": {}, "npm": {}}
 for i, r in enumerate(cat):
     where = "record %d (%s)" % (i, r.get("id", "?"))
     if "id" not in r: err(where + ": no id"); continue
@@ -130,7 +130,7 @@ for i, r in enumerate(cat):
         # on all three platforms) may omit manager keys, but its record must
         # then carry the note the catalog header promises.
         if not r.get("note"):
-            err(where + ": names no manager (apt/brew/cask/choco) and has no note")
+            err(where + ": names no manager (apt/brew/cask/choco/winget/npm) and has no note")
     for m in mgrs:
         if r[m] in seen[m]: err(where + ": %s name %r already used by %s" % (m, r[m], seen[m][r[m]]))
         seen[m][r[m]] = r["id"]
@@ -140,12 +140,17 @@ for i, r in enumerate(cat):
         err(where + ": migrate: false needs a migrate_reason")
     if "migrate_reason" in r and "migrate" not in r:
         err(where + ": migrate_reason without migrate: false")
-    if "migrate_risk" in r and "choco" not in r:
-        err(where + ": migrate_risk on a tool with no choco package")
+    if "migrate_risk" in r and "choco" not in r and "choco_was" not in r:
+        err(where + ": migrate_risk on a tool with neither a choco package nor a choco_was to migrate from")
+    if "choco_was" in r and "winget" not in r:
+        err(where + ": choco_was without winget (choco_was names what migrate-to-winget replaces)")
+    if "winget" in r and "choco" in r:
+        err(where + ": both winget and choco - winget is primary, choco only where winget has no current package")
     if "migrate" in r and "migrate_risk" in r:
         err(where + ": both migrate: false and migrate_risk - pick one")
 
 choco = [r["choco"] for r in cat if "choco" in r]
+winget = [r["winget"] + "|" + r.get("winget_args", "") + "|" + r.get("choco_was", "") for r in cat if "winget" in r]
 brew  = [r["brew"] for r in cat if "brew" in r]
 cask  = [r["cask"] for r in cat if "cask" in r]
 apt   = [r["apt"] for r in cat if "apt" in r]
@@ -155,6 +160,12 @@ def read(name):
 
 # 3a. the .ps1, every group on: exactly the catalog's choco names, in order
 ps1 = read("ps1.rendered")
+gotw = re.findall(r'^\$wingetPackages \+= "([^"]+)"', ps1, re.M)
+if gotw != winget:
+    err("ps1 render: winget ids differ from the catalog - missing=%s extra=%s (or out of order)"
+        % (sorted(set(winget) - set(gotw)), sorted(set(gotw) - set(winget))))
+else:
+    print("  rendered .ps1 (os=windows, all groups): %d winget ids, exactly the catalog, in catalog order" % len(gotw))
 got = re.findall(r'^\$packages \+= "([^"]+)"', ps1, re.M)
 if got != choco:
     err("ps1 render: choco names differ from the catalog - missing=%s extra=%s (or out of order)"

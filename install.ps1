@@ -180,7 +180,7 @@ try {
 
     # 1. Install Chezmoi if missing
     if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
-        Write-Info "Chezmoi not found. Installing via Chocolatey..."
+        Write-Info "Chezmoi not found. Installing via winget (Chocolatey if winget is missing)..."
         # Pin coherence (#133): deliberately install the SAME chezmoi CI
         # tests - the repo's .chezmoi-version pin, read when a checkout is on
         # disk (same lookup rule as the gum pin above; choco wants the bare
@@ -199,7 +199,20 @@ try {
             }
         }
         try {
-            if ($chezmoiPin) {
+            # winget is the primary Windows manager (twpayne.chezmoi); `dot upgrade`'s winget sweep
+            # then keeps chezmoi current. Chocolatey only where winget is missing.
+            $wingetFlags = @('--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                if ($chezmoiPin) {
+                    winget install --id twpayne.chezmoi --version $chezmoiPin @wingetFlags
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Fail "chezmoi $chezmoiPin not installable via winget - falling back to latest."
+                        winget install --id twpayne.chezmoi @wingetFlags
+                    }
+                } else {
+                    winget install --id twpayne.chezmoi @wingetFlags
+                }
+            } elseif ($chezmoiPin) {
                 choco install chezmoi -y --no-progress --version $chezmoiPin
                 if ($LASTEXITCODE -ne 0 -or -not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
                     Write-Fail "chezmoi $chezmoiPin not installable via Chocolatey (package lag?) - falling back to latest."
@@ -215,16 +228,20 @@ try {
             }
         } catch {
             Write-Fail "Failed to install chezmoi: $_"
-            Write-Host "Please install manually: choco install chezmoi -y"
+            Write-Host "Please install manually: winget install --id twpayne.chezmoi --exact"
             exit 1
         }
     }
 
     # 1.5 Ensure Git is installed (Required for chezmoi init)
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Info "Git not found. Installing via Chocolatey..."
+        Write-Info "Git not found. Installing via winget (Chocolatey if winget is missing)..."
         try {
-            choco install git -y --no-progress
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+            } else {
+                choco install git -y --no-progress
+            }
             # Refresh path to find git
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
             if (-not (Get-Command git -ErrorAction SilentlyContinue)) {

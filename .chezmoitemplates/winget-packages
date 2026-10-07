@@ -1,0 +1,15 @@
+{{- /*
+  winget package lines for one group, from the catalog in
+  .chezmoidata/packages.yaml (field `winget`). Twin of choco-packages: winget is
+  the primary Windows manager, Chocolatey the fallback for what winget lacks.
+  Used by run_onchange_install_packages.ps1.tmpl:
+
+    {{ includeTemplate "winget-packages" (dict "group" "core" "catalog" .catalog.packages) }}
+
+  Each entry is "id|extra args|choco_was" (winget_args and choco_was usually empty). Order is catalog order. Ends with -}} so no trailing newline is emitted.
+*/ -}}
+{{- range .catalog }}
+{{- if and (eq .group $.group) (hasKey . "winget") }}
+$wingetPackages += {{ printf "%s|%s|%s" .winget (get . "winget_args") (get . "choco_was") | quote }}
+{{- end }}
+{{- end -}}

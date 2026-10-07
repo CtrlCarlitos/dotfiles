@@ -279,6 +279,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 # Package names come from .chezmoidata/packages.yaml; scripts/migrate-to-choco.ps1
 # reads the same catalog at runtime, so there is no second list to keep in sync.
 $packages = @()
+# winget ids, rendered next to the choco names per group (catalog field `winget`)
+$wingetPackages = @()
 
 # On Windows PowerShell 5.1 (this script's target - see #Requires above),
 # $ErrorActionPreference = "Stop" promotes ANY line a native command writes to
@@ -337,8 +339,16 @@ function Install-Node {
     # -lt with a stripped operand would not parse as a comparison.
     $nodeMajor = {{ .versions.node_major }}
     if (-not (Get-Command node -ErrorAction SilentlyContinue) -or [int]((node -v) -replace 'v','' -split '\.')[0] -lt $nodeMajor) {
-        Write-Host "  Installing Node.js $nodeMajor..." -ForegroundColor Yellow
-        choco install nodejs --version={{ .versions.node_choco }} -y --no-progress | Out-Null
+        Write-Host "  Installing Node.js $nodeMajor (LTS)..." -ForegroundColor Yellow
+        # winget's LTS package stays on the LTS line (Chocolatey's nodejs floated to 26 under
+        # `choco upgrade all`, past the 24 pin); Chocolatey's pinned version only without winget.
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+            # Hold it on node_major, like Linux/WSL and macOS (dot upgrade keeps the pin in step).
+            winget pin add --id OpenJS.NodeJS.LTS --exact --version "$nodeMajor.*" --accept-source-agreements 2>$null | Out-Null
+        } else {
+            choco install nodejs --version={{ .versions.node_choco }} -y --no-progress | Out-Null
+        }
         # Refresh env var
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
@@ -349,6 +359,25 @@ function Install-Node {
 # Core tools
 # Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
 {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "core" "catalog" .catalog.packages) }}
+
+# WSL: no package manager owns it (catalog note on wsl2). Installed here only when missing; it
+# needs a reboot to finish, so this says so instead of continuing as if it were ready.
+# WSL_UTF8: wsl.exe writes UTF-16 otherwise, which PowerShell prints with a NUL between letters.
+$env:WSL_UTF8 = '1'
+$wslReady = $false
+if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
+    & wsl.exe --status *> $null
+    $wslReady = ($LASTEXITCODE -eq 0)
+}
+if (-not $wslReady -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installing WSL (wsl --install --no-distribution)..." -ForegroundColor Yellow
+    & wsl.exe --install --no-distribution
+    Write-Host "  WSL installed - restart Windows to finish, then: wsl --install -d Ubuntu" -ForegroundColor Yellow
+} elseif (-not $wslReady) {
+    Write-Host "  Warning: wsl.exe not found - this Windows cannot install WSL from here" -ForegroundColor Red
+}
+Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue
 
 # Node.js (versions.node_major pin, #125) - a core fundamental (spec §2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
@@ -359,6 +388,7 @@ Install-Node
 {{- if $modern_cli }}
 # Modern CLI tools
 {{ includeTemplate "choco-packages" (dict "group" "modern_cli" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "modern_cli" "catalog" .catalog.packages) }}
 
 # The catalog's npm globals (field `npm`: markdownlint-cli2), each only when it is missing;
 # `dot upgrade` keeps them current. Same names on every OS.
@@ -424,17 +454,20 @@ Install-Gum
 {{- if $fonts }}
 # Fonts - MesloLGS NF is excellent for Starship
 {{ includeTemplate "choco-packages" (dict "group" "fonts" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "fonts" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $dev_desktop }}
 # Desktop apps
 # Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
 {{ includeTemplate "choco-packages" (dict "group" "dev_desktop" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "dev_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $remote_access }}
 # Remote access tools are intentionally separate from desktop applications.
 {{ includeTemplate "choco-packages" (dict "group" "remote_access" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "remote_access" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $agent_toolkit }}
@@ -447,6 +480,7 @@ Install-Gum
 # agent_toolkit/etc section content. Confirmed this session testing a
 # Superpowers install fix - had to fall back to isolated `docker run` tests.
 {{ includeTemplate "choco-packages" (dict "group" "agent_toolkit" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "agent_toolkit" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_cli }}
@@ -457,6 +491,7 @@ Install-Gum
 # 2.0 desktop app is back since 2026-09-13 as its own antigravity_desktop
 # group (choco `antigravity`, below) - agy here remains the CLI surface.
 {{ includeTemplate "choco-packages" (dict "group" "antigravity_cli" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "antigravity_cli" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $claude_desktop }}
@@ -464,6 +499,7 @@ Install-Gum
 # choco loop like every other package. Claude Code (the CLI) is a separate
 # claude_cli group - different software, different gate.
 {{ includeTemplate "choco-packages" (dict "group" "claude_desktop" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "claude_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $antigravity_desktop }}
@@ -472,6 +508,7 @@ Install-Gum
 # installed it via choco). Windows floats on choco's version - no pinned
 # hub-channel URL here, unlike the sh template's dmg/tar.gz pins.
 {{ includeTemplate "choco-packages" (dict "group" "antigravity_desktop" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "antigravity_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $opencode_desktop }}
@@ -481,6 +518,7 @@ Install-Gum
 # like every other desktop package; the OpenCode CLI is a separate
 # opencode_cli group - different software, different gate.
 {{ includeTemplate "choco-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $hasChocolateyPackages }}
@@ -606,6 +644,61 @@ if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
     Write-Host "    pwsh -File `"$migrateScript`" -ListOnly   # see candidates + risks first" -ForegroundColor Yellow
 }
 {{- end }}
+
+# --- winget: the primary Windows package manager (catalog field `winget`) ---------------------
+# Chocolatey (above) is the fallback for what winget lacks or carries older. ONE `winget list`
+# inventory, then a per-id check only for ids it does not show (long ids can be truncated in its
+# table). An app still installed by Chocolatey also shows in winget's list and is left alone:
+# scripts/migrate-to-winget.ps1 moves it (per app, asked).
+if ($wingetPackages.Count -gt 0) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "  Warning: winget not found - $($wingetPackages.Count) winget package(s) not installed" -ForegroundColor Red
+    } else {
+        $wingetInventory = ''
+        try {
+            $wingetInventory = (@(Invoke-WithTimeout -Description "winget list (local inventory)" -Seconds 180 -NoStream -Action {
+                winget list --accept-source-agreements --disable-interactivity 2>$null
+            }) -join "`n")
+        } catch { $wingetInventory = '' }
+        $wingetMissing = @()
+        $wingetStillChoco = @()
+        $chocoHave = if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoInstalled } else { $null }
+        foreach ($wingetEntry in $wingetPackages) {
+            $wingetId, $null, $wingetChocoWas = $wingetEntry -split '\|', 3
+            # Still Chocolatey's on this machine: installing winget's copy too would leave two.
+            # scripts/migrate-to-winget.ps1 moves it.
+            if ($wingetChocoWas -and $chocoHave -and $chocoHave.Contains($wingetChocoWas)) { $wingetStillChoco += $wingetChocoWas; continue }
+            if ($wingetInventory -match "(?m)\s$([regex]::Escape($wingetId))\s") { continue }
+            $wingetOne = (winget list --id $wingetId --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
+            if ($wingetOne -match [regex]::Escape($wingetId)) { continue }
+            $wingetMissing += $wingetEntry
+        }
+        if ($wingetStillChoco.Count -gt 0) {
+            Write-Host "  $($wingetStillChoco.Count) tool(s) are still Chocolatey's here and winget-managed in dotfiles: $($wingetStillChoco -join ', ')" -ForegroundColor Yellow
+            Write-Host "    Move them (elevated, asked per app): scripts\migrate-to-winget.ps1 -ListOnly  # see the plan first" -ForegroundColor Yellow
+        }
+        if ($wingetMissing.Count -eq 0) {
+            Write-Host "  winget packages: all $($wingetPackages.Count - $wingetStillChoco.Count) present"
+        }
+        foreach ($wingetEntry in $wingetMissing) {
+            $wingetId, $wingetExtra, $null = $wingetEntry -split '\|', 3
+            Write-Host "  Installing $wingetId (winget)..." -ForegroundColor Yellow
+            # Jobs do not inherit this scope: id and extra args travel via $env (same as CHOCO_PKG above).
+            $env:WINGET_PKG = $wingetId
+            $env:WINGET_ARGS = "$wingetExtra"
+            try {
+                Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
+                    $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
+                    winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra
+                    if ($LASTEXITCODE -ne 0) { exit 1 }
+                }
+            } catch {
+                Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
+            }
+            Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 {{- if $remote_access_server }}
 # True only when the capability was missing and has just been added. It used to print "OpenSSH Server
