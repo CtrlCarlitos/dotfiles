@@ -1681,6 +1681,8 @@ function Write-CuratedSkillsSkippedSummary {
 if (Get-Command npx -ErrorAction SilentlyContinue) {
     $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
     # Skills dropped upstream are removed here (scripts/retired-agent-skills.txt).
+    # every source's upstream HEAD in one parallel round (Get-SkillsRemoteHead answers from it)
+    Start-SkillsHeadPrefetch -Repo @('mattpocock/skills', 'anthropics/skills', 'vercel-labs/skills', 'vercel-labs/agent-browser', 'CtrlCarlitos/skills', 'Leonxlnx/taste-skill')
     Invoke-RetiredSkillsCleanup -ListPath (Join-Path '{{ .chezmoi.sourceDir | replace "'" "''" }}' 'scripts\retired-agent-skills.txt')
     Invoke-SkillsSource -Label "Matt Pocock skills" -Repo 'mattpocock/skills' -Skills @('codebase-design', 'domain-modeling', 'grill-with-docs', 'improve-codebase-architecture', 'prototype', 'research', 'grilling', 'handoff', 'teach', 'writing-for-agents', 'pr', 'retro') -Agents $skAgents -Install {
         Write-Host "  Installing Matt Pocock's skills (skills CLI)..." -ForegroundColor Yellow
