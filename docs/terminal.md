@@ -52,8 +52,14 @@ wrote it". So the templates read the current file and force only their own keys:
 | Shell `pbcopy` / `pbpaste` | ➖ | ✅ `clip.exe` | ✅ `xclip` / `wl-copy` | ✅ native |
 | SSH host tabs (`ssh_hosts` → profiles) | ✅ | ➖ (Windows side) | ⚠️ | ⚠️ |
 
-**The remaining gap:** SSH host tabs are a Windows Terminal feature. In Ghostty, SSH
-from a tab (`ssh <alias>`, the same `~/.ssh/config` aliases).
+**The remaining gap:** SSH host tabs are a Windows Terminal feature. Ghostty has no
+profiles (as of 1.3.1; a `new_tab_with_command` keybind action was proposed and closed
+unmerged in 2026). In any terminal, `dot ssh` is the picker: it lists the same
+`[[data.ssh_hosts]]` with fzf (a numbered menu without it), connects to the one you choose,
+and joins its tmux session when the host sets `tmux`, as its Windows Terminal profile does.
+`dot ssh <name>` connects directly; `dot ssh --list` prints them. On Windows, inside Windows
+Terminal, it opens the host's own "SSH: <name>" profile in a new tab (its tab color and
+tmux); `--here` connects in the current window. Plain `ssh <alias>` keeps working everywhere.
 
 ## Ghostty (macOS and Linux)
 

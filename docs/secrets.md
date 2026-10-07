@@ -43,6 +43,8 @@ every apply — VS Code Remote-SSH (installed by the global extension set)
 reads `~/.ssh/config` natively, so aliases appear in the Remote-SSH host
 list automatically. On Windows each host also becomes a Windows Terminal
 profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-terminal)).
+In any terminal, `dot ssh` picks one of these hosts and connects (joining its tmux session
+when it sets `tmux`); `dot ssh <name>` connects directly.
 
 ```toml
 # ~/.config/chezmoi/chezmoi.toml

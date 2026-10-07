@@ -1,0 +1,15 @@
+{{- /* dot ssh's host list: one line per [[data.ssh_hosts]] entry, TAB-separated:
+       name, target (user@hostname:port), os, tmux session ("" = none), comment.
+       The tmux session follows the Windows Terminal SSH profiles: tmux = true -> "main",
+       a string -> that session. Read by scripts/dot-ssh.sh and scripts/dot-ssh.ps1 with
+       `chezmoi execute-template --file`, so both shells list the same hosts. */ -}}
+{{- if hasKey . "ssh_hosts" }}
+{{-   range .ssh_hosts }}
+{{-     $session := "" }}
+{{-     if hasKey . "tmux" }}{{ if kindIs "string" .tmux }}{{ $session = .tmux }}{{ else if .tmux }}{{ $session = "main" }}{{ end }}{{ end }}
+{{-     $target := .hostname }}
+{{-     if hasKey . "user" }}{{ $target = printf "%s@%s" .user $target }}{{ end }}
+{{-     if hasKey . "port" }}{{ $target = printf "%s:%v" $target .port }}{{ end }}
+{{ .name }}{{ "\t" }}{{ $target }}{{ "\t" }}{{ get . "os" }}{{ "\t" }}{{ $session }}{{ "\t" }}{{ get . "comment" }}
+{{-   end }}
+{{- end }}
