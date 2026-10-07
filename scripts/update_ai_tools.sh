@@ -338,7 +338,9 @@ if command -v claude &>/dev/null; then
 
     # Superpowers skills plugin
     echo "✨ Updating Superpowers (Claude Code)..."
-    claude plugin update superpowers -y &>/dev/null || echo "   Superpowers not installed for Claude Code - skipping"
+    # Named with its marketplace: a machine can carry superpowers from several marketplaces, and
+    # the bare name then fails with "installed from more than one marketplace" (silently, here).
+    claude plugin update superpowers@superpowers-marketplace -y &>/dev/null || echo "   Superpowers update for Claude Code failed - skipping"
 fi
 
 dot_timing_mark 'OpenCode'

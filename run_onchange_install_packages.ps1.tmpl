@@ -1108,7 +1108,16 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # gated host-only and never runs on WSL/containers, exactly where
     # coding agents most often run.
     Write-Host "  Installing Playwright Chromium (headless browser for agent automation)..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -Action { npx --yes playwright install chromium 2>$null }
+    # A new browser build printed ~30 progress-bar lines; now one line per download, and the
+    # whole output only when the install fails (the last line carries its exit code).
+    $pwOut = @(Invoke-WithTimeout -Description "Playwright Chromium install" -Seconds 600 -NoStream -Action { npx --yes playwright install chromium 2>&1 | ForEach-Object { "$_" }; "__exit=$LASTEXITCODE" })
+    $pwExit = (@($pwOut | Where-Object { "$_" -match '^__exit=' }) | Select-Object -Last 1) -replace '^__exit=', ''
+    if ($pwExit -and $pwExit -ne '0') {
+        $pwOut | Where-Object { "$_" -notmatch '^__exit=' } | ForEach-Object { Write-Host "    $_" }
+        Write-Host "  Warning: Playwright Chromium install failed (exit $pwExit) - continuing" -ForegroundColor Red
+    } else {
+        foreach ($pwLine in $pwOut) { if ("$pwLine" -match '^\s*(.+?) downloaded to ') { Write-Host "    Playwright: $($Matches[1]) downloaded" } }
+    }
 
     # Only when missing: reinstalling agent-browser@latest on every run is an upgrade, and `dot up`
     # never upgrades (`dot upgrade` does it, and skips it when already current).

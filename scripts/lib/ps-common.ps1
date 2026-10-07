@@ -378,14 +378,21 @@ function Stop-CodexDaemon {
 # what is blocking and asks. The invoker's own ancestry (this shell, the terminal, and the
 # agent session that launched `dot upgrade`) is never offered: stopping it would end the
 # very command that is asking. Those processes still defer their tools.
+# One process-table query, walked in memory (a query per ancestor took ~2 s, and dot upgrade
+# asks twice); remembered for the run - this shell's ancestry does not change.
 function Get-AncestorProcessId {
+    if ($script:AncestorIdCache) { return @($script:AncestorIdCache) }
+    $parentOf = @{}
+    foreach ($row in @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction SilentlyContinue)) {
+        $parentOf[[int]$row.ProcessId] = [int]$row.ParentProcessId
+    }
     $ids = [System.Collections.Generic.HashSet[int]]::new()
     $id = $PID
     while ($id -gt 0 -and $ids.Add($id)) {
-        $row = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
-        if (-not $row) { break }
-        $id = [int]$row.ParentProcessId
+        if (-not $parentOf.ContainsKey($id)) { break }
+        $id = $parentOf[$id]
     }
+    $script:AncestorIdCache = @($ids)
     return @($ids)
 }
 
@@ -439,7 +446,8 @@ $written = [uint32]0
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& { $code } -TargetId $ProcessId -Text '$sequence'"))
         $exe = (Get-Process -Id $PID).Path
         $child = Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
-        if (-not $child.WaitForExit(8000)) { try { $child.Kill() } catch { Write-Verbose "reset helper still running: $($_.Exception.Message)" } }
+        # ~1.6 s when it works; a console that will not attach is not worth more than 3 s.
+        if (-not $child.WaitForExit(3000)) { try { $child.Kill() } catch { Write-Verbose "reset helper still running: $($_.Exception.Message)" } }
         return $true
     }
     catch { Write-Verbose "terminal reset failed: $($_.Exception.Message)"; return $false }

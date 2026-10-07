@@ -6,6 +6,9 @@ $ErrorActionPreference = 'Continue'
 
 # Shared helpers (scripts/lib/ps-common.ps1, issue #123).
 . (Join-Path $PSScriptRoot 'lib\ps-common.ps1')
+# Native tools print UTF-8; PowerShell decodes their output with the console's OEM code page,
+# so a captured "..." came out as "three CP437 characters" (2026-10-07). Process-local, as in the installer.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { Write-Verbose "console encoding unchanged: $($_.Exception.Message)" }
 
 # --- Elevation: choco upgrade needs admin; fail loudly, not degraded. ---
 if (-not (Test-IsAdmin)) {

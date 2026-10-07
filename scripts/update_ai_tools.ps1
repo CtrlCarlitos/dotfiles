@@ -11,6 +11,9 @@ re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 $ProgressPreference = 'SilentlyContinue'
 # Shared helpers (the current-version checks below); the file sits next to this script.
 if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-common.ps1') }
+# Native tools print UTF-8; PowerShell decodes their output with the console's OEM code page,
+# so a captured "..." came out as "three CP437 characters" (2026-10-07). Process-local, as in the installer.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { Write-Verbose "console encoding unchanged: $($_.Exception.Message)" }
 # Glyphs from code points: this file stays ASCII. Windows PowerShell 5.1 reads a BOM-less file
 # as Windows-1252, where a UTF-8 emoji's bytes can include 0x93 - a "smart quote" that ends a
 # string ("The term 'upgrading' is not recognized", 2026-10-07). See docs/invariants.md #16.
@@ -493,7 +496,10 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # Superpowers skills plugin
     Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
     # Its "Checking for updates for plugin..." line said nothing on every run: shown only on failure.
-    $cpOut = @(& claude plugin update superpowers -y 2>&1 | ForEach-Object { "$_" })
+    # Named with its marketplace: a machine can carry superpowers from several (project-local
+    # installs from claude-plugins-official / superpowers-dev), and the bare name then fails
+    # with "installed from more than one marketplace". dotfiles installs this one.
+    $cpOut = @(& claude plugin update superpowers@superpowers-marketplace -y 2>&1 | ForEach-Object { "$_" })
     if ($LASTEXITCODE -ne 0) { $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red }
 }
 
