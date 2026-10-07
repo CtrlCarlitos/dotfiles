@@ -33,11 +33,15 @@ for f in "$ps1_profile" "$ps1_profile5" "$zsh_aliases"; do
         fail "$f: dotup back-compat alias must be removed"
 done
 
-# 3. dot up sequence: update --apply, then init, then conditional apply.
-#    init never pulls - update owns the fetch - so update runs FIRST.
-grep -Fq 'chezmoi update --apply' "$ps1_profile" || fail "$ps1_profile: dot up must update --apply"
-grep -Fq 'chezmoi init' "$ps1_profile" || fail "$ps1_profile: dot up must re-init config after pull"
-grep -Fq 'chezmoi init' "$zsh_aliases" || fail "$zsh_aliases: dot up must re-init config after pull"
+# 3. dot up sequence: pull WITHOUT applying, then init, then ONE apply. init never
+#    pulls - update owns the fetch - so update runs FIRST; applying inside update
+#    (before init) ran the installers twice whenever the config template changed.
+#    The zsh arm is executed in 7; the PowerShell profiles are checked for the order.
+for prof in "$ps1_profile" "$repo_root/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"; do
+    awk '/chezmoi update --apply=false/{a=NR} /^ *chezmoi init\r?$/{b=NR} /^ *chezmoi apply\r?$/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$prof" ||
+        fail "$prof: dot up must run chezmoi update --apply=false, then chezmoi init, then chezmoi apply"
+    if grep -Eq 'chezmoi update --apply( |\r?$)' "$prof"; then fail "$prof: dot up must not apply inside chezmoi update"; fi
+done
 
 # 3b. dot up refreshes the LIVE session: zsh drops its PATH-listing cache
 #     (HASH_LIST_ALL hides installs made after the shell started - observed
@@ -118,28 +122,26 @@ done
 grep -Fq 'repo_scripts="${DOTFILES_DIR:-$(chezmoi source-path)}/scripts"' "$zsh_aliases" ||
     fail "$zsh_aliases: dot must resolve scripts from DOTFILES_DIR or the chezmoi source path"
 
-# 7. `dot up` exits 0 on the normal path - EXECUTED, not grepped (#116): the
-#    old tail, `[ "$before" != "$after" ] && chezmoi apply`, made the function
-#    return 1 whenever `chezmoi init` rewrote nothing, so `dot up && ...`
-#    chains broke. The arm is extracted from dot_aliases.zsh and run against
-#    a stub chezmoi (no update, no network, no real config touched).
+# 7. `dot up`, EXECUTED (#116: a tail that returned 1 on the normal path broke
+#    every `dot up && ...` chain). The arm is extracted from dot_aliases.zsh and
+#    run against a stub chezmoi that logs its calls (no network, no real config):
+#    pull without applying, init, exactly one apply - whether or not init rewrote
+#    the config - and nothing applied when a step before it fails.
 dot_tmp="$(mktemp -d)"
 trap 'rm -rf "$dot_tmp"' EXIT
 
-run_dot_up() { # $1 = scratch dir, $2 = "yes" (init rewrites config) | "no"
-    local scratch="$1" rewrite="$2"
+run_dot_up() { # $1 = scratch dir, $2 = "yes" (init rewrites config) | "no", $3 = failing subcommand
+    local scratch="$1" rewrite="$2" failing="${3:-}"
     local bin="$scratch/bin"
-    rm -rf "$bin" "$scratch/applied"
+    rm -rf "$bin" "$scratch/calls"
     mkdir -p "$bin" "$scratch/home/.config/chezmoi" "$scratch/source"
     printf 'seed = "v1"\n' >"$scratch/home/.config/chezmoi/chezmoi.toml"
     cat >"$bin/chezmoi" <<EOF
 #!/usr/bin/env bash
-case "\$1" in
-    update) : ;;
-    init) [ "$rewrite" = yes ] && printf 'seed = "v2"\n' >"\$HOME/.config/chezmoi/chezmoi.toml" ;;
-    apply) : >"$scratch/applied" ;;
-    source-path) echo "$scratch/source" ;;
-esac
+[ "\$1" = source-path ] && { echo "$scratch/source"; exit 0; }
+echo "\$*" >>"$scratch/calls"
+[ "\$1" = init ] && [ "$rewrite" = yes ] && printf 'seed = "v2"\n' >"\$HOME/.config/chezmoi/chezmoi.toml"
+[ "\$1" = "$failing" ] && exit 1
 exit 0
 EOF
     chmod +x "$bin/chezmoi"
@@ -151,14 +153,21 @@ EOF
     )
 }
 
-# a. init rewrites the config: apply must fire, and the exit code is 0.
+want_calls="$(printf 'update --apply=false\ninit\napply')"
+# a. init rewrites the config: one apply, after init, exit 0.
 run_dot_up "$dot_tmp" yes >/dev/null 2>&1 || fail "dot up must exit 0 when init rewrites the config"
-[ -f "$dot_tmp/applied" ] || fail "dot up must apply when the config hash changed"
+[ "$(cat "$dot_tmp/calls")" = "$want_calls" ] || fail "dot up must pull, init, then apply once (got: $(tr '\n' ';' <"$dot_tmp/calls"))"
 pass
-# b. init changes nothing (the normal path, and the #116 bug): still exit 0.
+# b. init changes nothing (the normal path, and the #116 bug): the same, exit 0.
 run_dot_up "$dot_tmp" no >/dev/null 2>&1 ||
     fail "dot up must exit 0 when the config is unchanged (the #116 regression)"
-[ ! -f "$dot_tmp/applied" ] || fail "dot up must not apply when the config hash is unchanged"
+[ "$(cat "$dot_tmp/calls")" = "$want_calls" ] || fail "dot up must pull, init, then apply once (got: $(tr '\n' ';' <"$dot_tmp/calls"))"
+pass
+# c. a failed pull or init applies nothing and returns non-zero.
+for step in update init; do
+    if run_dot_up "$dot_tmp" no "$step" >/dev/null 2>&1; then fail "dot up must return non-zero when chezmoi $step fails"; fi
+    if grep -qx apply "$dot_tmp/calls"; then fail "dot up must not apply after chezmoi $step failed"; fi
+done
 pass
 
 # 8. dot remote arm: wired into all three dispatchers (#165). Both twins

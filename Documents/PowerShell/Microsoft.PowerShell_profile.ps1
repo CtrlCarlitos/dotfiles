@@ -141,9 +141,9 @@ if (Get-Command pstop -ErrorAction SilentlyContinue) {
 }
 
 # Dotfiles command family (dot CLI). `dot up` syncs
-# state and NEVER upgrades (chezmoi update owns the pull; init re-runs the
-# config template AFTER the pull - init does not fetch - and a final apply
-# fires only when init actually rewrote the config). `dot upgrade` is the
+# state and NEVER upgrades (chezmoi update pulls without applying, init
+# re-runs the config template on the pulled source - init does not fetch -
+# then one apply runs with the fresh config). `dot upgrade` is the
 # single upgrade owner (choco sweep + AI tools, live-session gated).
 function dot {
     $sub = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
@@ -151,14 +151,13 @@ function dot {
     $repoScripts = Join-Path $HOME '.local\share\chezmoi\scripts'
     switch ($sub) {
         'up' {
-            chezmoi update --apply
+            # Pull WITHOUT applying, re-run the config template on the pulled source, then ONE
+            # apply with the fresh config (applying before init ran the installer twice).
+            chezmoi update --apply=false
             if ($LASTEXITCODE -ne 0) { return }
-            $cfg = Join-Path $HOME '.config\chezmoi\chezmoi.toml'
-            $before = if (Test-Path $cfg) { (Get-FileHash $cfg -ErrorAction SilentlyContinue).Hash } else { $null }
             chezmoi init
             if ($LASTEXITCODE -ne 0) { return }
-            $after = if (Test-Path $cfg) { (Get-FileHash $cfg -ErrorAction SilentlyContinue).Hash } else { $null }
-            if ($before -ne $after) { chezmoi apply }
+            chezmoi apply
             # New installs land in the registry PATH; this session only sees
             # them after a re-read (child installers keep their own PATH).
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")

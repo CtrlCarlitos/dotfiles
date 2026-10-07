@@ -77,17 +77,24 @@ Write-Output ('graft-install-env-cleared=[' + $env:NPM_CONFIG_ALLOW_SCRIPTS + ']
 # sessions included. While one runs, that package is left out of the sweep.
 $script:procs = @()
 function Get-Process { param([Parameter(Position = 0)][string[]]$Name) foreach ($n in $Name) { $script:procs | Where-Object { $_.ProcessName -eq $n } } }
+# A scratch Chocolatey lib: both packages installed there unless removed below.
+$lib = Join-Path ([IO.Path]::GetTempPath()) ('choco-lib-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path (Join-Path $lib 'claude'), (Join-Path $lib 'docker-desktop') | Out-Null
 $script:procs = @()
-Write-Output ('choco-idle=' + ((Get-ChocoUpgradeArgument) -join ' '))
+Write-Output ('choco-idle=' + ((Get-ChocoUpgradeArgument -ChocoLib $lib) -join ' '))
 $script:procs = @([pscustomobject]@{ ProcessName = 'claude'; Path = 'C:\x\.local\bin\claude.exe' })
-Write-Output ('choco-claude-running=' + ((Get-ChocoUpgradeArgument) -join ' '))
+Write-Output ('choco-claude-running=' + ((Get-ChocoUpgradeArgument -ChocoLib $lib) -join ' '))
 $script:procs = @([pscustomobject]@{ ProcessName = 'codex'; Path = 'C:\x\codex.exe' })
-Write-Output ('choco-other-agent=' + ((Get-ChocoUpgradeArgument) -join ' '))
+Write-Output ('choco-other-agent=' + ((Get-ChocoUpgradeArgument -ChocoLib $lib) -join ' '))
 # Docker Desktop kept running (its installer cannot replace a running app): left out too.
 $script:procs = @()
-Write-Output ('choco-keep-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop) -join ' '))
+Write-Output ('choco-keep-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop -ChocoLib $lib) -join ' '))
 $script:procs = @([pscustomobject]@{ ProcessName = 'claude'; Path = 'C:/x/.local/bin/claude.exe' })
-Write-Output ('choco-claude-and-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop) -join ' '))
+Write-Output ('choco-claude-and-docker=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop -ChocoLib $lib) -join ' '))
+# Both moved to winget (no lib folder): nothing to exclude, or Chocolatey warns "not found".
+Remove-Item -Recurse -Force (Join-Path $lib 'claude'), (Join-Path $lib 'docker-desktop')
+Write-Output ('choco-winget-owned=' + ((Get-ChocoUpgradeArgument -KeepDockerDesktop -ChocoLib $lib) -join ' '))
+Remove-Item -Recurse -Force $lib
 PSEOF
 
 out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r' || true)"
@@ -118,6 +125,7 @@ expect 'choco-keep-docker=upgrade all -y --no-progress --except=docker-desktop'
 expect 'choco-claude-and-docker=upgrade all -y --no-progress --except=claude,docker-desktop'
 expect 'graft-install-scalar=True'
 expect 'choco-other-agent=upgrade all -y --no-progress'
+expect 'choco-winget-owned=upgrade all -y --no-progress'
 
 # On Windows `graft version` answers "latest: unreachable" (it cannot spawn npm.cmd), so the
 # graft-text check alone never said "current" there and graft was reinstalled on every run.

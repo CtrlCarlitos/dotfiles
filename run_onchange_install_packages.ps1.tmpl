@@ -178,7 +178,7 @@ function Invoke-WithTimeout {
 {{- /* VS Code settings: this machine's chezmoi.toml [data.vscode.settings] (seeded by
        `chezmoi init` from .chezmoitemplates/vscode-settings.toml). Every tier is read with an
        empty fallback: a tier deleted there is empty, and a config written before the move
-       (the first `chezmoi update --apply` of `dot up` runs before its `chezmoi init`)
+       (a config written before the settings moved, until its first `chezmoi init`)
        renders with no settings and a note instead of failing. */ -}}
 {{ $vsCfg := dict -}}
 {{- $vsCfgMissing := true -}}
@@ -950,8 +950,8 @@ $vsCfgMissing = ${{ $vsCfgMissing }}
 if (-not $vsApply) {
     Write-Host "  VS Code settings defaults disabled in config" -ForegroundColor Yellow
 } elseif ($vsCfgMissing) {
-    # The first `chezmoi update --apply` of `dot up` renders with the config from before the
-    # settings moved there; `dot up` runs `chezmoi init` next, and the apply after it has them.
+    # A config written before the settings moved there has none until its next `chezmoi init`
+    # (`dot up` runs init before it applies).
     $vsApply = $false
     Write-Host "  VS Code settings: not in chezmoi.toml yet - chezmoi init adds them ([data.vscode.settings]); skipped this run" -ForegroundColor Yellow
 } else {

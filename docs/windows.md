@@ -28,7 +28,7 @@ Sudo-style alternatives to opening a separate elevated terminal:
 
 | | `dot up` | `dot upgrade` |
 |---|---|---|
-| What it does | `chezmoi update --apply`, then `chezmoi init` (re-renders the config template after the pull), then a final `chezmoi apply` only if init changed `chezmoi.toml`; re-reads the registry PATH into the current session | the choco and winget sweeps, then the AI tools (`scripts/update_ai_tools.ps1`) |
+| What it does | `chezmoi update --apply=false` (pull only), then `chezmoi init` (re-renders the config template on the pulled source), then one `chezmoi apply`; re-reads the registry PATH into the current session | the choco and winget sweeps, then the AI tools (`scripts/update_ai_tools.ps1`) |
 | Upgrades tools? | **Never.** The installer only installs what is missing | **Yes, and it is the only command that does** |
 | Elevation | required (installer gate, see above) | required (`scripts/dotupgrade.ps1`) |
 | Agents running? | run it with none | run it with none; live ones defer their tool |

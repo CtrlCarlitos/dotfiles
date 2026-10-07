@@ -188,7 +188,7 @@ prints the path and puts the path back on the clipboard: paste that path to an a
 `dot` is a shell function (in `~/.aliases.zsh`); the PowerShell profiles have twins.
 
 ```bash
-dot up        # chezmoi update --apply, then chezmoi init (config re-init); never upgrades
+dot up        # pull (chezmoi update --apply=false), chezmoi init, one chezmoi apply; never upgrades
 dot upgrade   # the single owner of tool upgrades (run with no agent session open)
 dot backup    # encrypted portable backup
 dot restore   # restore a backup
