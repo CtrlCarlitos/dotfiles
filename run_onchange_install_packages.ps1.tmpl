@@ -662,7 +662,11 @@ if ($wingetPackages.Count -gt 0) {
         } catch { $wingetInventory = '' }
         $wingetMissing = @()
         $wingetStillChoco = @()
-        $chocoHave = if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoInstalled } else { $null }
+        # Assigned directly: `$x = if (...) { $set }` enumerates the set into a plain array, whose
+        # .Contains is case-sensitive - Chocolatey lists `Wget`, the catalog says `wget`, and the
+        # winget copy got installed next to Chocolatey's (2026-10-07).
+        $chocoHave = $null
+        if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoHave = $chocoInstalled }
         foreach ($wingetEntry in $wingetPackages) {
             $wingetId, $null, $wingetChocoWas = $wingetEntry -split '\|', 3
             # Still Chocolatey's on this machine: installing winget's copy too would leave two.

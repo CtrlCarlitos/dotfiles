@@ -9,7 +9,10 @@ set -euo pipefail
 #   - dot upgrade updates WSL with `wsl --update` and holds Claude Desktop while claude.exe runs;
 #   - install.ps1 installs chezmoi and Git through winget (Chocolatey only without winget);
 #   - Get-WingetMigrationPlan: only installed Chocolatey copies, .install companions found, drops;
-#   - Invoke-WingetMigrationItem: choco uninstall, companion, then winget install with its args;
+#     a package a staying Chocolatey package depends on is kept (opencode needs fzf and ripgrep);
+#   - Invoke-WingetMigrationItem: meta package and .install in ONE choco uninstall (meta first),
+#     then winget install with its args; a non-zero choco exit with the package gone still
+#     installs the winget copy (neovim was lost that way); one still there is left as it is;
 #     the WSL record is dropped with --skip-autouninstaller; a failed winget install says how to
 #     put the app back; PowerShell 7 never replaces itself.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,6 +30,11 @@ ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 grep -Fq 'winget list --accept-source-agreements --disable-interactivity' "$ps_t" || fail "installer: one winget list inventory before installing"
 grep -Fq 'winget install --id $env:WINGET_PKG --exact --source winget --silent' "$ps_t" || fail "installer: winget install of missing ids"
 grep -Fq '@extra' "$ps_t" || fail "installer: winget_args must reach winget install"
+# the Chocolatey inventory must stay a case-insensitive set: `$x = if (...) { $set }` turns it into
+# a case-sensitive array and `Wget` (Chocolatey) stopped matching `wget` (catalog)
+if grep -Fq '$chocoHave = if (' "$ps_t"; then fail "installer: assign the choco inventory set directly (an if-expression enumerates it)"; fi
+grep -Fq 'if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoHave = $chocoInstalled }' "$ps_t" ||
+    fail "installer: the still-Chocolatey check must use the choco inventory set itself"
 grep -Fq 'wsl.exe --install --no-distribution' "$ps_t" || fail "installer: WSL must be installed when missing"
 grep -Fq 'wsl.exe --update' "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: WSL must be updated with wsl --update"
 grep -Fq "\$wingetHold += 'Anthropic.Claude'" "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: Claude Desktop must be held while claude.exe runs"
@@ -52,21 +60,41 @@ $catalog = @(
     'vscode.install|Microsoft.VisualStudioCode|vscode|--scope machine|close VS Code',
     'powershell-core|Microsoft.PowerShell|powershell-core|--scope machine|cannot replace itself',
     'jq|jqlang.jq|jq||',
-    'nodejs|OpenJS.NodeJS.LTS|node||Node 26 -> 24 LTS'
+    'nodejs|OpenJS.NodeJS.LTS|node||Node 26 -> 24 LTS',
+    'fzf|junegunn.fzf|fzf||',
+    'neovim|Neovim.Neovim|neovim||'
 )
-$installed = @('git.install', 'bat', 'cmake', 'cmake.install', 'vscode.install', 'powershell-core', 'winmerge', 'wsl2', 'python', 'nodejs', 'nodejs.install', 'cutepdf', 'Ghostscript.app', 'autohotkey.portable')
-$plan = @(Get-WingetMigrationPlan -CatalogLine $catalog -Installed $installed)
+$installed = @('git', 'fzf', 'opencode', 'neovim', 'git.install', 'bat', 'cmake', 'cmake.install', 'vscode.install', 'powershell-core', 'winmerge', 'wsl2', 'python', 'nodejs', 'nodejs.install', 'cutepdf', 'Ghostscript.app', 'autohotkey.portable')
+# opencode (staying on Chocolatey) needs fzf; the meta `git` needs git.install, but leaves with it
+$plan = @(Get-WingetMigrationPlan -CatalogLine $catalog -Installed $installed -DependedOn @{ fzf = @('opencode'); 'git.install' = @('git'); 'cmake.install' = @('cmake') })
+Write-Output ('plan-keep=' + (($plan | Where-Object Action -eq 'keep' | ForEach-Object { "$($_.Choco): $($_.Risk)" }) -join ','))
+Write-Output ('plan-git-companion=' + (($plan | Where-Object Choco -eq 'git.install').Companion))
 Write-Output ('plan-moves=' + (($plan | Where-Object Action -eq 'move' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-drops=' + (($plan | Where-Object Action -eq 'drop' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-companion=' + (($plan | Where-Object Choco -eq 'cmake').Companion))
 Write-Output ('plan-risk=' + (($plan | Where-Object Choco -eq 'git.install').Risk))
 
-$script:calls = @(); $script:wingetExit = 0
-function choco { $script:calls += 'choco ' + ($args -join ' '); $global:LASTEXITCODE = 0 }
-function winget { $script:calls += 'winget ' + ($args -join ' '); $global:LASTEXITCODE = $script:wingetExit }
+$script:calls = @(); $script:wingetExit = 0; $script:chocoExit = 0; $script:chocoLeft = @()
+function choco {
+    if ($args[0] -eq 'list') { $script:chocoLeft | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
+    $script:calls += 'choco ' + ($args -join ' '); $global:LASTEXITCODE = $script:chocoExit
+}
+$script:wingetHas = @()
+function winget {
+    if ($args[0] -eq 'list') { $script:wingetHas | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
+    $script:calls += 'winget ' + ($args -join ' '); $global:LASTEXITCODE = $script:wingetExit
+}
 function npm { $script:calls += 'npm ' + ($args -join ' '); $global:LASTEXITCODE = 0 }
 function Run($item) { $script:calls = @(); $r = Invoke-WingetMigrationItem -Item $item 6>$null; return "$r|" + ($script:calls -join ' ; ') }
 Write-Output ('move-cmake=' + (Run ($plan | Where-Object Choco -eq 'cmake')))
+Write-Output ('move-git=' + (Run ($plan | Where-Object Choco -eq 'git.install')))
+Write-Output ('keep-fzf=' + (Run ($plan | Where-Object Choco -eq 'fzf')))
+# choco exits 1 (beforeModify warned) but neovim is gone: winget still installs it
+$script:chocoExit = 1
+Write-Output ('move-neovim-gone=' + (Run ($plan | Where-Object Choco -eq 'neovim')))
+$script:chocoLeft = @('neovim|0.12.0')
+Write-Output ('move-neovim-there=' + (Run ($plan | Where-Object Choco -eq 'neovim')))
+$script:chocoExit = 0; $script:chocoLeft = @()
 Write-Output ('move-vscode=' + (Run ($plan | Where-Object Choco -eq 'vscode.install')))
 Write-Output ('drop-wsl=' + (Run ($plan | Where-Object Choco -eq 'wsl2')))
 Write-Output ('drop-winmerge=' + (Run ($plan | Where-Object Choco -eq 'winmerge')))
@@ -76,6 +104,10 @@ Write-Output ('move-fail=' + $failText)
 $script:wingetExit = 0
 Write-Output ('move-pwsh=' + (Run ($plan | Where-Object Choco -eq 'powershell-core')))
 Write-Output ('move-node=' + (Run ($plan | Where-Object Choco -eq 'nodejs')))
+# winget already has its own copy (installed next to Chocolatey's): only Chocolatey's goes
+$script:wingetHas = @('Name Id Version', 'jq jqlang.jq 1.8.2')
+Write-Output ('move-already=' + (Run ([pscustomobject]@{ Action = 'move'; Choco = 'jq'; Winget = 'jqlang.jq'; Id = 'jq'; Args = ''; Risk = ''; Companion = '' })))
+$script:wingetHas = @()
 # Set-NodeLtsPin: no pin -> add "24.*"; the right pin -> nothing; another major -> replaced
 $script:pinList = @()
 function winget { $script:calls += 'winget ' + ($args -join ' '); if ($args[0] -eq 'pin' -and $args[1] -eq 'list') { $script:pinList | ForEach-Object { $_ } }; $global:LASTEXITCODE = 0 }
@@ -86,11 +118,17 @@ Write-Output ('pin-other=' + (Pin @('Node.js LTS OpenJS.NodeJS.LTS 22.11.0 Gatin
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r' || true)"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-600))"; }
-    expect 'plan-moves=git.install,bat,cmake,vscode.install,powershell-core,nodejs'
+    expect 'plan-moves=git.install,bat,cmake,vscode.install,powershell-core,nodejs,neovim'
+    expect "plan-keep=fzf: Chocolatey's opencode depends on it"
+    expect 'plan-git-companion=git'
     expect 'plan-drops=winmerge,cutepdf,Ghostscript.app,autohotkey.portable,wsl2'
     expect 'plan-companion=cmake.install'
     expect 'plan-risk=chezmoi uses git'
-    expect 'move-cmake=ok|choco uninstall cmake -y --no-progress ; choco uninstall cmake.install -y --no-progress ; winget install --id Kitware.CMake --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
+    expect 'move-cmake=ok|choco uninstall cmake cmake.install -y --no-progress ; winget install --id Kitware.CMake --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
+    expect 'move-git=ok|choco uninstall git git.install -y --no-progress ; winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
+    expect 'keep-fzf=skipped|'
+    expect 'move-neovim-gone=ok|choco uninstall neovim -y --no-progress ; winget install --id Neovim.Neovim --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
+    expect 'move-neovim-there=failed|choco uninstall neovim -y --no-progress'
     expect 'move-vscode=ok|choco uninstall vscode.install -y --no-progress ; winget install --id Microsoft.VisualStudioCode --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --scope machine'
     expect 'drop-wsl=ok|choco uninstall wsl2 -y --no-progress --skip-autouninstaller'
     expect 'drop-winmerge=ok|choco uninstall winmerge -y --no-progress'
@@ -100,8 +138,9 @@ PSEOF
     expect 'pin-same=True|'
     expect 'pin-other=True|winget pin remove --id OpenJS.NodeJS.LTS --exact ; winget pin add --id OpenJS.NodeJS.LTS --exact --version 24.* --accept-source-agreements'
     expect 'move-pwsh=skipped|'
+    expect 'move-already=ok|choco uninstall jq -y --no-progress'
     # a different Node major: the global npm tools' native modules are rebuilt right after
-    expect 'move-node=ok|choco uninstall nodejs -y --no-progress ; choco uninstall nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity ; npm rebuild -g'
+    expect 'move-node=ok|choco uninstall nodejs nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity ; npm rebuild -g'
     pass
 else
     printf 'note: pwsh not installed - executed checks skipped\n'

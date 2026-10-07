@@ -112,6 +112,21 @@ if [ "$(wc -l <"$GIT_LOG" | tr -d ' ')" != 6 ] || [ "$(sort -u "$GIT_LOG" | wc -
     fail "b: each upstream repo must be asked exactly once per run (asked: $(tr '\n' ' ' <"$GIT_LOG"))"
 fi
 unset GIT_LOG
+# ...and waits only for those lookups: the installer runs a sudo keep-alive loop in the
+# background, and a bare `wait` hung `dot up` on it (2026-10-07). An unrelated job must not hold
+# the prefetch up.
+prefetch_secs="$(
+    export PATH="$tmp/bin:$PATH" FAKE_HEAD=aaaaaaa
+    # shellcheck disable=SC1091
+    . "$repo_root/scripts/lib/agent-skills.sh"
+    sleep 30 &
+    keepalive=$!
+    start=$SECONDS
+    skills_prefetch_heads o/a o/b
+    echo $((SECONDS - start))
+    kill "$keepalive" 2>/dev/null || true
+)"
+if [ "${prefetch_secs:-99}" -ge 10 ]; then fail "b: the head prefetch must not wait for unrelated background jobs (took ${prefetch_secs}s)"; fi
 
 FAKE_HEAD=bbbbbbb
 [ "$(run_all)" = 'adds=8 installed=20' ] || fail "c: a moved head must reinstall every group (got $(run_all))"

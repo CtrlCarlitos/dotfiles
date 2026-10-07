@@ -312,12 +312,18 @@ skills_remote_head() {
 # skills_prefetch_heads <owner/repo...> - ask every repo at once, in the background; each answer
 # (possibly empty: unreachable) lands in a file skills_remote_head reads. Best effort.
 skills_prefetch_heads() {
-    local repo
+    local repo pids=()
     SKILLS_HEAD_DIR="$(mktemp -d 2>/dev/null)" || { SKILLS_HEAD_DIR=""; return 0; }
     for repo in "$@"; do
         ( net_timeout 20 git ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | cut -f1 | head -n 1 >"$SKILLS_HEAD_DIR/${repo//\//_}" ) &
+        pids+=("$!")
     done
-    wait
+    # Only these: a bare `wait` also waits for every other background job of the caller - the
+    # installer's sudo keep-alive loop never ends (it hung `dot up` on WSL, 2026-10-07), and dot
+    # upgrade's VS Code extension update can take minutes.
+    # A failed lookup is fine (it reads as "unknown" and the source reinstalls); `wait <pids>`
+    # returns the lookups' status, which must not end a `set -e` caller.
+    wait "${pids[@]}" || true
 }
 
 skills_up_to_date() {
