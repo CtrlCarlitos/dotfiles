@@ -945,6 +945,19 @@ function Get-WingetMigrationPlan {
             After = @($after | Where-Object { $_ -ine "$($f[0]).install" -and $_ -ine ($f[0] -replace '\.install$', '') })
         }
     }
+    # A Chocolatey package that only LEAVING packages depend on (unzip under opencode): nothing
+    # needs it once they are gone. Offered for removal after them; a catalog tool never is.
+    $catalogChoco = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in $CatalogLine) { if ($line) { [void]$catalogChoco.Add(($line -split '\|', 2)[0]) } }
+    foreach ($dep in @($DependedOn.Keys)) {
+        if (-not $have.Contains($dep) -or $leaving.Contains($dep) -or $catalogChoco.Contains($dep)) { continue }
+        $users = @($DependedOn[$dep] | Where-Object { $have.Contains($_) })
+        if ($users.Count -eq 0 -or @($users | Where-Object { -not $leaving.Contains($_) }).Count -gt 0) { continue }
+        $plan += [pscustomobject]@{
+            Action = 'orphan'; Choco = $dep; Winget = ''; Id = $dep; Args = ''
+            Risk = "only $($users -join ', ') used it"; Companion = ''; After = @($users)
+        }
+    }
     foreach ($name in $script:WingetMigrationDrops.Keys) {
         if (-not $have.Contains($name)) { continue }
         $plan += [pscustomobject]@{
@@ -989,7 +1002,7 @@ function Invoke-WingetMigrationItem {
                 return 'failed'
             }
         }
-        if ($Item.Action -eq 'drop') {
+        if ($Item.Action -eq 'drop' -or $Item.Action -eq 'orphan') {
             Write-Host "  - $($Item.Choco): removed ($($Item.Risk))" -ForegroundColor Green
             return 'ok'
         }
@@ -1011,9 +1024,22 @@ function Invoke-WingetMigrationItem {
             # A different Node major breaks native modules of the global npm tools (graft's
             # tree-sitter parsers): rebuild them for the Node now installed.
             $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
-            & npm rebuild -g *> $null
-            if ($LASTEXITCODE -ne 0) { Write-Host "    npm rebuild -g failed (exit $LASTEXITCODE) - run it once by hand" -ForegroundColor Yellow }
-            else { Write-Host "    native npm tools rebuilt for the new Node (npm rebuild -g)" }
+            # Not `npm rebuild -g`: it re-links every global command and fails with EEXIST on shims
+            # an older npm wrote (2026-10-07, on npm's own shim). graft is the one global tool with
+            # native modules (tree-sitter); reinstalling it compiles them for this Node - the path
+            # dot upgrade already takes.
+            & npm ls -g --depth=0 '@nanonets/graft' *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $graftAllow = ''
+                try { $graftAllow = ('{{ join "," .agents.npm.graft_allow_scripts }}' | chezmoi execute-template | Out-String).Trim() } catch { $graftAllow = '' }
+                if (-not $graftAllow) {
+                    Write-Host "    graft's native modules were not rebuilt (no allow-list from chezmoi data) - run dot upgrade" -ForegroundColor Yellow
+                } elseif ((Invoke-GraftNpmInstall -AllowScripts $graftAllow) -ne 0) {
+                    Write-Host "    graft reinstall failed - run dot upgrade to retry" -ForegroundColor Yellow
+                } else {
+                    Write-Host "    graft reinstalled: its native modules are built for the new Node"
+                }
+            }
             if ($script:WingetMigrationNodeMajor -gt 0) { $null = Set-NodeLtsPin -Major $script:WingetMigrationNodeMajor }
         }
         return 'ok'
