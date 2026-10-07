@@ -69,6 +69,13 @@ $installed = @('git', 'fzf', 'opencode', 'neovim', 'git.install', 'bat', 'cmake'
 $plan = @(Get-WingetMigrationPlan -CatalogLine $catalog -Installed $installed -DependedOn @{ fzf = @('opencode'); 'git.install' = @('git'); 'cmake.install' = @('cmake') })
 Write-Output ('plan-keep=' + (($plan | Where-Object Action -eq 'keep' | ForEach-Object { "$($_.Choco): $($_.Risk)" }) -join ','))
 Write-Output ('plan-git-companion=' + (($plan | Where-Object Choco -eq 'git.install').Companion))
+Write-Output ('plan-git-after=[' + (@(($plan | Where-Object Choco -eq 'git.install').After) -join ',') + ']')
+# opencode moves too (its catalog record): fzf is no longer kept - it moves AFTER opencode,
+# because Chocolatey refuses to remove it while opencode is installed
+$withOc = @($catalog + 'opencode|SST.opencode|opencode-cli||close every opencode session first')
+$planOc = @(Get-WingetMigrationPlan -CatalogLine $withOc -Installed $installed -DependedOn @{ fzf = @('opencode'); 'git.install' = @('git') })
+Write-Output ('oc-fzf=' + (($planOc | Where-Object Choco -eq 'fzf' | ForEach-Object { "$($_.Action) after $(@($_.After) -join ',')" })))
+Write-Output ('oc-keeps=[' + (@($planOc | Where-Object Action -eq 'keep').Count) + ']')
 Write-Output ('plan-moves=' + (($plan | Where-Object Action -eq 'move' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-drops=' + (($plan | Where-Object Action -eq 'drop' | ForEach-Object { $_.Choco }) -join ','))
 Write-Output ('plan-companion=' + (($plan | Where-Object Choco -eq 'cmake').Companion))
@@ -121,6 +128,14 @@ PSEOF
     expect 'plan-moves=git.install,bat,cmake,vscode.install,powershell-core,nodejs,neovim'
     expect "plan-keep=fzf: Chocolatey's opencode depends on it"
     expect 'plan-git-companion=git'
+    # a meta package leaving with its .install is the companion, not something to wait for
+    expect 'plan-git-after=[]'
+    expect 'oc-fzf=move after opencode'
+    expect 'oc-keeps=[0]'
+    # the script runs those last, and keeps one whose dependent stayed on Chocolatey
+    awk '/\$late \+= \$b/{a=NR} /foreach \(\$c in \$careful\)/{b=NR} /foreach \(\$l in \$late\)/{c=NR} END{exit !(a && b && c && a<c && b<c)}' "$repo_root/scripts/migrate-to-winget.ps1" ||
+        fail "migrate-to-winget.ps1: tools other moving packages depend on must move after the batch and the careful items"
+    grep -Fq 'still depends on it)' "$repo_root/scripts/migrate-to-winget.ps1" || fail "migrate-to-winget.ps1: a late tool whose dependent stayed must be kept, with the reason"
     expect 'plan-drops=winmerge,cutepdf,Ghostscript.app,autohotkey.portable,wsl2'
     expect 'plan-companion=cmake.install'
     expect 'plan-risk=chezmoi uses git'

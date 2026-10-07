@@ -192,6 +192,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `claude-desktop` | claude_desktop | — | — | — | `Anthropic.Claude` | — |  |
 | `antigravity-desktop` | antigravity_desktop | — | — | — | `Google.Antigravity` | — |  |
 | `opencode-desktop` | opencode_desktop | — | — | — | `SST.OpenCodeDesktop` | — |  |
+| `opencode-cli` | opencode_cli | — | — | — | `SST.opencode` | — | Windows only here: the Unix installers use OpenCode's own install script. Chocolatey's opencode package pulled fzf, ripgrep and unzip in as dependencies, which kept those on Chocolatey too |
 <!-- tool-parity:packages-end -->
 
 A few rows the catalog deliberately does not carry, kept by hand:

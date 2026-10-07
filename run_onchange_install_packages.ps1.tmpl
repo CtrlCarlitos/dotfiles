@@ -532,6 +532,13 @@ Install-Gum
 {{ includeTemplate "winget-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
+{{- if $opencode_cli }}
+# OpenCode CLI: winget's SST.opencode, installed by the winget pass like every catalog package.
+# The OpenCode section further down checks the binary works and wires Superpowers for it.
+{{ includeTemplate "choco-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
+{{ includeTemplate "winget-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
+{{- end }}
+
 {{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
 # ONE batched local inventory instead of one `choco list --exact <pkg>` per
@@ -1480,7 +1487,8 @@ if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'li
 # done by the agent-guardrails installer, and the Serena MCP registration
 # into opencode.json stays with Serena in agent_toolkit.
 
-# OpenCode (choco). NOT npm: opencode-ai's npm package only fetches
+# OpenCode: winget's SST.opencode, installed by the catalog's winget pass above (Chocolatey's
+#    opencode package only where winget is missing). NOT npm: opencode-ai's npm package only fetches
 #    its real platform binary in a postinstall script, and any install
 #    where that didn't run (npm 12 script handling, --ignore-scripts,
 #    partial installs) leaves bin/opencode.exe an invalid exe - every
@@ -1490,8 +1498,11 @@ if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'li
 #    re-check matters because Get-Command alone is fooled by that shim
 #    (the shim exists, the binary inside it is dead), and the npm rm is
 #    required or the leftover shim keeps shadowing choco's binary - the
-#    PowerShell profile prepends %APPDATA%\npm to PATH ahead of choco's
-#    bin (choco is the route opencode's own README documents for Windows).
+#    PowerShell profile prepends %APPDATA%\npm to PATH ahead of the real binary.
+# winget installs it as a portable package: its command link lands in WinGet\Links, which a
+# first portable install adds to the user PATH - this session only sees it after a re-read.
+$wingetLinks = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+if ((Test-Path $wingetLinks) -and (($env:Path -split ';') -notcontains $wingetLinks)) { $env:Path = "$wingetLinks;" + $env:Path }
 $ocWorks = $false
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
     try { opencode --version 2>&1 | Out-Null; $ocWorks = ($LASTEXITCODE -eq 0) } catch { $ocWorks = $false }
@@ -1503,8 +1514,12 @@ if (-not $ocWorks) {
     # $ErrorActionPreference=Stop a bare `choco ...` would then throw
     # CommandNotFoundException and silently kill everything after this
     # point (Superpowers, skills, Playwright, Antigravity, desktop apps).
-    if (Get-Command choco -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing OpenCode (choco)..." -ForegroundColor Yellow
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        # The winget pass above installs SST.opencode; reaching here means it failed (its warning
+        # is printed there) or the binary does not run.
+        Write-Host "  Warning: OpenCode (winget SST.opencode) is not working - see the winget install above, or run: winget install --id SST.opencode --exact" -ForegroundColor Red
+    } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Host "  Installing OpenCode (choco - winget is not available)..." -ForegroundColor Yellow
         try {
             choco install opencode -y --no-progress | Out-Null
             if ($LASTEXITCODE -ne 0) {

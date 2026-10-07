@@ -77,7 +77,11 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 } else {
     Write-Host "$($G.warning)  npm not found. Skipping npm packages." -ForegroundColor Red
 }
-if (Get-Command choco -ErrorAction SilentlyContinue) {
+# OpenCode is winget's SST.opencode now, upgraded (or held while a session is live) by
+# dotupgrade.ps1's winget sweep. A machine where Chocolatey still has it keeps the choco upgrade
+# until scripts/migrate-to-winget.ps1 moves it.
+$ocChocoLib = Join-Path $(if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }) 'lib\opencode'
+if ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $ocChocoLib)) {
     if (Test-Deferred 'opencode') {
         Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
     } else {
