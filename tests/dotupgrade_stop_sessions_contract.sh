@@ -149,6 +149,32 @@ Case 'nothing' @() @('y')
 $env:DOTUPGRADE_NO_PROMPT = '1'
 Case 'noprompt-env' $two @('y')
 Remove-Item Env:\DOTUPGRADE_NO_PROMPT
+
+# Desktop apps: offered as a whole, by install folder - several share a CLI's process name.
+$deskA = P 'claude' 501 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.26454.0\claude.exe'
+$deskB = P 'claude' 502 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.26454.0\claude.exe'
+$codexApp = P 'ChatGPT' 601 'C:\Program Files\WindowsApps\OpenAI.Codex_26.930.4958.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe'
+$codexAppCli = P 'codex' 602 'C:\Program Files\WindowsApps\OpenAI.Codex_26.930.4958.0_x64__2p2nqsd0c76g0\app\resources\codex.exe'
+$ocDesk = P 'OpenCode' 701 'C:\Users\u\AppData\Local\Programs\@opencode-aidesktop\OpenCode.exe'
+$ocCli = P 'opencode' 702 'C:\Users\u\AppData\Local\Microsoft\WinGet\Links\opencode.exe'
+$agDesk = P 'Antigravity' 801 'C:\Users\u\AppData\Local\Programs\antigravity\Antigravity.exe'
+$noPath = P 'Antigravity' 802 $null
+# Claude Code + Claude Desktop: "y" stops both, so no claude.exe is left to hold Claude Desktop
+$script:resets = 0
+Case 'desk-all' @($code, $deskA, $deskB) @('y')
+Write-Output ('desk-resets-only-the-session=' + $script:resets)
+Case 'desk-only' @($deskA, $deskB, $agDesk) @('y')
+# choose each: one question per session, one per app (not per process)
+Case 'desk-each' @($code, $deskA, $deskB) @('s', 'n', 'y')
+Case 'desk-keep' @($deskA, $deskB) @('n')
+Case 'desk-ancestor' @($deskA, $deskB) @('y') @(501)
+Case 'desk-nopath' @($noPath) @('y')
+# grouping, and desktop processes never count as CLI sessions (they would defer CLI upgrades)
+$script:table = @($code, $deskA, $codexApp, $codexAppCli, $ocDesk, $ocCli, $agDesk)
+Write-Output ('desk-apps=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.Label):$(@($_.Processes).Count)" }) -join ','))
+Write-Output ('desk-sessions=' + ((@(Get-LiveAgentProcess -Name @('opencode', 'claude', 'codex', 'agy', 'serena')) | ForEach-Object { $_.Id }) -join ','))
+$script:table = @($codexApp, $codexAppCli, $ocDesk)
+Write-Output ('desk-defers-nothing=' + (Test-LiveProcess @('codex', 'opencode', 'claude')))
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
@@ -164,6 +190,16 @@ PSEOF
     expect 'daemon=0||prompts=0'
     expect 'nothing=0||prompts=0'
     expect 'noprompt-env=0||prompts=0'
+    expect 'desk-all=3|200,501,502|prompts=1'
+    expect 'desk-resets-only-the-session=1'
+    expect 'desk-only=3|501,502,801|prompts=1'
+    expect 'desk-each=2|501,502|prompts=3'
+    expect 'desk-keep=0||prompts=1'
+    expect 'desk-ancestor=1|502|prompts=1'
+    expect 'desk-nopath=0||prompts=0'
+    expect 'desk-apps=Claude Desktop:1,ChatGPT / Codex:2,Antigravity:1,OpenCode Desktop:1'
+    expect 'desk-sessions=702,200'
+    expect 'desk-defers-nothing=False'
     # A console agent ended by taskkill never switches off its TUI's terminal modes; they print as
     # stray characters. Stop-AgentProcess -ResetTerminal writes the switch-offs to its console
     # FIRST (and only then), and the sequence covers mouse, focus, paste, kitty keys, cursor.

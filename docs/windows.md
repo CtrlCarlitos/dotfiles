@@ -210,10 +210,18 @@ On an interactive console, `dot upgrade` first lists the blocking processes and 
 ```text
 These sessions block part of the upgrade:
   claude (pid 1234, started 09:12)
+These desktop apps are running - their updates wait until they are closed:
+  Claude Desktop (desktop app, 9 process(es))
 Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer
 ```
 
-`y` stops all of them, `s` asks per process, anything else (the default) keeps today's
+The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE
+and OpenCode Desktop, recognised by their install folder (several share a process name with a CLI:
+claude, codex, opencode). Their installers cannot replace a running app, and Claude Desktop's
+closes every `claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a
+session: it never defers a CLI upgrade, and closing it loses nothing.
+
+`y` stops all of them, `s` asks per session and per app, anything else (the default) keeps today's
 defer-and-report. Stopping ends that session, so unsaved context is lost unless it can be
 resumed. On Windows each process is asked to close its window, then the whole process tree
 is killed after 5 seconds (Serena leaves language-server children behind); the Unix twin

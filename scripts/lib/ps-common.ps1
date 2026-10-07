@@ -220,8 +220,38 @@ function Test-DevTmpPathSafe {
 # AnthropicClaude\; it is not Claude Code). A process whose path cannot be read (an
 # elevated process seen from a normal shell) still counts: when in doubt, defer.
 $script:NonSessionPathPattern = @{
-    claude = @('\\AnthropicClaude\\')
-    codex  = @('\\\.codex\\packages\\app-server-daemon\\')
+    claude   = @('\\AnthropicClaude\\')
+    codex    = @('\\\.codex\\packages\\app-server-daemon\\', '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)')
+    opencode = @('\\@opencode-ai?desktop\\', '\\AppData\\Local\\OpenCode\\')
+}
+
+# The agent desktop apps (dot upgrade). Their installers cannot replace a running app, and
+# Claude Desktop shares claude.exe with Claude Code, so while any claude.exe runs the winget
+# sweep holds it - the stop offer used to list only the CLI sessions, and Claude Desktop held
+# itself out after the operator said yes (2026-10-07). Matched by name AND install folder:
+# several share a process name with a CLI (claude, codex, opencode).
+$script:AgentDesktopApp = @(
+    [pscustomobject]@{ Label = 'Claude Desktop';   Name = @('claude');                                  Path = '\\AnthropicClaude\\' }
+    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Name = @('ChatGPT', 'codex', 'codex-command-runner'); Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)' }
+    [pscustomobject]@{ Label = 'Antigravity';      Name = @('Antigravity');                             Path = '\\Programs\\antigravity\\' }
+    [pscustomobject]@{ Label = 'Antigravity IDE';  Name = @('Antigravity IDE');                         Path = '\\Programs\\Antigravity IDE\\' }
+    [pscustomobject]@{ Label = 'OpenCode Desktop'; Name = @('OpenCode');                                Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\' }
+)
+
+# One entry per RUNNING desktop app: its label and all its processes. A process whose path
+# cannot be read is not claimed by any app (it stays whatever the session scan makes of it).
+function Get-AgentDesktopApp {
+    param([int[]]$ExcludeId = @())
+    foreach ($app in $script:AgentDesktopApp) {
+        $procs = @(foreach ($n in $app.Name) {
+            foreach ($process in @(Get-Process $n -ErrorAction SilentlyContinue)) {
+                $path = $null
+                try { $path = $process.Path } catch { $path = $null }
+                if ($path -and $path -match $app.Path -and $ExcludeId -notcontains $process.Id) { $process }
+            }
+        })
+        if ($procs.Count -gt 0) { [pscustomobject]@{ Label = $app.Label; Processes = $procs } }
+    }
 }
 
 function Get-LiveAgentProcess {
@@ -381,29 +411,52 @@ function Invoke-LiveSessionStop {
     param([string[]]$Name, [int[]]$ExcludeId = @())
     if ($env:DOTUPGRADE_NO_PROMPT -eq '1') { return @() }
     $procs = @(Get-StoppableAgentProcess -Name $Name -ExcludeId $ExcludeId)
-    if ($procs.Count -eq 0) { return @() }
+    $apps = @(Get-AgentDesktopApp -ExcludeId $ExcludeId)
+    if ($procs.Count -eq 0 -and $apps.Count -eq 0) { return @() }
     if (-not (Test-InteractiveConsole)) { return @() }
 
-    Write-Host "  These sessions block part of the upgrade:" -ForegroundColor Yellow
-    foreach ($p in $procs) { Write-Host "    $(Format-LiveProcess $p)" }
-    Write-Host "  Stopping one ends that session; unsaved context is lost unless it can be resumed." -ForegroundColor Yellow
+    # One list: each session, then each desktop app as a whole (all of its processes).
+    $items = @()
+    foreach ($p in $procs) { $items += [pscustomobject]@{ Label = (Format-LiveProcess $p); Processes = @($p); Desktop = $false } }
+    foreach ($a in $apps) { $items += [pscustomobject]@{ Label = "$($a.Label) (desktop app, $(@($a.Processes).Count) process(es))"; Processes = @($a.Processes); Desktop = $true } }
+    if ($procs.Count -gt 0) {
+        Write-Host "  These sessions block part of the upgrade:" -ForegroundColor Yellow
+        foreach ($i in @($items | Where-Object { -not $_.Desktop })) { Write-Host "    $($i.Label)" }
+        Write-Host "  Stopping one ends that session; unsaved context is lost unless it can be resumed." -ForegroundColor Yellow
+    }
+    if ($apps.Count -gt 0) {
+        Write-Host "  These desktop apps are running - their updates wait until they are closed:" -ForegroundColor Yellow
+        foreach ($i in @($items | Where-Object { $_.Desktop })) { Write-Host "    $($i.Label)" }
+    }
     $answer = (Read-DotAnswer "  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer").Trim().ToLower()
 
     $chosen = @()
     if ($answer -eq 'y') {
-        $chosen = $procs
+        $chosen = $items
     } elseif ($answer -eq 's') {
-        foreach ($p in $procs) {
-            $each = (Read-DotAnswer "    Stop $(Format-LiveProcess $p)? [y/N]").Trim().ToLower()
-            if ($each -eq 'y') { $chosen += $p }
+        foreach ($i in $items) {
+            $each = (Read-DotAnswer "    Stop $($i.Label)? [y/N]").Trim().ToLower()
+            if ($each -eq 'y') { $chosen += $i }
         }
     }
     $stopped = @()
-    foreach ($p in $chosen) {
-        if (Stop-AgentProcess -Process $p -ResetTerminal) { $stopped += $p }
+    $closedApps = @()
+    foreach ($i in $chosen) {
+        if ($i.Desktop) {
+            # The window first (a clean shutdown), then whatever of the app is left.
+            foreach ($p in @($i.Processes | Sort-Object { try { [int]($_.MainWindowHandle -eq [IntPtr]::Zero) } catch { 1 } })) {
+                if (Stop-AgentProcess -Process $p) { $stopped += $p }
+            }
+            $closedApps += ($i.Label -replace ' \(desktop app, .*$', '')
+        } else {
+            foreach ($p in $i.Processes) { if (Stop-AgentProcess -Process $p -ResetTerminal) { $stopped += $p } }
+        }
     }
     if ($stopped.Count -gt 0) {
         Write-Host "  Stopped $($stopped.Count) process(es); re-scanning." -ForegroundColor Green
+    }
+    if ($closedApps.Count -gt 0) {
+        Write-Host "  Closed $($closedApps -join ', ') for the upgrade - reopen when dot upgrade is done." -ForegroundColor Green
     }
     return $stopped
 }
