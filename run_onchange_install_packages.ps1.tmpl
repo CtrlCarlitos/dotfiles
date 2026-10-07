@@ -175,6 +175,17 @@ function Invoke-WithTimeout {
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
       non-interactive/bare-init applies install nothing beyond what's seeded.
       Windows twin of the sh installer's variable block. */}}
+{{- /* VS Code settings: this machine's chezmoi.toml [data.vscode.settings] (seeded by
+       `chezmoi init` from .chezmoitemplates/vscode-settings.toml). Every tier is read with an
+       empty fallback: a tier deleted there is empty, and a config written before the move
+       (the first `chezmoi update --apply` of `dot up` runs before its `chezmoi init`)
+       renders with no settings and a note instead of failing. */ -}}
+{{ $vsCfg := dict -}}
+{{- $vsCfgMissing := true -}}
+{{- if and (hasKey . "vscode") (kindIs "map" .vscode) (hasKey .vscode "settings") -}}
+{{-   $vsCfg = .vscode.settings -}}
+{{-   $vsCfgMissing = false -}}
+{{- end -}}
 {{ $core := false -}}
 {{- $modern_cli := false -}}
 {{- $fonts := false -}}
@@ -758,7 +769,7 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 # cosmetically a full-file diff the first time this runs.
 # Same source as the VS Code font tier, so the Windows Terminal default font
 # and editor.fontFamily cannot drift apart.
-$desiredFont = {{ index .vscode.settings.forced "editor.fontFamily" | quote }}
+$desiredFont = {{ get (get $vsCfg "forced" | default dict) "editor.fontFamily" | default "MesloLGS Nerd Font Mono" | quote }}
 
 # ConvertFrom-JsonC: both Windows Terminal and VS Code settings.json are
 # JSONC (comments and trailing commas are legal there; strict JSON parsers
@@ -865,39 +876,40 @@ if ($wtSettings) {
 # Gated by packages.vscode_settings (hasKey pattern: default true, set
 # `[data.packages] vscode_settings = false` in chezmoi.toml to opt out - no prompt, so no
 # CI-seeding burden, see check_workflow_config_keys for that outage class).
-# Every tier below is rendered from .chezmoidata.yaml `vscode.settings`, the
-# single source this twin shares with run_onchange_install_packages.sh.tmpl
-# (#83). Values are emitted as native PowerShell literals rather than parsed at
+# Every tier below is rendered from this machine's chezmoi.toml
+# [data.vscode.settings] ($vsCfg, seeded by `chezmoi init`), the one source this
+# twin shares with run_onchange_install_packages.sh.tmpl (#83). Values are emitted as native PowerShell literals rather than parsed at
 # runtime: this script targets Windows PowerShell 5.1 (see #Requires above),
 # where ConvertFrom-Json has no -AsHashtable and returns a PSCustomObject.
 $vsForced = @{
-{{- range $k, $v := .vscode.settings.forced }}
+{{- range $k, $v := (get $vsCfg "forced" | default dict) }}
     '{{ $k }}' = "{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"
 {{- end }}
 }
 $vsDefaults = [ordered]@{
-{{- range $k, $v := .vscode.settings.defaults }}
+{{- range $k, $v := (get $vsCfg "defaults" | default dict) }}
     '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else if kindIs "string" $v }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ else if kindIs "slice" $v }}@({{ range $i, $e := $v }}{{ if $i }}, {{ end }}'{{ $e }}'{{ end }}){{ else }}{{ $v }}{{ end }}
 {{- end }}
 {{- /* Windows-only tier: the .sh twin deliberately renders none of these. */}}
-{{- range $k, $v := .vscode.settings.defaults_windows }}
+{{- range $k, $v := (get $vsCfg "defaults_windows" | default dict) }}
     '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ end }}
 {{- end }}
 }
-$vsJunk = @({{ range $i, $g := .vscode.settings.junk }}{{ if $i }}, {{ end }}'{{ $g }}'{{ end }})
+$vsJunk = @({{ range $i, $g := (get $vsCfg "junk" | default list) }}{{ if $i }}, {{ end }}'{{ $g }}'{{ end }})
 $vsJunkMap = [ordered]@{}
 foreach ($s in $vsJunk) { $vsJunkMap[$s] = $true }
 $vsTerminalColors = [ordered]@{
-{{- range $k, $v := .vscode.settings.terminal_colors }}
+{{- range $k, $v := (get $vsCfg "terminal_colors" | default dict) }}
     '{{ $k }}' = '{{ $v }}'
 {{- end }}
 }
 # MERGES: object key -> sub-keys (with values) added only when absent.
 $vsMerges = @{ 'files.exclude' = $vsJunkMap; 'search.exclude' = $vsJunkMap; 'workbench.colorCustomizations' = $vsTerminalColors }
-$vsUnset = [System.Collections.Generic.List[string]]@({{ range $i, $u := .vscode.settings.unset }}{{ if $i }}, {{ end }}'{{ $u }}'{{ end }})
+$vsUnset = [System.Collections.Generic.List[string]]@({{ range $i, $u := (get $vsCfg "unset" | default list) }}{{ if $i }}, {{ end }}'{{ $u }}'{{ end }})
 
-# Machine-local settings drift, rendered from [data.vscode_overrides] (see
-# the extensions comment above for why not [data.vscode]):
+# Machine-local settings drift, rendered from [data.vscode_overrides]. With the
+# settings themselves in chezmoi.toml, editing [data.vscode.settings] is simpler;
+# these still work:
 #   exclude_settings - JSON array; strips any tier (excluding a font key
 #                      stops its forced re-assert on this machine)
 #   extra_settings   - JSON object; joins the DEFAULTS tier (upsert-if-absent;
@@ -934,8 +946,14 @@ $vsApply = $true
 {{- if not $vscodeSettings }}
 $vsApply = $false
 {{- end }}
+$vsCfgMissing = ${{ $vsCfgMissing }}
 if (-not $vsApply) {
     Write-Host "  VS Code settings defaults disabled in config" -ForegroundColor Yellow
+} elseif ($vsCfgMissing) {
+    # The first `chezmoi update --apply` of `dot up` renders with the config from before the
+    # settings moved there; `dot up` runs `chezmoi init` next, and the apply after it has them.
+    $vsApply = $false
+    Write-Host "  VS Code settings: not in chezmoi.toml yet - chezmoi init adds them ([data.vscode.settings]); skipped this run" -ForegroundColor Yellow
 } else {
     # Extensions first (same gate): idempotent `code --install-extension`,
     # list rendered from .chezmoidata.yaml vscode.extensions (+ _windows).
@@ -943,8 +961,8 @@ if (-not $vsApply) {
         Write-Host "  Checking VS Code extensions (installing only what is missing)..." -ForegroundColor Yellow
         # Machine-local drift lives in chezmoi.toml [data.vscode_overrides] -
         # deliberately a DIFFERENT key from the .chezmoidata.yaml vscode table:
-        # chezmoi does not deep-merge same-named data tables (config [data.X]
-        # is wholesale-shadowed by chezmoidata X), so the merge happens here.
+        # chezmoi merges tables key by key, but an `extensions` LIST in the
+        # config would replace the repo's whole list, so the merge happens here.
         #   extra_extensions    - appended to the repo baseline
         #   exclude_extensions  - filtered out: stop reinstalling on THIS
         #                          machine only (repo-side veto contract still

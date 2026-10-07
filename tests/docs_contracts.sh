@@ -135,11 +135,12 @@ for g in sorted(documented - canonical - PRESETS):
 
 # ------------------------------- 4. documented settings really are set
 # The install_fonts class: prose naming a setting the installers never write.
-# The tiers now live in .chezmoidata.yaml and are rendered by both twins
-# (#83), so "is this setting actually written?" must look there too.
+# The tiers live in each machine's chezmoi.toml, seeded from
+# .chezmoitemplates/vscode-settings.toml, and are rendered by both twins (#83),
+# so "is this setting actually written?" must look at the seed too.
 installers = (read("run_onchange_install_packages.sh.tmpl")
               + read("run_onchange_install_packages.ps1.tmpl")
-              + read(".chezmoidata.yaml"))
+              + read(".chezmoitemplates/vscode-settings.toml"))
 SETTING = re.compile(r"`((?:terminal\.integrated|remote\.SSH)\.[A-Za-z.]+)`")
 # Settings the docs REFERENCE but deliberately do not set. Each needs a reason:
 # the check exists to catch prose claiming we configure something we never

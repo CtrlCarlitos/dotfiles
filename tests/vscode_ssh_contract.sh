@@ -83,9 +83,8 @@ grep -Fqi 'ssh_hosts' "$docs" || fail "docs/secrets.md: ssh_hosts not documented
 grep -Fqi 'never' "$docs" || fail "docs/secrets.md: git-never-sees-it caveat missing"
 
 # Machine-local drift: overrides live in [data.vscode_overrides] (NOT
-# [data.vscode] - chezmoi does not deep-merge same-named tables; the config
-# table would be wholesale-shadowed. Confirmed live.). Both installers must
-# read that key for extensions AND settings.
+# [data.vscode].extensions - a list set in the config replaces the repo's whole
+# list). Both installers must read that key for extensions AND settings.
 for f in "$sh_installer" "$ps1_installer"; do
     grep -Fq 'vscode_overrides' "$f" || fail "$f: no vscode_overrides merge"
     grep -Fq 'exclude_settings' "$f" || fail "$f: no settings exclusion support"
@@ -146,13 +145,14 @@ fi
 # Remote-SSH reads ~/.ssh/config (rendered from ssh_hosts) on every machine:
 # both twins UNSET remote.SSH.configFile, which used to point at a hand-kept
 # OneDrive config that ssh.exe, Windows Terminal and chezmoi never saw.
-# The UNSET tier moved into .chezmoidata.yaml so both twins render it from one
-# source (#83); assert the value there, and that each twin still reads it.
-grep -Fq -- '- remote.SSH.configFile' "$repo_root/.chezmoidata.yaml" ||
-    fail ".chezmoidata.yaml: remote.SSH.configFile must be in vscode.settings.unset"
-grep -Fq -- '.vscode.settings.unset' "$ps1_installer" ||
-    fail "$ps1_installer: no longer renders the UNSET tier from .chezmoidata.yaml"
-grep -Fq -- '.vscode.settings.unset' "$sh_installer" ||
-    fail "$sh_installer: no longer renders the UNSET tier from .chezmoidata.yaml"
+# The UNSET tier is in the chezmoi.toml seed (.chezmoitemplates/vscode-settings.toml,
+# both twins render it from [data.vscode.settings]); assert the value there, and
+# that each twin still reads it.
+grep -Eq '^unset = \[.*"remote\.SSH\.configFile"' "$repo_root/.chezmoitemplates/vscode-settings.toml" ||
+    fail "vscode-settings.toml: remote.SSH.configFile must be in the unset tier"
+grep -Fq -- '(get $vsCfg "unset"' "$ps1_installer" ||
+    fail "$ps1_installer: no longer renders the UNSET tier"
+grep -Fq -- '(get $vsCfg "unset"' "$sh_installer" ||
+    fail "$sh_installer: no longer renders the UNSET tier"
 
 finish

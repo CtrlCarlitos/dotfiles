@@ -79,13 +79,24 @@ forbid() { # $1 = file, $2 = literal
     fi
 }
 
+# seed_vscode_config FILE - write the VS Code settings a fresh machine's `chezmoi init` writes
+#   ([data.vscode.settings] from .chezmoitemplates/vscode-settings.toml) into FILE. The settings
+#   live in chezmoi.toml, not in .chezmoidata, so a render without them has empty tiers.
+seed_vscode_config() {
+    local seed_cfg
+    seed_cfg="$(mktemp "${TMPDIR:-/tmp}/lib-seed-config-XXXXXX.toml")"
+    chezmoi execute-template --config "$seed_cfg" --source "$_LIB_REPO_ROOT"         '{{ replace "[vscode" "[data.vscode" (toToml (dict "vscode" (dict "settings" (includeTemplate "vscode-settings.toml" . | fromToml)))) }}' >"$1"
+    rm -f "$seed_cfg"
+}
+
 render() {
     command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
     # The config must carry a .toml extension: chezmoi infers the config type
     # from the filename, so --config /dev/null fails as an unsupported type.
-    # The file is empty either way - the host's config must not shape a render.
+    # It holds only the seeded VS Code settings - the host's config must not shape a render.
     if [ -z "${_LIB_CONFIG:-}" ]; then
         _LIB_CONFIG="$(mktemp "${TMPDIR:-/tmp}/lib-empty-config-XXXXXX.toml")"
+        seed_vscode_config "$_LIB_CONFIG"
     fi
     chezmoi execute-template --config "$_LIB_CONFIG" --source "$_LIB_REPO_ROOT" "$@"
 }
@@ -99,7 +110,8 @@ render() {
 #       darwin  run_onchange_install_packages.sh.tmpl   as darwin
 #       ps1     run_onchange_install_packages.ps1.tmpl  as windows
 #   OVERRIDE_JSON is the "packages" document (a JSON object of group flags);
-#   the chezmoi OS/kernel part is filled in here.
+#   the chezmoi OS/kernel part is filled in here. The config carries the seeded
+#   VS Code settings, as a fresh machine's has (RENDER_NO_VSCODE_SETTINGS=1: none).
 render_to() { # $1 = outfile, $2 = platform, $3 = override JSON
     command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
     local out="$1" platform="$2" override="$3"
@@ -115,7 +127,12 @@ render_to() { # $1 = outfile, $2 = platform, $3 = override JSON
     if [ -f "$_LIB_REPO_ROOT/scripts/curated-agent-skills.txt" ]; then
         cp "$_LIB_REPO_ROOT/scripts/curated-agent-skills.txt" "$scratch/repo/scripts/"
     fi
-    : >"$config"
+    # RENDER_NO_VSCODE_SETTINGS=1: a config from before the settings moved into chezmoi.toml
+    if [ "${RENDER_NO_VSCODE_SETTINGS:-0}" = 1 ]; then
+        : >"$config"
+    else
+        seed_vscode_config "$config"
+    fi
     case "$platform" in
         sh) os_json='"os": "linux", "kernel": {"osrelease": "6.8.0-generic"}' ;;
         darwin) os_json='"os": "darwin"' ;;
