@@ -243,8 +243,8 @@ fi
 # PowerShell: every upstream HEAD is fetched in one parallel round before the first source is
 # checked, and Get-SkillsRemoteHead answers from that cache (no second ls-remote per repo).
 for f in "$repo_root/run_onchange_install_packages.ps1.tmpl" "$repo_root/scripts/update_ai_tools.ps1"; do
-    awk '/Start-SkillsHeadPrefetch -Repo/{a=NR} /Invoke-SkillsSource -Label/{if(!b)b=NR} END{exit !(a && b && a<b)}' "$f" ||
-        fail "$f: Start-SkillsHeadPrefetch must run before the first Invoke-SkillsSource"
+    awk '/Read-SkillsUpstreamHead -Repo/{a=NR} /Invoke-SkillsSource -Label/{if(!b)b=NR} END{exit !(a && b && a<b)}' "$f" ||
+        fail "$f: Read-SkillsUpstreamHead must run before the first Invoke-SkillsSource"
 done
 if command -v pwsh >/dev/null 2>&1; then
     cached="$(pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . '$(winpath "$repo_root/scripts/lib/ps-skills.ps1")'; \$script:SkillsHeadCache['o/r'] = 'abc123'; function git { throw 'git must not run for a cached repo' }; Get-SkillsRemoteHead -Repo 'o/r'" 2>&1 | tr -d '\r')"

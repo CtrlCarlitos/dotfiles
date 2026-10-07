@@ -29,7 +29,7 @@ $script:SkillsSeenKeys = @()
 # Why the last Test-SkillsUpToDate said "not current", printed with the install line so a
 # reinstall on every run can be told apart from a real upstream change.
 $script:SkillsStaleReason = ''
-# Upstream HEADs fetched by Start-SkillsHeadPrefetch, by owner/repo.
+# Upstream HEADs fetched by Read-SkillsUpstreamHead, by owner/repo.
 $script:SkillsHeadCache = @{}
 
 # USERPROFILE on Windows; $HOME where it is unset (the test fixtures run this on Linux pwsh).
@@ -71,7 +71,7 @@ function Get-SkillsRemoteHead {
 # Every source's upstream HEAD in one parallel round, answered from the cache by
 # Get-SkillsRemoteHead (twin of skills_prefetch_heads): eight sequential ls-remotes, two of them
 # for repos already asked, took 13-35 s. One 20 s deadline for all; anything slower is ''.
-function Start-SkillsHeadPrefetch {
+function Read-SkillsUpstreamHead {
     param([string[]]$Repo)
     $running = @{}
     foreach ($r in @($Repo | Select-Object -Unique)) {
