@@ -308,23 +308,33 @@ if command -v claude &>/dev/null; then
     # silently and - unguarded - abort this set -e script before
     # Playwright/agent-browser/Serena/Graft update (#114; this script promises
     # warn-and-continue).
-    cl_inst="$(mktemp)"
-    if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
-        # The installer prints a banner, a location and a "next steps" block on every run; the
-        # version is the only news. Its whole output is shown only when it fails.
-        cl_out="$(mktemp)"
-        if bash "$cl_inst" >"$cl_out" 2>&1; then
-            cl_ver="$(sed -n 's/^[[:space:]]*Version:[[:space:]]*//p' "$cl_out")"
-            echo "   Claude Code ${cl_ver:-installed} (installer re-run)"
-        else
-            cat "$cl_out"
-            echo "   Claude Code installer failed - continuing"
-        fi
-        rm -f "$cl_out"
+    # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
+    # package carries the same version numbers; an unknown answer re-runs it as before.
+    cl_pkg="$(chezmoi execute-template '{{ .agents.npm.claude_code_version }}' 2>/dev/null || true)"
+    cl_have="$(claude --version 2>/dev/null | awk 'NR==1 {print $1}')"
+    cl_want=""
+    [ -n "$cl_pkg" ] && cl_want="$(npm view "$cl_pkg" version 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$cl_have" ] && [ "$cl_have" = "$cl_want" ]; then
+        echo "   Claude Code is current ($cl_have)"
     else
-        echo "   Claude Code installer download failed - continuing"
+        cl_inst="$(mktemp)"
+        if curl -fsSL -o "$cl_inst" https://claude.ai/install.sh; then
+            # The installer prints a banner, a location and a "next steps" block on every run; the
+            # version is the only news. Its whole output is shown only when it fails.
+            cl_out="$(mktemp)"
+            if bash "$cl_inst" >"$cl_out" 2>&1; then
+                cl_ver="$(sed -n 's/^[[:space:]]*Version:[[:space:]]*//p' "$cl_out")"
+                echo "   Claude Code ${cl_ver:-installed} (installer re-run)"
+            else
+                cat "$cl_out"
+                echo "   Claude Code installer failed - continuing"
+            fi
+            rm -f "$cl_out"
+        else
+            echo "   Claude Code installer download failed - continuing"
+        fi
+        rm -f "$cl_inst"
     fi
-    rm -f "$cl_inst"
 
     # Superpowers skills plugin
     echo "✨ Updating Superpowers (Claude Code)..."

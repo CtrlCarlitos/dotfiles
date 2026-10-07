@@ -535,7 +535,16 @@ function Invoke-LiveSessionStop {
             }
             $closedApps += ($i.Label -replace ' \(desktop app, .*$', '')
         } else {
-            foreach ($p in $i.Processes) { if (Stop-AgentProcess -Process $p -ResetTerminal) { $stopped += $p } }
+            foreach ($p in $i.Processes) {
+                # Already gone: a session's child (Serena under Claude Code) dies with its parent's
+                # tree, and stopping it again cost a terminal reset and a taskkill.
+                $gone = $false
+                try { $p.Refresh(); $gone = [bool]$p.HasExited } catch { $gone = $false }
+                if ($gone) { $stopped += $p; continue }
+                # The terminal switch-offs are for TUI agents; an MCP server (Serena) has none.
+                $tui = @('claude', 'codex', 'opencode', 'agy') -contains $p.ProcessName
+                if (Stop-AgentProcess -Process $p -ResetTerminal:$tui) { $stopped += $p }
+            }
         }
     }
     if ($stopped.Count -gt 0) {

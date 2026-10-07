@@ -59,6 +59,10 @@ agents:
   npm:
     # Codex CLI. The installers install it; the updaters upgrade it to @latest.
     codex: "@openai/codex"
+    # Claude Code's npm package, used ONLY to read its latest version: Claude Code is
+    # installed by its native installer, whose releases carry the same version numbers.
+    # dot upgrade re-runs that installer (~20 s) only when `claude --version` differs.
+    claude_code_version: "@anthropic-ai/claude-code"
     # Graft's global install must let npm run these packages' native-build
     # scripts (tree-sitter grammars); npm 11 blocks lifecycle scripts unless
     # allowed explicitly. Order preserved as installed.

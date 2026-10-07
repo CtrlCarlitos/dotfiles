@@ -146,6 +146,13 @@ $daemon = P 'codex' 100 'C:\Users\u\.codex\packages\app-server-daemon\releases\l
 $two = @($code, $serena)
 Case 'all' $two @('y')
 Write-Output ('all-resets-terminal=' + $script:resets)
+# Serena dies with Claude Code's tree: already gone when its turn comes - counted, not stopped again.
+$exited = P 'serena' 301 'C:\Users\u\.local\bin\serena.exe'
+$exited | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+$exited | Add-Member -MemberType NoteProperty -Name HasExited -Value $true
+$script:resets = 0
+Case 'exited' @($code, $exited) @('y')
+Write-Output ('exited-resets=' + $script:resets)
 Case 'no' $two @('n')
 Case 'default' $two @('')
 Case 'garbage' $two @('maybe')
@@ -230,7 +237,10 @@ PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
     expect 'all=2|200,300|prompts=1'
-    expect 'all-resets-terminal=2'
+    # the terminal reset is for TUI agents (Claude Code), not for Serena (an MCP server)
+    expect 'all-resets-terminal=1'
+    expect 'exited=2|200|prompts=1'
+    expect 'exited-resets=1'
     expect 'no=0||prompts=1'
     expect 'default=0||prompts=1'
     expect 'garbage=0||prompts=1'
