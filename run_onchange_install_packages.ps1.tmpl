@@ -1708,7 +1708,11 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         try { codex --version *> $null; $codexRuns = ($LASTEXITCODE -eq 0) } catch { $codexRuns = $false }
     }
     if (-not $codexRuns) {
-         Invoke-Quietly -Description "Failed to install Codex CLI" -Action { npm install -g {{ .agents.npm.codex }} --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null }
+         # npm's "added 1 package, and changed 1 package" summary is shown only on failure.
+         Invoke-Quietly -Description "Failed to install Codex CLI" -Action {
+             $codexNpmOut = @(npm install -g {{ .agents.npm.codex }} --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | ForEach-Object { "$_" })
+             if ($LASTEXITCODE -ne 0) { $codexNpmOut | ForEach-Object { Write-Host "  $_" }; throw "npm exited $LASTEXITCODE" }
+         }
     }
     # Upgrades are `dot upgrade`'s sole domain (dot CLI spec,
     # 2026-09-20): presence-only here by design - install-if-missing.
@@ -1770,7 +1774,11 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 if (Get-Command agy -ErrorAction SilentlyContinue) {
     Write-Host "  Installing Superpowers plugin for Antigravity..." -ForegroundColor Yellow
-    Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action { agy plugin install https://github.com/obra/superpowers 2>$null }
+    # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
+    Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action {
+        $agyOut = @(agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { $agyOut | ForEach-Object { Write-Host "  $_" }; throw "agy exited $LASTEXITCODE" }
+    }
 }
 {{- end }}
 

@@ -1743,7 +1743,11 @@ install_chatgpt_cli() {
         # Upgrades: `dot upgrade` only - install-if-missing here by design.
         # Missing, or present but unable to start (npm skipped its platform binary - see
         # update_ai_tools.sh): install.
-        { command -v codex &>/dev/null && codex --version &>/dev/null; } || $npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} || warn "Codex CLI install failed - continuing"
+        # npm's "added 1 package, and changed 1 package" summary is shown only on failure.
+        if ! { command -v codex &>/dev/null && codex --version &>/dev/null; }; then
+            codex_npm_out="$($npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} --loglevel=error --no-progress 2>&1)" \
+                || { printf '%s\n' "$codex_npm_out" >&2; warn "Codex CLI install failed - continuing"; }
+        fi
     else
         warn "npm not found - skipping Codex CLI"
     fi
@@ -1812,7 +1816,9 @@ install_antigravity_cli() {
     # not us, so it stays correct even if/when that path changes again.
     if command -v agy &>/dev/null; then
         info "Installing Superpowers plugin for Antigravity..."
-        agy plugin install https://github.com/obra/superpowers 2>/dev/null || warn "Superpowers plugin install for Antigravity failed - continuing"
+        # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
+        agy_out="$(agy plugin install https://github.com/obra/superpowers 2>&1)" \
+            || { printf '%s\n' "$agy_out" >&2; warn "Superpowers plugin install for Antigravity failed - continuing"; }
     fi
 }
 

@@ -98,7 +98,9 @@ Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # (checksum verify each run); this just refreshes the plugin.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
     Write-Host "$($G.sparkles) Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
-    agy plugin install https://github.com/obra/superpowers 2>$null
+    # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
+    $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) { $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red }
 }
 
 Add-DotTimingMark -Name 'curated skills'
@@ -314,7 +316,9 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
         Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
     } else {
         Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
-        codex plugin add superpowers@openai-curated-remote 2>$null
+        # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
+        $cxOut = @(& codex plugin add superpowers@openai-curated-remote 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red }
     }
 }
 
@@ -458,7 +462,18 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     # harness closed (graft, codex and the others cannot be replaced while a session
     # runs, and Claude Code should not be replaced under one either), and with nothing
     # running the full installer is the simple, predictable path.
-    if ($claudeInstallUrl) {
+    # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
+    # package carries the same version numbers; an unknown answer re-runs it as before.
+    $claudeHave = ''
+    $claudeWant = ''
+    try {
+        $claudeHave = ((& claude --version 2>$null | Select-Object -First 1 | Out-String).Trim() -split '\s+')[0]
+        $claudePkg = (chezmoi execute-template '{{ .agents.npm.claude_code_version }}' | Out-String).Trim()
+        if ($claudePkg) { $claudeWant = (& npm view $claudePkg version 2>$null | Out-String).Trim() }
+    } catch { Write-Verbose "claude version probe failed: $($_.Exception.Message)" }
+    if ($claudeHave -and $claudeHave -eq $claudeWant) {
+        Write-Host "  Claude Code is current ($claudeHave)"
+    } elseif ($claudeInstallUrl) {
         # The installer prints a banner, a location and a "next steps" block on every run; the
         # version is the only news. Its whole output is shown only when it fails.
         $claudeOut = @(& powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex" 2>&1 | ForEach-Object { "$_" })
@@ -477,7 +492,9 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 
     # Superpowers skills plugin
     Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
-    claude plugin update superpowers -y 2>$null
+    # Its "Checking for updates for plugin..." line said nothing on every run: shown only on failure.
+    $cpOut = @(& claude plugin update superpowers -y 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) { $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red }
 }
 
 Add-DotTimingMark -Name 'Superpowers (OpenCode)'

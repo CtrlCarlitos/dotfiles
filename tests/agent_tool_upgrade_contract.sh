@@ -97,6 +97,7 @@ make_agent_browser() {
 # CURL_MODE=fail, which fails the download itself (exit 7).
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
+[ -n "${CURL_LOG:-}" ] && printf '%s\n' "$*" >> "$CURL_LOG"
 [ "${CURL_MODE:-ok}" = fail ] && exit 7
 out=''
 prev=''
@@ -111,9 +112,11 @@ EOF
 chmod +x "$bin/curl"
 
 # claude: `update` fails (forces the installer path), everything else succeeds.
+# `--version` prints $CLAUDE_VERSION when set (unset = unknown, which must mean "run the installer").
 cat >"$bin/claude" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = update ] && exit 1
+[ "${1:-}" = --version ] && [ -n "${CLAUDE_VERSION:-}" ] && printf '%s (Claude Code)\n' "$CLAUDE_VERSION"
 exit 0
 EOF
 chmod +x "$bin/claude"
@@ -236,6 +239,16 @@ grep -Fq 'agent-browser is current (9.9.9)' "$tmp/run5b.log" || fail "a current 
 if grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log"; then fail "agent-browser 9.9.9 == latest must not reinstall"; else pass; fi
 grep -Fq 'install' "$tmp/agent-browser.log" || fail "a current agent-browser still gets its browser setup"
 grep -Fq 'doctor --json' "$tmp/agent-browser.log" || fail "a current agent-browser is still verified"
+
+# Claude Code: the native installer (~20 s) re-runs only when `claude --version` differs from
+# the latest release (read from its npm package, same version numbers); unknown re-runs it.
+: >"$tmp/curl.log"
+CURL_LOG="$tmp/curl.log" CLAUDE_VERSION=9.9.9 NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b-claude.log" || true
+grep -Fq 'Claude Code is current (9.9.9)' "$tmp/run5b-claude.log" || fail "a current Claude Code must be reported, not reinstalled: $(grep -i 'claude code' "$tmp/run5b-claude.log" | head -3)"
+if grep -Fq 'claude.ai/install.sh' "$tmp/curl.log"; then fail "a current Claude Code must not download its installer"; else pass; fi
+: >"$tmp/curl.log"
+CURL_LOG="$tmp/curl.log" CLAUDE_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c-claude.log" || true
+grep -Fq 'claude.ai/install.sh' "$tmp/curl.log" || fail "a Claude Code behind the latest must re-run its installer"
 
 : >"$tmp/npm.log"; : >"$tmp/graft.log"
 GRAFT_VERSION_OUT='graft 1.2.2\nlatest on npm: 1.2.3 (update available)\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
