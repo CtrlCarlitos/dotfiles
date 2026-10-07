@@ -34,7 +34,7 @@ for key in forced defaults defaults_windows terminal_colors; do
     grep -Fqx -- "[$key]" "$seed" || fail "vscode-settings.toml: missing tier [$key]"
 done
 for key in junk unset; do
-    grep -Eq "^$key = \[" "$seed" || fail "vscode-settings.toml: missing list tier $key"
+    grep -Eq "^$key +=  *\[" "$seed" || fail "vscode-settings.toml: missing list tier $key"
 done
 if grep -Eq '^  settings:' "$data"; then
     fail ".chezmoidata.yaml: vscode.settings is back - the settings live in chezmoi.toml (deep merge would resurrect deleted keys)"
@@ -62,7 +62,7 @@ if command -v chezmoi >/dev/null 2>&1; then
     cmp -s "$tmp/first.toml" "$cfg" || fail "a second init must not change the config"
     # an edit and a deleted tier survive
     awk '/^    \[data\.vscode\.settings\.defaults_windows\]$/{skip=1; next} skip && /^      /{next} {skip=0; print}' "$cfg" |
-        sed 's/"terminal.integrated.fontSize" = 16/"terminal.integrated.fontSize" = 14/' >"$tmp/edited.toml"
+        sed -E 's/("terminal\.integrated\.fontSize" +=) 16$/\1 14/' >"$tmp/edited.toml"
     cp "$tmp/edited.toml" "$cfg"
     init
     [ "$(q '{{ index .vscode.settings.defaults "terminal.integrated.fontSize" }}|{{ hasKey .vscode.settings "defaults_windows" }}')" = '14|false' ] ||

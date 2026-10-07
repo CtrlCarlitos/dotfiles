@@ -7,19 +7,19 @@
 #                          fails the run by contract). Exercised on real
 #                          machines instead.
 [data.packages]
-  core = true
-  modern_cli = true
-  fonts = true
-  agent_toolkit = true
-  opencode_cli = true
-  opencode_desktop = true
-  claude_cli = true
-  claude_desktop = true
-  chatgpt_cli = true
-  chatgpt_desktop = true
-  antigravity_cli = true
-  antigravity_desktop = true
-  dev_desktop = true
-  remote_access = true
+  core                 = true
+  modern_cli           = true
+  fonts                = true
+  agent_toolkit        = true
+  opencode_cli         = true
+  opencode_desktop     = true
+  claude_cli           = true
+  claude_desktop       = true
+  chatgpt_cli          = true
+  chatgpt_desktop      = true
+  antigravity_cli      = true
+  antigravity_desktop  = true
+  dev_desktop          = true
+  remote_access        = true
   remote_access_server = false
-  guardrail = false
+  guardrail            = false

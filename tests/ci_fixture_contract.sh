@@ -140,7 +140,11 @@ done
 # Each is "the workflow asserts X" AND "the fixture provides X"; if either side
 # is renamed alone, this fails before CI does.
 tied() { # $1=what the job asserts  $2=fixture file  $3=what it must contain  $4=message
-    if grep -Fq -- "$1" "$ci" && ! grep -Fq -- "$3" "$fx/$2"; then fail "$4"; fi
+    # The fixture's "=" signs are column-aligned (tests/config_toml_alignment_contract.sh):
+    # compare with the padding collapsed to one space.
+    local fixture
+    fixture="$(sed -E 's/[[:space:]]+=[[:space:]]+/ = /' "$fx/$2")"
+    if grep -Fq -- "$1" "$ci" && ! grep -Fq -- "$3" <<<"$fixture"; then fail "$4"; fi
 }
 tied 'github-alice'               accounts-multi.toml   'username = "alice"'    "integration-test asserts on github-alice but accounts-multi no longer defines alice"
 tied 'IdentityFile ~/.ssh/id_bob' accounts-multi.toml   'key = "id_bob"'        "integration-test asserts on id_bob but accounts-multi no longer sets it"
