@@ -60,6 +60,8 @@ sh_stop() {
     (
         export PROC_TABLE="$tmp/table" PATH="$fakepath"
         [ -z "$noprompt" ] || export DOTUPGRADE_NO_PROMPT=1
+        # dot_ask / dot_ask_hint (the timed prompt reader) live in timing.sh, which dotupgrade.sh sources
+        . "$repo_root/scripts/lib/timing.sh"
         eval "$(cat "$tmp/fns.sh")"
         ancestor_pids() { for a in $ancestors; do echo "$a"; done; }
         is_interactive() { [ "$interactive" = 1 ]; }

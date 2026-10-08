@@ -17,6 +17,21 @@ if (-not (Test-IsAdmin)) {
     exit 1
 }
 
+# dot upgrade --yes: answer "yes" to its questions up front (stop the sessions and desktop
+# apps; stop Docker Desktop for its upgrade), for a run nobody stays to watch. Without it each
+# question takes its safe default ("no") after DOTUPGRADE_PROMPT_TIMEOUT seconds (60).
+# A script-scope flag, not an environment variable: dot upgrade runs inside the operator's
+# shell, and an env var would outlive an interrupted run and answer later questions too.
+foreach ($arg in $args) {
+    switch -Regex ($arg) {
+        '^(-y|--yes|-Yes)$' { $script:DotAnswerYes = $true }
+        '^(-h|--help|-Help)$' {
+            Write-Host 'dot upgrade [--yes]   upgrade all tooling; --yes answers its questions with yes'
+            Write-Host '  Unanswered questions take their default (no) after DOTUPGRADE_PROMPT_TIMEOUT seconds (60; 0 = wait).'
+            exit 0
+        }
+    }
+}
 Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
 Add-DotTimingMark -Name 'sessions and Codex daemon'
 

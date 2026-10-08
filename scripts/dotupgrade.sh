@@ -10,6 +10,20 @@ if [ -n "${DEVCONTAINER:-}" ] || [ -n "${REMOTE_CONTAINERS:-}" ] || [ -e /.docke
     exit 0
 fi
 
+# dot upgrade --yes: answer "yes" to its questions up front (stop the sessions and desktop
+# apps; stop Docker for its upgrade), for a run nobody stays to watch. Without it each
+# question takes its safe default ("no") after DOTUPGRADE_PROMPT_TIMEOUT seconds (60).
+for arg in "$@"; do
+    case "$arg" in
+        -y | --yes) export DOTUPGRADE_YES=1 ;;
+        -h | --help)
+            echo "dot upgrade [--yes]   upgrade all tooling; --yes answers its questions with yes"
+            echo "  Unanswered questions take their default (no) after DOTUPGRADE_PROMPT_TIMEOUT seconds (60; 0 = wait)."
+            exit 0
+            ;;
+    esac
+done
+
 # Where the time goes (scripts/lib/timing.sh): marks at each section, a summary at the end.
 DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DOT_SCRIPT_DIR/lib/timing.sh"
@@ -103,17 +117,17 @@ stop_live_sessions() {
         echo "  These sessions block part of the upgrade:"
         for pid in $pids; do echo "    $(describe_pid "$pid")"; done
         echo "  Stopping one ends that session; unsaved context is lost unless it can be resumed."
-        printf '  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer: '
+        printf '  Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer%s: ' "$(dot_ask_hint)"
     } >&2
     # the time spent answering is "your answers" in the closing Timings line, not this section
     dot_timing_wait 2>/dev/null || true
-    read -r answer || answer=""
+    dot_ask answer
     case "$answer" in
         [yY]) chosen="$pids" ;;
         [sS])
             for pid in $pids; do
-                printf '    Stop %s? [y/N]: ' "$(describe_pid "$pid")" >&2
-                read -r each || each=""
+                printf '    Stop %s? [y/N]%s: ' "$(describe_pid "$pid")" "$(dot_ask_hint)" >&2
+                dot_ask each
                 case "$each" in [yY]) chosen="$chosen $pid" ;; esac
             done
             ;;

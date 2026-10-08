@@ -178,10 +178,10 @@ dock_gate() {
         if [ "$hosts" = 1 ]; then
             echo "  VS Code also hosts THIS terminal, so it is not closed: any of its windows attached to a container will disconnect. Run dot upgrade from another terminal to avoid that."
         fi
-        printf '  Stop Docker so it can upgrade now? [y/N]: '
+        printf '  Stop Docker so it can upgrade now? [y/N]%s: ' "$(dot_ask_hint 2>/dev/null || true)"
     } >&2
     dot_timing_wait 2>/dev/null || true
-    read -r answer || answer=""
+    if declare -F dot_ask >/dev/null; then dot_ask answer; else read -r answer || answer=""; fi
     dot_timing_resume 2>/dev/null || true
     case "$answer" in
         [yY]) ;;

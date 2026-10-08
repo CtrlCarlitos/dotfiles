@@ -239,7 +239,11 @@ Background work is covered too:
   demand on the new version.
 
 `y` stops all of them, `s` asks per session and per app, anything else (the default) keeps today's
-defer-and-report. Stopping ends that session, so unsaved context is lost unless it can be
+defer-and-report. Nobody there to answer? After 60 seconds every question takes its default
+("no": keep and defer), so the run carries on instead of waiting (`DOTUPGRADE_PROMPT_TIMEOUT`
+sets the seconds; `0` waits as long as it takes). `dot upgrade --yes` answers "yes" up front -
+stop the sessions and desktop apps, stop Docker Desktop for its upgrade - for a run you start
+and leave. Stopping ends that session, so unsaved context is lost unless it can be
 resumed. On Windows each process is asked to close its window, then the whole process tree
 is killed after 5 seconds (Serena leaves language-server children behind); the Unix twin
 sends TERM to the tree and KILL after 5 seconds. Then the live-session scan runs again, so
