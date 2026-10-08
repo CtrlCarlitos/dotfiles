@@ -199,13 +199,24 @@ $script:AgentDesktopApp = @(
 
 # One entry per RUNNING desktop app: its label, all its processes, and its service when that
 # runs. A process whose path cannot be read is not claimed by any app.
+# Paths come from ONE Win32_Process query. Reading $process.Path walks that process's modules,
+# and this read it for every process once per app: 8.7 s of a 9.2 s scan in an elevated shell
+# (2026-10-08), where those reads succeed instead of failing fast. .Path is the fallback, at
+# most once per process, for one the query gave no path for.
 function Get-AgentDesktopApp {
     param([int[]]$ExcludeId = @())
     $all = @(Get-Process -ErrorAction SilentlyContinue)
+    $tablePath = @{}
+    foreach ($row in @(Get-ProcessTable)) { if ($row.Path) { $tablePath[[int]$row.Id] = $row.Path } }
+    $paths = @{}
+    foreach ($process in $all) {
+        $path = $tablePath[[int]$process.Id]
+        if (-not $path) { try { $path = $process.Path } catch { $path = $null } }
+        $paths[[int]$process.Id] = $path
+    }
     foreach ($app in $script:AgentDesktopApp) {
         $procs = @(foreach ($process in $all) {
-            $path = $null
-            try { $path = $process.Path } catch { $path = $null }
+            $path = $paths[[int]$process.Id]
             if ($path -and $path -match $app.Path -and $ExcludeId -notcontains $process.Id) { $process }
         })
         $service = ''
