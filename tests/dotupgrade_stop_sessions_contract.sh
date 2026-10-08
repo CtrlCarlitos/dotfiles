@@ -280,7 +280,7 @@ Set-StrictMode -Version Latest
 . $Lib
 $script:calls = @()
 function Reset-AgentTerminal { param([int]$ProcessId) $script:calls += "reset:$ProcessId"; return $true }
-function taskkill { $script:calls += 'taskkill'; $global:LASTEXITCODE = 0 }
+function Stop-ProcessTree { param([int]$Id) $script:calls += 'tree' }
 $proc = [pscustomobject]@{ ProcessName = 'claude'; Id = 77 }
 $proc | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value { return $false }
 $null = Stop-AgentProcess -Process $proc -ResetTerminal
@@ -292,8 +292,8 @@ $seq = Get-TerminalResetSequence
 foreach ($code in '?1000l', '?1006l', '?1004l', '?2004l', '<99u', '?25h') { Write-Output ("seq-$code=" + $seq.Contains($code)) }
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/reset.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '')"
-    expect 'with=reset:77,taskkill'
-    expect 'without=taskkill'
+    expect 'with=reset:77,tree'
+    expect 'without=tree'
     for code in '?1000l' '?1006l' '?1004l' '?2004l' '<99u' '?25h'; do expect "seq-$code=True"; done
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'

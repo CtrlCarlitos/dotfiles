@@ -270,8 +270,59 @@ function Get-AgentDesktopApp {
 # agent session above them; only the top of each chain (its tree goes with it).
 function Get-ProcessTable {
     @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-        [pscustomobject]@{ Id = [int]$_.ProcessId; ParentId = [int]$_.ParentProcessId; Name = [string]$_.Name; Path = [string]$_.ExecutablePath; CommandLine = [string]$_.CommandLine }
+        [pscustomobject]@{ Id = [int]$_.ProcessId; ParentId = [int]$_.ParentProcessId; Name = [string]$_.Name; Path = [string]$_.ExecutablePath; CommandLine = [string]$_.CommandLine; Created = $_.CreationDate }
     })
+}
+
+# --- A process tree, without PID reuse (dot upgrade) --------------------------------------------
+# Windows reuses process ids, and a process keeps the id of the parent that started it after
+# that parent exits. `taskkill /T` follows those ids: a Windows Terminal started at 01:14 by a
+# long-gone launcher listed a Claude Code session started hours later as its "parent", because
+# the session had been given the launcher's old id (2026-10-08) - stopping the session would
+# have taken the whole terminal, every tab, with it. A child counts only when it started at or
+# after its parent. Returned children first, the root last (the order to stop them in).
+function Get-ProcessTreeId {
+    param([Parameter(Mandatory)][int]$Id, $Table)
+    if ($null -eq $Table) { $Table = @(Get-ProcessTable) }
+    $byId = @{}
+    $byParent = @{}
+    foreach ($row in $Table) {
+        $byId[[int]$row.Id] = $row
+        if ([int]$row.ParentId -eq [int]$row.Id) { continue }
+        if (-not $byParent.ContainsKey([int]$row.ParentId)) { $byParent[[int]$row.ParentId] = New-Object System.Collections.Generic.List[object] }
+        $byParent[[int]$row.ParentId].Add($row)
+    }
+    $order = New-Object System.Collections.Generic.List[int]
+    $seen = @{}
+    $queue = New-Object System.Collections.Generic.Queue[int]
+    $queue.Enqueue($Id)
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if ($seen.ContainsKey($current)) { continue }
+        $seen[$current] = $true
+        $order.Add($current)
+        if (-not $byParent.ContainsKey($current)) { continue }
+        $parentCreated = if ($byId.ContainsKey($current)) { $byId[$current].Created } else { $null }
+        foreach ($child in $byParent[$current]) {
+            # unknown start times prove nothing: such a "child" is left alone
+            if ($null -eq $parentCreated -or $null -eq $child.Created) { continue }
+            if ($child.Created -lt $parentCreated) { continue }
+            $queue.Enqueue([int]$child.Id)
+        }
+    }
+    $result = @($order)
+    [array]::Reverse($result)
+    return $result
+}
+
+function Stop-ProcessTree {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][int]$Id)
+    foreach ($treeId in @(Get-ProcessTreeId -Id $Id)) {
+        if ($PSCmdlet.ShouldProcess("pid $treeId", 'Stop process')) {
+            Stop-Process -Id $treeId -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Get-AgentHelperKind {
@@ -367,7 +418,7 @@ function Stop-CodexDaemon {
     foreach ($left in @(Get-CodexDaemonProcess)) {
         # The tree: the daemon runs helpers (codex-code-mode-host, codex-command-runner,
         # codex-voice-host) that a plain Stop-Process would leave behind.
-        & taskkill /PID $left.Id /T /F *> $null
+        Stop-ProcessTree -Id $left.Id
     }
     return $running.Count
 }
@@ -460,11 +511,16 @@ function Stop-AgentProcess {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)]$Process, [int]$GraceSeconds = 5, [switch]$ResetTerminal)
     if (-not $PSCmdlet.ShouldProcess("$($Process.ProcessName) (pid $($Process.Id))", 'Stop process tree')) { return $false }
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $closing = $false
     try { $closing = [bool]$Process.CloseMainWindow() } catch { $closing = $false }
-    if ($closing -and $Process.WaitForExit($GraceSeconds * 1000)) { return $true }
+    if ($closing -and $Process.WaitForExit($GraceSeconds * 1000)) { $script:LastStopDetail = ('closed its window in {0:N1}s' -f $watch.Elapsed.TotalSeconds); return $true }
+    $windowSeconds = $watch.Elapsed.TotalSeconds
     if ($ResetTerminal) { $null = Reset-AgentTerminal -ProcessId $Process.Id }
-    & taskkill /PID $Process.Id /T /F *> $null
+    $resetSeconds = $watch.Elapsed.TotalSeconds - $windowSeconds
+    Stop-ProcessTree -Id $Process.Id
+    $treeSeconds = $watch.Elapsed.TotalSeconds - $windowSeconds - $resetSeconds
+    $script:LastStopDetail = ('window {0:N1}s, terminal reset {1:N1}s, process tree {2:N1}s' -f $windowSeconds, $resetSeconds, $treeSeconds)
     return $true
 }
 
@@ -551,7 +607,13 @@ function Invoke-LiveSessionStop {
                 if ($gone) { $stopped += $p; continue }
                 # The terminal switch-offs are for TUI agents; an MCP server (Serena) has none.
                 $tui = @('claude', 'codex', 'opencode', 'agy') -contains $p.ProcessName
+                $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
                 if (Stop-AgentProcess -Process $p -ResetTerminal:$tui) { $stopped += $p }
+                # where a slow stop spends its time (it took 12 s on 2026-10-08, cause unknown)
+                if ($stopWatch.Elapsed.TotalSeconds -gt 3) {
+                    $detail = Get-Variable -Name LastStopDetail -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+                    Write-Host ("    stopping {0} (pid {1}) took {2:N1}s: {3}" -f $p.ProcessName, $p.Id, $stopWatch.Elapsed.TotalSeconds, $detail) -ForegroundColor DarkGray
+                }
             }
         }
     }

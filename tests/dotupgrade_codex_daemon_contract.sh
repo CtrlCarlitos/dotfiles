@@ -111,7 +111,7 @@ function Start-Process {
 }
 # The stubborn daemon goes as a TREE: it runs helpers (codex-code-mode-host, codex-command-runner,
 # codex-voice-host) that a plain Stop-Process would leave behind.
-function taskkill { $script:calls.Add("taskkill $($args -join ' ')"); $global:LASTEXITCODE = 0 }
+function Stop-ProcessTree { param([int]$Id) $script:calls.Add("tree $Id") }
 function Stop-Process { param($Id, [switch]$Force) $script:calls.Add("stop $Id") }
 function P($id, $path) { [pscustomobject]@{ ProcessName = 'codex'; Id = $id; Path = $path } }
 function Case($label, $rows, $fails) {
@@ -132,9 +132,9 @@ PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400))"; }
     expect 'daemon=1|start app-server daemon stop'
-    expect 'daemon-stubborn=1|start app-server daemon stop;taskkill /PID 100 /T /F'
+    expect 'daemon-stubborn=1|start app-server daemon stop;tree 100'
     expect 'cli-only=0|'
-    expect 'both-stubborn=1|start app-server daemon stop;taskkill /PID 100 /T /F'
+    expect 'both-stubborn=1|start app-server daemon stop;tree 100'
     expect 'unreadable=0|'
     expect 'nothing=0|'
     pass
