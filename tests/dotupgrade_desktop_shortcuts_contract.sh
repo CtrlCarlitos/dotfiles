@@ -4,20 +4,51 @@ set -euo pipefail
 # `dot upgrade` desktop-shortcut cleanup: the config template must emit the
 # [data.upgrade] table when it is set (and survive `chezmoi init`), and
 # dotupgrade.ps1 must snapshot before the sweeps and delete only NEW shortcuts
-# after them. Behavior of the helpers: tests/desktop_shortcuts.ps1.
+# after them. `dot up`'s installer and migrate-to-winget run installers too
+# (Geany, OBS, ShareX, Termius and Handy all left shortcuts that way,
+# 2026-10-07), so they snapshot and clean up the same way. Behavior of the
+# helpers: tests/desktop_shortcuts.ps1.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
 upgrade="$repo_root/scripts/dotupgrade.ps1"
 common="$repo_root/scripts/lib/ps-common.ps1"
+shortcuts="$repo_root/scripts/lib/ps-desktop-shortcuts.ps1"
+installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
+migrate="$repo_root/scripts/migrate-to-winget.ps1"
 tmpl="$repo_root/.chezmoi.toml.tmpl"
 
 require "$upgrade" 'Test-DesktopShortcutsDisabled'
 require "$upgrade" 'Get-DesktopShortcut'
 require "$upgrade" 'Remove-NewDesktopShortcut'
-require "$common" 'function Test-DesktopShortcutsDisabled'
-require "$common" 'function Get-DesktopShortcut'
-require "$common" 'function Remove-NewDesktopShortcut'
+require "$shortcuts" 'function Test-DesktopShortcutsDisabled'
+require "$shortcuts" 'function Get-DesktopShortcut'
+require "$shortcuts" 'function Remove-NewDesktopShortcut'
+require "$common" "ps-desktop-shortcuts.ps1"
+require "$installer" '{{ include "scripts/lib/ps-desktop-shortcuts.ps1" }}'
+
+# The installer and the migration: snapshot before their first install, clean up after the last.
+line_of() { grep -nF -- "$2" "$1" | head -n1 | cut -d: -f1; }
+check_order() { # $1 = file, $2 = label, $3 = first install marker, $4 = last install marker
+    local snap first last clean
+    snap="$(line_of "$1" '$shortcutsBefore = @(Get-DesktopShortcut)')"
+    first="$(line_of "$1" "$3")"
+    last="$(grep -nF -- "$4" "$1" | tail -n1 | cut -d: -f1)"
+    clean="$(line_of "$1" 'Remove-NewDesktopShortcut -Before $shortcutsBefore')"
+    if [ -z "$snap" ] || [ -z "$first" ] || [ -z "$last" ] || [ -z "$clean" ]; then
+        fail "$2: could not locate the snapshot, install and cleanup lines"
+        return
+    fi
+    [ "$snap" -lt "$first" ] || fail "$2: the shortcut snapshot must precede the first install"
+    [ "$clean" -gt "$last" ] || fail "$2: the shortcut cleanup must follow the last install"
+}
+check_order "$installer" 'dot up installer' 'winget install' 'winget install'
+check_order "$migrate" 'migrate-to-winget' 'Invoke-WingetMigrationItem -Item' 'Invoke-WingetMigrationItem -Item'
+installer_done="$(line_of "$installer" 'Write-Host "Package installation complete!"')"
+installer_clean="$(line_of "$installer" 'Remove-NewDesktopShortcut -Before $shortcutsBefore')"
+if [ -z "$installer_done" ] || [ -z "$installer_clean" ] || [ "$installer_clean" -gt "$installer_done" ]; then
+    fail 'dot up installer: the shortcut cleanup must come before "Package installation complete!"'
+fi
 
 # Order matters: snapshot before the first sweep, cleanup after the last.
 snapshot_line="$(grep -n 'Get-DesktopShortcut)' "$upgrade" | head -n1 | cut -d: -f1)"
