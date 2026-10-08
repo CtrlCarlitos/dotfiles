@@ -294,7 +294,7 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 {{- end }}
 {{- end }}
 
-# Package names come from .chezmoidata/packages.yaml; scripts/migrate-to-choco.ps1
+# Package names come from .chezmoidata/packages.yaml; scripts/migrate-to-winget.ps1
 # reads the same catalog at runtime, so there is no second list to keep in sync.
 $packages = @()
 # winget ids, rendered next to the choco names per group (catalog field `winget`)
@@ -655,18 +655,10 @@ foreach ($pkg in $packages) {
         Write-Host "  Warning: Failed to install $pkg - $_" -ForegroundColor Red
     }
 }
-# Advisory for anything skipped above as "installed (not via Chocolatey)":
-# choco can't adopt an existing install - the opt-in migration script does
-# uninstall+reinstall per app, with confirmation and per-app risk notes.
+# Anything skipped above as "installed (not via Chocolatey)" stays where it is: choco can't
+# adopt an existing install, and `choco upgrade all` won't cover it.
 if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
-    Write-Host ""
-    Write-Host "  $($skippedNotChoco.Count) package(s) above are installed outside Chocolatey and stay unmanaged" -ForegroundColor Yellow
-    Write-Host "  (choco upgrade all will never cover them). To take them over (elevated, per-app confirm):" -ForegroundColor Yellow
-    # CHEZMOI_SOURCE_DIR arrives with forward slashes; normalize so the printed
-    # command is one Windows path instead of C:/.../chezmoi\scripts\... (#145).
-    $srcAdvisory = if ($env:CHEZMOI_SOURCE_DIR) { $env:CHEZMOI_SOURCE_DIR -replace '/', '' } else { Join-Path $env:USERPROFILE '.local\share\chezmoi' }
-    $migrateScript = Join-Path $srcAdvisory 'scripts\migrate-to-choco.ps1'
-    Write-Host "    pwsh -File `"$migrateScript`" -ListOnly   # see candidates + risks first" -ForegroundColor Yellow
+    Write-Host "  $($skippedNotChoco.Count) package(s) above are installed outside Chocolatey; choco upgrade all will not update them" -ForegroundColor Yellow
 }
 {{- end }}
 

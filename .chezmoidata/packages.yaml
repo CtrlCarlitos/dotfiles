@@ -1,6 +1,6 @@
 # The package catalog: every tool the installers install through a package
 # manager, once, with its name on each manager. Both installer twins and
-# scripts/migrate-to-choco.ps1 render or read this list; none of them carries
+# scripts/migrate-to-winget.ps1 render or read this list; none of them carries
 # a name of its own. See docs/package-groups.md and issue #83.
 #
 # One record per TOOL, not per package name, because the same tool is spelled
@@ -26,9 +26,7 @@
 #   npm      global npm package, the same name on every OS (needs Node). `dot up`
 #            installs it when missing; `dot upgrade` updates it when installed.
 #   note     why this tool, or a caveat worth keeping next to its name
-#   migrate  false = the migration scripts must never uninstall/reinstall
-#            this one (migrate_reason says why)
-#   migrate_risk  shown by migrate-to-winget (and migrate-to-choco) before it
+#   migrate_risk  shown by migrate-to-winget before it
 #            asks; the tool IS a candidate but uninstalling it has a consequence
 #
 # Order matters within a group: it is the install order on every manager.
@@ -556,7 +554,7 @@ catalog:
       winget: Tailscale.Tailscale
       choco_was: tailscale
       migrate_risk: "LIVE VPN - uninstalling drops your tailnet connection until the reinstall completes"
-      note: "apt: Tailscale's repo by procedure. migrate-to-choco requires typing the name to confirm this one."
+      note: "apt: Tailscale's repo by procedure."
     - id: cloudflared
       group: remote_access
       brew: cloudflared

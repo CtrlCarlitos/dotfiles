@@ -4,14 +4,15 @@ set -euo pipefail
 # The package catalog is the only place a package-manager name may live.
 #
 # Before #83 the Windows package universe existed three times - the .ps1
-# installer's $packages lists, scripts/migrate-to-choco.ps1's $Universe, and
+# installer's $packages lists, scripts/migrate-to-choco.ps1's $Universe (that
+# script is gone since winget became primary), and
 # the prose in docs/tool-parity.md - and the "kept in sync" contract between
 # the first two was a grep for a comment marker. The mirror held 39 of the
 # installer's 61 packages. Homebrew had its own curated lines, apt its own.
 #
 # Now .chezmoidata/packages.yaml is the catalog, the installers render their
 # manager's names from it through .chezmoitemplates fragments, and
-# migrate-to-choco reads it at runtime. This test keeps that true five ways:
+# migrate-to-winget reads it at runtime. This test keeps that true four ways:
 #
 #   1. SHAPE     every record has an id, a group the config actually prompts
 #                for, and at least one manager (or a note documenting its
@@ -19,7 +20,7 @@ set -euo pipefail
 #                migrate metadata is well-formed.
 #   2. NO COPY   no consumer carries a name of its own: the .ps1 has no
 #                `$packages += @(` literal, install_brew has no literal `brew
-#                install <names>`, migrate has no `$Universe = @(` list.
+#                install <names>`.
 #   3. RENDERS   BOTH twins, rendered with every group on and the OS forced
 #                through --override-data (the way remote_access_package_ownership
 #                does), emit exactly the catalog's names for their managers.
@@ -27,9 +28,7 @@ set -euo pipefail
 #                the first version read the host config, rendered whatever
 #                groups the host had enabled, and failed on the CI lint runner,
 #                which has none.
-#   4. RUNTIME   the expression migrate-to-choco evaluates yields the catalog's
-#                choco names minus those marked migrate: false.
-#   5. NO BYPASS every literal `apt install -y <name>` in the rendered Linux
+#   4. NO BYPASS every literal `apt install -y <name>` in the rendered Linux
 #                installer is produced by the catalog (#127) - no hardcoded
 #                package name in install_apt.
 #
@@ -40,7 +39,6 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 catalog="$repo_root/.chezmoidata/packages.yaml"
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 sh_t="$repo_root/run_onchange_install_packages.sh.tmpl"
-migrate="$repo_root/scripts/migrate-to-choco.ps1"
 
 . "$repo_root/tests/lib.sh"
 
@@ -61,17 +59,8 @@ if awk '/^install_brew\(\)/,/^}/' "$sh_t" | grep -qE '^\s*brew install (--cask )
 fi
 grep -Fq 'includeTemplate "pkg-names"' "$sh_t" ||
     fail "run_onchange_install_packages.sh.tmpl: no longer renders package names from the catalog"
-# A literal list opens the array and continues on the next line: `@(` then
-# end of line. The runtime path initialises `$Universe = @()` on one line,
-# which a bare `@\(` would wrongly match.
-# shellcheck disable=SC2016
-if grep -qE '^\s*\$Universe\s*=\s*@\(\s*$' "$migrate"; then
-    fail "scripts/migrate-to-choco.ps1: carries its own \$Universe list again - it must read the catalog at runtime"
-fi
-grep -Fq 'execute-template' "$migrate" ||
-    fail "scripts/migrate-to-choco.ps1: does not read the catalog through chezmoi execute-template"
 
-# --------------------------------------- 1, 3, 4 need chezmoi to render
+# ------------------------------------------ 1 and 3 need chezmoi to render
 command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed (static checks only)"
 PY=""
 for c in python3 python; do
@@ -90,8 +79,6 @@ grep -oE 'promptBoolOnce \. "packages\.[a-z_]+"' "$repo_root/.chezmoi.toml.tmpl"
 all_on="{$(sed -E 's/.*/"&":true/' "$tmp/groups.txt" | paste -sd, -)}"
 
 render '{{ .catalog.packages | toJson }}' > "$tmp/catalog.json" || fail "catalog does not render (YAML broken?)"
-render '{{ range .catalog.packages }}{{ if and (hasKey . "choco") (not (and (hasKey . "migrate") (not .migrate))) }}{{ .choco }}{{ "\n" }}{{ end }}{{ end }}' \
-    > "$tmp/migrate-universe.txt" || fail "the migrate-to-choco universe expression does not render"
 
 # Both twins, every group on, OS forced. darwin for the .sh so install_brew's
 # cask loop (darwin-gated) renders; linux again for the apt lines.
@@ -134,20 +121,14 @@ for i, r in enumerate(cat):
     for m in mgrs:
         if r[m] in seen[m]: err(where + ": %s name %r already used by %s" % (m, r[m], seen[m][r[m]]))
         seen[m][r[m]] = r["id"]
-    if "migrate" in r and r["migrate"] is not False:
-        err(where + ": migrate may only be false (omit it to allow migration)")
-    if "migrate" in r and "migrate_reason" not in r:
-        err(where + ": migrate: false needs a migrate_reason")
-    if "migrate_reason" in r and "migrate" not in r:
-        err(where + ": migrate_reason without migrate: false")
+    if "migrate" in r or "migrate_reason" in r:
+        err(where + ": migrate/migrate_reason are gone with migrate-to-choco - use migrate_risk")
     if "migrate_risk" in r and "choco" not in r and "choco_was" not in r:
         err(where + ": migrate_risk on a tool with neither a choco package nor a choco_was to migrate from")
     if "choco_was" in r and "winget" not in r:
         err(where + ": choco_was without winget (choco_was names what migrate-to-winget replaces)")
     if "winget" in r and "choco" in r:
         err(where + ": both winget and choco - winget is primary, choco only where winget has no current package")
-    if "migrate" in r and "migrate_risk" in r:
-        err(where + ": both migrate: false and migrate_risk - pick one")
 
 choco = [r["choco"] for r in cat if "choco" in r]
 winget = [r["winget"] + "|" + r.get("winget_args", "") + "|" + r.get("choco_was", "") for r in cat if "winget" in r]
@@ -224,14 +205,8 @@ if stray:
 else:
     print("  rendered .sh (os=linux): every literal apt install name is catalog-produced (%d distinct)" % len(literal))
 
-# 4. migrate universe
-uni = open(tmp + "/migrate-universe.txt").read().split()
-want = [r["choco"] for r in cat if "choco" in r and r.get("migrate", True) is not False]
-if sorted(uni) != sorted(want):
-    err("migrate universe expression: missing=%s extra=%s" % (sorted(set(want)-set(uni)), sorted(set(uni)-set(want))))
-excluded = [r["choco"] for r in cat if r.get("migrate") is False]
-print("  catalog: %d tools, %d choco / %d brew / %d cask / %d apt names; migrate universe %d (excluded: %s)"
-      % (len(cat), len(choco), len(brew), len(cask), len(apt), len(uni), ", ".join(excluded) or "none"))
+print("  catalog: %d tools, %d choco / %d winget / %d brew / %d cask / %d apt names"
+      % (len(cat), len(choco), len(winget), len(brew), len(cask), len(apt)))
 sys.exit(1 if bad else 0)
 PYEOF
 
