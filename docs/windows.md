@@ -274,7 +274,8 @@ it. Set this in `~/.config/chezmoi/chezmoi.toml`:
 
 `dot upgrade` then snapshots the `.lnk`/`.url` files on your Desktop and the
 Public Desktop before the sweeps and deletes only the ones that appeared
-during them, listing each. Shortcuts you already had are never touched.
+during them, listing each. `dot up`'s package installer and
+`scripts/migrate-to-winget.ps1` do the same around the installs they run. Shortcuts you already had are never touched.
 Absent or `true` keeps today's behavior. The table survives `chezmoi init`.
 Windows only: apt packages add menu entries rather than Desktop icons, and
 Homebrew casks install into `/Applications`.

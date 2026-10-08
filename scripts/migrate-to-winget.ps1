@@ -63,6 +63,12 @@ foreach ($o in $orphans) { Write-Host "  Remove afterwards (nothing else uses it
 foreach ($k in @($plan | Where-Object { $_.Action -eq 'keep' })) { Write-Host "  Kept on Chocolatey: $($k.Choco)  ($($k.Risk))" }
 if ($ListOnly) { exit 0 }
 
+# [data.upgrade] desktop_shortcuts = false: the winget installers below drop shortcuts too
+# (Handy's appeared during a migration, 2026-10-07). Snapshot now, remove the new ones at the end.
+$dropDesktopShortcuts = Test-DesktopShortcutsDisabled
+$shortcutsBefore = @()
+if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
+
 $results = @()
 $late = @()
 if ($batch.Count -and (Read-Host "Move the batch of $($batch.Count) tools now? [y/N]").Trim().ToLower() -eq 'y') {
@@ -86,6 +92,13 @@ foreach ($l in $late) {
 }
 if ($drops.Count -and (Read-Host "Drop $(($drops | ForEach-Object { $_.Choco }) -join ', ')? [y/N]").Trim().ToLower() -eq 'y') {
     foreach ($d in $drops) { $results += Invoke-WingetMigrationItem -Item $d }
+}
+if ($dropDesktopShortcuts) {
+    $removedShortcuts = @(Remove-NewDesktopShortcut -Before $shortcutsBefore)
+    if ($removedShortcuts.Count -gt 0) {
+        Write-Host "  Removed $($removedShortcuts.Count) new desktop shortcut(s) (desktop_shortcuts = false):" -ForegroundColor Yellow
+        foreach ($removed in $removedShortcuts) { Write-Host "    $removed" }
+    }
 }
 $failed = @($results | Where-Object { $_ -eq 'failed' }).Count
 Write-Host ("Done: {0} moved or dropped, {1} skipped, {2} failed." -f @($results | Where-Object { $_ -eq 'ok' }).Count, @($results | Where-Object { $_ -eq 'skipped' }).Count, $failed)

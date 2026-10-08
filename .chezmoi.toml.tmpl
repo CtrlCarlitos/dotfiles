@@ -226,7 +226,8 @@
 
 {{/* upgrade: machine-local `dot upgrade` behavior. Its own table, not
      [data.packages], so the package-selection menu never rewrites it.
-     Windows only: the desktop-shortcut cleanup lives in dotupgrade.ps1. */}}
+     Windows only: the desktop-shortcut cleanup lives in scripts/lib/ps-desktop-shortcuts.ps1
+     (dot upgrade, dot up's installer, migrate-to-winget). */}}
 {{- if eq .chezmoi.os "windows" }}
 {{- if and (hasKey . "upgrade") (hasKey .upgrade "desktop_shortcuts") }}
   # `dot upgrade`: false = delete the desktop shortcuts that the
