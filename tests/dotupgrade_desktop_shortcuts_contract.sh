@@ -46,8 +46,9 @@ check_order "$installer" 'dot up installer' 'winget install' 'winget install'
 check_order "$migrate" 'migrate-to-winget' 'Invoke-WingetMigrationItem -Item' 'Invoke-WingetMigrationItem -Item'
 installer_done="$(line_of "$installer" 'Write-Host "Package installation complete!"')"
 installer_clean="$(line_of "$installer" 'Remove-NewDesktopShortcut -Before $shortcutsBefore')"
-[ -n "$installer_done" ] && [ -n "$installer_clean" ] && [ "$installer_clean" -lt "$installer_done" ] ||
+if [ -z "$installer_done" ] || [ -z "$installer_clean" ] || [ "$installer_clean" -gt "$installer_done" ]; then
     fail 'dot up installer: the shortcut cleanup must come before "Package installation complete!"'
+fi
 
 # Order matters: snapshot before the first sweep, cleanup after the last.
 snapshot_line="$(grep -n 'Get-DesktopShortcut)' "$upgrade" | head -n1 | cut -d: -f1)"
