@@ -230,7 +230,7 @@ fails if a workflow carries an inline one.
 
 Neither do package names: `.chezmoidata/packages.yaml` is the one list, both
 installers render their manager's names from it through `.chezmoitemplates/`
-fragments, and `scripts/migrate-to-choco.ps1` reads it at runtime.
+fragments, and `scripts/migrate-to-winget.ps1` reads it at runtime.
 `tests/package_catalog_contract.sh` fails if a literal list reappears in any of
 the three. Two things learned building it: `includeTemplate` returns the
 fragment *with* its trailing newline (end the last action with `-}}`, or a

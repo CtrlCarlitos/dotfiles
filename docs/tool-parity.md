@@ -185,7 +185,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `raycast` | dev_desktop | — | — | `raycast` | — | — |  |
 | `codexbar` | dev_desktop | — | — | `codexbar` | — | — | Windows: Win-CodexBar via winget by procedure |
 | `screenrec` | dev_desktop | procedure | — | procedure | — | procedure | Screen capture recorder; no package-manager name on any platform by design. apt: vendor repo + signing key, then apt install, by procedure - the .deb hard-depends on the removed libgdk-pixbuf2.0-0 on Ubuntu 24.04+, so the source is rolled back on failure. cask: none - the vendor .dmg by procedure. choco: none - the vendor .exe by procedure. |
-| `tailscale` | remote_access | procedure | — | `tailscale-app` | `Tailscale.Tailscale` | — | apt: Tailscale's repo by procedure. migrate-to-choco requires typing the name to confirm this one. |
+| `tailscale` | remote_access | procedure | — | `tailscale-app` | `Tailscale.Tailscale` | — | apt: Tailscale's repo by procedure. |
 | `cloudflared` | remote_access | procedure | `cloudflared` | — | `Cloudflare.cloudflared` | — | apt: Cloudflare's repo by procedure |
 | `act` | agent_toolkit | procedure | procedure | — | `nektos.act` | — | brew/apt: installed by procedure in the agent_toolkit block |
 | `antigravity-cli` | antigravity_cli | — | — | — | — | `antigravity-cli` |  |

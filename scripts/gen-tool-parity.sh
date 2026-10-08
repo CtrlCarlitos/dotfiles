@@ -4,7 +4,7 @@ set -euo pipefail
 # Regenerates the per-program package table in docs/tool-parity.md (#105).
 #
 # Since #101 the package universe has one source, .chezmoidata/packages.yaml:
-# the installers render from it, migrate-to-choco reads it at runtime, and
+# the installers render from it, migrate-to-winget reads it at runtime, and
 # tests/package_catalog_contract.sh enforces both. The per-program table in
 # docs/tool-parity.md was the last hand-maintained copy, and it drifted. This
 # script renders the catalog into that table, between HTML-comment markers, so
@@ -60,7 +60,7 @@ cat = json.load(io.open(catalog_path, encoding="utf-8"))
 # Managers whose install a record's note documents as a procedure. Labels look
 # like "apt:" / "choco:" / "brew/apt:" at the start of a sentence or after a
 # semicolon; the span from one label to the next must say "procedure". A bare
-# mention ("never choco", "migrate-to-choco") is not a label.
+# mention ("never choco", "migrate-to-winget") is not a label.
 LABEL = re.compile(
     r'(?:^|(?<=;)|(?<=\.\s))\s*((?:apt|brew|cask|choco|winget)(?:/(?:apt|brew|cask|choco|winget))*)\s*:')
 def procedures(note):

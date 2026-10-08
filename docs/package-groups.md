@@ -152,7 +152,7 @@ Every package-manager name is in one file: `.chezmoidata/packages.yaml`, one
 record per tool with its `apt`, `brew`, `cask`, `winget` and `choco` spellings (`fd` is
 `fd-find` on apt; 7-Zip is `p7zip-full` / `sevenzip` / `7zip.install`). Both
 installers render their manager's lists from it, and
-`scripts/migrate-to-winget.ps1` (and the older `migrate-to-choco.ps1`) read the same records at runtime — so adding,
+`scripts/migrate-to-winget.ps1` reads the same records at runtime — so adding,
 renaming or dropping a package is one edit, and `tests/package_catalog_contract.sh`
 fails if a name reappears anywhere else.
 
