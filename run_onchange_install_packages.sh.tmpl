@@ -1644,7 +1644,8 @@ PYEOF
         fi
         # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
         # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
-        command -v graft &>/dev/null && net_timeout 60 graft telemetry disable \
+        # >/dev/null: its "telemetry: off. Nothing further will be recorded or sent." printed every run.
+        command -v graft &>/dev/null && net_timeout 60 graft telemetry disable >/dev/null \
             || true
     else
         warn "npm not found - skipping Graft"
