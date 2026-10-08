@@ -1089,14 +1089,15 @@ function Invoke-DockerDesktopStopOffer {
 
 # 'choco', 'winget' or '' (not installed). winget lists every installed app, Chocolatey's
 # MSI copy included, so Chocolatey is asked first.
+# Chocolatey's ownership from its lib\docker-desktop folder (instant), not `choco list`
+# (~1.9 s of a 3.2 s probe, on every dot upgrade).
 function Get-DockerDesktopOwner {
+    param([string]$ChocoLib)
+    if (-not $ChocoLib) { $ChocoLib = Join-Path $(if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }) 'lib' }
     $previous = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        if (Get-Command choco -ErrorAction SilentlyContinue) {
-            $chocoList = (choco list --limit-output --exact docker-desktop 2>$null | Out-String)
-            if ($chocoList -match '(?m)^docker-desktop\|') { return 'choco' }
-        }
+        if (Test-Path -LiteralPath (Join-Path $ChocoLib 'docker-desktop')) { return 'choco' }
         if (Get-Command winget -ErrorAction SilentlyContinue) {
             $wingetList = (winget list --id Docker.DockerDesktop --exact --accept-source-agreements 2>$null | Out-String)
             if ($wingetList -match 'Docker\.DockerDesktop') { return 'winget' }

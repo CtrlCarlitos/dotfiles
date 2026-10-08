@@ -56,12 +56,18 @@ function winget {
     $script:calls += $line
     $global:LASTEXITCODE = 0
 }
-$script:chocoOut = @('docker-desktop|4.93.0'); $script:wingetList = @('Docker Desktop Docker.DockerDesktop 4.93.0 4.94.0 winget')
-Write-Output ('owner-choco=' + (Get-DockerDesktopOwner))
-$script:chocoOut = @('git|2.56.0')
-Write-Output ('owner-winget=' + (Get-DockerDesktopOwner))
+# Chocolatey's ownership comes from its lib folder (instant), never a `choco list` (~1.9 s)
+$lib = Join-Path ([IO.Path]::GetTempPath()) ('choco-lib-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path (Join-Path $lib 'docker-desktop') | Out-Null
+$script:chocoCalls = 0
+$script:wingetList = @('Docker Desktop Docker.DockerDesktop 4.93.0 4.94.0 winget')
+Write-Output ('owner-choco=' + (Get-DockerDesktopOwner -ChocoLib $lib))
+Remove-Item -Recurse -Force (Join-Path $lib 'docker-desktop')
+Write-Output ('owner-winget=' + (Get-DockerDesktopOwner -ChocoLib $lib))
 $script:wingetList = @('No installed package found matching input criteria.')
-Write-Output ('owner-none=[' + (Get-DockerDesktopOwner) + ']')
+Write-Output ('owner-none=[' + (Get-DockerDesktopOwner -ChocoLib $lib) + ']')
+Write-Output ('owner-no-choco-call=' + $script:chocoCalls)
+Remove-Item -Recurse -Force $lib
 
 # only the owner is probed for a pending Docker Desktop upgrade
 $script:calls = @(); $script:chocoCalls = 0
@@ -87,6 +93,7 @@ PSEOF
     expect 'owner-choco=choco'
     expect 'owner-winget=winget'
     expect 'owner-none=[]'
+    expect 'owner-no-choco-call=0'
     expect 'probe-winget-owner=0|1'
     expect 'probe-choco-owner=1|0'
     expect 'hold=pin add,upgrade --all,pin remove,upgrade --include-unknown'
