@@ -1390,11 +1390,49 @@ function Get-DotTimingNow { return [DateTime]::UtcNow }
 # Read-Host for dot upgrade's prompts: the time spent answering is its own section ("your
 # answers") in the closing Timings line, not part of the work it interrupted. Twin of
 # dot_timing_wait / dot_timing_resume. Outside a timed run it is plain Read-Host.
+# A question nobody is there to answer must not hold the run: a dot upgrade sat 26 minutes on
+# "Stop them so everything upgrades now?" while its operator was out (2026-10-07). Under
+# `dot upgrade --yes` ($script:DotAnswerYes, set by dotupgrade.ps1, which dot-sources this
+# file into its own scope) the answer is "y" without asking. Otherwise, after
+# DOTUPGRADE_PROMPT_TIMEOUT seconds (default 60; 0 = wait as long as it takes), the empty
+# answer: every question's safe default (keep, defer). The wait polls the console for a first
+# key; a host without one (redirected input, tests) gets the plain Read-Host.
+function Get-DotAnswerTimeout {
+    $t = 60
+    if ("$env:DOTUPGRADE_PROMPT_TIMEOUT" -match '^\d+$') { $t = [int]$env:DOTUPGRADE_PROMPT_TIMEOUT }
+    return $t
+}
+
 function Read-DotAnswer {
     param([string]$Prompt)
+    if ((Get-Variable -Name DotAnswerYes -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+        Write-Host "${Prompt}: y (--yes)"
+        return 'y'
+    }
+    $timeout = Get-DotAnswerTimeout
     $resume = $script:DotTimingLast
     if ($resume) { Add-DotTimingMark -Name 'your answers' }
-    try { return (Read-Host $Prompt) }
+    try {
+        if ($timeout -gt 0) {
+            $polled = $false
+            try {
+                $null = [Console]::KeyAvailable
+                $polled = $true
+            } catch { $polled = $false }
+            if ($polled) {
+                Write-Host "$Prompt (${timeout}s): " -NoNewline
+                $deadline = (Get-Date).AddSeconds($timeout)
+                while (-not [Console]::KeyAvailable -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+                if (-not [Console]::KeyAvailable) {
+                    Write-Host ''
+                    Write-Host "  (no answer in ${timeout}s - taking the default: no)" -ForegroundColor Yellow
+                    return ''
+                }
+                return [Console]::ReadLine()
+            }
+        }
+        return (Read-Host $Prompt)
+    }
     finally { if ($resume) { Add-DotTimingMark -Name $resume } }
 }
 

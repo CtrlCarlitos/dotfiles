@@ -49,6 +49,44 @@ dot_timing_resume() {
     DOT_TIMING_RESUME=""
 }
 
+# A question nobody is there to answer must not hold the run: a dot upgrade sat 26 minutes on
+# "Stop them so everything upgrades now?" while its operator was out (2026-10-07).
+#   dot_ask_hint       " (60s)" - append to a prompt so the wait is visible
+#   dot_ask <var>      read one answer into <var>: "y" without asking under --yes
+#                      (DOTUPGRADE_YES=1); after DOTUPGRADE_PROMPT_TIMEOUT seconds (default
+#                      60, 0 = wait as long as it takes) the empty answer - every question's
+#                      safe default (keep, defer).
+dot_ask_timeout() {
+    local t="${DOTUPGRADE_PROMPT_TIMEOUT:-60}"
+    case "$t" in '' | *[!0-9]*) t=60 ;; esac
+    printf '%s' "$t"
+}
+dot_ask_hint() {
+    local t
+    t="$(dot_ask_timeout)"
+    [ "${DOTUPGRADE_YES:-0}" = 1 ] || [ "$t" = 0 ] || printf ' (%ss)' "$t"
+}
+dot_ask() {
+    local __ans="" __t __rc=0
+    if [ "${DOTUPGRADE_YES:-0}" = 1 ]; then
+        echo "y (--yes)" >&2
+        printf -v "$1" '%s' y
+        return 0
+    fi
+    __t="$(dot_ask_timeout)"
+    if [ "$__t" -gt 0 ]; then
+        read -r -t "$__t" __ans || __rc=$?
+        if [ "$__rc" -gt 128 ]; then
+            echo >&2
+            echo "  (no answer in ${__t}s - taking the default: no)" >&2
+            __ans=""
+        fi
+    else
+        read -r __ans || __ans=""
+    fi
+    printf -v "$1" '%s' "$__ans"
+}
+
 dot_timing_format() {
     local s="$1"
     if [ "$s" -ge 60 ]; then printf '%dm%02ds' "$((s / 60))" "$((s % 60))"; else printf '%ds' "$s"; fi
