@@ -33,7 +33,9 @@ foreach ($arg in $args) {
     }
 }
 Write-Host "dot upgrade - sweeping all tooling..." -ForegroundColor Cyan
-Add-DotTimingMark -Name 'sessions and Codex daemon'
+# Two marks, so the Timings line says which half is slow: the scan and the stop, then the
+# Codex daemon and the defer scan (one "sessions and Codex daemon" mark hid it).
+Add-DotTimingMark -Name 'sessions (scan and stop)'
 
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run.
 # npm -g / uv tool / choco opencode all delete+recreate package directories
@@ -47,6 +49,7 @@ Add-DotTimingMark -Name 'sessions and Codex daemon'
 $agentNames = @('opencode', 'claude', 'codex', 'agy', 'serena')
 $stoppedSessions = @(Invoke-LiveSessionStop -Name $agentNames -ExcludeId @(Get-AncestorProcessId))
 if ($stoppedSessions.Count -gt 0) { Start-Sleep -Seconds 1 }
+Add-DotTimingMark -Name 'Codex daemon and defer scan'
 # Codex's app-server daemon is not a session but keeps running the release it started with;
 # with no Codex session left it is stopped so the next start is the upgraded version.
 if (-not (Test-LiveProcess @('codex'))) {

@@ -30,7 +30,9 @@ DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DOT_SCRIPT_DIR/lib/docker-vscode.sh"
 
 echo "dot upgrade - sweeping all tooling..."
-dot_timing_mark 'sessions and Codex daemon'
+# Two marks, so the Timings line says which half is slow: the scan and the stop, then the
+# Codex daemon and the defer scan (one "sessions and Codex daemon" mark hid it).
+dot_timing_mark 'sessions (scan and stop)'
 
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run. ---
 # A name match is not always a session: Codex's shared app-server daemon runs its OWN
@@ -143,6 +145,7 @@ stop_live_sessions() {
     echo "$stopped"
 }
 stop_live_sessions opencode claude codex agy serena >/dev/null
+dot_timing_mark 'Codex daemon and defer scan'
 
 # --- Codex's app-server daemon: not a session, but it keeps running the release it started
 # with, so it stays behind the CLI after an upgrade. With no Codex session left, stop it; it
