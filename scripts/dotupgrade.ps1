@@ -47,7 +47,12 @@ Add-DotTimingMark -Name 'sessions (scan and stop)'
 # On an interactive console the operator is first offered the chance to stop the blocking
 # sessions (never this shell's own ancestry); whatever stays running still defers.
 $agentNames = @('opencode', 'claude', 'codex', 'agy', 'serena')
-$stoppedSessions = @(Invoke-LiveSessionStop -Name $agentNames -ExcludeId @(Get-AncestorProcessId))
+$ancestorWatch = [System.Diagnostics.Stopwatch]::StartNew()
+$ancestorIds = @(Get-AncestorProcessId)
+if ($ancestorWatch.Elapsed.TotalSeconds -gt 2) {
+    Write-Host ("    finding this shell's own processes took {0:N1}s" -f $ancestorWatch.Elapsed.TotalSeconds) -ForegroundColor DarkGray
+}
+$stoppedSessions = @(Invoke-LiveSessionStop -Name $agentNames -ExcludeId $ancestorIds)
 if ($stoppedSessions.Count -gt 0) { Start-Sleep -Seconds 1 }
 Add-DotTimingMark -Name 'Codex daemon and defer scan'
 # Codex's app-server daemon is not a session but keeps running the release it started with;

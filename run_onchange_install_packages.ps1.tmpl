@@ -1473,7 +1473,8 @@ if (-not $graftWorks) {
 }
 if ($graftWorks) {
     # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
-    Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { graft telemetry disable 2>$null }
+    # Its "telemetry: off. Nothing further will be recorded or sent." printed on every `dot up`.
+    Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { $null = graft telemetry disable 2>$null }
 }
 # graft-install-section: end (contract-test extraction boundary)
 # graft's background index build must not flash a terminal window (Repair-GraftBuildWindow,

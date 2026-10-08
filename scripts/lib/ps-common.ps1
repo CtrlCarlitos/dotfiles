@@ -492,9 +492,18 @@ function Format-LiveProcess {
 function Invoke-LiveSessionStop {
     param([string[]]$Name, [int[]]$ExcludeId = @())
     if ($env:DOTUPGRADE_NO_PROMPT -eq '1') { return @() }
+    # The scan took 9-15 s on every elevated `dot upgrade` (2026-10-07) and 1.2 s unelevated:
+    # say which part, once it is slow.
+    $scanWatch = [System.Diagnostics.Stopwatch]::StartNew()
     $procs = @(Get-StoppableAgentProcess -Name $Name -ExcludeId $ExcludeId)
+    $sessionSeconds = $scanWatch.Elapsed.TotalSeconds
     $apps = @(Get-AgentDesktopApp -ExcludeId $ExcludeId)
+    $appSeconds = $scanWatch.Elapsed.TotalSeconds - $sessionSeconds
     $orphans = @(Get-OrphanAgentHelper -ExcludeId $ExcludeId)
+    $helperSeconds = $scanWatch.Elapsed.TotalSeconds - $sessionSeconds - $appSeconds
+    if ($scanWatch.Elapsed.TotalSeconds -gt 3) {
+        Write-Host ("    session scan took {0:N1}s: sessions {1:N1}s, desktop apps {2:N1}s, helpers {3:N1}s" -f $scanWatch.Elapsed.TotalSeconds, $sessionSeconds, $appSeconds, $helperSeconds) -ForegroundColor DarkGray
+    }
     if ($procs.Count -eq 0 -and $apps.Count -eq 0 -and $orphans.Count -eq 0) { return @() }
     if (-not (Test-InteractiveConsole)) { return @() }
 
