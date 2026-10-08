@@ -198,6 +198,17 @@ Write-Output ('desk-defers-nothing=' + (Test-LiveProcess @('codex', 'opencode', 
 $agLs = P 'language_server' 803 'C:\Users\u\AppData\Local\Programs\antigravity\resources\bin\language_server.exe'
 $script:table = @($agDesk, $agLs)
 Write-Output ('desk-helpers=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.Label):$((@($_.Processes) | ForEach-Object { $_.Id }) -join '+')" }) -join ','))
+# Paths come from the one process-table query; .Path (a module walk per read - 8.7 s elevated)
+# only for a process the table has no path for, and then once, not once per app.
+$script:pathReads = 0
+$slow = P 'Antigravity' 804 $null
+$slow.PSObject.Properties.Remove('Path')
+$slow | Add-Member -MemberType ScriptProperty -Name Path -Value { $script:pathReads++; 'C:\Users\u\AppData\Local\Programs\antigravity\Antigravity.exe' }
+$fromTable = P 'claude' 503 $null
+$script:ptable = @([pscustomobject]@{ Id = 503; ParentId = 1; Name = 'claude.exe'; Path = 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.26454.0\claude.exe'; CommandLine = ''; Created = $null })
+$script:table = @($slow, $fromTable)
+Write-Output ('desk-paths=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.Label):$((@($_.Processes) | ForEach-Object { $_.Id }) -join '+')" }) -join ',') + "|reads=$script:pathReads")
+$script:ptable = @()
 # The Codex Store app's sandbox service is stopped with the app; listed even with no window open.
 $script:services = @{ 'CodexSandboxService.OpenAI.Codex' = 'Running' }
 $script:serviceStops = @()
@@ -264,6 +275,7 @@ PSEOF
     expect 'desk-sessions=702,200'
     expect 'desk-defers-nothing=False'
     expect 'desk-helpers=Antigravity:801+803'
+    expect 'desk-paths=Claude Desktop:503,Antigravity:804|reads=1'
     expect 'desk-service=0||prompts=1'
     expect 'desk-service-stopped=CodexSandboxService.OpenAI.Codex'
     expect 'desk-service-idle=0||prompts=0'
