@@ -540,8 +540,13 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
         if (Test-Path $agentBrowser) {
             $env:AGENT_BROWSER = $agentBrowser
-            & $env:AGENT_BROWSER install
-            if ($LASTEXITCODE -ne 0) { Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red }
+            # Every run (Chrome updates on its own schedule), but quiet unless it fails - its
+            # "Installing Chrome... already installed" printed on every upgrade; the bash twin is quiet.
+            $installOutput = @(& $env:AGENT_BROWSER install 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                $installOutput | ForEach-Object { Write-Host "   $_" }
+                Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red
+            }
             $doctorOutput = @(& $env:AGENT_BROWSER doctor --json)
             $doctorExit = $LASTEXITCODE
             Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
