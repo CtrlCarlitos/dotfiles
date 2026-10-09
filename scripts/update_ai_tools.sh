@@ -211,18 +211,29 @@ else
     echo "   Curated skills: Codex installed=0 skipped=$curated_total failed=0"
 fi
 
-# Superpowers for Codex CLI: the official Codex plugin marketplace
-# (`openai-curated-remote`, pre-configured in codex) carries it, and
-# `codex plugin add` both installs and updates (same command, idempotent -
-# like `agy plugin install` above). Defer-aware: the plugin dir is resolved
-# by live codex sessions, same premise as the npm upgrade above.
+# Superpowers for Codex CLI: the pre-configured Codex plugin marketplace
+# carries it, and `codex plugin add` both installs and updates (same command,
+# idempotent - like `agy plugin install` above). Defer-aware: the plugin dir is
+# resolved by live codex sessions, same premise as the npm upgrade above.
+#
+# The marketplace name comes from codex itself (see
+# codex_superpowers_marketplace in scripts/lib/agent-skills.sh for why
+# hardcoding it was wrong). The old line also MISREPORTED its failure: it sent
+# the error to /dev/null and printed "Superpowers not installed for Codex",
+# which was false - the plugin was installed, the add was failing on a
+# nonexistent marketplace. A real failure now prints what codex said.
 if command -v codex &>/dev/null; then
     if deferred codex; then
         echo "  codex deferred - Superpowers (Codex) update skipped with it."
     else
         echo "✨ Updating Superpowers (Codex)..."
-        net_timeout 300 codex plugin add superpowers@openai-curated-remote &>/dev/null \
-            || echo "   Superpowers not installed for Codex - skipping"
+        cx_market="$(codex_superpowers_marketplace)"
+        if [ -z "$cx_market" ]; then
+            echo "   no Codex marketplace lists a superpowers plugin - skipping"
+        else
+            cx_out="$(net_timeout 300 codex plugin add "superpowers@$cx_market" 2>&1)" \
+                || { printf '%s\n' "$cx_out"; echo "   Superpowers update for Codex failed - skipping"; }
+        fi
     fi
 fi
 

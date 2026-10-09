@@ -224,6 +224,33 @@ quiet_apt_enable() {
 }
 
 #-------------------------------------------------------------------------------
+# codex_superpowers_marketplace - print the marketplace that actually carries a
+# superpowers plugin on THIS codex, or nothing.
+#
+# Never hardcode this name. Every consumer here used to pass
+# `superpowers@openai-curated-remote`, which does not exist on the installed
+# codex: `dot up` ended in "Error: plugin `superpowers` was not found in
+# marketplace `openai-curated-remote`", and `dot upgrade` reported "Superpowers
+# not installed for Codex" with the real error swallowed by a redirect. The
+# name is genuinely volatile - it resolved to `openai-curated` one morning and
+# `openai-api-curated` the same evening - so the only reliable source is codex
+# itself: `codex plugin list` prints one `<plugin>@<marketplace>` row per
+# available plugin. Shared by the installer template and the updater so the two
+# can never drift again (the Windows twin is Get-CodexSuperpowersMarketplace in
+# ps-skills.ps1); tests/codex_marketplace_contract.sh pins all four.
+#
+# Callers must tolerate empty output: a codex that cannot list (offline, first
+# run, catalog needing auth) is a skip, never a hard failure.
+#-------------------------------------------------------------------------------
+codex_superpowers_marketplace() {
+    command -v codex >/dev/null 2>&1 || return 0
+    # `|| true` inside the substitution: the consumers set -e/pipefail, where a
+    # codex that cannot list would otherwise abort the whole run on assignment.
+    net_timeout 60 codex plugin list 2>/dev/null \
+        | sed -n 's/^superpowers@\([^[:space:]]*\).*/\1/p' | head -n 1 || true
+}
+
+#-------------------------------------------------------------------------------
 # guardrail_console_filter - stdin: the agent-guardrails installer's output; stdout: the
 # same, minus the routine status lines.
 #

@@ -309,19 +309,26 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-CuratedSkillsSkippedSummary
 }
 
-# Superpowers for Codex CLI: the official Codex plugin marketplace
-# (`openai-curated-remote`, pre-configured in codex) carries it, and
-# `codex plugin add` both installs and updates (same command, idempotent -
-# like `agy plugin install` above). Defer-aware: the plugin dir is resolved
-# by live codex sessions, same premise as the npm upgrade above.
+# Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
+# it, and `codex plugin add` both installs and updates (same command, idempotent
+# - like `agy plugin install` above). Defer-aware: the plugin dir is resolved by
+# live codex sessions, same premise as the npm upgrade above. The marketplace
+# name comes from codex itself - see Get-CodexSuperpowersMarketplace in
+# scripts/lib/ps-skills.ps1 for why hardcoding it was wrong.
 if (Get-Command codex -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'codex') {
         Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
     } else {
         Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
-        # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
-        $cxOut = @(& codex plugin add superpowers@openai-curated-remote 2>&1 | ForEach-Object { "$_" })
-        if ($LASTEXITCODE -ne 0) { $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red }
+        if (-not (Get-Command Get-CodexSuperpowersMarketplace -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+        $cxMarket = Get-CodexSuperpowersMarketplace
+        if (-not $cxMarket) {
+            Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+        } else {
+            # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
+            $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) { $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red }
+        }
     }
 }
 
