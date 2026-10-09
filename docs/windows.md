@@ -122,10 +122,19 @@ is done once, by hand, keeping the data disk:
    settings: `Copy-Item -Recurse "$env:APPDATA\Docker" "$env:LOCALAPPDATA\Docker-settings-keep"`.
 3. `choco uninstall docker-desktop -y`
 4. `winget install --id Docker.DockerDesktop --exact --source winget --accept-package-agreements --accept-source-agreements`
-   and do **not** start Docker Desktop yet.
+   and do **not** start Docker Desktop yet. The installer can launch it anyway (seen 2026-10-09: it created
+   a fresh, empty `$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx` and overwrote `$env:APPDATA\Docker`
+   with default settings within a minute of the install finishing, with no window ever shown). If
+   `docker-desktop` shows up in `wsl -l -v` right after the install, quit Docker Desktop and run
+   `wsl --shutdown` again before step 5 - the disk is held open until then and the plain `Move-Item` onto
+   it fails with "Could not find a part of the path" if `wsl\disk` doesn't exist yet, or refuses to
+   overwrite it once it does.
 5. Put the disk back: if the install created `$env:LOCALAPPDATA\Docker\wsl\disk`, rename it out of the way
-   first, then `Move-Item "$env:LOCALAPPDATA\Docker-disk-keep" "$env:LOCALAPPDATA\Docker\wsl\disk"`. If
-   `$env:APPDATA\Docker` is gone, copy the settings back.
+   first (it's the small fresh one, safe to delete once step 6 confirms the real disk is back), then
+   `Move-Item "$env:LOCALAPPDATA\Docker-disk-keep" "$env:LOCALAPPDATA\Docker\wsl\disk"`. `$env:APPDATA\Docker`
+   existing is not a sign the old settings survived - the auto-launch above regenerates it with defaults, so
+   check its timestamps against the install time, not just whether the folder is there, and copy the kept
+   settings back over it if they're newer.
 6. Start Docker Desktop, check `docker images` and `docker volume ls`, and confirm
    `winget upgrade --id Docker.DockerDesktop` no longer says "install technology is different". Then the
    two `*-keep` folders can be deleted.
