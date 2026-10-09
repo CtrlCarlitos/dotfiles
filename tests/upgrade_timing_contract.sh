@@ -125,6 +125,14 @@ inst="run_onchange_install_packages.sh.tmpl"
 grep -Fq 'include "scripts/lib/timing.sh"' "$repo_root/$inst" || fail "$inst must include scripts/lib/timing.sh"
 [ "$(count "$inst" '^[[:space:]]*dot_timing_mark ')" -ge 6 ] || fail "$inst: expected a mark at each section of main (found $(count "$inst" '^[[:space:]]*dot_timing_mark '))"
 [ "$(count "$inst" '^[[:space:]]*dot_timing_summary ')" = 1 ] || fail "$inst: expected exactly one summary"
+# The Windows twin: the helpers live in scripts/lib/ps-timing.ps1 (dot-sourced by ps-common.ps1 for
+# dot upgrade, inlined by the installer template, which never dot-sources ps-common.ps1).
+ps_inst="run_onchange_install_packages.ps1.tmpl"
+grep -Fq 'include "scripts/lib/ps-timing.ps1"' "$repo_root/$ps_inst" || fail "$ps_inst must include scripts/lib/ps-timing.ps1"
+[ "$(count "$ps_inst" '^[[:space:]]*Add-DotTimingMark ')" -ge 6 ] || fail "$ps_inst: expected a mark at each section (found $(count "$ps_inst" '^[[:space:]]*Add-DotTimingMark '))"
+[ "$(count "$ps_inst" '^[[:space:]]*Write-DotTimingSummary ')" = 1 ] || fail "$ps_inst: expected exactly one summary"
+grep -Fq 'ps-timing.ps1' "$repo_root/scripts/lib/ps-common.ps1" || fail "ps-common.ps1 must dot-source lib/ps-timing.ps1 so dot upgrade keeps its marks"
+grep -Fq 'function Add-DotTimingMark' "$repo_root/scripts/lib/ps-timing.ps1" 2>/dev/null || fail "scripts/lib/ps-timing.ps1 must define Add-DotTimingMark"
 grep -Fq 'lib/timing.sh' "$repo_root/scripts/update_ai_tools.sh" || fail "update_ai_tools.sh must source lib/timing.sh"
 pass
 
