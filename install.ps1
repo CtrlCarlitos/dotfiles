@@ -315,15 +315,21 @@ try {
         if ((Test-Path "chezmoi.toml") -or (Test-Path ".chezmoi.toml.tmpl")) {
             Invoke-ChezmoiWithRetry { chezmoi init --apply --source . }
         } else {
-            # Remote install (use PAT if available)
-            if ($env:PAT) {
-                $srcDir = "$env:USERPROFILE/.local/share/chezmoi"
-                # low-speed config aborts a stalled clone (<1KB/s for 60s)
-                git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 clone "https://$($env:PAT)@github.com/CtrlCarlitos/dotfiles.git" $srcDir
-                Invoke-ChezmoiWithRetry { chezmoi init --apply --source $srcDir }
-            } else {
-                Invoke-ChezmoiWithRetry { chezmoi init --apply --branch main CtrlCarlitos/dotfiles }
-            }
+            # Remote install. The repo is public: chezmoi clones it itself,
+            # unauthenticated.
+            #
+            # There is deliberately NO token-authenticated branch here. This
+            # used to clone an https URL with a bootstrap token interpolated
+            # into the userinfo position (before the host), and git persists a
+            # clone URL verbatim as remote.origin.url - so that token stayed
+            # in .git/config for as long as the checkout lived, which is
+            # exactly what docs/backup-restore.md's "do not embed a PAT in a
+            # clone URL" rule forbids. See the fuller note in install.sh; if a
+            # token is ever unavoidable, pass it as a one-shot
+            # `git -c credential.helper=...` BEFORE the subcommand, never
+            # `git clone -c ...`, which writes it into the new repo's config.
+            # tests/installer_url_credentials_contract.sh pins this.
+            Invoke-ChezmoiWithRetry { chezmoi init --apply --branch main CtrlCarlitos/dotfiles }
         }
     }
 

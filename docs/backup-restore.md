@@ -209,6 +209,17 @@ explicit grants to other users/groups.
 Do not embed a PAT in a clone URL: it can persist in shell history, process
 listings, Git remote configuration, and logs.
 
+"Git remote configuration" is the one that bites. `git clone <url>` stores the
+URL **verbatim** as `remote.origin.url`, so a one-shot bootstrap token becomes
+permanent plaintext in `.git/config` — mode 644, world-readable, and printed
+by `git remote -v` on demand. Nothing ever removes it. It is not reachable by
+anyone cloning the repo (`.git/config` is never tracked or transferred), but
+it is readable by every process on that machine. Both installers carried this
+shape and no longer do; `tests/installer_url_credentials_contract.sh` keeps it
+out. If a token is unavoidable, pass it as a one-shot credential helper
+*before* the subcommand — `git -c credential.helper=... clone <tokenless-url>`
+— never `git clone -c ...`, which writes the value into the new repo's config.
+
 ---
 
 ### Git identity not applied in directory
@@ -253,18 +264,26 @@ chezmoi apply --force
 
 ### Fresh start (nuclear option)
 
+The repo is public, so none of this needs a token.
+
 **Linux/macOS/WSL**:
 ```bash
 rm -rf ~/.config/chezmoi ~/.local/share/chezmoi
-export PAT="your_pat"
-sh -c "$(curl -H "Authorization: token $PAT" -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.sh)"
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.sh)"
 ```
 
 **Windows** (PowerShell as Administrator):
 ```powershell
 Remove-Item -Recurse -Force "$env:USERPROFILE\.config\chezmoi", "$env:USERPROFILE\.local\share\chezmoi"
-$PAT="your_pat"; iex "& {$(irm -Headers @{Authorization="token $PAT"} https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
+iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
 ```
+
+These two commands used to `export PAT="your_pat"` first, from when the repo
+was private. Do not reintroduce that: an exported token lands in shell history
+*and* in `/proc/<pid>/environ`, readable by anything running as you. If a
+private fork ever needs authentication, prefer SSH; if a token is truly
+unavoidable, read it with `read -rs PAT` instead of putting it on a command
+line, and never let it reach a clone URL (see the rule above).
 
 ---
 
