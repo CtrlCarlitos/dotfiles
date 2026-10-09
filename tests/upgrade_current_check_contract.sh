@@ -3,17 +3,36 @@
 set -euo pipefail
 
 # `dot upgrade` reinstalled things that were already current: `graft upgrade` (0.21.1 ->
-# 0.21.1 took 41 s on WSL) and the codex `npm install -g` (~9 s), on every run. The unix
-# updater now asks first (covered by tests/agent_tool_upgrade_contract.sh); this is the
-# PowerShell twin's decision logic in scripts/lib/ps-common.ps1, EXECUTED with a fake npm:
-#   Test-NpmGlobalCurrent  installed (npm ls -g) == registry (npm view)
-#   Get-GraftCurrentVersion  `graft version` prints "graft X" and "latest: Y"
+# 0.21.1 took 41 s on WSL) and the codex `npm install -g` (~9 s), on every run. Both twins'
+# decision logic is EXECUTED here over the same fixtures:
+#   graft_current_version    scripts/lib/agent-skills.sh   (unix)
+#   Get-GraftCurrentVersion  scripts/lib/ps-common.ps1     (windows)
+#   Test-NpmGlobalCurrent    installed (npm ls -g) == registry (npm view), with a fake npm
 # Anything unknown - empty answers, an unreachable registry - means "not current", so the
 # install still happens exactly as before.
+#
+# The graft cases run on BOTH twins on purpose. The unix side used to inline this parsing
+# with `[^ ]*` (space only) while PowerShell used `[^\s]*`, so a CRLF `graft version`
+# answer captured the CR into the version string and the two disagreed on exactly the
+# input the `graft-crlf` case covers. Shared helper now, same fixtures, one verdict.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
-command -v pwsh >/dev/null 2>&1 || skip 'pwsh not installed'
+# --- unix twin: graft_current_version (runs with or without pwsh) -------------------------------
+sh_graft_case() { # $1 = label, $2 = `graft version` output, $3 = expected answer
+    local got
+    got="$(bash -c '. "$1"; graft_current_version "$2"' _ "$repo_root/scripts/lib/agent-skills.sh" "$2" || true)"
+    if [ "$got" = "$3" ]; then pass; else fail "graft_current_version[$1]: expected '$3', got '$got'"; fi
+}
+sh_graft_case current      "$(printf 'graft 0.21.1\nlatest: 0.21.1\n')"                    '0.21.1'
+sh_graft_case stale        "$(printf 'graft 0.18.0\nlatest: 0.21.1\n')"                    ''
+sh_graft_case offline      "$(printf 'graft 0.21.1\nlatest: unreachable (offline?)\n')"    ''
+sh_graft_case empty        ''                                                               ''
+sh_graft_case crlf         "$(printf 'graft 0.21.1\r\nlatest on npm: 0.21.1 up to date\r\n')" '0.21.1'
+sh_graft_case online       "$(printf 'graft 0.21.1\nlatest on npm: 0.21.1 up to date\n')"  '0.21.1'
+sh_graft_case online-stale "$(printf 'graft 0.18.0\nlatest on npm: 0.21.1 (update available)\n')" ''
+
+command -v pwsh >/dev/null 2>&1 || skip 'pwsh not installed (unix twin checked above)'
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
