@@ -39,10 +39,11 @@ $end = $start
 while ($lines[$end] -ne '}') { $end++ }
 Invoke-Expression (($lines[$start..$end]) -join "`n")
 
-# The installer pipes its console copy through Select-GuardrailConsoleLine (inlined from
-# scripts/lib/ps-skills.ps1 together with the pattern it matches on): bring both in.
+# The installer runs the upstream installer through Invoke-GuardrailInstallerProcess (inlined
+# from scripts/lib/ps-skills.ps1 together with the hide-list pattern and Write-GuardrailFilteredLine
+# it calls): bring in everything from the pattern's declaration through that function's end.
 $filterStart = ($lines | Select-String -Pattern '^\$script:GuardrailHidden = 0' | Select-Object -First 1).LineNumber - 1
-$filterEnd = ($lines | Select-String -Pattern '^function Select-GuardrailConsoleLine \{' | Select-Object -First 1).LineNumber - 1
+$filterEnd = ($lines | Select-String -Pattern '^function Invoke-GuardrailInstallerProcess \{' | Select-Object -First 1).LineNumber - 1
 while ($lines[$filterEnd] -ne '}') { $filterEnd++ }
 Invoke-Expression (($lines[$filterStart..$filterEnd]) -join "`n")
 
@@ -59,26 +60,32 @@ Set-Content -LiteralPath $bin -Value 'installed-binary' -Encoding ascii
 $legacy = "$bin.old-20260101000000"
 Set-Content -LiteralPath $legacy -Value 'legacy set-aside copy' -Encoding ascii
 
-# The download job is replaced by a stub that "downloads" a fake upstream installer and
-# its checksum; the upstream installer itself is a function named like the executable.
+# The download job is replaced by a stub that "downloads" a fake upstream installer and its
+# checksum. Invoke-GuardrailInstaller now runs that installer through Invoke-GuardrailInstallerProcess,
+# a REAL child process (that is the entire point of the fix this guards: it bypasses PowerShell's
+# own native-command pipeline capture), so it can no longer be intercepted by a same-named
+# PowerShell function the way the old `& powershell ...` pipeline could. The fake installer records
+# its own invocation instead, into a marker file named over the environment (processes inherit the
+# environment, not session variables).
 function Invoke-WithTimeout {
     param([string]$Description, [int]$Seconds, [scriptblock]$Action, [switch]$NoStream)
     $fake = Join-Path $env:GUARDRAIL_TMP 'install.ps1'
-    Set-Content -LiteralPath $fake -Value 'exit 0' -Encoding ascii
+    Set-Content -LiteralPath $fake -Value '($args -join " ") | Set-Content -LiteralPath $env:GUARDRAIL_TEST_SEEN -Encoding ascii; exit 0' -Encoding ascii
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fake).Hash
     Set-Content -LiteralPath (Join-Path $env:GUARDRAIL_TMP 'SHA256SUMS') -Value "$hash  install.ps1" -Encoding ascii
 }
-$script:seen = ''
-function powershell { $script:seen = ($args -join ' '); $global:LASTEXITCODE = 0 }
+$env:GUARDRAIL_TEST_SEEN = Join-Path $env:TEMP ("guardrail-test-seen-" + [guid]::NewGuid().ToString('N') + '.txt')
 
 Invoke-GuardrailInstaller -State enabled | Out-Null
 
+$seen = if (Test-Path -LiteralPath $env:GUARDRAIL_TEST_SEEN) { Get-Content -LiteralPath $env:GUARDRAIL_TEST_SEEN -Raw } else { '' }
 $siblings = @(Get-ChildItem -LiteralPath $binDir -File -Force | Where-Object { $_.Name -like '*guardrail.exe.old-*' -and $_.FullName -ne $legacy })
 Write-Output ("binary-in-place=" + (Test-Path -LiteralPath $bin))
 Write-Output ("binary-content=" + ((Get-Content -LiteralPath $bin) -join ''))
 Write-Output ("moved-aside=" + $siblings.Count)
-Write-Output ("upstream-called=" + ($script:seen -match '-Version v9\.9\.9-test' -and $script:seen -match '-State enabled'))
+Write-Output ("upstream-called=" + ($seen -match '-Version v9\.9\.9-test' -and $seen -match '-State enabled'))
 Write-Output ("legacy-swept=" + (-not (Test-Path -LiteralPath $legacy)))
+Remove-Item -LiteralPath $env:GUARDRAIL_TEST_SEEN -ErrorAction SilentlyContinue
 PSEOF
 
 home="$tmp/home"

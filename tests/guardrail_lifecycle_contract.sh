@@ -135,7 +135,12 @@ windows_checks() { # $1 = file
     require_in_section "$1" 'Tls12'
     local sec
     sec="$(section "$1")"
-    grep -Eq -- '-File +"?\$[A-Za-z_]+\\install\.ps1"? +-Version' <<<"$sec" ||
+    # .{0,2} rather than a literal quote class: tolerates both shapes this repo's four
+    # consumers use without fighting bash's own quoting of an embedded "'" - a literal native
+    # invocation (-File "$dir\install.ps1" -Version ...) and Invoke-GuardrailInstallerProcess's
+    # -ArgumentList array literal ('-File', "$dir\install.ps1", '-Version', ...). Either way,
+    # -File and the pin must both be real arguments passed to install.ps1, not a piped script.
+    grep -Eq -- '-File.{0,2} +.{0,2}\$[A-Za-z_]+\\install\.ps1.{0,2} +.{0,2}-Version' <<<"$sec" ||
         fail "$1: guardrail section does not run install.ps1 with -File (-File \"\$dir\\install.ps1\" -Version ...)"
     forbid_in_section "$1" 'Invoke-Expression'
     forbid_in_section "$1" 'SetEnvironmentVariable("Path"'
