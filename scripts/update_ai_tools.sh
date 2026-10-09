@@ -453,10 +453,11 @@ if command -v graft &>/dev/null; then
         # WSL). `graft version` prints the installed version and the latest published one;
         # equal means nothing to do. "unreachable" or no answer still upgrades.
         graft_version_out="$(graft version 2>/dev/null || true)"
-        graft_have="$(printf '%s\n' "$graft_version_out" | sed -n 's/^graft \([0-9][^ ]*\).*/\1/p' | head -n 1)"
-        # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
-        graft_latest="$(printf '%s\n' "$graft_version_out" | sed -n 's/^latest\( on npm\)\{0,1\}: \([0-9][^ ]*\).*/\2/p' | head -n 1)"
-        if [ -n "$graft_have" ] && [ "$graft_have" = "$graft_latest" ]; then
+        # Shared with the PowerShell twin's decision logic via
+        # graft_current_version (scripts/lib/agent-skills.sh); empty means
+        # "not current", which upgrades exactly as before.
+        graft_have="$(graft_current_version "$graft_version_out")"
+        if [ -n "$graft_have" ]; then
             echo "  graft is current ($graft_have)"
         elif [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
             echo "  Warning: graft is in $graft_prefix (not writable) - reinstall with: sudo npm install -g @nanonets/graft@latest"

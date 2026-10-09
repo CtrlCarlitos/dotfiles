@@ -224,6 +224,35 @@ quiet_apt_enable() {
 }
 
 #-------------------------------------------------------------------------------
+# graft_current_version <graft-version-output> - print the installed graft
+# version when it ALREADY matches the latest published one; print nothing
+# otherwise (stale, unreachable registry, or no answer at all).
+#
+# `graft upgrade` reinstalls even when nothing changed - 0.21.1 -> 0.21.1 took
+# 41 s on WSL - so `dot upgrade` asks first. This is the Unix twin of
+# Get-GraftCurrentVersion in ps-common.ps1, and it exists as a function so both
+# can be executed over the same fixtures: the parsing used to be inlined in
+# update_ai_tools.sh with `[^ ]*` (space only) while PowerShell used `[^\s]*`,
+# so a CRLF `graft version` answer captured the CR into the version string and
+# the twins disagreed on exactly the input the PowerShell contract covers.
+# `[^[:space:]]*` includes CR, which makes the two regexes equivalent.
+#
+# Anything unknown means "not current", so the upgrade still happens as before.
+# Always returns 0: callers read it in a command substitution under `set -e`,
+# where a non-zero status would abort the whole run.
+#-------------------------------------------------------------------------------
+graft_current_version() {
+    local out="${1:-}" have latest
+    have="$(printf '%s\n' "$out" | sed -n 's/^graft \([0-9][^[:space:]]*\).*/\1/p' | head -n 1)"
+    # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
+    latest="$(printf '%s\n' "$out" | sed -n 's/^latest\( on npm\)\{0,1\}: \([0-9][^[:space:]]*\).*/\2/p' | head -n 1)"
+    if [ -n "$have" ] && [ "$have" = "$latest" ]; then
+        printf '%s\n' "$have"
+    fi
+    return 0
+}
+
+#-------------------------------------------------------------------------------
 # codex_superpowers_marketplace - print the marketplace that actually carries a
 # superpowers plugin on THIS codex, or nothing.
 #
