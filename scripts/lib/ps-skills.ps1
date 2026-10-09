@@ -252,6 +252,32 @@ function Write-AgentBrowserDoctorSummary {
 $script:GuardrailHidden = 0
 $script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):|^web-research enforcement:|^recipes |^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)|^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)|^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)|^antigravity coverage:|^  (configured MCP servers|declared MCP tools|uncontracted)|^note: codex probes invoke the hook directly|^setup: (registering|plane status)|^guardrail v[0-9]'
 
+# Get-CodexSuperpowersMarketplace - the marketplace that actually carries a superpowers plugin on
+# THIS codex, or $null.
+#
+# Never hardcode this name. Every consumer used to pass `superpowers@openai-curated-remote`, which
+# does not exist on the installed codex: the installer ended in "Error: plugin `superpowers` was not
+# found in marketplace `openai-curated-remote`", and the updater reported "Superpowers not installed
+# for Codex" with the real error swallowed. The name is genuinely volatile - it resolved to
+# `openai-curated` one morning and `openai-api-curated` the same evening - so the only reliable
+# source is codex itself: `codex plugin list` prints one `<plugin>@<marketplace>` row per available
+# plugin. The Unix twin is codex_superpowers_marketplace in agent-skills.sh;
+# tests/codex_marketplace_contract.sh pins all four consumers.
+#
+# Callers must tolerate $null: a codex that cannot list (offline, first run, a catalog needing auth)
+# is a skip, never a hard failure.
+function Get-CodexSuperpowersMarketplace {
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $null }
+    $rows = @()
+    try { $rows = @(& codex plugin list 2>$null | ForEach-Object { "$_" }) } catch { return $null }
+    foreach ($row in $rows) {
+        # `superpowers@<marketplace>` is the first column; the rest of the row is status/path.
+        $m = [regex]::Match($row, '^superpowers@(\S+)')
+        if ($m.Success) { return $m.Groups[1].Value }
+    }
+    return $null
+}
+
 # Shared by Select-GuardrailConsoleLine and Invoke-GuardrailInstallerProcess: apply the hide list
 # to one COMPLETE line. Never called for a still-unterminated prompt fragment - that bypasses the
 # hide list entirely and prints immediately (see Invoke-GuardrailInstallerProcess below).

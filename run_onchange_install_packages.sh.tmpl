@@ -1941,10 +1941,9 @@ install_chatgpt_cli() {
     # itself uses is right there - and a future rename cannot break us again.
     if command -v codex &>/dev/null; then
         info "Installing Superpowers plugin for Codex..."
-        # `|| true` inside the substitution: under `set -o pipefail` a codex
-        # that cannot list would abort the whole apply on the assignment.
-        codex_market="$(net_timeout 60 codex plugin list 2>/dev/null \
-            | sed -n 's/^superpowers@\([^[:space:]]*\).*/\1/p' | head -n 1 || true)"
+        # Resolved by the shared helper (scripts/lib/agent-skills.sh) so this
+        # and the updater cannot drift apart again.
+        codex_market="$(codex_superpowers_marketplace)"
         if [ -z "$codex_market" ]; then
             warn "no Codex marketplace lists a superpowers plugin - skipping"
         else

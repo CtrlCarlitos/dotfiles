@@ -1740,19 +1740,25 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # 2026-09-20): presence-only here by design - install-if-missing.
 }
 
-# Superpowers for Codex CLI: the official Codex plugin marketplace
-# (`openai-curated-remote`, pre-configured in codex) carries superpowers,
-# and `codex plugin add` installs it scriptably (obra/superpowers README,
-# Codex CLI section; verified live on codex-cli 0.157.0 - the third-party
-# `codex-plugin` npm helper this repo once rejected is not involved).
-# Re-running add on an installed plugin is a refresh, so this is idempotent
-# like the Claude Code Superpowers step above. Refresh PATH first:
-# the codex shim may have arrived in this same run (Install-Node above).
+# Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
+# superpowers, and `codex plugin add` installs it scriptably (obra/superpowers
+# README, Codex CLI section - the third-party `codex-plugin` npm helper this
+# repo once rejected is not involved). Re-running add on an installed plugin is
+# a refresh, so this is idempotent like the Claude Code Superpowers step above.
+# The marketplace name comes from codex itself - see
+# Get-CodexSuperpowersMarketplace in scripts/lib/ps-skills.ps1 for why
+# hardcoding it was wrong. Refresh PATH first: the codex shim may have arrived
+# in this same run (Install-Node above).
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 if (Get-Command codex -ErrorAction SilentlyContinue) {
     Write-Host "  Installing Superpowers plugin for Codex..." -ForegroundColor Yellow
-    # Silent on success ("Added plugin ... Installed plugin root: ..." on every run); a failure warns.
-    Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { $null = codex plugin add superpowers@openai-curated-remote 2>&1; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    $cxMarket = Get-CodexSuperpowersMarketplace
+    if (-not $cxMarket) {
+        Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+    } else {
+        # Silent on success ("Added plugin ... Installed plugin root: ..." on every run); a failure warns.
+        Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { $null = codex plugin add "superpowers@$cxMarket" 2>&1; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    }
     # MCP registration for Codex lives HERE, not in the serena section above
     # (see that section's note): codex only exists from this point on a
     # fresh/reinstall machine. Idempotent: serena's own setup tool rewrites
