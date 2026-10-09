@@ -112,7 +112,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 # ones go just before "Package installation complete!".
 $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
-if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
+if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcutBaseline) }
 # Wall-clock guard for network install steps (large downloads, `irm | iex`
 # installers, npm/npx) that carry no timeout of their own. On the Linux side a
 # stalled fetch was confirmed live to freeze the whole run for 15+ min with

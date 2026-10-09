@@ -2,8 +2,9 @@
 # drop shortcuts on the Desktop (Geany, OBS, ShareX, Termius, Handy, ...), and no winget or
 # Chocolatey sweep has a per-installer switch to stop them. Every place dotfiles runs
 # installers - dot up's installer, migrate-to-winget, dot upgrade - snapshots the Desktops
-# first and removes only the shortcuts that are NEW afterwards; a shortcut that was already
-# there is never touched. Loaded by ps-common.ps1 and inlined into
+# first (Get-DesktopShortcutBaseline, not a fresh Get-DesktopShortcut call - see there for why)
+# and removes only the shortcuts that are NEW afterwards; a shortcut that was already in the
+# baseline is never touched. Loaded by ps-common.ps1 and inlined into
 # run_onchange_install_packages.ps1.tmpl. ASCII only (docs/invariants.md #16).
 
 # True when [data.upgrade] desktop_shortcuts = false is set in the chezmoi
@@ -37,8 +38,36 @@ function Get-DesktopShortcut {
     }
 }
 
-# Delete the shortcuts that exist now but not in $Before (a Get-DesktopShortcut
-# snapshot taken ahead of the upgrade). Shortcuts that were already there are
+# The Desktop as it looked before dotfiles started managing shortcuts here, persisted once in
+# dotfiles state so EVERY later run diffs against the same fixed point - not a snapshot taken
+# fresh at the start of whichever run happens to call it. A fresh-every-run snapshot (plain
+# Get-DesktopShortcut, what this used to call) treats anything already on the Desktop as
+# permanently exempt, including a shortcut dropped by an install that ran before the FIRST sweep
+# ever executed: the original one-time bootstrap, a run that crashed before sweeping, or a
+# manual `winget install` run between two `dot upgrade`s. Confirmed live, 2026-10: Geany, VLC,
+# Antigravity and Termius, all from the original bootstrap, survived every `dot up`/
+# `dot upgrade` since, because no run's own before/after window ever saw them appear - they
+# needed one manual cleanup pass. Freezing the baseline the first time this runs means every
+# run from then on diffs against that same fixed point, so anything appearing after it -
+# including between monitored runs - is caught without needing a fresh snapshot to happen to
+# have witnessed it arrive. The trade a frozen baseline makes deliberately: a shortcut you add
+# on purpose AFTER the baseline was captured is just as "new" to it as an installer's, and gets
+# swept on the next run too, same as [data.upgrade] desktop_shortcuts = false already promises
+# for anything an installer drops.
+function Get-DesktopShortcutBaseline {
+    param([string[]]$Directory)
+    $path = Join-Path $env:USERPROFILE ".local\state\dotfiles\desktop-shortcuts-baseline.txt"
+    if (Test-Path -LiteralPath $path) {
+        return @([IO.File]::ReadAllLines($path) | Where-Object { $_ })
+    }
+    $current = if ($PSBoundParameters.ContainsKey('Directory')) { @(Get-DesktopShortcut -Directory $Directory) } else { @(Get-DesktopShortcut) }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    [IO.File]::WriteAllLines($path, $current)
+    return $current
+}
+
+# Delete the shortcuts that exist now but not in $Before (a Get-DesktopShortcutBaseline
+# snapshot taken ahead of the upgrade). Shortcuts that were already in the baseline are
 # never touched. Returns the removed paths.
 function Remove-NewDesktopShortcut {
     [CmdletBinding(SupportsShouldProcess)]

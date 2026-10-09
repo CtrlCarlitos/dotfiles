@@ -1,9 +1,11 @@
 #Requires -Version 5.1
 <#
 Behavioral test for the `dot upgrade` desktop-shortcut cleanup helpers in
-scripts/lib/ps-common.ps1: the config switch ([data.upgrade] desktop_shortcuts)
-and the snapshot-then-delete-new logic. Runs on any pwsh: the real Desktop is
-never touched, the helpers are pointed at scratch directories.
+scripts/lib/ps-common.ps1: the config switch ([data.upgrade] desktop_shortcuts),
+the snapshot-then-delete-new logic, and Get-DesktopShortcutBaseline's
+persisted-across-runs snapshot. Runs on any pwsh: the real Desktop is never
+touched, the helpers are pointed at scratch directories (and $env:USERPROFILE
+at a scratch state root for the baseline persistence case).
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -65,5 +67,50 @@ if ($none.Count -ne 0) { Fail "[3] removed shortcuts when nothing was new: $($no
 Write-Host '  ok: a no-op upgrade removes nothing'
 
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
+
+# --- [4] Get-DesktopShortcutBaseline persists the FIRST snapshot across calls/runs, unlike a
+# fresh Get-DesktopShortcut call: a shortcut dropped before the feature's first-ever run (the
+# original one-time bootstrap, a crashed run, or a manual install between two monitored runs)
+# must still be "new" relative to it, not baked in as pre-existing forever. Confirmed live,
+# 2026-10-10: Geany, VLC, Antigravity and Termius, all dropped by this repo's own original
+# bootstrap, survived every `dot up`/`dot upgrade` sweep since, because each run's own
+# before/after window never witnessed them appear.
+$Tmp4 = Join-Path ([IO.Path]::GetTempPath()) ("desktop-sc-baseline-" + [IO.Path]::GetRandomFileName())
+$user4 = Join-Path $Tmp4 'Desktop'
+$public4 = Join-Path $Tmp4 'Public'
+New-Item -ItemType Directory -Force -Path $user4, $public4 | Out-Null
+$dirs4 = @($user4, $public4)
+$prevUserProfile = $env:USERPROFILE
+$env:USERPROFILE = $Tmp4
+
+# A shortcut from "before this machine ever ran the feature" - the historical case itself.
+Set-Content -LiteralPath (Join-Path $user4 'FromOldBootstrap.lnk') -Value 'old' -Encoding ascii
+
+$baseline = @(Get-DesktopShortcutBaseline -Directory $dirs4)
+if ($baseline.Count -ne 1) { Fail "[4] first call expected to capture the 1 pre-existing shortcut as baseline, got $($baseline.Count)" }
+$statePath = Join-Path $Tmp4 '.local\state\dotfiles\desktop-shortcuts-baseline.txt'
+if (-not (Test-Path -LiteralPath $statePath)) { Fail '[4] the baseline was not persisted to state' }
+
+# A shortcut appearing AFTER the baseline was captured (simulating a later install) is still new.
+Set-Content -LiteralPath (Join-Path $public4 'NewSinceBaseline.lnk') -Value 'new' -Encoding ascii
+$removed4 = @(Remove-NewDesktopShortcut -Before (Get-DesktopShortcutBaseline -Directory $dirs4) -Directory $dirs4)
+if ($removed4.Count -ne 1 -or $removed4[0] -notmatch 'NewSinceBaseline\.lnk$') {
+    Fail "[4] expected only NewSinceBaseline.lnk removed, got: $($removed4 -join ', ')"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $user4 'FromOldBootstrap.lnk'))) {
+    Fail '[4] the historical pre-baseline shortcut must still be kept, not swept'
+}
+
+# A SECOND call, with the live Desktop now looking exactly like it did before the baseline was
+# ever captured (FromOldBootstrap.lnk still there, NewSinceBaseline.lnk gone): a fresh
+# Get-DesktopShortcut call here would wrongly re-adopt this as the new baseline. The persisted
+# one must come back unchanged.
+$baseline2 = @(Get-DesktopShortcutBaseline -Directory $dirs4)
+if (@(Compare-Object $baseline $baseline2).Count -ne 0) { Fail '[4] a second call must return the SAME persisted baseline, not re-snapshot' }
+
+$env:USERPROFILE = $prevUserProfile
+Remove-Item -Recurse -Force $Tmp4 -ErrorAction SilentlyContinue
+Write-Host '  ok: the baseline is captured once and persists across calls/runs'
+
 Write-Host 'PASS: desktop_shortcuts.ps1'
 exit 0

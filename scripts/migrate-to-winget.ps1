@@ -67,7 +67,7 @@ if ($ListOnly) { exit 0 }
 # (Handy's appeared during a migration, 2026-10-07). Snapshot now, remove the new ones at the end.
 $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
-if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
+if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcutBaseline) }
 
 $results = @()
 $late = @()

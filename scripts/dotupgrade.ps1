@@ -82,7 +82,7 @@ if ($defer.Count -gt 0) {
 # `choco upgrade all` / `winget upgrade --all` sweep.
 $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
-if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcut) }
+if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcutBaseline) }
 
 Add-DotTimingMark -Name 'Docker Desktop'
 # --- Docker Desktop: its installer cannot replace a running app, so an available upgrade used to

@@ -6,8 +6,12 @@ set -euo pipefail
 # dotupgrade.ps1 must snapshot before the sweeps and delete only NEW shortcuts
 # after them. `dot up`'s installer and migrate-to-winget run installers too
 # (Geany, OBS, ShareX, Termius and Handy all left shortcuts that way,
-# 2026-10-07), so they snapshot and clean up the same way. Behavior of the
-# helpers: tests/desktop_shortcuts.ps1.
+# 2026-10-07), so they snapshot and clean up the same way. The snapshot is
+# Get-DesktopShortcutBaseline, not a fresh Get-DesktopShortcut call: a shortcut
+# dropped before the feature's first-ever run (the original bootstrap, in this
+# repo's case - Geany, VLC, Antigravity and Termius all survived every sweep
+# since, 2026-10-10) would otherwise be "already there" forever. Behavior of
+# the helpers: tests/desktop_shortcuts.ps1.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
@@ -19,19 +23,28 @@ migrate="$repo_root/scripts/migrate-to-winget.ps1"
 tmpl="$repo_root/.chezmoi.toml.tmpl"
 
 require "$upgrade" 'Test-DesktopShortcutsDisabled'
-require "$upgrade" 'Get-DesktopShortcut'
+require "$upgrade" 'Get-DesktopShortcutBaseline'
 require "$upgrade" 'Remove-NewDesktopShortcut'
 require "$shortcuts" 'function Test-DesktopShortcutsDisabled'
 require "$shortcuts" 'function Get-DesktopShortcut'
+require "$shortcuts" 'function Get-DesktopShortcutBaseline'
 require "$shortcuts" 'function Remove-NewDesktopShortcut'
 require "$common" "ps-desktop-shortcuts.ps1"
 require "$installer" '{{ include "scripts/lib/ps-desktop-shortcuts.ps1" }}'
+require "$migrate" 'Get-DesktopShortcutBaseline'
+
+# All three consumers must go through the persisted baseline, never a fresh Get-DesktopShortcut
+# snapshot - that would silently reopen the exact bug this guards (a shortcut from before this
+# machine's first-ever sweep looking "already there" forever).
+for f in "$installer" "$upgrade" "$migrate"; do
+    forbid "$f" '$shortcutsBefore = @(Get-DesktopShortcut)'
+done
 
 # The installer and the migration: snapshot before their first install, clean up after the last.
 line_of() { grep -nF -- "$2" "$1" | head -n1 | cut -d: -f1; }
 check_order() { # $1 = file, $2 = label, $3 = first install marker, $4 = last install marker
     local snap first last clean
-    snap="$(line_of "$1" '$shortcutsBefore = @(Get-DesktopShortcut)')"
+    snap="$(line_of "$1" '$shortcutsBefore = @(Get-DesktopShortcutBaseline)')"
     first="$(line_of "$1" "$3")"
     last="$(grep -nF -- "$4" "$1" | tail -n1 | cut -d: -f1)"
     clean="$(line_of "$1" 'Remove-NewDesktopShortcut -Before $shortcutsBefore')"
@@ -51,7 +64,7 @@ if [ -z "$installer_done" ] || [ -z "$installer_clean" ] || [ "$installer_clean"
 fi
 
 # Order matters: snapshot before the first sweep, cleanup after the last.
-snapshot_line="$(grep -n 'Get-DesktopShortcut)' "$upgrade" | head -n1 | cut -d: -f1)"
+snapshot_line="$(grep -n 'Get-DesktopShortcutBaseline)' "$upgrade" | head -n1 | cut -d: -f1)"
 choco_line="$(grep -n '^    \$null = Invoke-ChocoUpgradeAll' "$upgrade" | head -n1 | cut -d: -f1)"
 ai_line="$(grep -n "update_ai_tools.ps1')" "$upgrade" | head -n1 | cut -d: -f1)"
 cleanup_line="$(grep -n 'Remove-NewDesktopShortcut -Before' "$upgrade" | head -n1 | cut -d: -f1)"
