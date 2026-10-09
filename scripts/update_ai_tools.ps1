@@ -424,12 +424,17 @@ if ($guardrailState -and -not $guardrailVersion) {
             $launchFailed = $false
             $launchError = ""
             try {
-                # Full output to the apply log (the installer's file); the console gets the filtered view.
+                # Full output to the apply log (the installer's file); the console gets the
+                # filtered view. Invoke-GuardrailInstallerProcess, not a native-command pipeline:
+                # `| Tee-Object | Select-GuardrailConsoleLine` relies on PowerShell's own
+                # native-command capture, which is RECORD-oriented and withholds a line until it
+                # sees that line's newline - so the installer's approval prompt (no trailing
+                # newline; the cursor sits after it) never reached the console until the
+                # installer had already exited (confirmed live 2026-10-08). This bypasses that
+                # capture and reads the installer's output at the byte level instead.
                 $guardrailApplyLog = Join-Path $env:USERPROFILE ".local\state\guardrail\apply.log"
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $guardrailApplyLog) | Out-Null
-                & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $guardrailState 2>&1 |
-                    Tee-Object -FilePath $guardrailApplyLog -Append | Select-GuardrailConsoleLine
-                $code = $LASTEXITCODE
+                $code = Invoke-GuardrailInstallerProcess -FilePath 'powershell' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$guardrailTmp\install.ps1", '-Version', $guardrailVersion, '-State', $guardrailState) -LogPath $guardrailApplyLog
             } catch {
                 # The native launch itself never started - distinct from a
                 # non-zero exit below.

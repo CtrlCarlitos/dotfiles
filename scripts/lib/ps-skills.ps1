@@ -252,20 +252,163 @@ function Write-AgentBrowserDoctorSummary {
 $script:GuardrailHidden = 0
 $script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):|^web-research enforcement:|^recipes |^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)|^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)|^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)|^antigravity coverage:|^  (configured MCP servers|declared MCP tools|uncontracted)|^note: codex probes invoke the hook directly|^setup: (registering|plane status)|^guardrail v[0-9]'
 
+# Shared by Select-GuardrailConsoleLine and Invoke-GuardrailInstallerProcess: apply the hide list
+# to one COMPLETE line. Never called for a still-unterminated prompt fragment - that bypasses the
+# hide list entirely and prints immediately (see Invoke-GuardrailInstallerProcess below).
+function Write-GuardrailFilteredLine {
+    # Not Mandatory: a bare [Parameter(Mandatory)] on a [string] rejects an empty string outright
+    # (PowerShell's own binder, not ValidateNotNullOrEmpty) - and a blank line is valid installer
+    # output, not a missing argument.
+    param([string]$Line)
+    if ($env:DOT_GUARDRAIL_VERBOSE -ne '1' -and $Line -cmatch $script:GuardrailRoutinePattern) { $script:GuardrailHidden++ }
+    else { Write-Host $Line }
+}
+
 function Select-GuardrailConsoleLine {
     [CmdletBinding()]
     param([Parameter(ValueFromPipeline = $true)]$InputObject)
     begin { $script:GuardrailHidden = 0 }
-    process {
-        $line = "$InputObject"
-        if ($env:DOT_GUARDRAIL_VERBOSE -ne '1' -and $line -cmatch $script:GuardrailRoutinePattern) { $script:GuardrailHidden++ }
-        else { Write-Host $line }
-    }
+    process { Write-GuardrailFilteredLine -Line "$InputObject" }
     end {
         if ($script:GuardrailHidden -gt 0) {
             Write-Host ("  ({0} routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)" -f $script:GuardrailHidden) -ForegroundColor DarkGray
         }
     }
+}
+
+# Invoke-GuardrailInstallerProcess <FilePath> <ArgumentList> <LogPath> - runs the agent-guardrails
+# installer directly and returns its exit code. Twin of guardrail_console_filter's byte-oriented
+# rewrite in scripts/lib/agent-skills.sh (agent-guardrails issue: the installer's approval prompt,
+# "Approve register guardrail on planes ...? [y/N] ", carries NO trailing newline - the cursor is
+# meant to sit after it).
+#
+# `& powershell -File install.ps1 2>&1 | Tee-Object -FilePath $log -Append | Select-GuardrailConsoleLine`
+# looks like the shell twin's `install.sh 2>&1 | tee -a $log | guardrail_console_filter`, but it is
+# not: a shell pipe moves raw bytes, so replacing the sh twin's awk filter with a byte-oriented one
+# was enough there. Here, the thing that buffers the prompt is not Select-GuardrailConsoleLine - it
+# is PowerShell's own native-command CAPTURE, the step that turns a piped process's stdout into
+# pipeline objects in the first place. That capture is RECORD-oriented exactly like awk: it will
+# not hand a string downstream until it has seen that line's newline. No filter running AFTER that
+# capture can see an unterminated prompt, because the capture never emits one. Confirmed live
+# (2026-10-08): with the pipeline form above, the console stayed blank for the whole wait on the
+# approval prompt, then printed the prompt AND the typed answer as one line, 3+ seconds late.
+#
+# So this bypasses that capture: it starts the process itself and reads both output streams at the
+# byte level (merging them by whichever read completes first - the same arrival order `2>&1` gives
+# on the shell side), using the perl filter's GRACE heuristic: a chunk boundary mid-line keeps
+# buffering (more bytes are likely still coming), a stream gone quiet mid-line is a blocked prompt
+# and is released immediately, and a released prefix is never re-printed or re-filtered once its
+# newline arrives. Complete lines go through the same hide list as Select-GuardrailConsoleLine
+# (Write-GuardrailFilteredLine), so the noise reduction is unchanged. The full byte stream still
+# lands in -LogPath, byte for byte, exactly as Tee-Object did.
+#
+# Standard input is deliberately left alone (RedirectStandardInput is never set): it was never the
+# broken half - the installer's keystrokes always reached it - and leaving it unset keeps it
+# attached to the real console exactly as `&` piping did, so a nested prompt still reads the
+# operator's keystrokes.
+function Invoke-GuardrailInstallerProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [Parameter(Mandatory)][string]$LogPath
+    )
+    $script:GuardrailHidden = 0
+    $graceMs = 200     # seconds-as-ms twin of guardrail_console_filter's $GRACE (0.2s)
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $FilePath
+    # Not $psi.ArgumentList.Add(...): on .NET Framework (Windows PowerShell 5.1, confirmed live on
+    # PSVersion 5.1.26100.9444) ArgumentList is never auto-initialised and stays $null, unlike
+    # .NET Core/pwsh where the constructor creates an empty collection - calling .Add on it throws
+    # "cannot call a method on a null-valued expression" there. Arguments takes one pre-quoted
+    # string on every PowerShell version, so this builds it the same way ArgumentList would have:
+    # every element gets its own double quotes (every value here is this script's own data - a
+    # path, a version tag, "enabled"/"disabled" - never free text, so doubling an embedded quote is
+    # the only escape this needs).
+    $psi.Arguments = ($ArgumentList | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+
+    # Same encoding PowerShell's own native-command capture would have decoded these bytes with -
+    # this changes only the buffering/timing of what reaches the console, never the text.
+    $encoding = [Console]::OutputEncoding
+    if (-not $encoding) { $encoding = [System.Text.Encoding]::UTF8 }
+    $outDecoder = $encoding.GetDecoder()
+    $errDecoder = $encoding.GetDecoder()
+
+    $logStream = [System.IO.File]::Open($LogPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+    try {
+        $outStream = $proc.StandardOutput.BaseStream
+        $errStream = $proc.StandardError.BaseStream
+        $outBuf = New-Object byte[] 65536
+        $errBuf = New-Object byte[] 65536
+        $charBuf = New-Object char[] 131072
+        $outTask = $outStream.ReadAsync($outBuf, 0, $outBuf.Length)
+        $errTask = $errStream.ReadAsync($errBuf, 0, $errBuf.Length)
+        $outDone = $false
+        $errDone = $false
+        $line = ''        # text of the line currently being assembled (CR stripped at emit time)
+        $shownLen = 0      # how many chars of $line are already on the console (an in-progress prompt)
+
+        while (-not ($outDone -and $errDone)) {
+            $tasks = [System.Collections.Generic.List[System.Threading.Tasks.Task]]::new()
+            $taskIsOut = [System.Collections.Generic.List[bool]]::new()
+            if (-not $outDone) { [void]$tasks.Add($outTask); [void]$taskIsOut.Add($true) }
+            if (-not $errDone) { [void]$tasks.Add($errTask); [void]$taskIsOut.Add($false) }
+            # No pending fragment -> block indefinitely; otherwise wake after GRACE so a prompt from
+            # a writer that has gone quiet can be released (twin of the perl filter's select() timeout).
+            $timeoutMs = if ($line.Length -gt $shownLen) { $graceMs } else { -1 }
+            $idx = [System.Threading.Tasks.Task]::WaitAny($tasks.ToArray(), $timeoutMs)
+            if ($idx -lt 0) {
+                Write-Host -NoNewline $line.Substring($shownLen)
+                $shownLen = $line.Length
+                continue
+            }
+            $isOut = $taskIsOut[$idx]
+            $n = if ($isOut) { $outTask.Result } else { $errTask.Result }
+            if ($n -eq 0) {
+                if ($isOut) { $outDone = $true } else { $errDone = $true }
+                continue
+            }
+            $buf = if ($isOut) { $outBuf } else { $errBuf }
+            $decoder = if ($isOut) { $outDecoder } else { $errDecoder }
+            $logStream.Write($buf, 0, $n)
+            $charCount = $decoder.GetChars($buf, 0, $n, $charBuf, 0)
+            $line += [string]::new($charBuf, 0, $charCount)
+            while (($i = $line.IndexOf("`n")) -ge 0) {
+                $completeLine = $line.Substring(0, $i).TrimEnd("`r")
+                if ($shownLen -gt 0) {
+                    # Finishing a line already partly shown (the prompt): print only what the
+                    # console does not have yet, and never re-test it against the hide list.
+                    Write-Host $completeLine.Substring([Math]::Min($shownLen, $completeLine.Length))
+                    $shownLen = 0
+                } else {
+                    Write-GuardrailFilteredLine -Line $completeLine
+                }
+                $line = $line.Substring($i + 1)
+            }
+            if ($isOut) { $outTask = $outStream.ReadAsync($outBuf, 0, $outBuf.Length) }
+            else { $errTask = $errStream.ReadAsync($errBuf, 0, $errBuf.Length) }
+        }
+        if ($line.Length -gt 0) {
+            # Unterminated final line (no trailing newline at EOF).
+            $completeLine = $line.TrimEnd("`r")
+            if ($shownLen -gt 0) { Write-Host $completeLine.Substring([Math]::Min($shownLen, $completeLine.Length)) }
+            else { Write-GuardrailFilteredLine -Line $completeLine }
+        }
+        if ($script:GuardrailHidden -gt 0) {
+            Write-Host ("  ({0} routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)" -f $script:GuardrailHidden) -ForegroundColor DarkGray
+        }
+    } finally {
+        $logStream.Dispose()
+    }
+    $proc.WaitForExit()
+    return $proc.ExitCode
 }
 
 # graft's index refresh (dist/claude/sync-run.js) runs `graft build` with execFileSync from a

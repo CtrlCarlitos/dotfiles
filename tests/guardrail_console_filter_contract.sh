@@ -185,15 +185,119 @@ else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'
 fi
 
+# --- PowerShell twin: Invoke-GuardrailInstallerProcess, the REAL call path (a process, not a bare
+# array of already-split lines fed to Select-GuardrailConsoleLine as above) --------------------------
+# `& powershell -File install.ps1 2>&1 | Tee-Object | Select-GuardrailConsoleLine` looked like the
+# shell twin's byte-streaming pipe but was not: PowerShell's own native-command CAPTURE - the step
+# that turns a piped process's stdout into pipeline objects, upstream of Tee-Object and the filter -
+# is RECORD-oriented, exactly like the awk the shell twin replaced. No filter running after that
+# capture can fix it, because the capture never emits an unterminated line for the filter to see.
+# Invoke-GuardrailInstallerProcess (scripts/lib/ps-skills.ps1) bypasses that capture: it starts the
+# process itself and reads its output at the byte level. First: it must still apply the same hide
+# list and log the full output, now exercised through a real child process.
+if command -v pwsh >/dev/null 2>&1; then
+    cat >"$tmp/fixture-writer.ps1" <<'PSEOF'
+param([string]$Fixture)
+foreach ($l in [IO.File]::ReadAllLines($Fixture)) { Write-Host $l }
+PSEOF
+    cat >"$tmp/process-harness.ps1" <<'PSEOF'
+param([string]$Lib, [string]$Writer, [string]$Fixture, [string]$Log)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. $Lib
+function Capture([scriptblock]$Run) { (& $Run *>&1 | Out-String) -split "`r?`n" | Where-Object { $_ -ne '' } }
+$out = @(Capture { Invoke-GuardrailInstallerProcess -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $Writer, '-Fixture', $Fixture) -LogPath $Log | Out-Null })
+$shown = @($out | Where-Object { $_ -notmatch '^  \(\d+ routine guardrail status line' })
+$note = @($out | Where-Object { $_ -match '^  \(\d+ routine guardrail status line' })
+Write-Output ('proc-shown-count=' + $shown.Count)
+$shown | ForEach-Object { Write-Output ('SHOWN|' + $_) }
+Write-Output ('proc-note=' + ($note -join ''))
+Write-Output ('proc-log-lines=' + ([IO.File]::ReadAllLines($Log)).Count)
+$env:DOT_GUARDRAIL_VERBOSE = '1'
+Remove-Item $Log -ErrorAction SilentlyContinue
+$verbose = @(Capture { Invoke-GuardrailInstallerProcess -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $Writer, '-Fixture', $Fixture) -LogPath $Log | Out-Null })
+Write-Output ('proc-verbose-all=' + ($verbose.Count -eq ([IO.File]::ReadAllLines($Fixture)).Count))
+PSEOF
+    proc_out="$tmp/ps-proc.txt"
+    proc_log="$tmp/ps-proc.log"
+    pwsh -NoProfile -File "$(winpath "$tmp/process-harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" \
+        -Writer "$(winpath "$tmp/fixture-writer.ps1")" -Fixture "$(winpath "$tmp/fixture.txt")" -Log "$(winpath "$proc_log")" \
+        2>&1 | tr -d '\r' >"$proc_out" || true
+    sed -n 's/^SHOWN|//p' "$proc_out" >"$tmp/proc-shown.txt"
+    if ! diff -u "$tmp/expected.txt" "$tmp/proc-shown.txt" >"$tmp/proc.diff"; then
+        fail "Invoke-GuardrailInstallerProcess kept the wrong lines: $(head -20 "$tmp/proc.diff") ... $(tail -5 "$proc_out")"
+    fi
+    grep -Fxq "proc-shown-count=$kept" "$proc_out" || fail "Invoke-GuardrailInstallerProcess: expected $kept shown lines"
+    grep -Fq "($hidden routine guardrail status line(s) hidden" "$proc_out" ||
+        fail "Invoke-GuardrailInstallerProcess must say how many lines it hid ($hidden)"
+    grep -Fxq "proc-log-lines=$total" "$proc_out" ||
+        fail "Invoke-GuardrailInstallerProcess must log the FULL output ($total lines), not just what it showed"
+    grep -Fxq 'proc-verbose-all=True' "$proc_out" || fail "DOT_GUARDRAIL_VERBOSE=1 must show every line (Invoke-GuardrailInstallerProcess)"
+    pass
+else
+    printf 'SKIP (PowerShell twin only): pwsh not installed\n'
+fi
+
+# --- PowerShell twin: an unterminated prompt must appear WHILE the writer is still blocked ----------
+# Same regression as the shell twin's test above, reproduced through the real call path: a writer
+# that prompts with NO trailing newline and then blocks. A record-oriented capture upstream of the
+# filter cannot represent that - it is exactly what PowerShell's own native-command capture used
+# to leave on screen: nothing, for as long as the writer waited.
+if command -v pwsh >/dev/null 2>&1; then
+    cat >"$tmp/prompt-writer.ps1" <<'PSEOF'
+Write-Host 'guardrail v0.23.36-dev'
+Write-Host 'setup: registering /usr/local/bin/guardrail'
+Write-Host -NoNewline 'Approve register guardrail on planes: claude,codex? [y/N] '
+Start-Sleep -Seconds 3
+Write-Host 'y'
+Write-Host 'claude enabled'
+PSEOF
+    cat >"$tmp/prompt-harness.ps1" <<'PSEOF'
+param([string]$Lib, [string]$Writer, [string]$Log)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. $Lib
+Invoke-GuardrailInstallerProcess -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $Writer) -LogPath $Log | Out-Null
+PSEOF
+    ps_prompt_out="$tmp/ps-prompt.txt"; : >"$ps_prompt_out"
+    ps_prompt_log="$tmp/ps-prompt.log"
+    pwsh -NoProfile -File "$(winpath "$tmp/prompt-harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" \
+        -Writer "$(winpath "$tmp/prompt-writer.ps1")" -Log "$(winpath "$ps_prompt_log")" >"$ps_prompt_out" 2>&1 &
+    ps_prompt_writer=$!
+    ps_prompt_seen=false
+    waited=0
+    while [ "$waited" -lt 25 ]; do   # up to 2.5s; the filter releases after ~0.2s of silence
+        if tr -d '\r' <"$ps_prompt_out" 2>/dev/null | grep -Fq 'Approve register guardrail on planes: claude,codex? [y/N]'; then
+            ps_prompt_seen=true
+            break
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    wait "$ps_prompt_writer" 2>/dev/null || true
+    $ps_prompt_seen ||
+        fail "PowerShell: an unterminated prompt must reach the console while the writer is still blocked on it"
+    occurrences="$(tr -d '\r' <"$ps_prompt_out" | grep -Fc 'Approve register guardrail on planes' || true)"
+    [ "$occurrences" = 1 ] ||
+        fail "PowerShell: the released prompt prefix must appear exactly once, got $occurrences: $(cat "$ps_prompt_out")"
+    tr -d '\r' <"$ps_prompt_out" | grep -Fq 'Approve register guardrail on planes: claude,codex? [y/N] y' ||
+        fail "PowerShell: the completed prompt line must carry the answer: $(cat "$ps_prompt_out")"
+    tr -d '\r' <"$ps_prompt_out" | grep -Fq '  (2 routine guardrail status line(s) hidden' ||
+        fail "PowerShell: the routine lines around a prompt must still be hidden: $(cat "$ps_prompt_out")"
+    pass
+else
+    printf 'SKIP (PowerShell twin only): pwsh not installed\n'
+fi
+
 # --- wiring: all four places that run the installer put the filter after the full-output tee ------
 grep -Fq 'tee -a "$log" | guardrail_console_filter' "$repo_root/run_onchange_install_packages.sh.tmpl" ||
     fail "the shell installer must filter the console copy after tee"
-grep -Fq 'Tee-Object -FilePath $guardrailApplyLog -Append | Select-GuardrailConsoleLine' "$repo_root/run_onchange_install_packages.ps1.tmpl" ||
-    fail "the PowerShell installer must filter the console copy after Tee-Object"
+grep -Fq 'Invoke-GuardrailInstallerProcess' "$repo_root/run_onchange_install_packages.ps1.tmpl" ||
+    fail "the PowerShell installer must run the installer through Invoke-GuardrailInstallerProcess, not a native-command pipe"
 grep -Fq 'tee -a "$glog" | guardrail_console_filter' "$repo_root/scripts/update_ai_tools.sh" ||
     fail "the shell updater must keep the full output in the apply log and filter the console copy"
-grep -Fq 'Tee-Object -FilePath $guardrailApplyLog -Append | Select-GuardrailConsoleLine' "$repo_root/scripts/update_ai_tools.ps1" ||
-    fail "the PowerShell updater must keep the full output in the apply log and filter the console copy"
+grep -Fq 'Invoke-GuardrailInstallerProcess' "$repo_root/scripts/update_ai_tools.ps1" ||
+    fail "the PowerShell updater must run the installer through Invoke-GuardrailInstallerProcess, not a native-command pipe"
 pass
 
 finish

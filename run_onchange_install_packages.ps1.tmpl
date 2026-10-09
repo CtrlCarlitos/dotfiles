@@ -1095,7 +1095,20 @@ if (-not $vsApply) {
 # Ollama - installer downloads a large (~700MB+) setup with no timeout of its own
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Host "  Installing Ollama..." -ForegroundColor Yellow
-    Invoke-WithTimeout -Description "Ollama install" -Seconds 1200 -Action { & powershell -NoProfile -c "`$ProgressPreference = 'SilentlyContinue'; irm https://ollama.com/install.ps1 | iex" }
+    # The upstream installer redraws its own download percentage with `\r`; captured through a
+    # job each tick becomes a separate Write-Host line (confirmed live: 700+ lines). -NoStream and
+    # keep only its ">>> ..." status lines, same treatment as Playwright Chromium below.
+    $ollamaOut = @(Invoke-WithTimeout -Description "Ollama install" -Seconds 1200 -NoStream -Action {
+        & powershell -NoProfile -c "`$ProgressPreference = 'SilentlyContinue'; irm https://ollama.com/install.ps1 | iex" 2>&1 | ForEach-Object { "$_" }
+        "__exit=$LASTEXITCODE"
+    })
+    $ollamaExit = (@($ollamaOut | Where-Object { "$_" -match '^__exit=' }) | Select-Object -Last 1) -replace '^__exit=', ''
+    if ($ollamaExit -and $ollamaExit -ne '0') {
+        $ollamaOut | Where-Object { "$_" -notmatch '^__exit=' } | ForEach-Object { Write-Host "    $_" }
+        Write-Host "  Warning: Ollama install failed (exit $ollamaExit) - continuing" -ForegroundColor Red
+    } else {
+        $ollamaOut | Where-Object { "$_" -match '^\s*>>>' } | ForEach-Object { Write-Host "    $_" }
+    }
 }
 
 Install-Node
@@ -2161,20 +2174,25 @@ function Invoke-GuardrailInstaller {
         return
     }
     Write-Host "  Running agent-guardrails installer $guardrailVersion (-State $State); its output streams below..." -ForegroundColor Yellow
-    # In-session, NOT Invoke-WithTimeout: the installer's output must stream -
-    # never captured or silenced - so anything it prints (including a live
-    # WebAuthn URL, should one ever print) stays visible in the run output.
-    # Function-local EAP=Continue + try/catch: under the script's
-    # EAP=Stop, PS 5.1 turns any native stderr line into a terminating error
-    # (see the note above Invoke-Quietly); the exit code is the real signal.
+    # Invoke-GuardrailInstallerProcess (not Invoke-WithTimeout, not a native-command pipeline):
+    # the installer's output must stream - never captured or silenced - so anything it prints
+    # (including a live WebAuthn URL or its plain approval prompt) stays visible in the run
+    # output AS IT IS WRITTEN. `& powershell ... | Tee-Object | Select-GuardrailConsoleLine` used
+    # to do this, but PowerShell's own native-command pipeline capture is RECORD-oriented (same
+    # class of bug as the sh twin's old awk filter): it withholds a line from Tee-Object/the
+    # filter until it sees that line's newline, so the installer's approval prompt - which has
+    # none, the cursor is meant to sit after it - never reached the console until the installer
+    # had already exited (confirmed live 2026-10-08). Invoke-GuardrailInstallerProcess bypasses
+    # that capture entirely.
+    # Function-local EAP=Continue: under the script's EAP=Stop, PS 5.1 turns any native stderr
+    # line into a terminating error (see the note above Invoke-Quietly); the exit code is the
+    # real signal.
     $ErrorActionPreference = 'Continue'
     $code = 1
     $guardrailApplyLog = Join-Path $env:USERPROFILE ".local\state\guardrail\apply.log"
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $guardrailApplyLog) | Out-Null
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File "$guardrailTmp\install.ps1" -Version $guardrailVersion -State $State 2>&1 |
-            Tee-Object -FilePath $guardrailApplyLog -Append | Select-GuardrailConsoleLine
-        $code = $LASTEXITCODE
+        $code = Invoke-GuardrailInstallerProcess -FilePath 'powershell' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$guardrailTmp\install.ps1", '-Version', $guardrailVersion, '-State', $State) -LogPath $guardrailApplyLog
     } catch {
         # The native launch itself never started (e.g. powershell.exe not
         # found) - distinct from a non-zero exit below, so throw a message
