@@ -137,7 +137,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `zoxide` | modern_cli | procedure | `zoxide` | — | `ajeetdsouza.zoxide` | — | apt: package where the release has it, upstream script as fallback - by procedure |
 | `direnv` | modern_cli | `direnv` | `direnv` | — | `direnv.direnv` | — | hooked from .zshrc (direnv hook zsh); .envrc files are allowed per project, never by the installer |
 | `lazygit` | modern_cli | procedure | `lazygit` | — | `JesseDuffield.lazygit` | — | apt: GitHub release tarball by procedure |
-| `gum` | modern_cli | procedure | `gum` | — | — | — | apt: Charm's repo by procedure; choco: not published there - Install-Gum fetches the GitHub release |
+| `gum` | modern_cli | procedure | `gum` | — | `charmbracelet.gum` | — | apt: Charm's repo by procedure |
 | `tealdeer` | modern_cli | procedure | `tealdeer` | — | `dbrgn.tealdeer` | — | apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar) |
 | `dust` | modern_cli | procedure | `dust` | — | `bootandy.dust` | — | apt: GitHub release .deb by procedure |
 | `duf` | modern_cli | `duf` | `duf` | — | `muesli.duf` | — | aliased over df when present |
@@ -158,6 +158,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `iperf3` | modern_cli | `iperf3` | `iperf3` | — | — | — | apt: its postinst may ask whether to start the daemon - the default (no) is what we want; nothing here starts it |
 | `telnet` | modern_cli | `telnet` | `telnet` | — | — | — | macOS removed telnet in 10.13+ - the brew formula fills that gap |
 | `meslo-nerd-font` | fonts | procedure | — | `font-meslo-lg-nerd-font` | — | `nerd-fonts-meslo` | apt: downloaded from the Nerd Fonts release by procedure |
+| `firacode-nerd-font` | fonts | — | — | `font-fira-code-nerd-font` | — | `nerd-fonts-FiraCode` | apt/WSL: downloaded from the Nerd Fonts release by procedure, same as meslo-nerd-font |
 | `powertoys` | dev_desktop | — | — | — | `Microsoft.PowerToys` | — |  |
 | `files` | dev_desktop | — | — | — | `FilesCommunity.Files` | — |  |
 | `cpu-z` | dev_desktop | — | — | — | `CPUID.CPU-Z` | — |  |
@@ -177,13 +178,13 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `telegram` | dev_desktop | `telegram-desktop` | — | `telegram` | `Telegram.TelegramDesktop` | — |  |
 | `vlc` | dev_desktop | `vlc` | — | `vlc` | `VideoLAN.VLC` | — |  |
 | `handy` | dev_desktop | procedure | — | `handy` | `cjpais.Handy` | — | Speech-to-text (handy.computer). Whisper/Parakeet model choice is GUI-only, nothing to pre-seed: for Spanish + English pick a Whisper model after install (Parakeet is English-only) - Large for accuracy, Turbo for speed. apt: GitHub release .deb by procedure. |
-| `google-chrome` | dev_desktop | procedure | — | `google-chrome` | — | — | apt: Google's .deb download by procedure; Windows: Google's own installer by procedure (never choco - see the GoogleChrome note in the .ps1) |
+| `google-chrome` | dev_desktop | procedure | — | `google-chrome` | — | — | apt: Google's .deb download by procedure. Windows: winget (Google.Chrome - installs the same enterprise MSI Google publishes), not Chocolatey, by procedure (a lingering Chocolatey copy is removed first - see the install script's Google Chrome block). |
 | `ghostty` | dev_desktop | procedure | — | `ghostty` | — | — | apt: universe on Ubuntu 26.04+, warns elsewhere - by procedure. Windows: Windows Terminal instead |
 | `flameshot` | dev_desktop | `flameshot` | — | `flameshot` | — | — |  |
 | `rectangle` | dev_desktop | — | — | `rectangle` | — | — |  |
 | `raycast` | dev_desktop | — | — | `raycast` | — | — |  |
 | `codexbar` | dev_desktop | — | — | `codexbar` | — | — | Windows: Win-CodexBar via winget by procedure |
-| `screenrec` | dev_desktop | procedure | — | procedure | — | procedure | Screen capture recorder; no package-manager name on any platform by design. apt: vendor repo + signing key, then apt install, by procedure - the .deb hard-depends on the removed libgdk-pixbuf2.0-0 on Ubuntu 24.04+, so the source is rolled back on failure. cask: none - the vendor .dmg by procedure. choco: none - the vendor .exe by procedure. |
+| `screenrec` | dev_desktop | procedure | — | procedure | — | procedure | Screen capture recorder; no package-manager name on any platform by design. apt: vendor repo + signing key, then apt install, by procedure - the .deb hard-depends on the removed libgdk-pixbuf2.0-0 on Ubuntu 24.04+, so the source is rolled back on failure. cask: none - the vendor .dmg by procedure. choco: none - the vendor .exe by procedure. winget: checked 2026-10 - no package for this app, only unrelated screen-recording tools under similar names. |
 | `tailscale` | remote_access | procedure | — | `tailscale-app` | `Tailscale.Tailscale` | — | apt: Tailscale's repo by procedure. |
 | `cloudflared` | remote_access | procedure | `cloudflared` | — | `Cloudflare.cloudflared` | — | apt: Cloudflare's repo by procedure |
 | `act` | agent_toolkit | procedure | procedure | — | `nektos.act` | — | brew/apt: installed by procedure in the agent_toolkit block |

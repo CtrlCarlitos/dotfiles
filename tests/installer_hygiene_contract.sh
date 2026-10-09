@@ -8,9 +8,11 @@ set -euo pipefail
 #      and the next dotup re-fires fully (the 1.0.3 contract).
 #   2. lib-bkp\opencode cleanup: every choco upgrade while an opencode
 #      session holds the binary abandons the old copy there (seen twice).
-#   3. GoogleChrome handover advisory: choco-managed GoogleChrome fails
-#      `choco upgrade all` on checksum lag while the installer's direct-MSI
-#      Chrome block self-updates - advise the one-time uninstall.
+#   3. GoogleChrome winget migration: choco-managed GoogleChrome fails
+#      `choco upgrade all` on checksum lag against Google's enterprise MSI.
+#      Unlike Docker Desktop, there's no data disk to lose, so the installer
+#      removes that Chocolatey copy itself (detected first) and installs
+#      Google.Chrome through winget instead of a manual handover.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ps1_installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
@@ -29,9 +31,12 @@ grep -Pzq 'WaitOne\(0\)[\s\S]{0,400}exit 1' "$ps1_installer" ||
 grep -Fq 'lib-bkp' "$ps1_installer" ||
     fail "$ps1_installer: no lib-bkp opencode cleanup"
 
-# 3. GoogleChrome handover advisory keyed on the batched inventory.
-grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
-    fail "$ps1_installer: no GoogleChrome handover advisory"
+# 3. GoogleChrome winget migration: a Chocolatey copy is detected and
+#    removed before winget installs it (same ordering as Meld's migration).
+grep -Fq 'winget install --id Google.Chrome --exact --source winget' "$ps1_installer" ||
+    fail "$ps1_installer: Google Chrome must be installed through winget"
+awk '/chocoChromeList -match/{a=NR} /winget install --id Google\.Chrome/{b=NR} END{exit !(a && b && a<b)}' "$ps1_installer" ||
+    fail "$ps1_installer: a Chocolatey GoogleChrome copy must be detected before any winget install"
 
 # 4. The installer NEVER upgrades: upgrades moved to `dot upgrade`
 #    (tests/dot_cli_contract.sh pins the split). Assert the upgrade
