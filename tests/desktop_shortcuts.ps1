@@ -112,5 +112,33 @@ $env:USERPROFILE = $prevUserProfile
 Remove-Item -Recurse -Force $Tmp4 -ErrorAction SilentlyContinue
 Write-Host '  ok: the baseline is captured once and persists across calls/runs'
 
+# --- [5] Zero shortcuts anywhere: Windows PowerShell 5.1 collapses an if/else statement's
+# output to $null, not an empty array, when the executed branch emits exactly one object and
+# that object is itself a zero-length array - confirmed live, 2026-10-09, after a Desktop and
+# Public Desktop both had every shortcut swept down to none: Get-DesktopShortcutBaseline's
+# $current = if (...) {@(Get-DesktopShortcut ...)} else {...} came back $null and
+# WriteAllLines($path, $null) threw "Value cannot be null". pwsh does not have this quirk, so a
+# test suite run only under pwsh would never catch it. Both functions must come back an empty
+# array, never $null, when nothing is there to find.
+$Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("desktop-sc-empty-" + [IO.Path]::GetRandomFileName())
+$user5 = Join-Path $Tmp5 'Desktop'
+$public5 = Join-Path $Tmp5 'Public'
+New-Item -ItemType Directory -Force -Path $user5, $public5 | Out-Null
+$dirs5 = @($user5, $public5)
+$prevUserProfile5 = $env:USERPROFILE
+$env:USERPROFILE = $Tmp5
+
+$baseline5 = @(Get-DesktopShortcutBaseline -Directory $dirs5)
+if ($null -eq $baseline5) { Fail '[5] Get-DesktopShortcutBaseline must return an empty array, not $null, when nothing is on the Desktop' }
+if ($baseline5.Count -ne 0) { Fail "[5] expected an empty baseline, got $($baseline5.Count)" }
+
+$removed5 = @(Remove-NewDesktopShortcut -Before $baseline5 -Directory $dirs5)
+if ($null -eq $removed5) { Fail '[5] Remove-NewDesktopShortcut must return an empty array, not $null, when nothing is new' }
+if ($removed5.Count -ne 0) { Fail "[5] expected nothing removed, got $($removed5.Count)" }
+
+$env:USERPROFILE = $prevUserProfile5
+Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+Write-Host '  ok: zero shortcuts anywhere comes back as an empty array, not $null'
+
 Write-Host 'PASS: desktop_shortcuts.ps1'
 exit 0

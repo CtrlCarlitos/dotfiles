@@ -60,7 +60,12 @@ function Get-DesktopShortcutBaseline {
     if (Test-Path -LiteralPath $path) {
         return @([IO.File]::ReadAllLines($path) | Where-Object { $_ })
     }
-    $current = if ($PSBoundParameters.ContainsKey('Directory')) { @(Get-DesktopShortcut -Directory $Directory) } else { @(Get-DesktopShortcut) }
+    # The outer @() is load-bearing, not redundant with the one on each branch: Windows
+    # PowerShell 5.1 collapses an if/else statement's output to $null when the executed
+    # branch's only emitted object is itself a zero-length array (confirmed live, 2026-10-09 -
+    # WriteAllLines then threw "Value cannot be null" the first time this machine's Desktop and
+    # Public Desktop both had zero shortcuts left to snapshot). pwsh does not have this quirk.
+    $current = @(if ($PSBoundParameters.ContainsKey('Directory')) { Get-DesktopShortcut -Directory $Directory } else { Get-DesktopShortcut })
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
     [IO.File]::WriteAllLines($path, $current)
     return $current
@@ -74,7 +79,8 @@ function Remove-NewDesktopShortcut {
     param([string[]]$Before = @(), [string[]]$Directory)
     $known = @{}
     foreach ($path in $Before) { $known[$path.ToLowerInvariant()] = $true }
-    $scan = if ($PSBoundParameters.ContainsKey('Directory')) { @(Get-DesktopShortcut -Directory $Directory) } else { @(Get-DesktopShortcut) }
+    # Same $null-collapse quirk as Get-DesktopShortcutBaseline's $current - see there.
+    $scan = @(if ($PSBoundParameters.ContainsKey('Directory')) { Get-DesktopShortcut -Directory $Directory } else { Get-DesktopShortcut })
     foreach ($path in $scan) {
         if ($known.ContainsKey($path.ToLowerInvariant())) { continue }
         if ($PSCmdlet.ShouldProcess($path, 'remove new desktop shortcut')) {
