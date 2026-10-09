@@ -270,7 +270,7 @@ The repo root carries a `guardrail.toml` — guardrail's own config overlay:
 
 ```toml
 [slots]
-  web_hosts = ["starship.rs", "code.claude.com"]
+  web_hosts = ["starship.rs", "code.claude.com", "opencode.ai", "raw.githubusercontent.com"]
 ```
 
 Location semantics matter here: guardrail reads this overlay from the
@@ -278,9 +278,11 @@ Location semantics matter here: guardrail reads this overlay from the
 `guardrail.toml` copy in `$HOME` is dead weight — `guardrail doctor` run
 there reports `overlay: none` — which is why the file is on
 `.chezmoiignore`'s never-deploy list, pinned by
-`tests/home_scope_contract.sh`. The two shipped entries are docs sites the
-prompt and agent configs reference; edit the file in the repo to change
-them — never a `$HOME` copy, which nothing reads.
+`tests/home_scope_contract.sh`. The four shipped entries are docs/release
+sites the prompt and agent configs reference (`opencode.ai` and
+`raw.githubusercontent.com` were added in #321 for the pwsh install); edit
+the file in the repo to change them — never a `$HOME` copy, which nothing
+reads.
 
 ### The repo cannot grant itself a host
 
@@ -301,9 +303,11 @@ guardrail denies it under `P5.self-config` ("the guarded plane cannot
 change its own guardrail posture"):
 
 ```text
-guardrail egress grant --scope repo --host starship.rs
-guardrail egress grant --scope repo --host code.claude.com
+guardrail egress grant --scope repo --host starship.rs,code.claude.com,opencode.ai,raw.githubusercontent.com
 ```
+
+(`--host` takes a comma-separated list, so all of a repo's requested hosts
+can be authorized in one call.)
 
 The grants land in `waivers.toml`'s `[web_hosts]` table, which
 `dotbackup`/`dotrestore` carry between machines (see
