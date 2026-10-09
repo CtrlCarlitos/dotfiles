@@ -71,6 +71,20 @@ function Get-DesktopShortcutBaseline {
     return $current
 }
 
+# Tell Explorer a file is gone. Deleting it on disk is not enough: the desktop keeps painting
+# the stale icon until a manual F5 refresh. Best effort; a failure only leaves the old behaviour.
+function Send-ShellItemDeleted {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        if (-not ('DotShellNotify' -as [type])) {
+            Add-Type -Namespace '' -Name DotShellNotify -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern void SHChangeNotify(int eventId, uint flags, string item1, System.IntPtr item2);'
+        }
+        # SHCNE_DELETE = 0x4, SHCNF_PATHW = 0x5
+        [DotShellNotify]::SHChangeNotify(4, 5, $Path, [IntPtr]::Zero)
+    }
+    catch { $null = $_ }
+}
+
 # Delete the shortcuts that exist now but not in $Before (a Get-DesktopShortcutBaseline
 # snapshot taken ahead of the upgrade). Shortcuts that were already in the baseline are
 # never touched. Returns the removed paths.
@@ -85,6 +99,7 @@ function Remove-NewDesktopShortcut {
         if ($known.ContainsKey($path.ToLowerInvariant())) { continue }
         if ($PSCmdlet.ShouldProcess($path, 'remove new desktop shortcut')) {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            Send-ShellItemDeleted -Path $path
             $path
         }
     }
