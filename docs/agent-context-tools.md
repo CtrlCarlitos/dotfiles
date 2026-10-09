@@ -1,10 +1,9 @@
-# Agent context tools — Serena & Graft
+# Agent context tools — Serena
 
-Practical guide (2026-10-05) to the two agent-context tools this repo installs
-under the `agent_toolkit` package group: what each is for, what the installer
-already wired
-up, and the one manual step (per-repo Graft activation) that's deliberately
-left to you.
+Practical guide to the agent-context tool this repo installs under the
+`agent_toolkit` package group: what it is for and what the installer already
+wired up. Graft, the second tool this page used to cover, was removed on
+2026-10-09 — see [Graft (removed)](#graft-removed).
 
 ## TL;DR
 
@@ -12,74 +11,23 @@ left to you.
   server that gives agents **semantic** code retrieval and editing — LSP-backed
   find-symbol / find-references / replace-symbol instead of regex greps. Use it
   when precision matters (renames, call-site edits, navigating a big codebase).
-- **Graft** ([`@nanonets/graft`](https://www.npmjs.com/package/@nanonets/graft))
-  is a **repo map / context graph**: small linked markdown nodes with exact
-  file:line spans, built per repo. Use it for orientation ("where does X
-  live?") and token savings (read a node's crux instead of whole files).
-- **They complement each other**: Graft answers *where things are and how they
-  fit together* cheaply and statically; Serena answers *exactly what this
-  symbol references* at edit time. Graft first for orientation, Serena when
-  you're about to cut.
-- **Installer state**: both are installed wherever the `agent_toolkit` group
-  runs,
-  Serena is registered as an MCP server in every client it finds, Graft's
-  telemetry is off. The only manual step is per-repo: `graft init && graft
-  build`.
+- **Installer state**: installed wherever the `agent_toolkit` group runs and
+  registered as an MCP server in every client it finds. There is no per-repo
+  step.
 
 ## What the installer set up
 
-| | Serena | Graft |
-| :--- | :--- | :--- |
-| Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) | `npm i -g @nanonets/graft` (with npm's `--allow-scripts` allowlist for its tree-sitter native builds) |
-| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex` (run once the Codex CLI is installed); JSON merge into OpenCode's global `mcp` key (graft joins it there too — opencode reads MCP only from that block); Antigravity gets both in the top-level `~/.gemini/config/mcp_config.json`, each server with `forceAllToolsEager: true` — agy marks every server's tools lazy by default, lazy tools are only reachable through the generic `call_mcp_tool` invoker guardrail denies, and a plugin bundle would prefix the server names into forms guardrail's registry does not know (#175) | Same file and same `forceAllToolsEager` flag as serena's; Codex gets `codex mcp add graft -- graft mcp` from the installer (only while `~/.codex/config.toml` does not name `[mcp_servers.graft]` yet); Claude gets graft's MCP via graft's own registration on first `graft init` |
-| agy command form | `serena start-mcp-server --context ide-assistant` | `graft mcp` (the installed binary — with `npx -y` agy exposed no graft tools at all, a slow npx cold start being the prime suspect, #175) |
-| Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional | `graft init` + `graft build` (see below) |
-| Telemetry | n/a | Disabled by the installer (`graft telemetry disable`) |
-| Upgrade | `dot upgrade` only (via `scripts/update_ai_tools.*`; `dot up` never upgrades): `uv tool upgrade serena-agent` | `dot upgrade` only: skipped when `graft version` says it is current; otherwise `graft upgrade` on Linux/macOS/WSL (with the `--allow-scripts` list from the catalog exported), and `npm install -g @nanonets/graft@latest` on Windows because `graft upgrade` fails there (`spawnSync npm ENOENT`). A graft that does not start afterwards is reported |
-
-Both tools are skipped by `dot upgrade` while an agent session is live
-(graft's directory is resolved by every hook event, and neither can be
-replaced under a running session): close the agents first, as `dot upgrade`
-says. OpenCode and agy register the two servers with the commands in
-`.chezmoidata/agents.yaml` (`serena start-mcp-server --context ide-assistant`
-and `graft mcp`).
-
-## Graft per-repo activation
-
-Graft's graph is per-repo and gitignored (`graft/`), so activation is a
-one-time, per-repo choice:
-
-```sh
-graft init          # interactive client picker — commits AGENTS.md wiring etc.
-graft build         # builds the local graft/ graph (deterministic, $0, no key)
-```
-
-Non-interactive equivalent: `graft init --agents claude agents`. Re-run
-`graft build` after big code changes to refresh the graph. This repo is
-deliberately **not** wired: its graph covers one Lua file, so graft's
-"use graft for any task" instructions and its broad `Bash(graft:*)` allow rules
-would be wrong here (`AGENTS.md` says so; `.claude/settings.json` allows only
-read-only subcommands). Do not run `graft init` in this repo; if it was run,
-see "graft rewrote `AGENTS.md` and `.claude/settings.json`" below.
-
-### CLI greatest hits
-
-The only in-repo copy of this table — `AGENTS.md` deliberately does not
-repeat it. Note the graph itself only covers `dot_config/nvim/init.lua` in
-this repo (graft has no parser for `.sh`/`.ps1`/`.tmpl`/`.toml`), so these
-commands answer only for that file here.
-
-| Command | What it's for |
+| | Serena |
 | :--- | :--- |
-| `graft ask "<question>" --source` | Ranked nodes with the relevant code spans inlined |
-| `graft grep "<literal>"` | Exhaustive match list over indexed files (ask is top-N, not complete) |
-| `graft callers <symbol>` | Precomputed, exact who-calls-this edges (`--direction out`, `--depth N`) |
-| `graft map` | Token-budgeted orientation for a repo you're new to |
-| `graft skeleton <file>` | Every definition's signature + span, ~10× cheaper than reading the file |
+| Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) |
+| Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex` (run once the Codex CLI is installed); JSON merge into OpenCode's global `mcp` key (opencode reads MCP only from that block); Antigravity gets it in the top-level `~/.gemini/config/mcp_config.json` with `forceAllToolsEager: true` — agy marks every server's tools lazy by default, lazy tools are only reachable through the generic `call_mcp_tool` invoker guardrail denies, and a plugin bundle would prefix the server names into forms guardrail's registry does not know (#175) |
+| agy command form | `serena start-mcp-server --context ide-assistant` (the installed binary, not an `npx -y` form: with one, agy exposed no tools at all, a slow npx cold start being the prime suspect, #175) |
+| Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional |
+| Upgrade | `dot upgrade` only (via `scripts/update_ai_tools.*`; `dot up` never upgrades): `uv tool upgrade serena-agent` |
 
-Graft `--deep` LLM summaries need a user-supplied `GRAFT_API_KEY`/provider —
-see Graft's own docs (the [`@nanonets/graft`](https://www.npmjs.com/package/@nanonets/graft)
-npm page) for setup; everything above works without a key.
+`dot upgrade` skips Serena while a serena process is live (uv recreates the
+package directory a running server resolves from): close the agents first, as
+`dot upgrade` says.
 
 ## Serena notes
 
@@ -95,57 +43,31 @@ npm page) for setup; everything above works without a key.
 
 ## Troubleshooting
 
-- **`command not found: serena` / `graft` right after install**: PATH refresh.
-  Both land on PATH via their installers (`~/.local/bin` for uv tools, npm's
-  global bin for graft); a fresh shell (or `exec $SHELL`) fixes it. On
-  Windows, uv's tool shim dir (`%USERPROFILE%\.local\bin`) must be on PATH —
+- **`command not found: serena` right after install**: PATH refresh. uv puts
+  its tool shims in `~/.local/bin`; a fresh shell (or `exec $SHELL`) fixes it.
+  On Windows, uv's tool shim dir (`%USERPROFILE%\.local\bin`) must be on PATH —
   the installer already prepends it for the current session.
-- **Graft install blocked / binary errors about tree-sitter**: npm 12 blocks
-  install scripts by default, which silently skips graft's tree-sitter parser
-  native builds. The installers pass the exact `--allow-scripts` allowlist
-  npm's own warning prints; if you install by hand, include it.
-- **graft rewrote `AGENTS.md` and `.claude/settings.json` after an upgrade.**
-  Graft's SessionStart hook (registered at user level, so it runs in every
-  project) replays `graft init` for a repo that is already wired, whenever the
-  repo's recorded graft version differs from the running one. "Wired" is machine-local
-  state: `graft/.cache/wiring-stamp.json`, `.claude/helpers/graft-*.cjs`, and graft's
-  fenced section in `AGENTS.md` (all but the last are gitignored). After the 0.18.0 -> 0.21.1
-  upgrade it added the "use graft for ANY task" block to `AGENTS.md` and re-added
-  `Bash(graft:*)`, `Bash(npx graft:*)`, hooks and a statusline to `.claude/settings.json`,
-  which `tests/claude_settings_graft_contract.sh` forbids. A repo with no wiring at all is
-  left alone ("never wired here — not our business"), so the fix is to make it unwired
-  (once per machine), not to fight the refresh:
-  ```sh
-  git checkout -- .claude/settings.json AGENTS.md        # only if graft already rewrote them
-  rm -f .claude/helpers/graft-hooks.cjs .claude/helpers/graft-statusline.cjs graft/.cache/wiring-stamp.json
-  ```
-  (PowerShell: `Remove-Item .claude\helpers\graft-*.cjs, graft\.cache\wiring-stamp.json`.)
-  Verified against graft 0.21.1's own `reconcileWiring` on both the Windows and the WSL
-  clone: with nothing wired, a pretend upgrade rewrites nothing and writes no stamp. The
-  `graft/` graph, `graft ask` and the MCP tools are unaffected. Running `graft init` here
-  re-creates the wiring; repeat the cleanup if that happens.
 - **Serena's semantic tools inert for a language**: no language server
   installed for it — see the note above; the LSPs are opt-in per language.
 
 ## Where the wiring values live
 
 The MCP server definitions the installers register for OpenCode and agy
-(Serena's `start-mcp-server --context ide-assistant`, Graft's
-`graft mcp`, the installed binary), Graft's npm `--allow-scripts` list, the Codex
-package name and the list of agent CLIs the curated skills are installed for
-all come from one file: `.chezmoidata/agents.yaml`. Both installers render
-from it and `scripts/update_ai_tools.{sh,ps1}` read it at runtime, so a change
-is one edit; `tests/agent_catalog_contract.sh` fails if any value reappears as
-a literal elsewhere.
+(Serena's `start-mcp-server --context ide-assistant`, the installed binary),
+the Codex package name and the list of agent CLIs the curated skills are
+installed for all come from one file: `.chezmoidata/agents.yaml`. Both
+installers render from it and `scripts/update_ai_tools.{sh,ps1}` read it at
+runtime, so a change is one edit; `tests/agent_catalog_contract.sh` fails if
+any value reappears as a literal elsewhere.
 
 OpenCode's entries **converge** on that catalog on every apply (#230). A server
 whose binary is installed is added when absent, and an existing entry has its
-`command` repaired if it differs: an older `npx -y @nanonets/graft mcp` entry,
-which made OpenCode wait about 46 s for npx on every start, becomes `graft mcp`.
-Your `enabled` flag and every other key you set are kept, and the file is only
-written when something actually changes. If a tool rewrites an entry in another
-form, the next apply repairs it. `tests/opencode_mcp_sync_contract.sh` runs both
-installers' registration code against these cases.
+`command` repaired if it differs: an older `npx -y <package> mcp` entry, which
+made OpenCode wait about 46 s for npx on every start, becomes the installed
+binary. Your `enabled` flag and every other key you set are kept, and the file
+is only written when something actually changes. If a tool rewrites an entry in
+another form, the next apply repairs it. `tests/opencode_mcp_sync_contract.sh`
+runs both installers' registration code against these cases.
 
 ## Serena dashboard auto-open
 
@@ -178,3 +100,40 @@ dashboard_interface = "tray_manager"   # one global icon for all instances; or "
 
 `tests/serena_dashboard_contract.sh` keeps the default, both twins and this
 section in step.
+
+## Graft (removed)
+
+Graft ([`@nanonets/graft`](https://www.npmjs.com/package/@nanonets/graft)), a
+per-repo context graph with its own MCP server and agent hooks, was installed
+under `agent_toolkit` until 2026-10-09. A benchmark on two real codebases
+(Odoo and Phoenix), across Sonnet and Haiku, showed no gain in accuracy or
+cost: Sonnet mostly ignored the graph, and every session paid for graft's
+hooks and instructions anyway. It was dropped.
+
+The installers and `dot upgrade` now **retire** it from machines an earlier
+run set it up on, quietly and only where something is left
+(`graft_retire` in `scripts/lib/agent-skills.sh`, `Invoke-GraftRetirement` in
+`scripts/lib/ps-skills.ps1`; `tests/graft_retirement_contract.sh` executes both).
+Only what is unambiguously graft's goes:
+
+- the `graft` MCP entries the dotfiles registered: OpenCode's global
+  `opencode.json`, agy's `~/.gemini/config/mcp_config.json`, Codex
+  (`codex mcp remove graft`) and Claude Code's user scope
+  (`claude mcp remove graft -s user`) — an entry named `graft` that runs
+  something else is kept;
+- what `graft init` wrote for every project: the hook entries that run
+  `graft-hooks.cjs` in `~/.claude/settings.json` and `~/.codex/hooks.json`, a
+  statusLine that runs `graft-statusline.cjs`, graft's `Bash(graft…)` allow
+  entries and `graft/` footer regex, the shims
+  (`~/.claude/helpers/graft-*.cjs`, `~/.codex/hooks/graft/`) and graft's skill
+  (a skills dir named `graft` whose `SKILL.md` says `name: graft`);
+- the global npm package `@nanonets/graft` (from the prefix it lives in), then
+  graft's own state directory `~/.graft`.
+
+**Repos you ran `graft init` in keep their local files** — the gitignored
+`graft/` graph, `.claude/helpers/graft-*.cjs`, `.claude/skills/graft/`, the
+`graft` entry in the repo's `.mcp.json` / `opencode.json`, graft's fenced
+section in `AGENTS.md` and its entries in the repo's `.claude/settings.json`.
+Nothing runs them once the package is gone; delete them by hand when you next
+touch the repo. This source tree's `.gitignore` and `.chezmoiignore` keep
+ignoring those leftovers so they are never committed or applied to `$HOME`.

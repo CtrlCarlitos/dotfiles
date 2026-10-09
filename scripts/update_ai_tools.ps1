@@ -1,7 +1,7 @@
 <#
 update_ai_tools.ps1 - refresh the AI coding tools and curated skills, no
 package-manager sweep (Windows twin of scripts/update_ai_tools.sh). Upgrades
-the AI CLIs (Claude Code, Codex, OpenCode, agy, Serena, Graft, act) and
+the AI CLIs (Claude Code, Codex, OpenCode, agy, Serena, act) and
 re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 `dot upgrade` (which exports the defer list) or direct: .\update_ai_tools.ps1
 #>
@@ -204,7 +204,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
-    # code-search (CtrlCarlitos/skills) - search-tool escalation: graft > serena > rg > grep, probed once per session
+    # code-search (CtrlCarlitos/skills) - search-tool escalation: repo graph > serena > rg > grep, probed once per session
     Invoke-SkillsSource -Label 'code-search' -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
@@ -474,7 +474,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     $claudeInstallUrl = ''
     try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
     # Deliberately NOT `claude update`: dot upgrade is meant to run with every agent and
-    # harness closed (graft, codex and the others cannot be replaced while a session
+    # harness closed (codex and the others cannot be replaced while a session
     # runs, and Claude Code should not be replaced under one either), and with nothing
     # running the full installer is the simple, predictable path.
     # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
@@ -568,10 +568,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     }
 }
 
-Add-DotTimingMark -Name 'Serena and Graft'
-# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
-# Both are defer-aware: uv/graft recreate package dirs that live sessions
-# resolve from (2026-09-20 live incidents).
+Add-DotTimingMark -Name 'Serena'
+# 6. Serena (uv-managed). Defer-aware: uv recreates the package dir that live
+# sessions resolve from (2026-09-20 live incidents).
 if (Get-Command serena -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'serena') {
         Write-Host "$($G.puzzle) Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
@@ -585,78 +584,13 @@ if (Get-Command serena -ErrorAction SilentlyContinue) {
         }
     }
 }
-if (Get-Command graft -ErrorAction SilentlyContinue) {
-    if (Test-Deferred 'graft') {
-        Write-Host "$($G.seedling) Graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)." -ForegroundColor Yellow
-    } else {
-        Write-Host "$($G.seedling) Updating Graft..." -ForegroundColor Yellow
-        # npm 12 skips install scripts unless allow-listed, so a bare
-        # `graft upgrade` leaves a graft whose tree-sitter parsers were never
-        # compiled (crashes at startup; seen on WSL 2026-10-02). Hand npm the
-        # installer's allow-list, read from the catalog like the codex package.
-        $graftAllow = ''
-        try { $graftAllow = ('{{ join "," .agents.npm.graft_allow_scripts }}' | chezmoi execute-template | Out-String).Trim() } catch { Write-Verbose "graft allow-scripts probe failed: $($_.Exception.Message)" }
-        # Only upgrade when the installed graft is not already the latest published one.
-        $graftCurrent = ''
-        try { $graftCurrent = Get-GraftCurrentVersion -VersionOutput ((graft version 2>$null) | Out-String) } catch { Write-Verbose "graft version probe failed: $($_.Exception.Message)" }
-        # On Windows `graft version` cannot reach npm (it spawns npm.cmd without a shell, the same
-        # ENOENT as `graft upgrade`) and answers "latest: unreachable", so the ~1 min reinstall ran
-        # every time. Ask npm directly before concluding it is not current.
-        if (-not $graftCurrent -and (Test-NpmGlobalCurrent '@nanonets/graft')) { $graftCurrent = $script:NpmCurrentVersion }
-        if ($graftCurrent) {
-            Write-Host "  graft is current ($graftCurrent)"
-        } elseif (-not $graftAllow) {
-            Write-Host "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade" -ForegroundColor Red
-        } else {
-            # Not `graft upgrade`: it fails on Windows with "spawnSync npm ENOENT".
-            try {
-                $graftExit = Invoke-GraftNpmInstall -AllowScripts $graftAllow
-                if ($graftExit -ne 0) { Write-Host "  Warning: graft install failed (npm exit $graftExit) - continuing" -ForegroundColor Red }
-            } catch {
-                Write-Host "  Warning: graft install failed - continuing" -ForegroundColor Red
-            }
-            # A graft that cannot start breaks every agent hook: say so now.
-            graft --version *> $null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "  Warning: graft does not start after the upgrade - reinstall with NPM_CONFIG_ALLOW_SCRIPTS set to the installer's allow-list: npm install -g @nanonets/graft@latest" -ForegroundColor Red
-            }
-        }
-        # graft's background build must not flash a terminal window (scripts/lib/ps-skills.ps1).
-        if (-not (Get-Command Repair-GraftBuildWindow -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        if (Get-Command Repair-GraftBuildWindow -ErrorAction SilentlyContinue) { Write-GraftBuildWindowResult -Result (Repair-GraftBuildWindow) }
-        # graft writes its Codex hook entries with backslash paths and no
-        # commandWindows fallback - git bash (Codex's shell here) eats the
-        # backslashes, so every hook event dies with "Cannot find module"
-        # (dotfiles #170). Forward-slash Windows paths work in every shell:
-        # normalize the spelling after each graft upgrade, idempotently.
-        $codexHooks = Join-Path $env:USERPROFILE ".codex\hooks.json"
-        if (Test-Path -LiteralPath $codexHooks) {
-            try {
-                $hooksJson = Get-Content -LiteralPath $codexHooks -Raw | ConvertFrom-Json
-                $changed = $false
-                foreach ($hookEvent in $hooksJson.hooks.PSObject.Properties) {
-                    foreach ($entry in $hookEvent.Value) {
-                        foreach ($hook in $entry.hooks) {
-                            if ($hook.command -and $hook.command -match '\\' -and -not $hook.commandWindows) {
-                                $forward = $hook.command -replace '\\', '/'
-                                if ($forward -ne $hook.command) {
-                                    $hook.command = $forward
-                                    $changed = $true
-                                }
-                            }
-                        }
-                    }
-                }
-                if ($changed) {
-                    [System.IO.File]::WriteAllText($codexHooks, ($hooksJson | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding($false)))
-                    Write-Host "  Normalized Codex hook paths to forward slashes (git bash eats backslashes; dotfiles #170)" -ForegroundColor Yellow
-                }
-            } catch {
-                Write-Host "  Warning: could not normalize Codex hook paths: $_" -ForegroundColor Yellow
-            }
-        }
-    }
-}
+
+Add-DotTimingMark -Name 'Graft retirement'
+# 7. Graft was dropped from the dotfiles (2026-10-09): remove it where an earlier run
+# installed it (Invoke-GraftRetirement, scripts/lib/ps-skills.ps1; quiet when there is
+# nothing to do).
+if (-not (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+if (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) { Invoke-GraftRetirement }
 
 Write-DotTimingSummary -Title 'AI tools'
 Write-Host "$($G.check) AI Tools Update Complete!" -ForegroundColor Green

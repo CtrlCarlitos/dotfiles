@@ -103,8 +103,6 @@ function winget {
     $script:calls += 'winget ' + ($args -join ' '); $global:LASTEXITCODE = $script:wingetExit
 }
 function npm { $script:calls += 'npm ' + ($args -join ' '); $global:LASTEXITCODE = 0 }
-# graft's allow-list comes from chezmoi data (the template arrives on stdin)
-function chezmoi { $null = @($input); 'tree-sitter,tree-sitter-bash' }
 function Run($item) { $script:calls = @(); $r = Invoke-WingetMigrationItem -Item $item 6>$null; return "$r|" + ($script:calls -join ' ; ') }
 Write-Output ('move-cmake=' + (Run ($plan | Where-Object Choco -eq 'cmake')))
 Write-Output ('move-git=' + (Run ($plan | Where-Object Choco -eq 'git.install')))
@@ -172,10 +170,10 @@ PSEOF
     expect 'pin-other=True|winget pin remove --id OpenJS.NodeJS.LTS --exact ; winget pin add --id OpenJS.NodeJS.LTS --exact --version 24.* --accept-source-agreements'
     expect 'move-pwsh=skipped|'
     expect 'move-already=ok|choco uninstall jq -y --no-progress'
-    # a different Node major: the global npm tools' native modules are rebuilt right after
-    # a different Node major: graft (the global tool with native modules) is reinstalled - not
-    # `npm rebuild -g`, which fails with EEXIST on command shims an older npm wrote
-    expect 'move-node=ok|choco uninstall nodejs nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity ; npm ls -g --depth=0 @nanonets/graft ; npm install -g @nanonets/graft@latest --loglevel=error --no-progress'
+    # a different Node major: no global npm tool the dotfiles install has native modules any
+    # more (graft was the one), so nothing is rebuilt - and never `npm rebuild -g`, which fails
+    # with EEXIST on command shims an older npm wrote
+    expect 'move-node=ok|choco uninstall nodejs nodejs.install -y --no-progress ; winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
     if grep -Fq 'npm rebuild -g' "$repo_root/scripts/lib/ps-common.ps1"; then
         grep -F 'npm rebuild -g' "$repo_root/scripts/lib/ps-common.ps1" | grep -vq '^ *#' && fail "ps-common.ps1: npm rebuild -g is back (it fails with EEXIST on older shims)"
     fi

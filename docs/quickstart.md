@@ -71,7 +71,7 @@ should never quietly upgrade your compiler.
 
 **Run `dot up` and `dot upgrade` with no agent or harness running** (Claude Code,
 Codex, OpenCode, `agy`, Serena — and the session you are reading this in). Tools
-like Graft and Codex cannot be replaced under a live session: `dot upgrade`
+like Codex and Serena cannot be replaced under a live session: `dot upgrade`
 defers what a live session is using and, on an interactive console, offers to
 stop it first. On Windows both need an elevated PowerShell. See
 [Windows Setup](windows.md#when-to-run-it-with-every-agent-session-closed).

@@ -40,8 +40,6 @@ grep -Fq 'choco still manages GoogleChrome' "$ps1_installer" ||
     fail "$ps1_installer: must not upgrade codex (dot upgrade owns it)"
 ! grep -Fq 'uv tool upgrade' "$ps1_installer" ||
     fail "$ps1_installer: must not upgrade serena (dot upgrade owns it)"
-! grep -Fq 'Upgrading graft' "$ps1_installer" ||
-    fail "$ps1_installer: must not upgrade graft (dot upgrade owns it)"
 
 # 5. Guardrail installation (binary, Defender exclusion #132/#146, PATH,
 #    plane wiring) lives in the agent-guardrails installer: this file only

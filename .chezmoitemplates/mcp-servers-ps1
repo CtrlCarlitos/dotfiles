@@ -6,7 +6,6 @@
   renders
 
     $mcpCatalog = @{
-        graft = @{ command = 'graft'; args = @('mcp') }
         serena = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
     }
 

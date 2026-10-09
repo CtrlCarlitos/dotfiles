@@ -53,19 +53,17 @@ node_modules/
 docs/research/
 docs/superpowers/
 
-# Graft: generated graph is local; `.graft` can contain Brain credentials.
+# Leftovers of the removed Graft integration (2026-10-09): a source tree that
+# was `graft init`-ed keeps its local graph and wiring until deleted by hand,
+# and none of it may be committed (`.graft` can hold credentials, the shims bake
+# one machine's paths).
 /.graft/
 /graft/
-
-# Graft: host wiring is GENERATED per machine by `graft init` (shims bake the
-# running machine's dist path by design; .mcp.json/opencode.json get the npx
-# entry graft itself writes). Verified against @nanonets/graft 0.18.0 source
-# (dist/claude/init.js runInit writes all of these each run; its own comments
-# design for gitignore-ability with a ~/.claude global fallback). Tracking
-# them ships one machine's baked paths and reverts on every regeneration.
 .claude/helpers/graft-hooks.cjs
 .claude/helpers/graft-statusline.cjs
 .claude/skills/graft/
+
+# Per-machine agent host wiring (MCP server lists): generated, never shared.
 /.mcp.json
 /opencode.json
 

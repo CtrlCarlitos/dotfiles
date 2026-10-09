@@ -25,7 +25,7 @@ are reference.
 
 ## Agents and security
 
-- [Agent Context Tools](agent-context-tools.md) — Serena + Graft: what they do, how to query them
+- [Agent Context Tools](agent-context-tools.md) — Serena: what it does, how it is wired (and why Graft was removed)
 - [Skills Install Strategy](skills-install-strategy.md) — the as-built curated-skills wiring (status: implemented)
 - [Agent Skill Wiring Design](agent-skill-wiring-design.md) — the original design spec behind it (implemented; rationale record)
 - [Dot Repo Baseline Design](superpowers/specs/2026-09-25-dot-repo-baseline-design.md) — the repository baseline audit/apply handover spec

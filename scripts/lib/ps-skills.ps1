@@ -437,45 +437,172 @@ function Invoke-GuardrailInstallerProcess {
     return $proc.ExitCode
 }
 
-# graft's index refresh (dist/claude/sync-run.js) runs `graft build` with execFileSync from a
-# DETACHED process - one with no console - and without windowsHide, so Windows gives the build
-# a console of its own. With Windows Terminal as the default terminal that console opens as a
-# Terminal window titled "C:\Program Files\nodejs\node.exe", at the end of every agent turn
-# that edited files, and closes when the build ends: the black flash (seen 2026-10-07, graft
-# 0.21.1; reported upstream: https://github.com/trailhq/Graft/issues/567 - drop this once that
-# ships). This adds windowsHide: true to
-# that one call. Idempotent. Once graft hides it itself, or the line changes, it does nothing
-# and says which ('ok' / 'changed'); nothing else in the package is touched.
-# Returns: patched | ok | changed | absent | no-npm | skipped.
-function Repair-GraftBuildWindow {
-    [CmdletBinding(SupportsShouldProcess)]
-    param([string]$GraftRoot)
-    if (-not $GraftRoot) {
-        $previous = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $npmRoot = ''
-        try { $npmRoot = (& npm root -g 2>$null | Out-String).Trim() } catch { $npmRoot = '' }
-        $ErrorActionPreference = $previous
-        if (-not $npmRoot) { return 'no-npm' }
-        $GraftRoot = Join-Path $npmRoot '@nanonets\graft'
-    }
-    $file = Join-Path $GraftRoot 'dist\claude\sync-run.js'
-    if (-not (Test-Path -LiteralPath $file)) { return 'absent' }
-    $text = [IO.File]::ReadAllText($file)
-    if ($text -match 'windowsHide') { return 'ok' }
-    $old = "{ cwd: dir, stdio: 'ignore', timeout: 120000 }"
-    if (-not $text.Contains($old)) { return 'changed' }
-    if (-not $PSCmdlet.ShouldProcess($file, 'Add windowsHide: true to the graft build call')) { return 'skipped' }
-    $new = "{ cwd: dir, stdio: 'ignore', timeout: 120000, windowsHide: true }"
-    [IO.File]::WriteAllText($file, $text.Replace($old, $new), (New-Object System.Text.UTF8Encoding($false)))
-    return 'patched'
+# --- Graft retirement ------------------------------------------------------------------------
+# Graft (@nanonets/graft) was installed by the dotfiles until 2026-10-09 and dropped after a
+# benchmark showed no accuracy or cost benefit. Invoke-GraftRetirement removes it from a machine
+# that has it; the installer and `dot upgrade` call it. Twin of graft_retire in
+# scripts/lib/agent-skills.sh - see there for exactly what goes. Only what is unambiguously
+# graft's: MCP entries named graft whose command runs graft, the hook/statusLine/allow/footer
+# fragments `graft init` writes into the user-level Claude Code and Codex settings, its shims
+# and skill, the global npm package, then ~/.graft. Repos you ran `graft init` in keep their own
+# graft/ directory and wiring. Quiet when there is nothing to do; never throws.
+
+# True when a JSON value (an MCP server entry) runs graft: one of its strings is the graft
+# command (bare, or a path ending in graft / graft.cmd / graft.exe) or the npm package.
+function Test-GraftJsonEntry {
+    param($Value)
+    if ($null -eq $Value) { return $false }
+    $json = $Value | ConvertTo-Json -Depth 20 -Compress
+    return ($json -match '@nanonets[\\/]+graft' -or $json -match '"(?:[^"]*[\\/])?graft(?:\.cmd|\.exe)?"')
 }
 
-# The one line Repair-GraftBuildWindow's result is worth (silent when there is nothing to say).
-function Write-GraftBuildWindowResult {
-    param([string]$Result)
-    switch ($Result) {
-        'patched' { Write-Host "  graft: its background index build no longer opens a terminal window (local patch until graft ships the fix)" -ForegroundColor Green }
-        'changed' { Write-Host "  graft: sync-run.js changed - the hidden-window patch no longer applies; check whether graft fixed the flashing build window" -ForegroundColor Yellow }
+# Drop hook entries that run graft-hooks.cjs from a settings object's `hooks` map (Claude Code
+# settings.json, Codex hooks.json). An event left with no entries is removed. True if changed.
+function Edit-GraftHookEntry {
+    param($Root)
+    $hooksProp = $Root.PSObject.Properties['hooks']
+    if ($null -eq $hooksProp -or $hooksProp.Value -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+    $changed = $false
+    foreach ($hookEvent in @($hooksProp.Value.PSObject.Properties)) {
+        $entries = @($hookEvent.Value)
+        $kept = @($entries | Where-Object { ($_ | ConvertTo-Json -Depth 20 -Compress) -notmatch 'graft-hooks\.cjs' })
+        if ($kept.Count -eq $entries.Count) { continue }
+        $changed = $true
+        if ($kept.Count -eq 0) { $hooksProp.Value.PSObject.Properties.Remove($hookEvent.Name) }
+        else { $hookEvent.Value = $kept }
     }
+    if ($changed -and @($hooksProp.Value.PSObject.Properties).Count -eq 0) { $Root.PSObject.Properties.Remove('hooks') }
+    return $changed
+}
+
+# The rest of what `graft init` puts in a Claude Code settings file: a statusLine that runs
+# graft-statusline.cjs, its Bash allow entries and its graft/ footer regex. True if changed.
+function Edit-GraftClaudeSetting {
+    param($Root)
+    $changed = $false
+    foreach ($key in @('statusLine', 'subagentStatusLine')) {
+        $prop = $Root.PSObject.Properties[$key]
+        if ($null -ne $prop -and ($prop.Value | ConvertTo-Json -Depth 10 -Compress) -match 'graft-statusline\.cjs') {
+            $Root.PSObject.Properties.Remove($key)
+            $changed = $true
+        }
+    }
+    $perm = $Root.PSObject.Properties['permissions']
+    if ($null -ne $perm -and $perm.Value -is [System.Management.Automation.PSCustomObject] -and $null -ne $perm.Value.PSObject.Properties['allow']) {
+        $allow = @($perm.Value.allow)
+        $keep = @($allow | Where-Object { "$_" -notmatch '^Bash\((graft|npx graft|graft-dev)(:|\))' })
+        if ($keep.Count -ne $allow.Count) { $perm.Value.allow = $keep; $changed = $true }
+    }
+    $footer = $Root.PSObject.Properties['footerLinksRegexes']
+    if ($null -ne $footer -and $null -ne $footer.Value) {
+        $all = @($footer.Value)
+        $keep = @($all | Where-Object { "$_" -notlike '*graft/*' })
+        if ($keep.Count -ne $all.Count) { $footer.Value = $keep; $changed = $true }
+    }
+    return $changed
+}
+
+# Parse a JSON file that mentions graft, let $Edit change the object (it returns True when it
+# did), and write it back BOM-less only then. An unreadable or unparsable file is left alone.
+function Edit-GraftJsonFile {
+    param([string]$Path, [scriptblock]$Edit)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $raw = [IO.File]::ReadAllText($Path)
+        if ($raw -notmatch 'graft') { return $false }
+        $root = $raw | ConvertFrom-Json
+        if ($root -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+        if (-not (& $Edit $root)) { return $false }
+        [IO.File]::WriteAllText($Path, ($root | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
+        return $true
+    } catch { return $false }
+}
+
+function Invoke-GraftRetirement {
+    $userHome = Get-SkillsHome
+    $done = New-Object System.Collections.Generic.List[string]
+    $previous = $ErrorActionPreference
+    # PS 5.1 promotes native stderr to a terminating error under Stop; exit codes are the signal.
+    $ErrorActionPreference = 'Continue'
+    try {
+        $removeMcp = {
+            param($Root, $Key)
+            $map = $Root.PSObject.Properties[$Key]
+            if ($null -eq $map -or $map.Value -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+            $entry = $map.Value.PSObject.Properties['graft']
+            if ($null -eq $entry -or -not (Test-GraftJsonEntry $entry.Value)) { return $false }
+            $map.Value.PSObject.Properties.Remove('graft')
+            return $true
+        }
+        if (Edit-GraftJsonFile -Path (Join-Path $userHome '.config\opencode\opencode.json') -Edit { param($r) & $removeMcp $r 'mcp' }) { $done.Add('OpenCode-MCP') }
+        if (Edit-GraftJsonFile -Path (Join-Path $userHome '.gemini\config\mcp_config.json') -Edit { param($r) & $removeMcp $r 'mcpServers' }) { $done.Add('agy-MCP') }
+        if (Edit-GraftJsonFile -Path (Join-Path $userHome '.claude\settings.json') -Edit {
+                param($r)
+                $hooksChanged = Edit-GraftHookEntry $r
+                $otherChanged = Edit-GraftClaudeSetting $r
+                $hooksChanged -or $otherChanged
+            }) { $done.Add('Claude-hooks') }
+        if (Edit-GraftJsonFile -Path (Join-Path $userHome '.codex\hooks.json') -Edit { param($r) Edit-GraftHookEntry $r }) { $done.Add('Codex-hooks') }
+
+        $codexToml = Join-Path $userHome '.codex\config.toml'
+        if ((Get-Command codex -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $codexToml) -and
+            (Select-String -LiteralPath $codexToml -Pattern '^\[mcp_servers\.graft\]' -Quiet)) {
+            try { & codex mcp remove graft *> $null; if ($LASTEXITCODE -eq 0) { $done.Add('Codex-MCP') } } catch { Write-Verbose "codex mcp remove graft: $($_.Exception.Message)" }
+        }
+        $claudeJson = Join-Path $userHome '.claude.json'
+        if ((Get-Command claude -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $claudeJson) -and
+            (Select-String -LiteralPath $claudeJson -Pattern '@nanonets/graft|"command": *"graft"' -Quiet)) {
+            try { & claude mcp remove graft -s user *> $null; if ($LASTEXITCODE -eq 0) { $done.Add('Claude-MCP') } } catch { Write-Verbose "claude mcp remove graft: $($_.Exception.Message)" }
+        }
+
+        foreach ($relative in @('.claude\skills\graft', '.agents\skills\graft', '.gemini\skills\graft', '.gemini\antigravity-cli\skills\graft')) {
+            $skill = Join-Path $userHome $relative
+            $skillMd = Join-Path $skill 'SKILL.md'
+            if ((Test-Path -LiteralPath $skillMd -PathType Leaf) -and (Select-String -LiteralPath $skillMd -Pattern '^name:\s*graft\s*$' -Quiet)) {
+                Remove-Item -LiteralPath $skill -Recurse -Force -ErrorAction SilentlyContinue
+                $done.Add("skill($relative)")
+            }
+        }
+        $shims = @(@('.claude\helpers\graft-hooks.cjs', '.claude\helpers\graft-statusline.cjs', '.codex\hooks\graft') |
+            ForEach-Object { Join-Path $userHome $_ } | Where-Object { Test-Path -LiteralPath $_ })
+        if ($shims.Count -gt 0) {
+            foreach ($shim in $shims) { Remove-Item -LiteralPath $shim -Recurse -Force -ErrorAction SilentlyContinue }
+            $done.Add('hook-shims')
+        }
+
+        # The package: in the prefix the graft command lives in, else npm's default one.
+        $graftCmd = Get-Command graft -ErrorAction SilentlyContinue
+        $stateDir = Join-Path $userHome '.graft'
+        if ((Get-Command npm -ErrorAction SilentlyContinue) -and ($graftCmd -or (Test-Path -LiteralPath $stateDir))) {
+            # Windows layout: the command shim sits in the prefix, the package in <prefix>\node_modules.
+            $nodeModules = ''
+            $prefixArgs = @()
+            if ($graftCmd -and $graftCmd.Source) {
+                $shimDir = Split-Path -Parent $graftCmd.Source
+                $candidate = Join-Path $shimDir 'node_modules'
+                if (Test-Path -LiteralPath (Join-Path $candidate '@nanonets\graft')) { $nodeModules = $candidate; $prefixArgs = @('--prefix', $shimDir) }
+            }
+            if (-not $nodeModules) { try { $nodeModules = (& npm root -g 2>$null | Out-String).Trim() } catch { $nodeModules = '' } }
+            $pkg = if ($nodeModules) { Join-Path $nodeModules '@nanonets\graft' } else { '' }
+            if ($pkg -and (Test-Path -LiteralPath $pkg)) {
+                $npmOutput = @(& npm uninstall -g @prefixArgs '@nanonets/graft' --loglevel=error 2>&1)
+                if (Test-Path -LiteralPath $pkg) {
+                    foreach ($line in $npmOutput) { Write-Host "    $line" }
+                    Write-Host "  Warning: could not uninstall Graft (a running agent session may hold its files) - close agent sessions and re-run dot upgrade, or: npm uninstall -g @nanonets/graft" -ForegroundColor Yellow
+                } else {
+                    $done.Add('npm-package')
+                }
+            }
+            # graft's own state (telemetry id, update check): only once the package is gone.
+            if ($pkg -and -not (Test-Path -LiteralPath $pkg) -and (Test-Path -LiteralPath $stateDir)) {
+                Remove-Item -LiteralPath $stateDir -Recurse -Force -ErrorAction SilentlyContinue
+                $done.Add('~/.graft')
+            }
+        }
+    } catch {
+        Write-Host "  Warning: Graft retirement did not finish - $($_.Exception.Message)" -ForegroundColor Yellow
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($done.Count -gt 0) { Write-Host "  Retired Graft (dropped from the dotfiles): $($done -join ' ')" -ForegroundColor Green }
 }

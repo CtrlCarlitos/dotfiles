@@ -24,7 +24,7 @@ the persisted `[data.packages]` section is emitted in.
 | `core` | Terminal fundamentals | git, zsh, tmux/psmux, node 24, python, neovim, ripgrep, gh, jq, fzf, 7zip… |
 | `modern_cli` | Modern CLI replacements | bat, eza, fd, starship, zoxide, direnv, lazygit, delta, gum, tealdeer, dust/duf/procs, shellcheck, shfmt; docs linting (markdownlint-cli2 via npm, lychee, vale); network diagnostics (net-tools, dnsutils, traceroute, mtr, tcpdump, nmap, whois, iperf3, telnet — #177) |
 | `fonts` | Nerd Fonts | MesloLGS NF |
-| `agent_toolkit` | Cross-vendor agent layer | Serena, Graft, act, Playwright Chromium |
+| `agent_toolkit` | Cross-vendor agent layer | Serena, act, Playwright Chromium |
 | `opencode_cli` | OpenCode CLI + Superpowers + skills + guardrail | OpenCode CLI (native installer / choco) + superpowers plugin + curated skills + guardrail opencode plane |
 | `opencode_desktop` | OpenCode Desktop app | Win choco `opencode-desktop`; mac brew cask `opencode-desktop`; Linux GitHub-release .deb (amd64) |
 | `claude_cli` | Claude Code | Claude Code CLI + superpowers plugin + curated skills + guardrail claude plane |
@@ -186,8 +186,8 @@ PDF, with the Ghostscript and AutoHotkey packages that came with it), Chocolatey
 Chocolatey's WSL record (`--skip-autouninstaller`: WSL itself stays) are dropped after a last
 question. A failed winget install prints the `choco install` that puts the app back. PowerShell 7
 cannot replace itself: run the script once more from Windows PowerShell (`powershell.exe`) for it.
-Moving Node from 26 to 24 LTS reinstalls graft right after: it is the one global npm tool with
-native modules, and `npm rebuild -g` fails on command shims an older npm wrote. Chocolatey
+Moving Node from 26 to 24 LTS rebuilds nothing: none of the global npm tools the dotfiles install
+has native modules, and `npm rebuild -g` would fail on command shims an older npm wrote. Chocolatey
 refuses to remove a package another one depends on, so dependencies are ordered: a tool that a
 moving package depends on moves after it (`fzf` and `ripgrep` after `opencode`); one that a
 package staying on Chocolatey depends on stays too, and the plan says which. A dependency only

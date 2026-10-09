@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MCP autowire contract: graft + serena must load into EVERY plane's fresh
-# session with zero ritual. Survey (2026-09-20, live): claude and codex
-# already automagic via user-scope config; opencode only reads the mcp block
-# of its GLOBAL config (graft was absent). agy is the #175 correction
+# MCP autowire contract: the catalog's servers (serena) must load into EVERY
+# plane's fresh session with zero ritual. Survey (2026-09-20, live): claude and
+# codex already automagic via user-scope config; opencode only reads the mcp
+# block of its GLOBAL config (a server was absent there). agy is the #175 correction
 # (2026-09-28, live): agy marks every server's tools lazy, lazy tools are
 # only reachable through the generic call_mcp_tool invoker guardrail denies,
 # and a plugin bundle prefixes server names into forms guardrail's registry
@@ -19,16 +19,15 @@ sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 
 . "$repo_root/tests/lib.sh"
 
-# 1. opencode: graft added to the GLOBAL mcp block, both twins (the serena
-#    merge already proves the merge-not-clobber pattern lives there).
+# 1. opencode: the catalog's servers go into the GLOBAL mcp block, both twins.
 # The server table lives in .chezmoidata/agents.yaml (#83): both twins must
-# render it, and the catalog must still define graft's MCP entry.
+# render it. Graft was dropped (2026-10-09): the catalog no longer carries it.
 for f in "$ps1_installer" "$sh_installer"; do
     grep -Fq '.agents.mcp' "$f" ||
         fail "$f: no MCP wiring from the agent catalog (.chezmoidata/agents.yaml)"
 done
-grep -Fq 'command: graft' "$repo_root/.chezmoidata/agents.yaml" ||
-    fail ".chezmoidata/agents.yaml: graft MCP server entry missing"
+! grep -Fq 'command: graft' "$repo_root/.chezmoidata/agents.yaml" ||
+    fail ".chezmoidata/agents.yaml: graft was dropped and must not be registered as an MCP server"
 # The registration CONVERGES (a stale `npx -y` entry is repaired, #230); what it
 # does is asserted by executing it: tests/opencode_mcp_sync_contract.sh.
 grep -Fq 'function Sync-OpenCodeMcp' "$ps1_installer" ||
@@ -51,15 +50,13 @@ for f in "$ps1_installer" "$sh_installer"; do
         fail "$f: agy mcp add is superseded by the forceAllToolsEager registration (deferred path)"
 done
 
-# 3. The catalog carries both servers with the live-verified commands.
-#    graft is the installed binary now (#175: with the npx -y form agy
-#    exposed zero graft tools - slow npx cold start), not the npx form.
-for f in "$ps1_installer" "$sh_installer"; do
-    grep -Fq 'args: [start-mcp-server, --context, ide-assistant]' "$repo_root/.chezmoidata/agents.yaml" ||
-        fail ".chezmoidata/agents.yaml: serena MCP command changed from the live-verified form"
-    grep -Fq 'args: [mcp]' "$repo_root/.chezmoidata/agents.yaml" ||
-        fail ".chezmoidata/agents.yaml: graft MCP must be the installed binary (graft mcp), not npx (#175)"
-done
+# 3. The catalog carries serena with the live-verified command: the installed
+#    binary, not an npx form (#175: with an npx -y form agy exposed zero
+#    tools - slow npx cold start).
+grep -Fq 'args: [start-mcp-server, --context, ide-assistant]' "$repo_root/.chezmoidata/agents.yaml" ||
+    fail ".chezmoidata/agents.yaml: serena MCP command changed from the live-verified form"
+grep -Fq 'command: serena' "$repo_root/.chezmoidata/agents.yaml" ||
+    fail ".chezmoidata/agents.yaml: serena MCP must be the installed binary, not npx (#175)"
 
 # 4. The global mcp_config.json is NEVER deleted: guardrail's
 #    `doctor --coverage antigravity` (the `guardrail setup` gate) fails hard

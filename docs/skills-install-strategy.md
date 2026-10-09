@@ -359,10 +359,10 @@ prompt hook kept nagging "run graft ask".
 npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a claude-code opencode codex -g -y --copy
 ```
 
-Overlap, accepted on purpose: graft's own skill (`~/.claude/skills/graft`,
-written by `graft init`) and its AGENTS.md block still say "graph first".
-`code-search` is the gate in front of them: it keeps graft when the probe says
-the graph covers the code and drops it for the session otherwise.
+Graft itself was removed from the dotfiles on 2026-10-09 (no accuracy or cost
+benefit in a benchmark; see [Graft (removed)](agent-context-tools.md#graft-removed)),
+and its skill in `~/.claude/skills/graft` is retired with it. `code-search`
+stays: its probe finds no graph and routes serena > rg > grep.
 
 ## skill-creator: our drop-in fork (2026-09-24)
 

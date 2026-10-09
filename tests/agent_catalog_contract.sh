@@ -3,24 +3,24 @@ set -euo pipefail
 
 # The agent catalog is the only place agent-toolkit DATA may live.
 #
-# The logic that installs and wires Serena, Graft, Codex and the curated skills
-# is procedure in two languages and stays in the installers. The values inside
-# it are what drift, and they had multiplied: the MCP server table was written
-# six times (four in the .sh alone - its agent_toolkit block exists once under
-# install_apt and once under install_brew, byte for byte), the graft
-# allow-scripts list three times, the Codex package and the skills agent list
-# four times each. .chezmoidata/agents.yaml is now the one copy.
+# The logic that installs and wires Serena, Codex and the curated skills is
+# procedure in two languages and stays in the installers. The values inside it
+# are what drift, and they had multiplied: the MCP server table was written six
+# times (four in the .sh alone - its agent_toolkit block exists once under
+# install_apt and once under install_brew, byte for byte), an npm allow-scripts
+# list three times, the Codex package and the skills agent list four times
+# each. .chezmoidata/agents.yaml is now the one copy.
 #
-#   1. SHAPE     each MCP server has a command and args; the allow-scripts list
-#                names graft itself plus tree-sitter grammars only; the skills
-#                agent list is non-empty; the codex package is scoped.
+#   1. SHAPE     each MCP server has a command and args (serena is one; graft,
+#                dropped 2026-10-09, is not); the skills agent list is
+#                non-empty; the codex package is scoped.
 #   2. NO COPY   no consumer carries a value of its own: no literal
-#                start-mcp-server, tree-sitter allow-list, @openai/codex or
-#                agent array in either installer template or either updater.
+#                start-mcp-server, @openai/codex or agent array in either
+#                installer template or either updater.
 #   3. RENDERS   both twins, rendered with an empty --config and
 #                --override-data (every group on, OS forced), emit exactly the
-#                catalog's values - the MCP table in both shapes, the
-#                allow-scripts string, the codex package, the agent list.
+#                catalog's values - the MCP table in both shapes, the codex
+#                package, the agent list.
 #   4. RUNTIME   the updaters read the catalog through chezmoi execute-template,
 #                and the expressions they use evaluate to the catalog's values.
 #
@@ -47,14 +47,12 @@ no_literal() { # $1=file $2=fixed string $3=what it is
 }
 for f in "$ps_t" "$sh_t" "$up_sh" "$up_ps"; do
     no_literal "$f" 'start-mcp-server' 'the MCP server table'
-    no_literal "$f" 'allow-scripts=@nanonets/graft,tree-sitter' 'the graft allow-scripts list'
     no_literal "$f" '@openai/codex' 'the codex package name'
     no_literal "$f" "@('claude-code', 'opencode', 'codex')" 'the skills agent list'
     no_literal "$f" 'AGENTS=(claude-code opencode codex)' 'the skills agent list'
 done
 for f in "$ps_t" "$sh_t"; do
     grep -Fq '.agents.mcp' "$f" || fail "$(basename -- "$f"): no longer renders the MCP table from the catalog"
-    grep -Fq '.agents.npm.graft_allow_scripts' "$f" || fail "$(basename -- "$f"): no longer renders the graft allow-scripts list"
     grep -Fq '.agents.npm.codex' "$f" || fail "$(basename -- "$f"): no longer renders the codex package"
     grep -Fq '.agents.skills.agents' "$f" || fail "$(basename -- "$f"): no longer renders the skills agent list"
 done
@@ -106,12 +104,10 @@ if not mcp: err("agents.mcp is empty")
 for name, srv in mcp.items():
     if not isinstance(srv.get("command"), str) or not srv["command"]: err("mcp.%s: command must be a non-empty string" % name)
     if not isinstance(srv.get("args"), list) or not srv["args"]: err("mcp.%s: args must be a non-empty list" % name)
-for s in ("serena", "graft"):
-    if s not in mcp: err("mcp.%s missing - both installers register it" % s)
-allow = a.get("npm", {}).get("graft_allow_scripts", [])
-if "@nanonets/graft" not in allow: err("npm.graft_allow_scripts must include @nanonets/graft itself")
-for pkg in allow:
-    if pkg != "@nanonets/graft" and "tree-sitter" not in pkg: err("npm.graft_allow_scripts: %r is not a tree-sitter package" % pkg)
+if "serena" not in mcp: err("mcp.serena missing - both installers register it")
+# Graft was dropped (2026-10-09): neither its MCP entry nor its npm allow-list may return.
+if "graft" in mcp: err("mcp.graft is back - graft was dropped; the installers only retire it")
+if "graft_allow_scripts" in a.get("npm", {}): err("npm.graft_allow_scripts is back - graft was dropped")
 codex = a.get("npm", {}).get("codex", "")
 if not codex.startswith("@openai/"): err("npm.codex must be the scoped @openai package, got %r" % codex)
 agents = a.get("skills", {}).get("agents", [])
@@ -124,14 +120,9 @@ if read("agents-sp.txt").strip().split() != agents: err("updater agent-list expr
 if read("agents-comma.txt").strip().split(",") != agents: err("updater agent-list expression (ps1) != catalog")
 
 # 3. renders
-allow_str = "--allow-scripts=" + ",".join(allow)
 ps1 = read("ps1.rendered")
 sh = read("sh.rendered")
 
-if allow_str not in ps1: err("ps1 render: graft allow-scripts string not rendered verbatim")
-# #124 hoisted the shared agent-toolkit sections out of install_apt/install_brew
-# into one install_agent_toolkit, so the string renders ONCE now (was 2).
-if sh.count(allow_str) != 1: err("sh render: graft allow-scripts string expected once (shared toolkit), found %d" % sh.count(allow_str))
 if ("npm install -g %s " % codex) not in ps1: err("ps1 render: codex install line not rendered")
 # #124: the sh Codex install is shared now and runs through the run-once
 # $NPM_BIN/$npm_sudo pair, so pin the package name + install verb instead of
@@ -149,7 +140,7 @@ else:
     for name, srv in mcp.items():
         want = "%s = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
         if want not in body: err("ps1 render: $mcpCatalog lacks %s as %s" % (name, want))
-    for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.graft.args"):
+    for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.serena.args"):
         if ref not in ps1: err("ps1 render: OpenCode/agy wiring does not consume %s" % ref)
 # the sh embeds the table as JSON inside its python heredocs. #124: the two
 # registration blocks live in the shared install_agent_toolkit now, so the
@@ -166,9 +157,9 @@ for d in blobs:
     # a copy that names the same servers but is not the catalog has drifted
     if set(d) == set(mcp) and json.dumps(d, separators=(",", ":"), sort_keys=True) != sh_json: err("sh render: an embedded MCP table differs from the catalog")
 
-print("  catalog: %d MCP servers, %d allow-scripts entries, codex=%s, agents=%s" % (len(mcp), len(allow), codex, ",".join(agents)))
-print("  rendered .ps1: $mcpCatalog + 4 consumers, allow-scripts, codex, %d agent-list sites" % ps1.count("$skAgents = @("))
-print("  rendered .sh : MCP table x4, allow-scripts x2, codex, AGENTS - all from the catalog")
+print("  catalog: %d MCP servers, codex=%s, agents=%s" % (len(mcp), codex, ",".join(agents)))
+print("  rendered .ps1: $mcpCatalog + its consumers, codex, %d agent-list sites" % ps1.count("$skAgents = @("))
+print("  rendered .sh : MCP table x2, codex, AGENTS - all from the catalog")
 sys.exit(1 if bad else 0)
 PYEOF
 

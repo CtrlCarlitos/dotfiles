@@ -40,7 +40,7 @@ Add-DotTimingMark -Name 'sessions (scan and stop)'
 # --- Live-session scan: defer dir-recreating upgrades while agent hosts run.
 # npm -g / uv tool / choco opencode all delete+recreate package directories
 # that live sessions resolve from at runtime (2026-09-20 live incidents:
-# graft hook resolution, opencode lib-bkp, codex banner drift).
+# opencode lib-bkp, codex banner drift).
 # Test-LiveProcess / Get-LiveAgentProcess: scripts/lib/ps-common.ps1 (path-aware: Codex's
 # app-server daemon and Claude Desktop are not sessions).
 #
@@ -63,9 +63,6 @@ if (-not (Test-LiveProcess @('codex'))) {
 }
 $defer = @()
 if (Test-LiveProcess @('codex'))  { $defer += 'codex' }
-if (Test-LiveProcess @('opencode','claude','codex','agy')) { $defer += 'graft' }
-# A graft MCP server an ended session left running still holds graft's files open.
-elseif (@(Get-OrphanAgentHelper | Where-Object { $_.Kind -eq 'graft MCP server' }).Count -gt 0) { $defer += 'graft' }
 if (Test-LiveProcess @('serena')) { $defer += 'serena' }
 if (Test-LiveProcess @('opencode')) { $defer += 'opencode' }
 $env:DOTUPGRADE_DEFER = ($defer -join ',')

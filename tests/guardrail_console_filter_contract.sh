@@ -56,7 +56,7 @@ credential posture:
   WARNING: the gh login carries admin:public_key, workflow. An agent running under it can change what those scopes control.
   WARNING: 2 gh accounts are logged in. Which one an agent acts as depends on the active account.
 antigravity coverage: Antigravity (/home/carlitos/.gemini/config/mcp_config.json)
-  configured MCP servers: graft, serena
+  configured MCP servers: serena
   declared MCP tools: 29 (29 in registry, 0 uncontracted)
   uncontracted (absent from registry): none
 verdict: 2 problems (see above)

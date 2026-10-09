@@ -2,9 +2,9 @@
 # shellcheck disable=SC2034,SC2317  # the sourced/extracted code consumes these
 set -euo pipefail
 
-# `dot upgrade` defers codex and graft while "an agent session is live", because npm -g
+# `dot upgrade` defers codex (and opencode, serena) while "an agent session is live", because npm -g
 # deletes and recreates the package directories a running session resolves from. It
-# matched PROCESS NAMES only, so two things that are not sessions kept deferring them:
+# matched PROCESS NAMES only, so two things that are not sessions kept deferring it:
 #   - Codex's shared app-server daemon (`codex app-server daemon`), which runs its OWN
 #     copy under ~/.codex/packages/app-server-daemon/releases/<id>/ - not the npm-global
 #     CLI that the upgrade replaces;
@@ -65,7 +65,7 @@ cli='codex 101 /usr/lib/node_modules/@openai/codex/vendor/x86_64/codex/codex'
 [ "$(sh_live "$daemon
 $cli" codex)" = yes ] || fail "sh: the CLI counts even beside the daemon"
 [ "$(sh_live "claude 200 /home/u/.local/bin/claude" claude)" = yes ] || fail "sh: claude keeps counting"
-[ "$(sh_live "$daemon" opencode claude codex agy)" = no ] || fail "sh: the daemon alone must not defer graft either"
+[ "$(sh_live "$daemon" opencode claude codex agy)" = no ] || fail "sh: the daemon alone is no live session for any agent name"
 [ "$(sh_live "" codex claude)" = no ] || fail "sh: nothing running means nothing live"
 
 # --- PowerShell twin -------------------------------------------------------------------------

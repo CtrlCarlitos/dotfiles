@@ -1,7 +1,7 @@
 #!/bin/bash
 # update_ai_tools.sh - refresh the AI coding tools and curated skills, no
 # package-manager sweep. Upgrades the AI CLIs (Claude Code, Codex, OpenCode,
-# agy, Serena, Graft, act) and re-runs the curated-skill install, honoring
+# agy, Serena, act) and re-runs the curated-skill install, honoring
 # DOTUPGRADE_DEFER. Entry points: `dot upgrade` (which exports the defer
 # list) or direct: bash scripts/update_ai_tools.sh
 set -e
@@ -311,13 +311,13 @@ dot_timing_mark 'Claude Code'
 if command -v claude &>/dev/null; then
     echo "🧠 Updating Claude Code..."
     # Deliberately NOT `claude update` (same as the Windows twin): dot upgrade is meant to
-    # run with every agent and harness closed (graft, codex and the others cannot be
+    # run with every agent and harness closed (codex and the others cannot be
     # replaced while a session runs, and Claude Code should not be replaced under one
     # either), and with nothing running the installer is the simple, predictable path.
     # Same installer URL as the installer template. Fetch-then-run, never piped: a piped
     # `curl | bash` exits 0 on a failed fetch (empty stdin) and would both skip the update
     # silently and - unguarded - abort this set -e script before
-    # Playwright/agent-browser/Serena/Graft update (#114; this script promises
+    # Playwright/agent-browser/Serena update (#114; this script promises
     # warn-and-continue).
     # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
     # package carries the same version numbers; an unknown answer re-runs it as before.
@@ -424,10 +424,9 @@ if command -v npm &>/dev/null; then
     fi
 fi
 
-dot_timing_mark 'Serena and Graft'
-# 6. Serena (uv-managed) + Graft (self-upgrading via `graft upgrade`).
-# Both are defer-aware: uv/graft recreate package dirs that live sessions
-# resolve from (2026-09-20 live incidents).
+dot_timing_mark 'Serena'
+# 6. Serena (uv-managed). Defer-aware: uv recreates the package dir that live
+# sessions resolve from (2026-09-20 live incidents).
 if command -v serena &>/dev/null; then
     if deferred serena; then
         echo "  serena deferred - a serena process is live (dot upgrade reports it)."
@@ -435,57 +434,12 @@ if command -v serena &>/dev/null; then
         uv tool upgrade serena-agent 2>/dev/null || echo "  Warning: serena upgrade failed - continuing"
     fi
 fi
-if command -v graft &>/dev/null; then
-    if deferred graft; then
-        echo "  graft deferred - agent session(s) are live; graft's dir is resolved by every hook event (dot upgrade reports it)."
-    else
-        # `graft upgrade` runs `npm install -g` against npm's DEFAULT prefix.
-        # A graft living under another prefix (a stale ~/.local install,
-        # nvm) then fails EACCES on the system /usr prefix and was never
-        # upgraded (WSL: 0.18.0 stuck while 0.21.1 shipped). Point npm at the
-        # prefix graft actually lives in.
-        graft_real="$(readlink -f "$(command -v graft)" 2>/dev/null || true)"
-        graft_prefix=""
-        case "$graft_real" in
-            */lib/node_modules/@nanonets/graft/*) graft_prefix="${graft_real%/lib/node_modules/@nanonets/graft/*}" ;;
-        esac
-        # `graft upgrade` reinstalls even when nothing changed (0.21.1 -> 0.21.1 took 41 s on
-        # WSL). `graft version` prints the installed version and the latest published one;
-        # equal means nothing to do. "unreachable" or no answer still upgrades.
-        graft_version_out="$(graft version 2>/dev/null || true)"
-        # Shared with the PowerShell twin's decision logic via
-        # graft_current_version (scripts/lib/agent-skills.sh); empty means
-        # "not current", which upgrades exactly as before.
-        graft_have="$(graft_current_version "$graft_version_out")"
-        if [ -n "$graft_have" ]; then
-            echo "  graft is current ($graft_have)"
-        elif [ -n "$graft_prefix" ] && [ ! -w "$graft_prefix/lib/node_modules" ]; then
-            echo "  Warning: graft is in $graft_prefix (not writable) - reinstall with: sudo npm install -g @nanonets/graft@latest"
-        else
-            # npm 12 skips install scripts unless allow-listed, so a bare
-            # `graft upgrade` replaces graft with a build that crashes at
-            # startup ("No native build was found", tree-sitter parsers never
-            # compiled - seen on WSL 2026-10-02). Hand the installer's own
-            # allow-list to npm as NPM_CONFIG_ALLOW_SCRIPTS, read from the
-            # catalog like the codex package name (no literal copy here).
-            graft_allow="$(chezmoi execute-template '{{ join "," .agents.npm.graft_allow_scripts }}' 2>/dev/null || true)"
-            if [ -z "$graft_allow" ]; then
-                echo "  Warning: graft allow-scripts list unavailable from chezmoi data - skipping graft upgrade"
-            else
-                NPM_CONFIG_ALLOW_SCRIPTS="$graft_allow" NPM_CONFIG_PREFIX="${graft_prefix:-$(npm prefix -g 2>/dev/null)}" \
-                    graft upgrade 2>/dev/null || echo "  Warning: graft upgrade failed - continuing"
-                # A graft that cannot start breaks every agent hook: say so now.
-                graft --version >/dev/null 2>&1 ||
-                    echo "  Warning: graft does not start after the upgrade - reinstall: NPM_CONFIG_ALLOW_SCRIPTS='$graft_allow' npm install -g @nanonets/graft@latest"
-            fi
-        fi
-    fi
-fi
-# No Codex hook-path normalization here, unlike the .ps1 twin: graft writes
-# this OS's native separator, so on Linux/macOS ~/.codex/hooks.json already
-# carries forward slashes. The backslash bug (dotfiles #170) is Windows-only
-# - git bash, which the Codex TUI spawns there, eats backslashes - and the
-# Windows twin normalizes it after every graft upgrade.
+
+dot_timing_mark 'Graft retirement'
+# 7. Graft was dropped from the dotfiles (2026-10-09): remove it where an earlier
+# run installed it (graft_retire, scripts/lib/agent-skills.sh; quiet when there
+# is nothing to do). Same npm sudo decision as the npm steps above.
+graft_retire "$npm_sudo"
 
 dot_timing_summary 'AI tools'
 echo "✅ AI Tools Update Complete!"

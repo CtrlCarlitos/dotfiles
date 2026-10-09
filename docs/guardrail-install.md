@@ -227,17 +227,16 @@ Windows, the usual cause is Defender scanning the binary: check the exclusion ab
 Guardrail never edits your `~/.claude/settings.json`. `guardrail allow-baseline` prints a
 vetted list of `permissions.allow` rules with the reason for each, `--check` compares it with
 your file and flags rules broader than the baseline (the doctor carries a summary line), and
-`--json` prints the list as `{"permissions":{"allow":[...]}}`. It has no apply mode. The
-broad `Bash(graft:*)`, `Bash(npx graft:*)` and `Bash(graft-dev:*)` also cover `graft init`,
-`graft upgrade` and `graft build --deep`, so the baseline allows graft by read-only
-subcommand instead (this repo's own `.claude/settings.json` does the same).
+`--json` prints the list as `{"permissions":{"allow":[...]}}`. It has no apply mode. (The
+broad `Bash(graft:*)` rules `graft init` used to add are removed by the dotfiles' Graft
+retirement - see [Graft (removed)](agent-context-tools.md#graft-removed).)
 
-To merge the baseline and drop those three rules, back up the file first, then:
+To merge the baseline, back up the file first, then:
 
 ```bash
 cp ~/.claude/settings.json ~/.claude/settings.json.bak
 guardrail allow-baseline --json > baseline.json
-jq -b --slurpfile b baseline.json '.permissions.allow = ((((.permissions.allow // []) - ["Bash(graft:*)","Bash(npx graft:*)","Bash(graft-dev:*)"]) + $b[0].permissions.allow) | unique)' ~/.claude/settings.json > merged.json
+jq -b --slurpfile b baseline.json '.permissions.allow = (((.permissions.allow // []) + $b[0].permissions.allow) | unique)' ~/.claude/settings.json > merged.json
 # read merged.json, then replace settings.json with it
 ```
 

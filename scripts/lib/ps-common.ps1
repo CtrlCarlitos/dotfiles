@@ -170,7 +170,7 @@ function Test-DevTmpPathSafe {
 # --- Live agent sessions (dot upgrade) ---------------------------------------------------
 # `dot upgrade` defers upgrades that delete and recreate package directories a running
 # agent session resolves from. It used to match process NAMES only, so two things that are
-# not sessions kept deferring codex and graft: Codex's shared app-server daemon (it runs
+# not sessions kept deferring upgrades: Codex's shared app-server daemon (it runs
 # its OWN release copy under ~\.codex\packages\app-server-daemon\, not the npm-global CLI
 # the upgrade replaces) and Claude Desktop (an Electron app, ~10 claude.exe processes under
 # AnthropicClaude\; it is not Claude Code). A process whose path cannot be read (an
@@ -229,12 +229,10 @@ function Get-AgentDesktopApp {
 }
 
 # --- Background work an ENDED session left running (dot upgrade) -------------------------------
-# A Claude Code background task (the shells `/exit` asks about) and the MCP servers an agent
-# starts (graft's `npx @nanonets/graft mcp` chain) are children of their session, so stopping
-# the session takes them along. When the session ended WITHOUT them - a background task left
-# running, an MCP server orphaned - nothing listed them, and a leftover graft MCP server keeps
-# graft's files open while npm replaces them. Found by command line; only those with no live
-# agent session above them; only the top of each chain (its tree goes with it).
+# A Claude Code background task (the shells `/exit` asks about) is a child of its session, so
+# stopping the session takes it along. When the session ended WITHOUT it - a background task
+# left running - nothing listed it. Found by command line (Get-AgentHelperKind); only those with
+# no live agent session above them; only the top of each chain (its tree goes with it).
 function Get-ProcessTable {
     @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
         [pscustomobject]@{ Id = [int]$_.ProcessId; ParentId = [int]$_.ParentProcessId; Name = [string]$_.Name; Path = [string]$_.ExecutablePath; CommandLine = [string]$_.CommandLine; Created = $_.CreationDate }
@@ -295,9 +293,6 @@ function Stop-ProcessTree {
 function Get-AgentHelperKind {
     param([string]$CommandLine)
     if ($CommandLine -match '__claudeCodeScript|CLAUDE_CODE_SHELL') { return 'Claude Code background task' }
-    if ($CommandLine -match '@nanonets[\\/]graft|(^|[\\/"\s])graft(\.cmd)?"?\s+mcp\b') {
-        if ($CommandLine -match '\bmcp\b') { return 'graft MCP server' }
-    }
     return ''
 }
 
@@ -676,8 +671,7 @@ function Update-CodexNpm {
 }
 
 # --- "Is it already current?" (dot upgrade) ----------------------------------------------
-# `graft upgrade` ran every time (0.21.1 -> 0.21.1 took 41 s on WSL) and the codex
-# `npm install -g` another ~9 s. Ask first; anything unknown (empty answers, an unreachable
+# The codex `npm install -g` took ~9 s on every run, even with nothing to change. Ask first; anything unknown (empty answers, an unreachable
 # registry) means "not current", so the install still happens exactly as before.
 $script:NpmCurrentVersion = ''
 
@@ -709,50 +703,6 @@ function Test-NpmGlobalCurrent {
     }
     catch { return $false }
     finally { $ErrorActionPreference = $previous }
-}
-
-# `graft version` prints "graft <installed>" and "latest: <published>" (or "latest:
-# unreachable (offline?)"). Returns the version when both agree, else ''.
-function Get-GraftCurrentVersion {
-    param([string]$VersionOutput)
-
-    $installed = ''
-    $latest = ''
-    if ($VersionOutput -match '(?m)^graft (\d[^\s]*)') { $installed = $Matches[1] }
-    # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
-    if ($VersionOutput -match '(?m)^latest(?: on npm)?: (\d[^\s]*)') { $latest = $Matches[1] }
-    if ($installed -and $installed -eq $latest) { return $installed }
-    return ''
-}
-
-# graft's own `graft upgrade` dies on Windows with "spawnSync npm ENOENT" (npm is npm.cmd
-# there and the upgrade spawns it without a shell). It only wraps `npm install -g`, so run
-# that directly. npm 12 skips install scripts unless allow-listed, so the installer's
-# allow-list (agents.yaml) goes into NPM_CONFIG_ALLOW_SCRIPTS for the call only. Returns
-# npm's exit code.
-function Invoke-GraftNpmInstall {
-    param([Parameter(Mandatory)][string]$AllowScripts)
-
-    $previousAllow = $env:NPM_CONFIG_ALLOW_SCRIPTS
-    $previousPreference = $ErrorActionPreference
-    # PS 5.1 promotes native stderr to a terminating error under Stop; the exit code is the signal.
-    $ErrorActionPreference = 'Continue'
-    try {
-        $env:NPM_CONFIG_ALLOW_SCRIPTS = $AllowScripts
-        # Captured, never emitted: PowerShell returns EVERYTHING a function writes, so npm's
-        # "changed 44 packages" used to come back as part of the result (("changed ...", 0))
-        # and the caller printed "graft install failed (npm exit changed 44 packages in 1m 0)".
-        # Its output is shown only when the install actually failed.
-        $npmOutput = @(npm install -g '@nanonets/graft@latest' --loglevel=error --no-progress 2>&1)
-        $exitCode = [int]$LASTEXITCODE
-        if ($exitCode -ne 0) { foreach ($line in $npmOutput) { Write-Host "    $line" } }
-        return $exitCode
-    }
-    finally {
-        $ErrorActionPreference = $previousPreference
-        if ($null -eq $previousAllow) { Remove-Item Env:NPM_CONFIG_ALLOW_SCRIPTS -ErrorAction SilentlyContinue }
-        else { $env:NPM_CONFIG_ALLOW_SCRIPTS = $previousAllow }
-    }
 }
 
 # The `choco upgrade all` argument list. Chocolatey's `claude` package (Claude Desktop) ends
@@ -1289,25 +1239,6 @@ function Invoke-WingetMigrationItem {
         }
         Write-Host "  - $($Item.Choco) -> winget $($Item.Winget)" -ForegroundColor Green
         if ($Item.Winget -eq 'OpenJS.NodeJS.LTS') {
-            # A different Node major breaks native modules of the global npm tools (graft's
-            # tree-sitter parsers): rebuild them for the Node now installed.
-            $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
-            # Not `npm rebuild -g`: it re-links every global command and fails with EEXIST on shims
-            # an older npm wrote (2026-10-07, on npm's own shim). graft is the one global tool with
-            # native modules (tree-sitter); reinstalling it compiles them for this Node - the path
-            # dot upgrade already takes.
-            & npm ls -g --depth=0 '@nanonets/graft' *> $null
-            if ($LASTEXITCODE -eq 0) {
-                $graftAllow = ''
-                try { $graftAllow = ('{{ join "," .agents.npm.graft_allow_scripts }}' | chezmoi execute-template | Out-String).Trim() } catch { $graftAllow = '' }
-                if (-not $graftAllow) {
-                    Write-Host "    graft's native modules were not rebuilt (no allow-list from chezmoi data) - run dot upgrade" -ForegroundColor Yellow
-                } elseif ((Invoke-GraftNpmInstall -AllowScripts $graftAllow) -ne 0) {
-                    Write-Host "    graft reinstall failed - run dot upgrade to retry" -ForegroundColor Yellow
-                } else {
-                    Write-Host "    graft reinstalled: its native modules are built for the new Node"
-                }
-            }
             if ($script:WingetMigrationNodeMajor -gt 0) { $null = Set-NodeLtsPin -Major $script:WingetMigrationNodeMajor }
         }
         return 'ok'
