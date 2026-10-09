@@ -9,20 +9,50 @@ set -euo pipefail
 WORK="$(mktemp -d)"
 trap '[ -n "${WORK:-}" ] && rm -rf "$WORK"' EXIT
 
-# Sudo helper
+# Sudo helper. $SUDO names a FUNCTION, not the `sudo` binary, so the credential
+# prompt and the keep-alive are deferred to the first command that actually
+# needs root.
+#
+# This used to run `sudo -v` here, at the very top - before package-manager
+# detection, before any group check, before a single line of output. So an
+# apply with nothing to do still stopped dead on "[sudo] password for ...",
+# and a `chezmoi update` that re-ran this script only because its hash changed
+# asked for a password to then do nothing. Priming on first use keeps the
+# "type it once" property (the prompt and the keep-alive still happen exactly
+# once per run) while a no-op run never asks at all.
+#
+# Shape notes: every call site is `$SUDO <cmd> ...`, and root keeps SUDO=""
+# so the expansion vanishes as before. The one copy (npm_sudo="$SUDO") carries
+# the function name and works the same way. Nothing exports SUDO or passes it
+# to a child shell - a function would not survive that, and
+# tests/sudo_lazy_prime_contract.sh pins that it stays so.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null; then
-        SUDO="sudo"
-        # Cache sudo credentials upfront so the user only types password once
-        sudo -v
-        # Keep-alive: refresh sudo timestamp in background until this script exits
-        while true; do sudo -n true; sleep 30; kill -0 "$$" || exit; done 2>/dev/null &
+        SUDO="dot_sudo"
     else
         echo "Error: This script requires root privileges or sudo." >&2
         exit 1
     fi
 fi
+
+# dot_sudo - sudo, priming the credential cache and the keep-alive on the FIRST
+# privileged command of the run. `sudo "$@"` on purpose rather than
+# `command sudo`: quiet_apt_enable installs a sudo() shim that rewrites apt
+# invocations, and this must keep going through it.
+_DOT_SUDO_PRIMED=""
+dot_sudo() {
+    if [ -z "$_DOT_SUDO_PRIMED" ]; then
+        _DOT_SUDO_PRIMED=1
+        # A refused or mistyped password fails this one command, exactly as a
+        # bare `sudo` would - the caller's own || warn handles it from there.
+        sudo -v || return 1
+        # Keep-alive: refresh the sudo timestamp until this script exits. $$ is
+        # still the main shell inside a function, so the `kill -0` guard works.
+        while true; do sudo -n true; sleep 30; kill -0 "$$" || exit; done 2>/dev/null &
+    fi
+    sudo "$@"
+}
 
 {{/* 16-group package taxonomy (docs/package-groups.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
