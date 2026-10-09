@@ -374,42 +374,56 @@ install_fonts() {
         $SUDO apt install -y p7zip-full
     fi
 
-    # Check for Meslo Nerd Font
-    if [[ ! -f "$font_dir/MesloLGMNerdFont-Regular.ttf" ]]; then
-        info "Installing Meslo Nerd Font (for Starship)..."
+    local seven_z="7z"
+    if command -v 7zz &>/dev/null; then seven_z="7zz"; fi
+
+    # Nerd Fonts shipped here: the release asset's zip name, and a file inside
+    # it that proves this font is already extracted. Meslo's patched family
+    # name is MesloLGM, not Meslo, so that marker can't be derived from the
+    # zip name alone - hence two parallel arrays instead of one.
+    local -a nf_zip_names=(Meslo FiraCode)
+    local -a nf_marker_files=(MesloLGMNerdFont-Regular.ttf FiraCodeNerdFont-Regular.ttf)
+    local nf_version=''
+    local installed_any=false
+
+    for i in "${!nf_zip_names[@]}"; do
+        local zip_name="${nf_zip_names[$i]}"
+        local marker="${nf_marker_files[$i]}"
+        [[ -f "$font_dir/$marker" ]] && continue
+
+        info "Installing $zip_name Nerd Font (for Starship)..."
         mkdir -p "$font_dir"
 
-        # Determine latest Nerd Fonts release. `|| true` INSIDE the
+        # Determine latest Nerd Fonts release, once. `|| true` INSIDE the
         # substitution: an unauthenticated 403 (60 req/h API limit) makes
         # grep exit 1 and the failing assignment would abort the whole run
         # under set -e - at the very first install step (#114).
-        local nf_version
-        nf_version=$(curl -s --max-time 30 "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")' || true)
         if [[ -z "$nf_version" ]]; then
-            warn "Could not determine latest Nerd Fonts release - skipping"
-            return
+            nf_version=$(curl -s --max-time 30 "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")' || true)
+            if [[ -z "$nf_version" ]]; then
+                warn "Could not determine latest Nerd Fonts release - skipping"
+                return
+            fi
         fi
 
         # Download from official Nerd Fonts repo (into WORK, never /tmp)
-        if ! net_timeout 300 wget -q --show-progress -O "$WORK/Meslo.zip" "https://github.com/ryanoasis/nerd-fonts/releases/download/${nf_version}/Meslo.zip"; then
-            warn "Meslo Nerd Font download failed or timed out - skipping"
-            rm -f "$WORK/Meslo.zip"
-            return
+        if ! net_timeout 300 wget -q --show-progress -O "$WORK/$zip_name.zip" "https://github.com/ryanoasis/nerd-fonts/releases/download/${nf_version}/${zip_name}.zip"; then
+            warn "$zip_name Nerd Font download failed or timed out - skipping"
+            rm -f "$WORK/$zip_name.zip"
+            continue
         fi
 
         # Unzip with 7z/7zz
         # 7z x -o{output_dir} {archive}
-        local seven_z="7z"
-        if command -v 7zz &>/dev/null; then seven_z="7zz"; fi
+        "$seven_z" x -y -o"$font_dir" "$WORK/$zip_name.zip"
+        rm "$WORK/$zip_name.zip"
+        installed_any=true
+        success "$zip_name Nerd Font installed"
+    done
 
-        "$seven_z" x -y -o"$font_dir" "$WORK/Meslo.zip"
-        rm "$WORK/Meslo.zip"
-
-        if command -v fc-cache &>/dev/null; then
-            info "Updating font cache..."
-            fc-cache -f
-        fi
-        success "Meslo Nerd Font installed"
+    if $installed_any && command -v fc-cache &>/dev/null; then
+        info "Updating font cache..."
+        fc-cache -f
     fi
 }
 
