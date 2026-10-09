@@ -90,8 +90,21 @@ PSEOF
 
 home="$tmp/home"
 mkdir -p "$home"
+
+# Invoke-GuardrailInstallerProcess starts 'powershell' as a REAL OS process (.NET
+# Process.Start, resolved by PATH like any other bare command) - that bypass is the entire
+# point of the fix this test guards, but it means a same-named PowerShell FUNCTION can no
+# longer stand in for a missing `powershell` executable the way it could before. Real Windows
+# always has powershell.exe; this harness runs through cross-platform pwsh, including on Linux
+# CI, where no file named `powershell` exists at all. A one-line shim gives PATH resolution a
+# real, executable `powershell` everywhere pwsh itself exists, by forwarding to it verbatim.
+shim_dir="$tmp/shim"
+mkdir -p "$shim_dir"
+printf '#!/bin/sh\nexec pwsh "$@"\n' >"$shim_dir/powershell"
+chmod +x "$shim_dir/powershell"
+
 # `|| true`: a harness that throws must show its output in the failure, not end the test silently.
-out="$(HOME="$home" USERPROFILE="$home" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r' || true)"
+out="$(HOME="$home" USERPROFILE="$home" PATH="$shim_dir:$PATH" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r' || true)"
 expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500))"; }
 
 expect 'binary-in-place=True'
