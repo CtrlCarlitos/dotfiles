@@ -314,6 +314,51 @@ PERL
     if [ "$crlf_count" -eq 0 ]; then result ok ssh-crlf 'SSH text files are LF'; fi
 fi
 
+#-------------------------------------------------------------------------------
+# 9. coreutils flavour. Ubuntu 26.04 is progressively replacing GNU coreutils
+#    with uutils (rust-coreutils), and the swap is SILENT. On one WSL box an
+#    apt sweep moved rust-coreutils 0.8.0 -> 0.10.0 and took over stat, wc,
+#    sort, date and readlink while cp/mv/rm stayed GNU; `sudo` became sudo-rs
+#    in the same run. Every script in this repo assumes GNU flag behaviour, so
+#    a future breakage would look like a mystery rather than a swapped binary.
+#    This probes the exact invocations the repo relies on and names the
+#    flavour, turning that mystery into one line.
+#
+#    Prompted by a real miss: while adding the pwsh install, `tr -d '\r'`
+#    behaved differently than expected on a UTF-16 file and sent a checksum
+#    extraction silently empty.
+#
+#    No Windows twin: there is no coreutils there. macOS skips - it ships BSD
+#    tools, and the call sites that care already carry a BSD fallback.
+#-------------------------------------------------------------------------------
+if [ "$(uname -s)" != Linux ]; then
+    result skip coreutils "Linux-only probe (macOS ships BSD tools; call sites carry the fallback)"
+else
+    cu_gnu="" cu_uu="" cu_other=""
+    for cu_c in stat readlink wc sort date tr cp mv rm; do
+        command -v "$cu_c" >/dev/null 2>&1 || continue
+        case "$("$cu_c" --version 2>/dev/null | head -n 1)" in
+            *"(GNU coreutils)"*)    cu_gnu="$cu_gnu $cu_c" ;;
+            *"(uutils coreutils)"*) cu_uu="$cu_uu $cu_c" ;;
+            *)                      cu_other="$cu_other $cu_c" ;;
+        esac
+    done
+    # Each probe is an invocation this repo actually makes.
+    cu_bad=""
+    stat -c '%a' / >/dev/null 2>&1                        || cu_bad="$cu_bad stat-c"
+    readlink -f / >/dev/null 2>&1                         || cu_bad="$cu_bad readlink-f"
+    printf 'x y\n' | wc -w >/dev/null 2>&1                || cu_bad="$cu_bad wc-w"
+    date -u +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1           || cu_bad="$cu_bad date-u"
+    [ "$(printf 'b\na\na\n' | sort -u | tr '\n' ' ')" = "a b " ] || cu_bad="$cu_bad sort-u"
+    [ "$(printf 'a\rb' | tr -d '\r')" = "ab" ]             || cu_bad="$cu_bad tr-d-cr"
+    [ -n "$(mktemp -d 2>/dev/null)" ]                     || cu_bad="$cu_bad mktemp-d"
+    if [ -n "$cu_bad" ]; then
+        result warn coreutils "GNU flag probes FAILED:$cu_bad - uutils:${cu_uu:- none} gnu:${cu_gnu:- none}${cu_other:+ other:$cu_other}"
+    else
+        result ok coreutils "GNU flag probes pass - uutils:${cu_uu:- none} gnu:${cu_gnu:- none}${cu_other:+ other:$cu_other}"
+    fi
+fi
+
 if [ "$errors" -gt 0 ]; then
     printf '\n%d error(s). ' "$errors"
     if $FIX; then printf '(--fix applied where safe)\n'; else printf 're-run with --fix for auto-repairable items\n'; fi

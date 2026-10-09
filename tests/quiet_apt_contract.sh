@@ -91,7 +91,12 @@ pass
 # --- wiring: enabled only once apt is the known package manager --------------------------------------------
 tpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 set_line="$(grep -n 'PKG_MANAGER="$pkg_manager"' "$tpl" | head -1 | cut -d: -f1)"
-call_line="$(grep -n 'quiet_apt_enable' "$tpl" | head -1 | cut -d: -f1)"
+# The CALL, not any mention: this used to take the first textual match, so a
+# comment that merely named quiet_apt_enable earlier in the file (the sudo
+# helper's note about the sudo() shim) looked like a call before PKG_MANAGER
+# was set and failed the ordering check. awk keeps the real line number while
+# skipping full-line comments.
+call_line="$(awk '!/^[[:space:]]*#/ && /quiet_apt_enable/ { print NR; exit }' "$tpl")"
 if [ -z "$set_line" ] || [ -z "$call_line" ] || [ "$call_line" -le "$set_line" ]; then
     fail "quiet_apt_enable must be called after PKG_MANAGER is set"
 fi
