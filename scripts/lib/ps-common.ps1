@@ -941,7 +941,7 @@ function Invoke-WingetUpgradeAll {
     }
     if (@($pending.Other).Count -gt 0) {
         $others = @($pending.Other | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
-        Write-Host ("  Not upgradeable through winget (installed another way; choco or the app itself updates it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
+        Write-Host ("  Not upgradeable through winget (installed another way; its own updater handles it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
     }
     if ($pending.Blocked) { Write-Host "  $($pending.Blocked)" -ForegroundColor Yellow }
     if ($code -ne 0 -and $installed -eq 0 -and @($pending.Rows).Count -eq 0) {

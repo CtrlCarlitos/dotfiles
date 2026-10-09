@@ -92,7 +92,7 @@ and, from a second listing, what is **still pending** (`Still pending in winget:
 winget lists some packages it cannot upgrade at all (`A newer version was found, but the install
 technology is different`: Docker Desktop installed by Chocolatey, Microsoft Edge). When it reports blocked
 upgrades, each pending package is asked about by id, and the ones it refuses move out of "still pending"
-into `Not upgradeable through winget (installed another way; choco or the app itself updates it): ...`.
+into `Not upgradeable through winget (installed another way; its own updater handles it): ...`.
 A Docker Desktop still installed by Chocolatey lands there: see
 [Docker Desktop through winget](#docker-desktop-through-winget) below.
 
