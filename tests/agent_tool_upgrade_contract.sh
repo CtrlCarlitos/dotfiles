@@ -11,7 +11,7 @@ set -euo pipefail
 # tests/dot_cli_contract.sh; this file pins the upgrade semantics.
 #
 # Executed (v2, #135): scripts/update_ai_tools.sh runs END TO END under
-# stubbed binaries (npm/npx/git/curl/claude/opencode/agy/uv/serena/graft and
+# stubbed binaries (npm/npx/git/curl/claude/opencode/agy/uv/serena and
 # a delegating chezmoi that reads the real agent catalog), and the semantics
 # are asserted from what the stubs were actually called with - the codex
 # package really comes from .chezmoidata/agents.yaml at @latest, the defer
@@ -40,10 +40,10 @@ grep -Fq '.agents.npm.codex' "$ai_ps1" ||
     fail "$ai_ps1: codex package name must be read from the agent catalog"
 grep -Fq '@latest"' "$ai_ps1" ||
     fail "$ai_ps1: codex must upgrade via @latest"
-# graft's own `graft upgrade` dies on Windows with "spawnSync npm ENOENT" (npm is npm.cmd
-# there); the Windows updater runs the npm install it wraps, via Invoke-GraftNpmInstall.
-grep -Fq 'Invoke-GraftNpmInstall' "$ai_ps1" ||
-    fail "$ai_ps1: graft must be installed through Invoke-GraftNpmInstall (graft upgrade fails on Windows)"
+# Graft was dropped: dot upgrade retires it (Invoke-GraftRetirement, executed by
+# tests/graft_retirement_contract.sh) and never upgrades it.
+grep -Fq 'Invoke-GraftRetirement' "$ai_ps1" || fail "$ai_ps1: must retire Graft"
+forbid "$ai_ps1" '@nanonets/graft@latest'
 
 [ -f "$ai_sh" ] || { fail "$ai_sh missing"; finish; }
 command -v timeout >/dev/null 2>&1 || skip "coreutils timeout not installed"
@@ -121,16 +121,6 @@ exit 0
 EOF
 chmod +x "$bin/claude"
 
-# graft: logs `upgrade` so the call (or its absence) is assertable.
-cat >"$bin/graft" <<'EOF'
-#!/bin/sh
-printf '%s prefix=%s allow=%s\n' "$*" "${NPM_CONFIG_PREFIX:-}" "${NPM_CONFIG_ALLOW_SCRIPTS:-}" >> "${GRAFT_LOG:?}"
-# `graft version` prints the installed and the latest published version.
-[ "${1:-}" = version ] && [ -n "${GRAFT_VERSION_OUT:-}" ] && printf '%b' "$GRAFT_VERSION_OUT"
-exit 0
-EOF
-chmod +x "$bin/graft"
-
 # chezmoi: delegate to the REAL binary against a scratch source carrying the
 # repo's data (the agent catalog), so `{{ .agents.npm.codex }}` and the skills
 # agent list resolve from .chezmoidata exactly as in production (#83).
@@ -148,13 +138,13 @@ chmod +x "$bin/chezmoi"
 
 run_updater() { # $1 = output file; extra env via caller's exported vars
     local out_file="$1"
-    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" GRAFT_LOG="$tmp/graft.log" \
+    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" \
         STUB_LOG="$tmp/agent-browser.log" NPM_FAKE_PREFIX="$prefix" \
         timeout 120 bash "$ai_sh" >"$out_file" 2>&1
 }
 
 # --- 1. Baseline: upgrades happen, catalog-driven, and the run completes -----
-: >"$tmp/npm.log"; : >"$tmp/graft.log"
+: >"$tmp/npm.log"
 rm -f "$prefix/bin/agent-browser"; make_agent_browser
 : >"$tmp/agent-browser.log"
 out="$tmp/run1.log"
@@ -163,14 +153,6 @@ grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" ||
     fail "codex must upgrade via npm -g <catalog package>@latest; npm saw: $(grep codex "$tmp/npm.log" || true)"
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" ||
     fail "agent-browser must be refreshed via npm -g with its allow-scripts list"
-grep -Fq 'upgrade' "$tmp/graft.log" ||
-    fail "graft must use its own self-updater (graft upgrade)"
-# npm 12 skips install scripts unless allow-listed: without the catalog's list
-# the upgraded graft crashes at startup (no tree-sitter native builds).
-grep -Eq '^upgrade .*allow=.*tree-sitter-kotlin' "$tmp/graft.log" ||
-    fail "graft upgrade must run with NPM_CONFIG_ALLOW_SCRIPTS from the catalog; graft saw: $(cat "$tmp/graft.log")"
-grep -Fq -- '--version' "$tmp/graft.log" ||
-    fail "the updater must check that graft still starts after upgrading it"
 grep -Fq 'install' "$tmp/agent-browser.log" || fail "agent-browser browser setup (install) did not run"
 grep -Fq 'doctor --json' "$tmp/agent-browser.log" ||
     fail "agent-browser verification (doctor --json) did not run"
@@ -182,14 +164,12 @@ grep -Fq 'AI Tools Update Complete' "$out" ||
     fail "the updater must survive every failure above and reach the end (#114)"
 
 # --- 2. DOTUPGRADE_DEFER suppresses the dir-recreating upgrades ---------------
-: >"$tmp/npm.log"; : >"$tmp/graft.log"
-DOTUPGRADE_DEFER=codex,graft,opencode,serena run_updater "$tmp/run2.log" || true
+: >"$tmp/npm.log"
+DOTUPGRADE_DEFER=codex,opencode,serena run_updater "$tmp/run2.log" || true
 if grep -Fq 'codex deferred' "$tmp/run2.log"; then pass; else fail "deferred codex must be reported, not upgraded"; fi
-if grep -Fq 'graft deferred' "$tmp/run2.log"; then pass; else fail "deferred graft must be reported, not upgraded"; fi
 if grep -Fq '@openai/codex@latest' "$tmp/npm.log"; then fail "DOTUPGRADE_DEFER=codex must suppress the npm @latest upgrade"; else pass; fi
 # the catalog's npm tools (markdownlint-cli2) are not agent tools: a codex defer does not hold them
 if grep -Fq 'install -g markdownlint-cli2@latest' "$tmp/npm.log"; then pass; else fail "catalog npm tools must still upgrade when codex is deferred; npm saw: $(tr '\n' ' ' <"$tmp/npm.log")"; fi
-if [ -s "$tmp/graft.log" ]; then fail "DOTUPGRADE_DEFER=graft must suppress graft upgrade"; else pass; fi
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" ||
     fail "agent-browser is not defer-listed and must still refresh"
 
@@ -223,16 +203,13 @@ else
     pass
 fi
 
-# --- 5b. graft and codex that are already current are not reinstalled ---------
-# `graft upgrade` ran every time (0.21.1 -> 0.21.1 cost 41 s) and the codex
-# `npm install -g` another ~9 s. `graft version` prints installed + latest; for npm
-# packages the installed (`npm ls -g`) and registry (`npm view`) versions are compared.
-# Anything unknown - offline, no answer - still installs.
+# --- 5b. npm tools that are already current are not reinstalled ---------------
+# The codex `npm install -g` cost ~9 s on every run. For npm packages the installed
+# (`npm ls -g`) and registry (`npm view`) versions are compared. Anything unknown -
+# offline, no answer - still installs.
 make_agent_browser
-: >"$tmp/npm.log"; : >"$tmp/graft.log"
-GRAFT_VERSION_OUT='graft 1.2.3\nlatest on npm: 1.2.3 \342\234\223 up to date\n' NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b.log" || true
-grep -Fq 'graft is current (1.2.3)' "$tmp/run5b.log" || fail "current graft must be reported, not upgraded: $(grep -i graft "$tmp/run5b.log" | head -3)"
-if grep -Eq '^upgrade ' "$tmp/graft.log"; then fail "graft 1.2.3 == latest must not run graft upgrade"; else pass; fi
+: >"$tmp/npm.log"
+NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5b.log" || true
 grep -Fq 'codex is current (9.9.9)' "$tmp/run5b.log" || fail "current codex must be reported, not reinstalled"
 if grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log"; then fail "codex 9.9.9 == latest must not reinstall"; else pass; fi
 grep -Fq 'agent-browser is current (9.9.9)' "$tmp/run5b.log" || fail "a current agent-browser must be reported, not reinstalled"
@@ -250,33 +227,34 @@ if grep -Fq 'claude.ai/install.sh' "$tmp/curl.log"; then fail "a current Claude 
 CURL_LOG="$tmp/curl.log" CLAUDE_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c-claude.log" || true
 grep -Fq 'claude.ai/install.sh' "$tmp/curl.log" || fail "a Claude Code behind the latest must re-run its installer"
 
-: >"$tmp/npm.log"; : >"$tmp/graft.log"
-GRAFT_VERSION_OUT='graft 1.2.2\nlatest on npm: 1.2.3 (update available)\n' NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
-grep -Eq '^upgrade ' "$tmp/graft.log" || fail "a stale graft must be upgraded"
+: >"$tmp/npm.log"
+NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "a stale codex must be reinstalled"
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" || fail "a stale agent-browser must be reinstalled"
 
-: >"$tmp/npm.log"; : >"$tmp/graft.log"
-GRAFT_VERSION_OUT='graft 1.2.3\nlatest: unreachable (offline?)\n' run_updater "$tmp/run5d.log" || true
-grep -Eq '^upgrade ' "$tmp/graft.log" || fail "an unreachable registry must not skip the graft upgrade"
+: >"$tmp/npm.log"
+run_updater "$tmp/run5d.log" || true
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "unknown codex versions must not skip the reinstall"
 
-# --- 6. graft installed under a non-default npm prefix -------------------------
-# `graft upgrade` runs `npm install -g` against npm's default prefix; a graft
-# living elsewhere (stale ~/.local install on WSL) failed EACCES and stayed
-# old. The updater must point npm at the prefix graft actually lives in.
+# --- 6. dot upgrade retires Graft, in the prefix it lives in -------------------
+# Graft was dropped from the dotfiles; the updater removes it (graft_retire, whose
+# own behaviour is pinned by tests/graft_retirement_contract.sh). A graft under a
+# non-default prefix (a stale ~/.local install on WSL) is uninstalled from THAT
+# prefix, not npm's default one.
 gprefix="$tmp/gprefix"
 mkdir -p "$gprefix/bin" "$gprefix/lib/node_modules/@nanonets/graft/dist"
-cp "$bin/graft" "$gprefix/lib/node_modules/@nanonets/graft/dist/cli.js"
+printf '#!/bin/sh\nexit 0\n' >"$gprefix/lib/node_modules/@nanonets/graft/dist/cli.js"
 chmod +x "$gprefix/lib/node_modules/@nanonets/graft/dist/cli.js"
 if ln -s ../lib/node_modules/@nanonets/graft/dist/cli.js "$gprefix/bin/graft" 2>/dev/null &&
     [ -L "$gprefix/bin/graft" ]; then
-    rm -f "$bin/graft"
     ln -s "$gprefix/bin/graft" "$bin/graft"
-    : >"$tmp/graft.log"
+    : >"$tmp/npm.log"
     run_updater "$tmp/run6.log" || true
-    grep -Fq "prefix=$gprefix" "$tmp/graft.log" ||
-        fail "graft under $gprefix must be upgraded with NPM_CONFIG_PREFIX pointing there; graft saw: $(cat "$tmp/graft.log")"
+    grep -Fq "uninstall -g --prefix $gprefix @nanonets/graft" "$tmp/npm.log" ||
+        fail "graft under $gprefix must be uninstalled from that prefix; npm saw: $(tr '\n' ' ' <"$tmp/npm.log")"
+    grep -Fq 'AI Tools Update Complete' "$tmp/run6.log" ||
+        fail "a graft that would not uninstall (the stub leaves it) must not abort the updater"
+    rm -f "$bin/graft"
 else
     skip "symlinks unavailable"
 fi

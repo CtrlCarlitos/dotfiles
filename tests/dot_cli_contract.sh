@@ -105,10 +105,6 @@ grep -Fq 'DOTUPGRADE_DEFER' "$ai_sh" || fail "$ai_sh: no defer hooks"
     fail "$ps1_installer: must not upgrade serena (dot upgrade owns it)"
 ! grep -Fq 'uv tool upgrade serena-agent' "$sh_installer" ||
     fail "$sh_installer: must not upgrade serena (dot upgrade owns it)"
-! grep -Fq 'Upgrading graft' "$ps1_installer" ||
-    fail "$ps1_installer: must not upgrade graft (dot upgrade owns it)"
-! grep -Fq 'Upgrading graft' "$sh_installer" ||
-    fail "$sh_installer: must not upgrade graft (dot upgrade owns it)"
 
 # The dot family runs these scripts from the SOURCE repo, resolved from
 # DOTFILES_DIR (exported by dot_zshrc) with the chezmoi source path as the

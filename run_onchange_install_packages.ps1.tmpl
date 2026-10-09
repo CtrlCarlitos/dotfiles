@@ -51,14 +51,14 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 # Hard elevation gate - exit before ANY work. Chocolatey, capability
-# installs (OpenSSH), winget (VS Build Tools), and graft's native parser
-# builds all require Administrator; running degraded once silently burns
+# installs (OpenSSH) and machine-wide winget packages all require
+# Administrator; running degraded once silently burns
 # the run_onchange trigger for the elevated follow-up (see 1.0.3 note).
 # Pure .NET check - no module autoload, safe before the PSModulePath guard.
 $__isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $__isAdmin) {
     Write-Host "This installer requires an elevated PowerShell (Administrator)." -ForegroundColor Red
-    Write-Host "  Chocolatey, OpenSSH capabilities, winget, and graft's native builds all need it." -ForegroundColor Red
+    Write-Host "  Chocolatey, OpenSSH capabilities and winget machine-wide installs all need it." -ForegroundColor Red
     Write-Host "  Open a terminal as Administrator and re-run: dot up" -ForegroundColor Yellow
     Write-Host "  (Nothing was changed - the installer will re-run fully once elevated.)" -ForegroundColor Yellow
     exit 1
@@ -1086,7 +1086,7 @@ if (-not $vsApply) {
 
 
 {{- if $agent_toolkit }}
-# Agent Toolkit (spec section 2: the cross-vendor agent layer - Serena, Graft,
+# Agent Toolkit (spec section 2: the cross-vendor agent layer - Serena,
 # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
 # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli: vendor
 # products live in vendor groups per the spec's placement rule. act joins
@@ -1244,8 +1244,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 #     converges on the catalog (Sync-OpenCodeMcp below, #230) and writes only
 #     when something differs, so a registered config is never re-serialized.
 #     opencode loads MCP ONLY from this global mcp block (surveyed live
-#     2026-09-20): without a graft entry here, every fresh opencode session
-#     starts with serena only.
+#     2026-09-20): a server missing here is missing from every session.
 # MCP servers, from .chezmoidata/agents.yaml (see #83): command + args per
 # server, consumed by the OpenCode registration and the Antigravity (agy) global
 # mcp_config.json registration (the dotfiles-mcp plugin bundle was retired).
@@ -1253,9 +1252,8 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 # Registers the catalog's MCP servers in OpenCode's GLOBAL config and CONVERGES
 # them (#230): a server whose binary is present (-Present) is added when absent,
 # and an existing entry has only its `command` repaired to the catalog's - a
-# stale `npx -y @nanonets/graft mcp` kept OpenCode's graft at a ~46 s npx cold
-# start, and free to drift from the installed graft, long after the catalog said
-# `graft mcp`. `enabled` and every other key the user set survive, the file is
+# stale `npx -y <pkg> mcp` once kept a server at a ~46 s npx cold start long
+# after the catalog named the installed binary. `enabled` and every other key the user set survive, the file is
 # written BOM-less only when something differs (a registered config is never
 # re-serialized), and the names it changed are returned.
 # Tested by executing it: tests/opencode_mcp_sync_contract.sh.
@@ -1313,8 +1311,8 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
 # agy: MCP via the TOP-LEVEL mcp_config.json, each server with
 #     forceAllToolsEager - agy marks every server's tools lazy by default,
 #     and lazy tools are only reachable through the generic call_mcp_tool
-#     invoker, which guardrail denies by design (dotfiles #175: serena and
-#     graft were effectively unusable in agy). forceAllToolsEager promotes
+#     invoker, which guardrail denies by design (dotfiles #175: serena was
+#     effectively unusable in agy). forceAllToolsEager promotes
 #     each server's tools to native mcp_<server>_<tool> entries that
 #     guardrail's registry already classifies. A plugin bundle is not an
 #     alternative: it prefixes the server name, and guardrail does not know
@@ -1325,7 +1323,6 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
 $agyGlobalMcp = "$env:USERPROFILE\.gemini\config\mcp_config.json"
 $agyWantServers = @()
 if (Get-Command serena -ErrorAction SilentlyContinue) { $agyWantServers += 'serena' }
-if (Get-Command graft -ErrorAction SilentlyContinue) { $agyWantServers += 'graft' }
 if ($agyWantServers.Count -gt 0) {
     try {
         New-Item -ItemType Directory -Force -Path (Split-Path $agyGlobalMcp) | Out-Null
@@ -1346,11 +1343,6 @@ if ($agyWantServers.Count -gt 0) {
             $serenaDef = @{ command = $mcpCatalog.serena.command; args = $mcpCatalog.serena.args; forceAllToolsEager = $true }
             if ($agyCfg.mcpServers.PSObject.Properties['serena']) { $agyCfg.mcpServers.serena = $serenaDef }
             else { $agyCfg.mcpServers | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef }
-        }
-        if ($agyWantServers -contains 'graft') {
-            $graftDef = @{ command = $mcpCatalog.graft.command; args = $mcpCatalog.graft.args; forceAllToolsEager = $true }
-            if ($agyCfg.mcpServers.PSObject.Properties['graft']) { $agyCfg.mcpServers.graft = $graftDef }
-            else { $agyCfg.mcpServers | Add-Member -MemberType NoteProperty -Name graft -Value $graftDef }
         }
         [System.IO.File]::WriteAllText($agyGlobalMcp, ($agyCfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
         Write-Host "  agy MCP registered in global mcp_config.json (forceAllToolsEager): $($agyWantServers -join ', ')" -ForegroundColor Green
@@ -1386,114 +1378,13 @@ if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
         Write-Host "  Warning: could not repair agy global mcp_config.json - $_" -ForegroundColor Red
     }
 }
-
-# Graft (trailhq/Graft) - codebase context graph. Global CLI here;
-#     per-repo activation is `graft init` (documented in
-#     docs/agent-context-tools.md). Telemetry off per repo decision.
-#     --allow-scripts: npm 12 blocks install scripts by default, which
-#     silently skips graft's tree-sitter parser native builds - the binary
-#     then crashes with "No native build was found" (node-gyp-build). The
-#     allowlist is the exact list npm's own warning prints for this graft
-#     version; if a graft update changes its parser set, npm's error output
-#     prints the new list to paste here. (Single-quoted because PS 5.1
-#     splits unquoted commas into multiple native args.) A command shim is not
-#     sufficient proof of health: native parser failures leave graft.cmd on
-#     PATH but make every real command fail.
-$graftWorks = $false
-if (Get-Command graft -ErrorAction SilentlyContinue) {
-    try { graft --version 2>&1 | Out-Null; $graftWorks = ($LASTEXITCODE -eq 0) } catch { $graftWorks = $false }
-}
-if (-not $graftWorks) {
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        Write-Host "  Warning: npm not found - skipping Graft" -ForegroundColor Red
-    } else {
-        $pythonPath = ""
-        $pythonCandidate = ""
-        if (Get-Command python -ErrorAction SilentlyContinue) {
-            try { $pythonCandidate = (& python -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim() } catch { $pythonCandidate = "" }
-        }
-        # The official Python installer commonly exposes only the `py` launcher
-        # in a fresh session. Give node-gyp the resolved interpreter path rather
-        # than assuming its directory has already reached PATH.
-        if (-not $pythonCandidate -and (Get-Command py -ErrorAction SilentlyContinue)) {
-            try { $pythonCandidate = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim() } catch { $pythonCandidate = "" }
-        }
-        if (Test-Path $pythonCandidate) {
-            try {
-                $pythonSupported = (& $pythonCandidate -c "import sys; print('supported' if sys.version_info >= (3, 8) else 'unsupported')" 2>$null | Out-String).Trim()
-                if ($pythonSupported -eq "supported") { $pythonPath = $pythonCandidate }
-            } catch { $pythonPath = "" }
-        }
-        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        $vcToolsPath = ""
-        if (Test-Path $vswhere) {
-            try { $vcToolsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Out-String).Trim() } catch { $vcToolsPath = "" }
-        }
-        if (-not (Test-Path $pythonPath)) {
-            Write-Host "  Warning: Graft needs Python 3.8+ for native parser builds - skipping Graft" -ForegroundColor Red
-            Write-Host "    Install Python manually: winget install Python.Python.3.13" -ForegroundColor Yellow
-        } elseif (-not $vcToolsPath) {
-            # 1.0.4 policy flip: the elevation gate guarantees admin whenever
-            # this script runs, so instead of diagnosing-and-skipping (the
-            # old stance - the operator had to winget the Build Tools by
-            # hand, then a version bump was needed to re-fire graft), install
-            # the workload right here. One elevated dotup does the whole
-            # chain: Build Tools -> graft -> verify -> telemetry off. Large
-            # (multi-GB) and slow (~10-20 min); capped at 1800s and streamed,
-            # same never-silent contract as the choco loop. On failure the
-            # old manual guidance is printed and graft is skipped - degraded
-            # on ONE prerequisite, never silently.
-            Write-Host "  Graft needs the C++ Build Tools - installing via winget (one-time, multi-GB, ~10-20 min)..." -ForegroundColor Yellow
-            Invoke-WithTimeout -Description "VS Build Tools install" -Seconds 1800 -Action {
-                winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
-            }
-            # Re-check vswhere now that the installer ran.
-            if (Test-Path $vswhere) {
-                try { $vcToolsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Out-String).Trim() } catch { $vcToolsPath = "" }
-            }
-        }
-        if (-not (Test-Path $pythonPath)) {
-            # unchanged: python missing stays a hard skip (small, fast, and
-            # the py-launcher fallback above already covers the usual shape)
-        } elseif (-not $vcToolsPath) {
-            Write-Host "  Warning: Build Tools still not detected after the winget attempt - skipping Graft" -ForegroundColor Red
-            Write-Host "    Install the C++ Build Tools manually: winget install Microsoft.VisualStudio.2022.BuildTools --override `"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"" -ForegroundColor Yellow
-        } else {
-            Write-Host "  Installing Graft (npm -g)..." -ForegroundColor Yellow
-            $priorNpmConfigPython = $env:NPM_CONFIG_PYTHON
-            $env:NPM_CONFIG_PYTHON = $pythonPath
-            Invoke-WithTimeout -Description "Graft install" -Seconds 300 -Action {
-                $graftInstallOutput = npm install -g '--allow-scripts={{ join "," .agents.npm.graft_allow_scripts }}' @nanonets/graft --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | Out-String
-                if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE): $($graftInstallOutput.Trim())" }
-            }
-            if ($null -eq $priorNpmConfigPython) {
-                Remove-Item Env:\NPM_CONFIG_PYTHON -ErrorAction SilentlyContinue
-            } else {
-                $env:NPM_CONFIG_PYTHON = $priorNpmConfigPython
-            }
-            # Rebuild so the fresh graft shim resolves in this session. npm/npx
-            # steps below use the same Machine+User rebuild.
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-            if (Get-Command graft -ErrorAction SilentlyContinue) {
-                try { graft --version 2>&1 | Out-Null; $graftWorks = ($LASTEXITCODE -eq 0) } catch { $graftWorks = $false }
-            }
-            if (-not $graftWorks) {
-                Write-Host "  Warning: Graft install did not produce a working CLI; inspect the npm output above, repair prerequisites, then rerun chezmoi apply" -ForegroundColor Red
-            }
-        }
-    }
-}
-if ($graftWorks) {
-    # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
-    # Its "telemetry: off. Nothing further will be recorded or sent." printed on every `dot up`.
-    Invoke-Quietly -Description "Failed to disable Graft telemetry" -Action { $null = graft telemetry disable 2>$null }
-}
-# graft-install-section: end (contract-test extraction boundary)
-# graft's background index build must not flash a terminal window (Repair-GraftBuildWindow,
-# scripts/lib/ps-skills.ps1, inlined above). Every run: a graft reinstall puts the line back.
-if (Get-Command graft -ErrorAction SilentlyContinue) { Write-GraftBuildWindowResult -Result (Repair-GraftBuildWindow) }
 {{- end }}
+
+# Graft was dropped from the dotfiles (2026-10-09): remove it where an earlier run installed it.
+# Every run and whatever the groups say (it was installed under agent_toolkit, which may since
+# have been turned off); quiet when there is nothing to do (Invoke-GraftRetirement,
+# scripts/lib/ps-skills.ps1, inlined above).
+Invoke-GraftRetirement
 
 {{- if $opencode_cli }}
 # choco abandons lib-bkp\opencode whenever an upgrade ran while an opencode
@@ -1762,17 +1653,8 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
     # MCP registration for Codex lives HERE, not in the serena section above
     # (see that section's note): codex only exists from this point on a
     # fresh/reinstall machine. Idempotent: serena's own setup tool rewrites
-    # its entry; graft goes in via the codex CLI only while config.toml does
-    # not name it yet.
+    # its entry.
     $null = Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -NoStream -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
-    $codexToml = "$env:USERPROFILE\.codex\config.toml"
-    $codexHasGraft = $false
-    if (Test-Path $codexToml) {
-        try { $codexHasGraft = ((Get-Content $codexToml -Raw) -match '(?m)^\[mcp_servers\.graft\]') } catch { Write-Verbose "codex config.toml unreadable: $($_.Exception.Message)" }
-    }
-    if (-not $codexHasGraft) {
-        Invoke-Quietly -Description "Failed to register graft MCP for Codex" -Action { codex mcp add graft -- graft mcp 2>$null }
-    }
 }
 {{- end }}
 
@@ -1971,10 +1853,10 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     }
 
     # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
-    # Probes once per session which tools can see the code (graft graph built
-    # and covering the language, serena LSP, rg, grep), routes each question
-    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
-    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
+    # Probes once per session which tools can see the code (a repo graph when
+    # one is built, serena LSP, rg, grep), routes each question down that
+    # ladder, and stops re-asking a semantic tool after one empty result.
+    # Added 2026-09-24 after graft's (since removed) "graph first for ANY
     # task" block cost every session in this repo two empty queries (the graph
     # covers one Lua file here) - docs/skills-install-strategy.md.
     Invoke-SkillsSource -Label "code-search skill" -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {

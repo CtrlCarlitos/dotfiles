@@ -223,15 +223,13 @@ $script:services = @{}
 function Row($id, $parent, $name, $cmd, $path = '') { [pscustomobject]@{ Id = $id; ParentId = $parent; Name = $name; Path = $path; CommandLine = $cmd } }
 $bgShell = Row 900 4242 'cmd.exe' 'cmd.exe /d /s /c "pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH""'
 $bgChild = Row 901 900 'pwsh.exe' 'pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH"'
-$graftTop = Row 910 4343 'cmd.exe' 'cmd.exe /d /s /c "npx ^"-y^" ^"@nanonets/graft^" ^"mcp^""'
-$graftNode = Row 911 910 'node.exe' 'node npx-cli.js -y @nanonets/graft mcp'
 $liveClaude = Row 200 1 'claude.exe' 'claude' 'C:\Users\u\.local\bin\claude.exe'
 $ownedShell = Row 920 200 'cmd.exe' 'cmd.exe /d /s /c "pwsh -Command "$__claudeCodeScript = $env:CLAUDE_CODE_SHELL_LAUNCH""'
 $deskClaude = Row 501 1 'claude.exe' 'claude' 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.26454.0\claude.exe'
 $deskChild = Row 930 501 'cmd.exe' 'cmd.exe /c "pwsh -Command "$__claudeCodeScript = 1""'
-$script:ptable = @($bgShell, $bgChild, $graftTop, $graftNode, $liveClaude, $ownedShell, $deskClaude, $deskChild)
+$script:ptable = @($bgShell, $bgChild, $liveClaude, $ownedShell, $deskClaude, $deskChild)
 Write-Output ('orphans=' + ((@(Get-OrphanAgentHelper) | ForEach-Object { "$($_.Kind)@$($_.Id)" }) -join ','))
-$script:table = @((P 'cmd' 900 'C:\Windows\System32\cmd.exe'), (P 'cmd' 910 'C:\Windows\System32\cmd.exe'))
+$script:table = @((P 'cmd' 900 'C:\Windows\System32\cmd.exe'))
 $script:stopped = @(); $script:prompts = 0
 $script:answers = [System.Collections.Queue]::new(); $script:answers.Enqueue('y')
 $result = @(Invoke-LiveSessionStop -Name @('opencode', 'claude', 'codex', 'agy', 'serena'))
@@ -280,8 +278,8 @@ PSEOF
     expect 'desk-service-stopped=CodexSandboxService.OpenAI.Codex'
     expect 'desk-service-idle=0||prompts=0'
     # top of each orphaned chain only; owned by a live session (or by Claude DESKTOP, not a session) differs
-    expect 'orphans=Claude Code background task@900,graft MCP server@910,Claude Code background task@930'
-    expect 'orphans-stopped=900,910|prompts=1'
+    expect 'orphans=Claude Code background task@900,Claude Code background task@930'
+    expect 'orphans-stopped=900|prompts=1'
     expect 'server-label=True'
     # A console agent ended by taskkill never switches off its TUI's terminal modes; they print as
     # stray characters. Stop-AgentProcess -ResetTerminal writes the switch-offs to its console

@@ -28,7 +28,7 @@ Toggle package groups (space=toggle, a=all, enter=confirm)
 > [x] core              Terminal fundamentals (git, zsh, tmux, node, neovim...)
   [x] modern_cli        Modern CLI replacements (bat, eza, starship, delta...)
   [x] fonts             Nerd Fonts (required for Starship icons)
-  [x] agent_toolkit     Cross-vendor agent layer (Serena, Graft, act...)
+  [x] agent_toolkit     Cross-vendor agent layer (Serena, act...)
   [x] opencode_cli      OpenCode CLI + Superpowers + skills + guardrail
   [ ] opencode_desktop  OpenCode Desktop app
   [x] claude_cli        Claude Code CLI + Superpowers + skills + guardrail

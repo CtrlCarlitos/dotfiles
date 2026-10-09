@@ -1256,7 +1256,7 @@ install_apt() {
 # into both branches and had already drifted: brew never ran
 # configure_claude_attribution or the VS Code settings (its Darwin arm was
 # unreachable), and apt repeated the npm-sudo decision per site, ignoring
-# it at the graft/npm@latest call sites.
+# it at the npm@latest call sites.
 #-------------------------------------------------------------------------------
 
 # pkg_install <pkg...> - install a package with the detected manager.
@@ -1543,7 +1543,7 @@ install_claude_cli() {
 }
 
 install_agent_toolkit() {
-    # Agent toolkit (spec §2: the cross-vendor agent layer - Serena, Graft,
+    # Agent toolkit (spec §2: the cross-vendor agent layer - Serena,
     # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
     # claude_cli, agy to antigravity_cli, OpenCode to opencode_cli: vendor
     # products live in vendor groups per the spec's placement rule).
@@ -1705,14 +1705,12 @@ install_agent_toolkit() {
     fi
 
     # opencode: global config mcp keys (merge, never clobber the plugin
-    # key). opencode loads MCP ONLY from this global block - graft needs an
-    # entry here too, or every fresh session starts with serena only
-    # (surveyed live 2026-09-20).
+    # key). opencode loads MCP ONLY from this global block - a server missing
+    # here is missing from every session (surveyed live 2026-09-20).
     # The registration CONVERGES on the catalog (#230): a server whose binary is
     # present is added when absent, and an existing entry has only its `command`
-    # repaired - a stale `npx -y @nanonets/graft mcp` kept OpenCode's graft at a
-    # ~46 s npx cold start (and free to drift from the installed graft) long
-    # after the catalog said `graft mcp`. `enabled` and every other key the user
+    # repaired - a stale `npx -y <pkg> mcp` once kept a server at a ~46 s npx
+    # cold start long after the catalog named the installed binary. `enabled` and every other key the user
     # set survive, and nothing is written when nothing differs. Prints the names
     # it changed. Tested by executing it: tests/opencode_mcp_sync_contract.sh.
     opencode_mcp_sync() {
@@ -1761,8 +1759,8 @@ PYEOF
     # agy: MCP via the TOP-LEVEL mcp_config.json, each server with
     # forceAllToolsEager - agy marks every server's tools lazy by default,
     # and lazy tools are only reachable through the generic call_mcp_tool
-    # invoker, which guardrail denies by design (dotfiles #175: serena and
-    # graft were effectively unusable in agy). forceAllToolsEager promotes
+    # invoker, which guardrail denies by design (dotfiles #175: serena was
+    # effectively unusable in agy). forceAllToolsEager promotes
     # each server's tools to native mcp_<server>_<tool> entries that
     # guardrail's registry already classifies. A plugin bundle is not an
     # alternative: it prefixes the server name, and guardrail does not know
@@ -1771,7 +1769,6 @@ PYEOF
     AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
     AGY_WANT=""
     command -v serena &>/dev/null && AGY_WANT="serena"
-    command -v graft &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}graft"
     if [ -n "$AGY_WANT" ]; then
         info "Registering MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)..."
         mkdir -p "$(dirname "$AGY_GLOBAL_MCP")"
@@ -1825,32 +1822,6 @@ PYEOF
         else
             warn "could not repair agy global mcp_config.json - continuing"
         fi
-    fi
-
-    # Graft (trailhq/Graft) - codebase context graph. Global CLI here;
-    # per-repo activation is `graft init` (documented in
-    # docs/agent-context-tools.md). Telemetry off per repo decision.
-    # $SUDO on the install: apt-Node's global prefix is system-owned (plain
-    # npm -g fails EACCES); brew-Node's prefix is user-writable (no sudo).
-    # --allow-scripts: npm 12 blocks install scripts by default, which
-    # silently skips graft's tree-sitter parser native builds - the binary
-    # then crashes with "No native build was found" (node-gyp-build). The
-    # allowlist is the exact list npm's own warning prints for this graft
-    # version; if a graft update changes its parser set, npm's error output
-    # prints the new list to paste here.
-    if command -v npm &>/dev/null; then
-        if ! command -v graft &>/dev/null; then
-            info "Installing Graft (npm -g)..."
-            net_timeout 300 $npm_sudo npm install -g --allow-scripts={{ join "," .agents.npm.graft_allow_scripts }} @nanonets/graft \
-                || warn "Graft install failed - skipping"
-        fi
-        # Upgrades: `dot upgrade` only (graft self-updater, defer-aware there).
-        # shellcheck disable=SC2015  # A && B || true is the intended shape here (graft absent = nothing to do)
-        # >/dev/null: its "telemetry: off. Nothing further will be recorded or sent." printed every run.
-        command -v graft &>/dev/null && net_timeout 60 graft telemetry disable >/dev/null \
-            || true
-    else
-        warn "npm not found - skipping Graft"
     fi
 
     # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
@@ -1984,14 +1955,9 @@ install_chatgpt_cli() {
         # MCP registration for Codex lives HERE, not in the serena section
         # above (see that section's note): codex only exists from this point
         # on a fresh/reinstall machine. Idempotent: serena's own setup tool
-        # rewrites its entry; graft goes in via the codex CLI only while
-        # config.toml does not name it yet.
+        # rewrites its entry.
         serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
             || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
-        if ! grep -Fq '[mcp_servers.graft]' "$HOME/.codex/config.toml" 2>/dev/null; then
-            net_timeout 60 codex mcp add graft -- graft mcp \
-                || warn "graft MCP registration for Codex failed - continuing"
-        fi
     fi
 }
 
@@ -2525,6 +2491,12 @@ main() {
     # VS Code settings + extensions - hoisted out of install_apt (#124) so the
     # Darwin settings arm is reachable on macOS too.
     configure_vscode
+
+    # Graft was dropped from the dotfiles (2026-10-09): remove it where an
+    # earlier run installed it. Every run and whatever the groups say (it was
+    # installed under agent_toolkit, which may since have been turned off);
+    # quiet when there is nothing to do (graft_retire, scripts/lib/agent-skills.sh).
+    graft_retire "$npm_sudo"
 
 {{- if $agent_toolkit }}
     install_agent_toolkit

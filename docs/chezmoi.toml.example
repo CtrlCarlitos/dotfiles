@@ -46,7 +46,7 @@
     # fonts — Nerd Fonts: MesloLGS NF (for terminal/Starship)
     fonts = true
 
-    # agent_toolkit — Cross-vendor agent layer: Serena, Graft, act,
+    # agent_toolkit — Cross-vendor agent layer: Serena, act,
     #                 Playwright Chromium.
     agent_toolkit = true
 

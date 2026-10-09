@@ -289,8 +289,9 @@ on the rendered installer and on the plain scripts that set strict mode.
 Its companion for native commands: under `$ErrorActionPreference = 'Stop'`,
 Windows PowerShell 5.1 turns a native command's **stderr** into a terminating
 error, so a command whose answer is its exit code or its output (`npm ls`,
-`npm install -g`) is run with the preference temporarily `'Continue'`
-(`Test-NpmGlobalCurrent`, `Invoke-GraftNpmInstall` in `scripts/lib/ps-common.ps1`).
+`npm install -g`, `npm uninstall -g`) is run with the preference temporarily `'Continue'`
+(`Test-NpmGlobalCurrent` in `scripts/lib/ps-common.ps1`, `Invoke-GraftRetirement` in
+`scripts/lib/ps-skills.ps1`).
 
 ---
 

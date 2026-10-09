@@ -94,7 +94,7 @@ jobs:
           $failed = $false
 
           $expectedCommands = @(
-            "git", "chezmoi", "nvim", "rg", "agy", "serena", "graft", "tmux",
+            "git", "chezmoi", "nvim", "rg", "agy", "serena", "tmux",
             "starship", "zoxide", "direnv", "lazygit", "bat", "eza", "fd", "delta", "gum"
           )
           foreach ($cmd in $expectedCommands) {
@@ -104,21 +104,6 @@ jobs:
               Write-Host "::error::$cmd not found on PATH"
               $failed = $true
             }
-          }
-
-          # Get-Command only proves a graft shim exists. This exercises the
-          # native tree-sitter modules that have historically failed to build.
-          try {
-            graft --version 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "  OK: graft --version"
-            } else {
-              Write-Host "::error::graft --version failed (exit $LASTEXITCODE)"
-              $failed = $true
-            }
-          } catch {
-            Write-Host "::error::graft --version failed: $_"
-            $failed = $true
           }
 
           # tmux is psmux's alias (the native Windows tmux). agy is the
@@ -231,7 +216,7 @@ jobs:
               FAILED=1
             fi
           }
-          for cmd in git chezmoi nvim rg agy serena graft starship zoxide direnv lazygit bat eza fd delta gum; do
+          for cmd in git chezmoi nvim rg agy serena starship zoxide direnv lazygit bat eza fd delta gum; do
             check "$cmd"
           done
 
@@ -299,7 +284,7 @@ jobs:
               FAILED=1
             fi
           }
-          for cmd in git chezmoi nvim rg agy serena graft starship zoxide direnv lazygit bat eza fd delta gum; do
+          for cmd in git chezmoi nvim rg agy serena starship zoxide direnv lazygit bat eza fd delta gum; do
             check "$cmd"
           done
 

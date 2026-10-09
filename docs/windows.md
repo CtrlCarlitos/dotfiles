@@ -8,8 +8,8 @@ This guide covers Windows-specific configuration for a seamless development expe
 ### Run `dot up` as Administrator
 
 The chezmoi installer hard-requires an elevated terminal: Chocolatey,
-OpenSSH capabilities, winget (VS Build Tools), and graft's native parser
-builds all need Administrator. A non-elevated `dot up` exits 1 **before
+OpenSSH capabilities and machine-wide winget installs all need
+Administrator. A non-elevated `dot up` exits 1 **before
 changing anything**, and chezmoi does not record failed scripts — the next
 elevated `dot up` re-runs the installer with every admin step intact.
 (Never run it half-elevated by ignoring the warning: older versions
@@ -77,8 +77,8 @@ check below.
 
 **Where the time goes.** A Windows `dot upgrade` took 13 minutes with no breakdown, so each script now
 marks its sections (sessions, Docker Desktop, choco, winget, VS Code extensions, AI tools; inside the AI
-tools: npm packages, curated skills, guardrail, Claude Code, OpenCode, Playwright, agent-browser, Serena and
-Graft) and ends with one line, for example `Timings (dot upgrade, 13m03s): choco 6m10s, AI tools 4m20s, ...`,
+tools: npm packages, curated skills, guardrail, Claude Code, OpenCode, Playwright, agent-browser, Serena,
+Graft retirement) and ends with one line, for example `Timings (dot upgrade, 13m03s): choco 6m10s, AI tools 4m20s, ...`,
 listing sections of 5 seconds or more, slowest first (`DOT_TIMING_MIN_SECONDS` changes the floor), plus the
 same line for the AI-tools part. Time spent answering a prompt (stop sessions, stop Docker) is its own
 section, `your answers`, so it is not counted as the work it interrupted. The line is appended to `upgrade.log` (Linux and macOS:
@@ -164,7 +164,7 @@ What the AI-tools step does on Windows:
 | Tool | Behavior |
 |---|---|
 | Codex (npm package) | skipped when `npm ls -g` already matches the registry's latest (`codex is current (...)`); an unreachable registry counts as "not current" |
-| Graft | skipped when `graft version` reports the installed version equals the latest published one. Otherwise installed with `npm install -g @nanonets/graft@latest` (with the installer's allow-scripts list), **not** `graft upgrade`, which fails on Windows with `spawnSync npm ENOENT`. Afterwards `graft --version` must start, and graft's Codex hook paths in `~\.codex\hooks.json` are normalized to forward slashes |
+| Graft | no longer installed or upgraded (removed 2026-10-09); `Invoke-GraftRetirement` removes it where an earlier run left it, silently when there is nothing to do. See [Graft (removed)](agent-context-tools.md#graft-removed) |
 | OpenCode | `choco upgrade opencode`; a legacy npm-global `opencode-ai` shim is removed |
 | Claude Code | the native installer is re-run (URL from `versions.claude_install_ps1`); deliberately **not** `claude update`, since `dot upgrade` is meant to run with every agent closed. Linux, macOS and WSL do the same |
 | Skills | per-source: skipped when every skill is present and upstream HEAD equals the commit recorded in `%USERPROFILE%\.local\state\dotfiles\skills-sources`; `DOT_SKILLS_FORCE=1` forces a reinstall. See [Skills install strategy](skills-install-strategy.md) |
@@ -192,7 +192,6 @@ does the session you are reading this in. `dot upgrade` scans for those processe
 | Live process | Deferred |
 |---|---|
 | `codex` | the Codex npm package |
-| `opencode`, `claude`, `codex` or `agy` | Graft (every hook event resolves its directory) |
 | `serena` | Serena (`uv tool upgrade` recreates its environment) |
 | `opencode` | OpenCode |
 
@@ -227,11 +226,10 @@ never defers a CLI upgrade, and closing it loses nothing.
 Background work is covered too:
 
 - A session's own background work - Claude Code's background tasks (what `/exit` asks about),
-  the MCP servers an agent starts (graft, Serena), the language servers OpenCode starts - is
+  the MCP servers an agent starts (Serena), the language servers OpenCode starts - is
   its child process tree and stops with the session.
-- What an ENDED session left running (a background task kept alive, an orphaned graft MCP
-  server) is listed as "Background work still running after its session ended". A leftover
-  graft MCP server keeps graft's files open, so graft's upgrade waits while one runs.
+- What an ENDED session left running (a Claude Code background task kept alive) is listed as
+  "Background work still running after its session ended".
 - `opencode serve` / `opencode web` is listed as "OpenCode server": it is a session (its
   upgrade waits) but not an interactive one.
 - Codex's app-server daemon is not offered: with no Codex session left it is stopped
@@ -494,7 +492,7 @@ Rules learned the hard way when changing the Windows scripts:
   (`tests/ps_script_scope_vars_contract.sh`; it broke the first Windows `dot up` once).
 - **Native stderr on Windows PowerShell 5.1:** under `$ErrorActionPreference = 'Stop'` any
   stderr line from a native command becomes a terminating error. Probe natives under
-  `Continue` and judge by exit code, as `Test-NpmGlobalCurrent` and `Invoke-GraftNpmInstall` do.
+  `Continue` and judge by exit code, as `Test-NpmGlobalCurrent` and `Invoke-GraftRetirement` do.
 - **`jq.exe` emits CRLF** under Git Bash; every `jq` call in `scripts/*.sh` carries `jq -b`
   (`tests/jq_binary_contract.sh`).
 - **Twins:** a change to a `.sh` / `.ps1` pair, or to one PowerShell profile, is a bug in

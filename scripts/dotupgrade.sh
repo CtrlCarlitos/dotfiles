@@ -171,7 +171,6 @@ stop_codex_daemon() {
 live codex || stop_codex_daemon
 DEFER=""
 live codex && DEFER="codex"
-live opencode claude codex agy && DEFER="${DEFER:+$DEFER,}graft"
 live serena && DEFER="${DEFER:+$DEFER,}serena"
 live opencode && DEFER="${DEFER:+$DEFER,}opencode"
 export DOTUPGRADE_DEFER="$DEFER"

@@ -37,7 +37,6 @@ Full feature inventory: [github.com/CtrlCarlitos/devcontainer-features](https://
     "ghcr.io/CtrlCarlitos/devcontainer-features/opencode:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/antigravity-cli:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/serena:1": {},
-    "ghcr.io/CtrlCarlitos/devcontainer-features/graft:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/modern-cli:1": {}
   }
 }
@@ -129,7 +128,6 @@ features.
     "ghcr.io/CtrlCarlitos/devcontainer-features/antigravity-cli:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/codex:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/serena:1": {},
-    "ghcr.io/CtrlCarlitos/devcontainer-features/graft:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/curated-skills:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/guardrail:1": {},
     "ghcr.io/CtrlCarlitos/devcontainer-features/playwright:1": {
@@ -139,7 +137,7 @@ features.
 }
 ```
 
-This maps dotfiles' `agent_toolkit` bundle to Serena, Graft, and optional
+This maps dotfiles' `agent_toolkit` bundle to Serena and optional
 Playwright. CLI features map to their individual CLIs; `curated-skills` and
 `guardrail` provide the cross-agent integrations. Playwright downloads a
 browser and should be omitted from containers that do not need browser

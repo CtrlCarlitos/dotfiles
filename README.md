@@ -112,7 +112,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 | **core** | git, zsh, tmux, node 24, neovim, ripgrep... | ✅ | ✅ | ✅ | ✅ | `runtime_core` |
 | **modern_cli** | bat, eza, fd, starship, delta, lazygit... | ✅ | ✅ | ✅ | ✅ | `modern-cli` |
 | **fonts** | Nerd Fonts (for Starship icons) | ✅ | ✅ | ✅ | ✅ | `nerd-font` |
-| **agent_toolkit** | Serena, Graft, curated skills, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `graft` `curated-skills` `playwright` |
+| **agent_toolkit** | Serena, curated skills, act, Playwright | ✅ | ✅ | ✅ | ✅ | `serena` `curated-skills` `playwright` |
 | **opencode_cli** | OpenCode CLI + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `opencode` |
 | **opencode_desktop** | OpenCode Desktop app | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **claude_cli** | Claude Code + Superpowers + skills + guardrail | ✅ | ✅ | ✅ | ✅ | `claude-code` |
@@ -180,7 +180,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Git](docs/git.md) | Line endings, gitconfig defaults, delta, and aliases |
 | [Terminal Experience](docs/terminal.md) | Windows Terminal, VS Code terminal, OpenCode theme, agent keys, clipboard, SSH hosts |
 | [Remote Agent Sessions](docs/remote-agent-sessions.md) | tmux/psmux across desk and phone: canonical keys, detach/attach, recovery |
-| [Agent Context Tools](docs/agent-context-tools.md) | Serena + Graft — what they do and how to use them |
+| [Agent Context Tools](docs/agent-context-tools.md) | Serena — what it does and how to use it (and why Graft was removed) |
 | [Menu Demo](docs/menu-demo.md) | What the selection menu looks like |
 | [Config Example](docs/chezmoi.toml.example) | Complete chezmoi.toml with all options |
 | [VS Code](docs/vscode.md) | Managed extensions, settings tiers, and per-machine overrides |
@@ -255,7 +255,7 @@ and `dot docker-compact` (shrink Docker Desktop's data disk,
 
 **Run `dot up` and `dot upgrade` with no agent or harness running** (Claude
 Code, Codex, OpenCode, `agy`, Serena, and the session you are reading this in).
-Tools such as Graft and Codex cannot be replaced under a live session. If one is
+Tools such as Codex and Serena cannot be replaced under a live session. If one is
 live, `dot upgrade` defers that tool and reports `Deferred (live sessions): ...`
 at the end; on an interactive console it first offers to stop the blocking
 sessions. Details: [docs/windows.md](docs/windows.md#when-to-run-it-with-every-agent-session-closed).

@@ -7,7 +7,7 @@
 # and cannot be shared. What CAN drift is the data inside it, and it had:
 # the MCP server table was written six times (four in the .sh alone - the
 # agent_toolkit block exists once under install_apt and once under
-# install_brew, byte for byte), the graft allow-scripts list three times, the
+# install_brew, byte for byte), an npm allow-scripts list three times, the
 # Codex package name and the skills-CLI agent list four times each.
 #
 # Guardrail is deliberately absent: its install logic and pin are owned by the
@@ -30,15 +30,6 @@ agents:
     serena:
       command: serena
       args: [start-mcp-server, --context, ide-assistant]
-    graft:
-      # The installed binary, NOT `npx -y @nanonets/graft mcp`: with the npx
-      # form agy exposed zero graft tools at all (a slow npx cold start is
-      # the prime suspect, #175), and every machine that registers graft's
-      # MCP also has the global npm install from the installers. `graft mcp`
-      # starts instantly and cannot resolve a different graft than the
-      # installed one.
-      command: graft
-      args: [mcp]
 
   # Serena's web dashboard opens a browser tab every time a client starts the
   # MCP server (one per agent per session). false keeps the dashboard running
@@ -63,22 +54,6 @@ agents:
     # installed by its native installer, whose releases carry the same version numbers.
     # dot upgrade re-runs that installer (~20 s) only when `claude --version` differs.
     claude_code_version: "@anthropic-ai/claude-code"
-    # Graft's global install must let npm run these packages' native-build
-    # scripts (tree-sitter grammars); npm 11 blocks lifecycle scripts unless
-    # allowed explicitly. Order preserved as installed.
-    graft_allow_scripts:
-      - "@nanonets/graft"
-      - tree-sitter
-      - tree-sitter-go
-      - tree-sitter-java
-      - tree-sitter-kotlin
-      - tree-sitter-php
-      - tree-sitter-python
-      - "@davisvaughan/tree-sitter-r"
-      - tree-sitter-swift
-      - tree-sitter-typescript
-      - tree-sitter-cli
-      - tree-sitter-javascript
 
   skills:
     # `skills add ... -a <agents>`: which agent CLIs the curated skills are

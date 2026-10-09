@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Codex MCP registration contract: `serena setup codex` and the graft MCP
-# entry must be registered AFTER the Codex CLI install in BOTH installer
-# twins. The registration used to live in the serena section, which runs
+# Codex MCP registration contract: `serena setup codex` must run AFTER the
+# Codex CLI install in BOTH installer twins. The registration used to live in the serena section, which runs
 # before the install: on a machine where codex is absent until that very run
 # (fresh setup, or a deliberate removal + reinstall) the early call skipped
 # and codex stayed MCP-less forever (observed live 2026-09-29, codex 0.159.0
@@ -17,7 +16,8 @@ sh_tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 
 order_check() { # $1 = file, $2 = install marker, $3 = twin label
     grep -Fq 'serena setup codex' "$1" || fail "$1: serena setup codex missing"
-    grep -Fq 'codex mcp add graft' "$1" || fail "$1: graft MCP registration for codex missing"
+    # Graft was dropped (2026-10-09): nothing registers it for Codex any more.
+    ! grep -Fq 'codex mcp add graft' "$1" || fail "$1: graft must no longer be registered for codex"
     local count install_line setup_line
     count=$(grep -cF 'serena setup codex' "$1")
     [ "$count" -eq 1 ] || fail "$3: serena setup codex must appear on exactly one line (the early skip is the bug); got $count"

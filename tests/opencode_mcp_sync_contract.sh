@@ -3,11 +3,11 @@ set -euo pipefail
 
 # OpenCode's MCP registration must CONVERGE on the catalog, not merely register
 # what is absent (#230). The installers used to add a server only when its name
-# was missing from opencode.json (`grep -q '"graft"'` / `-notmatch '"graft"'`),
-# so an entry written in an older form kept that form forever: OpenCode started
-# graft through `npx -y @nanonets/graft mcp` (a ~46 s cold start, and a graft
-# that can drift from the installed one) long after .chezmoidata/agents.yaml
-# said `graft mcp`. agy's registration already refreshed its keys every run;
+# was missing from opencode.json (`grep -q '"<name>"'` / `-notmatch`), so an
+# entry written in an older form kept that form forever: OpenCode started a
+# server through `npx -y <pkg> mcp` (a ~46 s cold start, and a copy that can
+# drift from the installed one) long after .chezmoidata/agents.yaml named the
+# installed binary. agy's registration already refreshed its keys every run;
 # OpenCode's did not.
 #
 # Both installer twins (invariant #10) are rendered from the real templates, the
@@ -37,9 +37,8 @@ q() { # $1 = json file, $2 = python expression over d -> compact JSON
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8-sig")); print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$1" "$2"
 }
 
-stale='{"plugin":["superpowers"],"mcp":{"graft":{"type":"local","command":["npx","-y","@nanonets/graft","mcp"],"enabled":false},"custom":{"type":"local","command":["mine"],"enabled":true}}}'
+stale='{"plugin":["superpowers"],"mcp":{"serena":{"type":"local","command":["npx","-y","serena-agent","start-mcp-server"],"enabled":false},"custom":{"type":"local","command":["mine"],"enabled":true}}}'
 serena_cmd='["serena","start-mcp-server","--context","ide-assistant"]'
-graft_cmd='["graft","mcp"]'
 
 check_twin() { # $1 = label, $2 = function that runs the registration: run CONFIG NAME...
     local label="$1" run="$2" cfg before after out
@@ -47,42 +46,41 @@ check_twin() { # $1 = label, $2 = function that runs the registration: run CONFI
 
     # a. stale npx entry beside a user server and a plugin key
     printf '%s' "$stale" >"$cfg"
-    out="$("$run" "$cfg" serena graft)" || fail "$label: registration failed on the stale config: $out"
-    [ "$(q "$cfg" 'd["mcp"]["graft"]["command"]')" = "$graft_cmd" ] ||
-        fail "$label: a stale npx graft entry must be repaired to the installed binary (got $(q "$cfg" 'd["mcp"]["graft"]["command"]'))"
-    [ "$(q "$cfg" 'd["mcp"]["graft"]["enabled"]')" = 'false' ] ||
-        fail "$label: the repair must keep the user's enabled flag"
+    out="$("$run" "$cfg" serena)" || fail "$label: registration failed on the stale config: $out"
     [ "$(q "$cfg" 'd["mcp"]["serena"]["command"]')" = "$serena_cmd" ] ||
-        fail "$label: a missing serena entry must be added from the catalog"
+        fail "$label: a stale npx serena entry must be repaired to the catalog's command (got $(q "$cfg" 'd["mcp"]["serena"]["command"]'))"
+    [ "$(q "$cfg" 'd["mcp"]["serena"]["enabled"]')" = 'false' ] ||
+        fail "$label: the repair must keep the user's enabled flag"
     [ "$(q "$cfg" 'd["plugin"]')" = '["superpowers"]' ] ||
         fail "$label: the plugin key must survive the merge"
     [ "$(q "$cfg" 'd["mcp"]["custom"]["command"]')" = '["mine"]' ] ||
         fail "$label: a user-added server must survive the merge"
-    printf '%s\n' "$out" | tr -d '\r' | tr ',' '\n' | grep -Fxq graft ||
-        fail "$label: the changed servers must be reported (graft missing from: $out)"
+    printf '%s\n' "$out" | tr -d '\r' | tr ',' '\n' | grep -Fxq serena ||
+        fail "$label: the changed servers must be reported (serena missing from: $out)"
 
     # b. converged: a second run neither rewrites the file nor reports anything
     before="$(cksum <"$cfg")"
-    out="$("$run" "$cfg" serena graft)"
+    out="$("$run" "$cfg" serena)"
     after="$(cksum <"$cfg")"
     [ "$before" = "$after" ] || fail "$label: a converged config must not be rewritten"
     [ -z "$(printf '%s' "$out" | tr -d '\r\n ')" ] || fail "$label: nothing changed, so nothing is reported (got: $out)"
 
     # c. no config at all: created with every present server
     rm -f "$cfg"
-    "$run" "$cfg" serena graft >/dev/null || fail "$label: registration failed with no config"
-    [ "$(q "$cfg" 'd["mcp"]["graft"]')" = "{\"type\":\"local\",\"command\":$graft_cmd,\"enabled\":true}" ] ||
-        fail "$label: a new graft entry must be {type: local, command: graft mcp, enabled: true} (got $(q "$cfg" 'd["mcp"]["graft"]'))"
+    "$run" "$cfg" serena >/dev/null || fail "$label: registration failed with no config"
+    [ "$(q "$cfg" 'd["mcp"]["serena"]')" = "{\"type\":\"local\",\"command\":$serena_cmd,\"enabled\":true}" ] ||
+        fail "$label: a new serena entry must be {type: local, command: <catalog>, enabled: true} (got $(q "$cfg" 'd["mcp"]["serena"]'))"
 
-    # d. binary absent: not added, and a stale entry is left alone
+    # d. binary absent: not added, and a stale entry is left alone; a name the
+    #    catalog does not know is never added either
     printf '%s' "$stale" >"$cfg"
-    "$run" "$cfg" serena >/dev/null || fail "$label: registration failed without graft"
-    [ "$(q "$cfg" 'd["mcp"]["graft"]["command"]')" = '["npx","-y","@nanonets/graft","mcp"]' ] ||
-        fail "$label: graft is not installed, so its entry must not be touched"
+    "$run" "$cfg" >/dev/null || fail "$label: registration failed with no server present"
+    [ "$(q "$cfg" 'd["mcp"]["serena"]["command"]')" = '["npx","-y","serena-agent","start-mcp-server"]' ] ||
+        fail "$label: serena is not installed, so its entry must not be touched"
     printf '{}' >"$cfg"
-    "$run" "$cfg" serena >/dev/null || fail "$label: registration failed on an empty config"
+    "$run" "$cfg" serena not-in-catalog >/dev/null || fail "$label: registration failed on an empty config"
     [ "$(q "$cfg" 'sorted(d["mcp"])')" = '["serena"]' ] ||
-        fail "$label: only servers whose binary is present may be added"
+        fail "$label: only catalog servers whose binary is present may be added"
 
     # No BOM in anything written (Go JSON consumers reject one; PS 5.1's
     # Set-Content -Encoding utf8 would add it).

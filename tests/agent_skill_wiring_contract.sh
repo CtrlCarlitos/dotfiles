@@ -315,7 +315,7 @@ verify_unix_claude_attribution() {
                 ;;
             nested)
                 mkdir -p "${settings%/*}"
-                printf '%s\n' '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}' > "$settings"
+                printf '%s\n' '{"permissions":{"allow":["Bash(make:*)"]},"attribution":{"commit":"custom","extra":"keep"}}' > "$settings"
                 ;;
             malformed)
                 mkdir -p "${settings%/*}"
@@ -354,7 +354,7 @@ verify_unix_claude_attribution() {
     [[ "$mode" == 640 ]] || fail 'Unix Claude attribution merge must preserve the original settings mode on macOS'
 
     settings="$tmp/nested/.claude/settings.json"
-    jq -e '.permissions.allow == ["Bash(graft:*)"] and .attribution.extra == "keep"' "$settings" >/dev/null \
+    jq -e '.permissions.allow == ["Bash(make:*)"] and .attribution.extra == "keep"' "$settings" >/dev/null \
         || fail 'Unix Claude attribution merge must preserve nested settings'
 }
 
@@ -402,7 +402,7 @@ try {
             [IO.File]::WriteAllText($settings, '')
         } elseif ($fixture -eq 'nested') {
             New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
-            [IO.File]::WriteAllText($settings, '{"permissions":{"allow":["Bash(graft:*)"]},"attribution":{"commit":"custom","extra":"keep"}}')
+            [IO.File]::WriteAllText($settings, '{"permissions":{"allow":["Bash(make:*)"]},"attribution":{"commit":"custom","extra":"keep"}}')
         } elseif ($fixture -eq 'malformed') {
             New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
             [IO.File]::WriteAllText($settings, '{not json')
@@ -419,7 +419,7 @@ try {
         if ($json.attribution.commit -ne '' -or $json.attribution.pr -ne '' -or $json.attribution.sessionUrl -ne $false) { throw "attribution not disabled: $fixture" }
     }
     $nested = Get-Content -Raw -LiteralPath (Join-Path $fixtureRoot 'nested\.claude\settings.json') | ConvertFrom-Json
-    if ($nested.permissions.allow -cne 'Bash(graft:*)' -or $nested.attribution.extra -cne 'keep') { throw 'nested settings not preserved' }
+    if ($nested.permissions.allow -cne 'Bash(make:*)' -or $nested.attribution.extra -cne 'keep') { throw 'nested settings not preserved' }
 } finally {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

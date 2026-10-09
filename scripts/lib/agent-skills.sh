@@ -224,31 +224,126 @@ quiet_apt_enable() {
 }
 
 #-------------------------------------------------------------------------------
-# graft_current_version <graft-version-output> - print the installed graft
-# version when it ALREADY matches the latest published one; print nothing
-# otherwise (stale, unreachable registry, or no answer at all).
+# graft_retire [npm-sudo] - remove Graft (@nanonets/graft) from a machine that
+# has it. The dotfiles installed it until 2026-10-09 and dropped it after a
+# benchmark showed no accuracy or cost benefit; the installers and `dot upgrade`
+# call this so it does not linger. Twin of Invoke-GraftRetirement in
+# scripts/lib/ps-skills.ps1.
 #
-# `graft upgrade` reinstalls even when nothing changed - 0.21.1 -> 0.21.1 took
-# 41 s on WSL - so `dot upgrade` asks first. This is the Unix twin of
-# Get-GraftCurrentVersion in ps-common.ps1, and it exists as a function so both
-# can be executed over the same fixtures: the parsing used to be inlined in
-# update_ai_tools.sh with `[^ ]*` (space only) while PowerShell used `[^\s]*`,
-# so a CRLF `graft version` answer captured the CR into the version string and
-# the twins disagreed on exactly the input the PowerShell contract covers.
-# `[^[:space:]]*` includes CR, which makes the two regexes equivalent.
+# Only what is unambiguously graft's goes:
+#   - MCP entries named graft whose command runs graft: OpenCode's global
+#     opencode.json (mcp.graft), agy's ~/.gemini/config/mcp_config.json
+#     (mcpServers.graft), Codex (`codex mcp remove graft`), Claude Code's user
+#     scope (`claude mcp remove graft -s user`);
+#   - what `graft init` writes for every project: hook entries that run
+#     graft-hooks.cjs in ~/.claude/settings.json and ~/.codex/hooks.json, a
+#     statusLine that runs graft-statusline.cjs, graft's Bash allow entries and
+#     its graft/ footer regex, the shims (~/.claude/helpers/graft-*.cjs,
+#     ~/.codex/hooks/graft/) and its skill (a skills dir named graft whose
+#     SKILL.md says `name: graft`);
+#   - the global npm package, then graft's state dir ~/.graft. The package is
+#     looked for in the prefix graft actually lives in (a ~/.local or nvm
+#     install, not only npm's default), with npm-sudo (the installer's
+#     decision) only when that prefix is not writable.
+# Repos you ran `graft init` in keep their own graft/ directory and wiring.
 #
-# Anything unknown means "not current", so the upgrade still happens as before.
-# Always returns 0: callers read it in a command substitution under `set -e`,
-# where a non-zero status would abort the whole run.
+# Quiet when there is nothing to do; best effort, never fails the run. The
+# JSON edits need jq (without it they are skipped) and only touch a file that
+# mentions graft at all.
 #-------------------------------------------------------------------------------
-graft_current_version() {
-    local out="${1:-}" have latest
-    have="$(printf '%s\n' "$out" | sed -n 's/^graft \([0-9][^[:space:]]*\).*/\1/p' | head -n 1)"
-    # Online: "latest on npm: 0.21.1 <check> up to date"; offline: "latest: unreachable (offline?)".
-    latest="$(printf '%s\n' "$out" | sed -n 's/^latest\( on npm\)\{0,1\}: \([0-9][^[:space:]]*\).*/\2/p' | head -n 1)"
-    if [ -n "$have" ] && [ "$have" = "$latest" ]; then
-        printf '%s\n' "$have"
+_graft_json_edit() {
+    local file="$1" filter="$2" tmp
+    [ -f "$file" ] && grep -q graft "$file" 2>/dev/null || return 1
+    tmp="$file.tmp.$$"
+    if jq -b "$filter" "$file" >"$tmp" 2>/dev/null &&
+        [ "$(jq -b -cS . "$file" 2>/dev/null)" != "$(jq -b -cS . "$tmp" 2>/dev/null)" ]; then
+        mv "$tmp" "$file"
+        return 0
     fi
+    rm -f "$tmp"
+    return 1
+}
+
+graft_retire() {
+    local npm_sudo="${1:-}" done_list="" real prefix pkg sudo_cmd skill
+    # An entry is graft's when one of its strings is the graft command or the npm package.
+    local is_graft='def is_graft: [.. | strings] | any(test("@nanonets[/\\\\]+graft") or test("(^|[/\\\\])graft(\\.cmd|\\.exe)?$"));'
+    # graft init's own fragments in a Claude Code / Codex settings file.
+    local hooks_filter='def graft_hook: tojson | contains("graft-hooks.cjs");
+        if (.hooks | type) == "object" then
+            .hooks |= with_entries(if (.value | type) == "array" and any(.value[]; graft_hook)
+                then (.value |= map(select(graft_hook | not))) | select(.value != []) else . end)
+            | if .hooks == {} then del(.hooks) else . end
+        else . end'
+    # shellcheck disable=SC2016 # $k is a jq variable, not a shell one.
+    local claude_filter="$hooks_filter"'
+        | reduce ("statusLine", "subagentStatusLine") as $k (.;
+            if .[$k] != null and (.[$k] | tojson | contains("graft-statusline.cjs")) then del(.[$k]) else . end)
+        | if (.permissions.allow | type) == "array"
+            then .permissions.allow |= map(select(tostring | test("^Bash\\((graft|npx graft|graft-dev)(:|\\))") | not))
+            else . end
+        | if (.footerLinksRegexes | type) == "array"
+            then .footerLinksRegexes |= map(select(tostring | contains("graft/") | not))
+            else . end'
+
+    if command -v jq &>/dev/null; then
+        _graft_json_edit "$HOME/.config/opencode/opencode.json" \
+            "$is_graft"' if (.mcp.graft? // null) != null and (.mcp.graft | is_graft) then del(.mcp.graft) else . end' &&
+            done_list="$done_list OpenCode-MCP"
+        _graft_json_edit "$HOME/.gemini/config/mcp_config.json" \
+            "$is_graft"' if (.mcpServers.graft? // null) != null and (.mcpServers.graft | is_graft) then del(.mcpServers.graft) else . end' &&
+            done_list="$done_list agy-MCP"
+        _graft_json_edit "$HOME/.claude/settings.json" "$claude_filter" && done_list="$done_list Claude-hooks"
+        _graft_json_edit "$HOME/.codex/hooks.json" "$hooks_filter" && done_list="$done_list Codex-hooks"
+    fi
+    if command -v codex &>/dev/null && grep -Eq '^\[mcp_servers\.graft\]' "$HOME/.codex/config.toml" 2>/dev/null; then
+        net_timeout 60 codex mcp remove graft </dev/null >/dev/null 2>&1 && done_list="$done_list Codex-MCP"
+    fi
+    if command -v claude &>/dev/null && grep -Eq '@nanonets/graft|"command": *"graft"' "$HOME/.claude.json" 2>/dev/null; then
+        net_timeout 60 claude mcp remove graft -s user </dev/null >/dev/null 2>&1 && done_list="$done_list Claude-MCP"
+    fi
+    for skill in "$HOME/.claude/skills/graft" "$HOME/.agents/skills/graft" \
+        "$HOME/.gemini/skills/graft" "$HOME/.gemini/antigravity-cli/skills/graft"; do
+        if grep -Eq '^name:[[:space:]]*graft[[:space:]]*$' "$skill/SKILL.md" 2>/dev/null; then
+            rm -rf "$skill" && done_list="$done_list skill(${skill#"$HOME/"})"
+        fi
+    done
+    if [ -e "$HOME/.claude/helpers/graft-hooks.cjs" ] || [ -e "$HOME/.claude/helpers/graft-statusline.cjs" ] || [ -d "$HOME/.codex/hooks/graft" ]; then
+        rm -rf "$HOME/.claude/helpers/graft-hooks.cjs" "$HOME/.claude/helpers/graft-statusline.cjs" "$HOME/.codex/hooks/graft"
+        done_list="$done_list hook-shims"
+    fi
+
+    # The package: in the prefix graft resolves from, else npm's default one.
+    if command -v npm &>/dev/null && { command -v graft &>/dev/null || [ -d "$HOME/.graft" ]; }; then
+        real="$(readlink -f "$(command -v graft 2>/dev/null)" 2>/dev/null || true)"
+        prefix=""
+        case "$real" in
+            */lib/node_modules/@nanonets/graft/*) prefix="${real%/lib/node_modules/@nanonets/graft/*}" ;;
+        esac
+        [ -n "$prefix" ] || prefix="$(npm prefix -g 2>/dev/null || true)"
+        pkg="$prefix/lib/node_modules/@nanonets/graft"
+        if [ -n "$prefix" ] && [ -d "$pkg" ]; then
+            sudo_cmd=""
+            [ -w "$prefix/lib/node_modules" ] || sudo_cmd="$npm_sudo"
+            # Not under net_timeout when sudo'd: the installer's sudo is a shell
+            # function (dot_sudo), which `timeout` cannot run.
+            if [ -n "$sudo_cmd" ]; then
+                $sudo_cmd npm uninstall -g --prefix "$prefix" @nanonets/graft --loglevel=error </dev/null >/dev/null 2>&1 || true
+            else
+                net_timeout 120 npm uninstall -g --prefix "$prefix" @nanonets/graft --loglevel=error </dev/null >/dev/null 2>&1 || true
+            fi
+            if [ -d "$pkg" ]; then
+                warn "Could not uninstall Graft from $prefix - remove it with: ${sudo_cmd:+sudo }npm uninstall -g @nanonets/graft"
+            else
+                done_list="$done_list npm-package"
+            fi
+        fi
+        # graft's own state (telemetry id, update check): only once the package is gone.
+        if [ -n "$prefix" ] && [ ! -d "$pkg" ] && [ -d "$HOME/.graft" ]; then
+            rm -rf "${HOME:?}/.graft" && done_list="$done_list ~/.graft"
+        fi
+    fi
+    [ -z "$done_list" ] || info "Retired Graft (dropped from the dotfiles):$done_list"
     return 0
 }
 
@@ -687,10 +782,10 @@ skills_add_all() {
     fi
 
     # code-search (CtrlCarlitos/skills, MIT): our own search-escalation skill.
-    # Probes once per session which tools can see the code (graft graph built
-    # and covering the language, serena LSP, rg, grep), routes each question
-    # down graft > serena > rg > grep, and stops re-asking a semantic tool after
-    # one empty result. Added 2026-09-24 after graft's "graph first for ANY
+    # Probes once per session which tools can see the code (a repo graph when
+    # one is built, serena LSP, rg, grep), routes each question down that
+    # ladder, and stops re-asking a semantic tool after one empty result.
+    # Added 2026-09-24 after graft's (since removed) "graph first for ANY
     # task" block cost every session in this repo two empty queries (the graph
     # covers one Lua file here) - docs/skills-install-strategy.md.
     if skills_up_to_date CtrlCarlitos/skills code-search; then
