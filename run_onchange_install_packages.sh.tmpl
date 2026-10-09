@@ -244,6 +244,95 @@ ensure_locale() {
     success "en_US.UTF-8 locale generated"
 }
 
+# PowerShell (pwsh) on Unix, for ONE reason: half this repo's test suite is
+# PowerShell - the .ps1 twins that tests/*_contract.sh execute, plus
+# tests/*.ps1 - and `tests/run.sh --strict` counts a skip as a failure. Without
+# pwsh a Linux/macOS checkout can never run a green suite: 15 contracts skipped
+# on WSL until this landed, and all 15 pass once pwsh is present. CI never saw
+# the gap because GitHub's ubuntu-latest ships pwsh preinstalled.
+#
+# Linux: the pinned GitHub release tarball, NOT Microsoft's apt repo - that repo
+# is published per Ubuntu release and lags new ones (nothing for 26.04 while
+# this was written), so an apt source would break on exactly the machines this
+# repo targets. The tarball is distro-independent.
+# macOS: the `powershell` cask. The literal lives here rather than in
+# install_brew() because tests/package_catalog_contract.sh forbids a literal
+# `brew install` inside that function - everything there renders from the
+# catalog, and pwsh is a by-procedure record (no manager key).
+#
+# The digest comes from .chezmoidata.yaml, not from the release's own
+# hashes.sha256: that file is UTF-16LE with a BOM, CRLF endings and a
+# binary-mode `*` before the name, so parsing it here would put three encoding
+# hazards inside the one step that must be boringly correct. (It also means no
+# second download.) scripts/update-versions.sh owns that parsing, in one place.
+#
+# Idempotent: an existing pwsh on PATH returns at the first probe. Every failure
+# warns and continues - a missing pwsh costs test coverage, never the install.
+install_powershell() {
+    command -v pwsh &>/dev/null && return 0
+    case "$(uname -s)" in
+        Darwin)
+            info "Installing PowerShell (pwsh - the suite's PowerShell half)..."
+            brew install --cask powershell \
+                || warn "pwsh install failed - the PowerShell half of the test suite will skip"
+            return 0
+            ;;
+    esac
+
+    local ver arch asset url tmp want got sha_cmd
+    ver='{{ .versions.powershell }}'
+    case "$(uname -m)" in
+        x86_64)
+            arch=x64
+            want='{{ .versions.powershell_sha256_x64 }}'
+            ;;
+        aarch64|arm64)
+            arch=arm64
+            want='{{ .versions.powershell_sha256_arm64 }}'
+            ;;
+        *)
+            warn "pwsh: no PowerShell release for $(uname -m) - the PowerShell half of the test suite will skip"
+            return 0
+            ;;
+    esac
+    asset="powershell-$ver-linux-$arch.tar.gz"
+    url="https://github.com/PowerShell/PowerShell/releases/download/v$ver/$asset"
+    sha_cmd="$(sha256_cmd)"
+    if [ -z "$sha_cmd" ]; then
+        warn "pwsh: no SHA-256 tool found - cannot verify the download, skipping"
+        return 0
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        warn "pwsh: could not create a temporary directory - skipping"
+        return 0
+    fi
+    info "Installing PowerShell $ver (pwsh - the suite's PowerShell half)..."
+    if ! net_timeout 300 curl -fsSLo "$tmp/$asset" "$url"; then
+        warn "pwsh download failed or timed out - the PowerShell half of the test suite will skip"
+        rm -rf "$tmp"
+        return 0
+    fi
+    # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
+    got="$($sha_cmd "$tmp/$asset" 2>/dev/null | cut -d' ' -f1)"
+    if [ "$want" != "$got" ]; then
+        warn "pwsh CHECKSUM MISMATCH for $asset - not installing (pin stale? re-run scripts/update-versions.sh)"
+        rm -rf "$tmp"
+        return 0
+    fi
+    # Microsoft's documented layout. The tarball is FLAT (pwsh sits at the
+    # archive root), so it needs a directory of our own making rather than
+    # --strip-components.
+    if $SUDO mkdir -p /opt/microsoft/powershell/7 \
+        && $SUDO tar -xzf "$tmp/$asset" -C /opt/microsoft/powershell/7 \
+        && $SUDO chmod +x /opt/microsoft/powershell/7/pwsh \
+        && $SUDO ln -sf /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh; then
+        success "PowerShell $ver installed (pwsh)"
+    else
+        warn "pwsh install failed - the PowerShell half of the test suite will skip"
+    fi
+    rm -rf "$tmp"
+}
+
 install_fonts() {
     local font_dir="$HOME/.local/share/fonts"
     # Ensure wget and 7zip are available. apt only: this function is reached
@@ -828,6 +917,9 @@ install_apt() {
 
     # The locale dot_zshrc exports, before anything else runs under it.
     ensure_locale
+
+    # pwsh, so this checkout can run its own PowerShell contracts.
+    install_powershell
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
@@ -2006,6 +2098,9 @@ install_brew() {
     # Names come from .chezmoidata/packages.yaml (see #83).
     brew install {{ includeTemplate "pkg-names" (dict "manager" "brew" "group" "core" "catalog" .catalog.packages) }}
     brew link --overwrite node@{{ .versions.node_major }} || true
+
+    # pwsh, so this checkout can run its own PowerShell contracts.
+    install_powershell
 {{- else }}
     info "Core packages disabled in config"
 {{- end }}

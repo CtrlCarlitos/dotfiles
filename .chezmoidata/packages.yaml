@@ -193,6 +193,14 @@ catalog:
       winget_args: "--scope machine"
       choco_was: powershell-core
       migrate_risk: "PowerShell 7 cannot replace itself - run migrate-to-winget from Windows PowerShell (powershell.exe) to move it"
+      note: >-
+        Unix has no manager key on purpose - pwsh is installed by procedure
+        there (install_powershell): Linux takes the pinned GitHub release
+        tarball, because Microsoft's apt repo is published per Ubuntu release
+        and lags new ones; macOS takes the `powershell` cask. It is wanted on
+        Unix for one reason - half this repo's suite is PowerShell, and
+        `tests/run.sh --strict` counts a skip as a failure, so without pwsh a
+        Linux/macOS checkout can never run a green suite. See docs/testing.md.
     - id: psmux
       group: core
       winget: marlocarlo.psmux

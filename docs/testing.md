@@ -127,6 +127,13 @@ WSL runs the same apt code path as native Linux (see that section), plus:
   skip on Windows and only really run in WSL or Linux; so do tests that need
   `zsh`, `pwsh` or `chezmoi` when those are missing. `bash tests/run.sh --strict`
   in WSL turns every such skip into a failure, which is the point.
+- **pwsh is installed on Unix by `dot up`**, in the `core` group
+  (`install_powershell`). Half the suite is PowerShell - the `.ps1` twins the
+  shell contracts execute, plus `tests/*.ps1` - so without it 15 contracts
+  skipped on WSL and `--strict` could never go green there. CI never showed
+  the gap: GitHub's `ubuntu-latest` ships pwsh preinstalled. If you are on a
+  checkout older than that change, install PowerShell 7 by hand or re-run
+  `dot up`.
 - **`act` caveat:** this repo's container detection treats any Docker
   container as a devcontainer, so under `act` nothing package-related ever
   runs interactively; use isolated `docker run` tests with a non-root sudo
