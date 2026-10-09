@@ -67,6 +67,14 @@ versions:
   node_choco: "24.19.0"
   antigravity_hub: "2.19.1-6046815158665216"
   gum: "2.0.1"
+  powershell: "7.6.6"
+  # Pinned rather than read from the release's own hashes.sha256: that file is
+  # UTF-16LE with a BOM, CRLF line endings and a binary-mode `*` before the
+  # name - three parsing hazards in a verification step that must not be
+  # clever. Pinning the digest is what .chezmoiexternal.toml already does for
+  # every archive. scripts/update-versions.sh refreshes all three together.
+  powershell_sha256_x64: "ddbc4a2d113bbd46d283cfedcbcd117a70caefd7673f41f2b4e0000badf103bc"
+  powershell_sha256_arm64: "924829e54c983648f6f1419a2dc7f9433c861b2fb5bd57736ff096c24f133729"
   claude_install_sh: "https://claude.ai/install.sh"
   claude_install_ps1: "https://claude.ai/install.ps1"
 

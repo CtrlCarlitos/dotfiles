@@ -97,6 +97,45 @@ else
     echo "Warning: Could not derive Antigravity hub version from the download page - leaving pin unchanged."
 fi
 
+# 2b. PowerShell (pwsh) - the suite's PowerShell half on Unix. Three pins move
+# together: versions.powershell and the per-arch sha256 the installer verifies
+# against (it does NOT parse the release's own hashes.sha256 - see the note in
+# .chezmoidata.yaml). That parsing lives HERE, once: the published file is
+# UTF-16LE with a BOM, CRLF line endings and a binary-mode `*` before each
+# name, so it is iconv'd to UTF-8 and matched on an exact field compare rather
+# than a regex over a name full of dots. A pin is left unchanged unless BOTH
+# arch digests resolve, so a partial release never half-updates the trio.
+PS_LATEST="$(net_timeout 60 curl -s "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | cut -d'"' -f4)"
+PS_LATEST="${PS_LATEST#v}"
+if [ -z "$PS_LATEST" ]; then
+    echo "Warning: could not resolve the latest PowerShell release - pins left unchanged."
+else
+    ps_sum_for() { # $1 = asset name; prints the lowercase sha256 or nothing
+        iconv -f UTF-16 -t UTF-8 "$ps_tmp/hashes.sha256" 2>/dev/null \
+            | awk -v a="$1" '{ sub(/\r$/, ""); n = $NF; sub(/^\*/, "", n); if (n == a) { print tolower($1); exit } }'
+    }
+    ps_tmp="$(mktemp -d)"
+    if ! net_timeout 60 curl -fsSLo "$ps_tmp/hashes.sha256" \
+        "https://github.com/PowerShell/PowerShell/releases/download/v$PS_LATEST/hashes.sha256"; then
+        echo "Warning: PowerShell $PS_LATEST hashes.sha256 download failed - pins left unchanged."
+    else
+        PS_X64="$(ps_sum_for "powershell-$PS_LATEST-linux-x64.tar.gz")"
+        PS_ARM64="$(ps_sum_for "powershell-$PS_LATEST-linux-arm64.tar.gz")"
+        if [ -z "$PS_X64" ] || [ -z "$PS_ARM64" ]; then
+            echo "Warning: PowerShell $PS_LATEST is missing a linux-x64/linux-arm64 digest - pins left unchanged."
+        else
+            tmp_data="$(mktemp)"
+            sed -E -e "s|^  powershell: .*|  powershell: \"$PS_LATEST\"|" \
+                   -e "s|^  powershell_sha256_x64: .*|  powershell_sha256_x64: \"$PS_X64\"|" \
+                   -e "s|^  powershell_sha256_arm64: .*|  powershell_sha256_arm64: \"$PS_ARM64\"|" \
+                   .chezmoidata.yaml > "$tmp_data"
+            mv "$tmp_data" .chezmoidata.yaml
+            echo "  PowerShell -> $PS_LATEST (x64 + arm64 digests pinned)"
+        fi
+    fi
+    rm -rf "$ps_tmp"
+fi
+
 # 3. Refresh .chezmoiexternal.toml pins: resolve each external repo's
 # default-branch SHA (git ls-remote - no API auth), rewrite the
 # /archive/<sha>.tar.gz URL, download the archive once, and pin its sha256 so
