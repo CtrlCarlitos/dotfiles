@@ -1,12 +1,5 @@
 # Agent notes
 
-## Graft covers one file here
-
-Graft is installed and this repo is `graft init`-ed, but the graph covers only
-`dot_config/nvim/init.lua` — graft has no parser for the `.sh`, `.ps1`,
-`.tmpl`, `.zsh` and `.toml` files that make up everything else. `graft
-ask`/`callers`/`skeleton` return nothing useful outside that one Lua file.
-
 ## Where context actually lives
 
 - `docs/invariants.md` — the repo's own list of expensive lessons; read it
