@@ -312,17 +312,27 @@ else
   if [ -f "chezmoi.toml" ] || [ -f ".chezmoi.toml.tmpl" ]; then
      run_chezmoi_with_retry chezmoi init --apply --source .
   else
-     # If PAT is provided (private repo), clone with PAT and init from source.
-     # low-speed config aborts a stalled clone (<1KB/s for 60s); _net is a
-     # hard ceiling on top.
-     if [ -n "${PAT:-}" ]; then
-        _net 900 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 \
-            clone "https://${PAT}@github.com/CtrlCarlitos/dotfiles.git" "$HOME/.local/share/chezmoi"
-        run_chezmoi_with_retry chezmoi init --apply --source "$HOME/.local/share/chezmoi"
-     else
-        # Fallback: Clone from GitHub
-        run_chezmoi_with_retry chezmoi init --apply --branch main CtrlCarlitos/dotfiles
-     fi
+     # The repo is public: chezmoi clones it itself, unauthenticated.
+     #
+     # There is deliberately NO token-authenticated branch here. This used to
+     # clone an https URL with a bootstrap token interpolated into the
+     # userinfo position (before the host), and git persists a clone URL
+     # verbatim as remote.origin.url - so that token stayed in .git/config
+     # (mode 644, world-readable) for as long as the checkout lived, which is
+     # exactly what docs/backup-restore.md's "do not embed a PAT in a clone
+     # URL" rule forbids. One real machine carried a classic token there for
+     # weeks; `git remote -v` printed it on demand, and a token in the
+     # username position is not even a working push credential.
+     #
+     # If this repo is ever private again, authenticate by identity, not by
+     # URL: SSH (dot_gitconfig's url.*.insteadOf rewrites already carry a
+     # per-account identity) or a credential helper. If a token is truly
+     # unavoidable, pass it as a ONE-SHOT helper BEFORE the subcommand -
+     # `git -c credential.helper=... clone <tokenless-url>` - and never as
+     # `git clone -c ...`, which writes the value into the new repo's config
+     # and recreates this bug. tests/installer_url_credentials_contract.sh
+     # pins all of that.
+     run_chezmoi_with_retry chezmoi init --apply --branch main CtrlCarlitos/dotfiles
   fi
 fi
 
