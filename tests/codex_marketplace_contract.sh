@@ -76,10 +76,30 @@ make_stub() { # $1 = the superpowers row to print (empty for "no such plugin")
         printf '  exit 0\nfi\nexit 0\n'
     } >"$tmp/bin/codex"
     chmod +x "$tmp/bin/codex"
+    # Native Windows pwsh resolves a bare command through its own extension list (.ps1 among
+    # them, independent of $env:PATHEXT) - an extensionless POSIX stub is invisible to that
+    # resolution, so bare `codex` falls straight through this PATH entry to any real,
+    # globally-installed codex.ps1 further down PATH instead of this stub (found live: a real
+    # codex on PATH hijacked the "fake" marketplace answer, so the PowerShell twin was actually
+    # exercising production Codex, not the stub). Mirror the same fake rows in a .ps1 sibling so
+    # native Windows pwsh shadows the real one too; bash never sees this file, it still matches
+    # the extensionless "codex" by exact name.
+    {
+        printf 'if ($args[0] -eq "plugin" -and $args[1] -eq "list") {\n'
+        printf '    "PLUGIN STATUS VERSION PATH"\n'
+        printf '    "github@test-marketplace not installed"\n'
+        [ -n "$1" ] && printf '    "%s"\n' "$1"
+        printf '}\n'
+    } >"$tmp/bin/codex.ps1"
 }
 
 sh_answer() { PATH="$tmp/bin:$PATH" bash -c '. "$1"; codex_superpowers_marketplace' _ "$sh_lib"; }
-ps_answer() { PATH="$tmp/bin:$PATH" pwsh -NoProfile -Command ". '$ps_lib'; \$m = Get-CodexSuperpowersMarketplace; if (\$m) { Write-Output \$m }" 2>/dev/null | tr -d '\r'; }
+# pwsh needs a Windows-style path to dot-source - a POSIX one ("/c/Users/...") embedded in a
+# -Command string fails to resolve, and the 2>/dev/null below used to swallow that failure
+# silently, so this looked like a marketplace-parsing bug instead of a path format one.
+winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+ps_lib_win="$(winpath "$ps_lib")"
+ps_answer() { PATH="$tmp/bin:$PATH" pwsh -NoProfile -Command ". '$ps_lib_win'; \$m = Get-CodexSuperpowersMarketplace; if (\$m) { Write-Output \$m }" 2>/dev/null | tr -d '\r'; }
 
 make_stub 'superpowers@test-marketplace not installed'
 sh_got="$(sh_answer || true)"
