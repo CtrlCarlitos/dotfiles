@@ -16,6 +16,26 @@ function Get-SevenZip {
         }
     }
 
+    # The 7-Zip installer (winget 7zip.7zip, the core package) does not add
+    # itself to PATH: find it through its own registry key, then the default
+    # install folder.
+    $folders = @()
+    foreach ($key in 'HKLM:\SOFTWARE\7-Zip', 'HKCU:\SOFTWARE\7-Zip') {
+        $item = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        if ($null -ne $item) {
+            foreach ($value in 'Path64', 'Path') {
+                if ($item.PSObject.Properties[$value]) { $folders += $item.$value }
+            }
+        }
+    }
+    $folders += (Join-Path $env:ProgramFiles '7-Zip')
+    foreach ($folder in $folders) {
+        $candidate = Join-Path $folder '7z.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+
     throw 'Install 7-Zip (7zz or 7z) first.'
 }
 
