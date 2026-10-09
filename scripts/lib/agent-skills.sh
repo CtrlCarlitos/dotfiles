@@ -235,23 +235,98 @@ quiet_apt_enable() {
 # latency, and anything this list has never seen - above all an approval prompt or URL, which
 # the installer blocks on, so nothing is ever hidden by default.
 # DOT_GUARDRAIL_VERBOSE=1 shows everything.
+#
+# Why perl and not awk (the shape this started as): the installer's approval prompt
+# ("Approve register guardrail on planes ...? [y/N] ") carries NO trailing newline, because the
+# cursor is meant to sit after it. awk is RECORD-oriented - it hands you a line only once it has
+# seen the record separator - so an unterminated prompt sat in awk's input buffer and reached the
+# screen only at EOF, i.e. after the installer had already exited. The operator saw a blank
+# terminal, typed blind, and the keystrokes did land (the apply completed) with nothing echoed:
+# indistinguishable from a hung terminal, and it cost a real session a restart. fflush() does not
+# help - that flushes OUTPUT, and the problem is an input record that never terminated. Nor does a
+# different RS: "bytes arrived but no newline followed" is a TIMING condition, not a textual one
+# (and regex RS is GNU-only, while macOS ships BSD awk).
+#
+# So this reads BYTES (sysread) instead of records, and uses select() to tell the two kinds of
+# incomplete line apart:
+#   - a chunk boundary that fell mid-line     -> more bytes arrive at once, so keep buffering;
+#   - a prompt the writer is now blocked on   -> the stream goes quiet, so release it immediately.
+# GRACE is that "gone quiet" threshold. The blocking select has no timeout while nothing is
+# pending, so this never spins. Deliberate trade-off in the release path: a routine line that is
+# BOTH split by a chunk boundary AND followed by a >GRACE pause leaks to the console unfiltered.
+# That direction is the safe one - showing one extra status line costs nothing, hiding a prompt
+# costs a terminal restart - and a released prefix is never re-printed or re-hidden when its
+# newline finally arrives (see $shown).
+#
+# Falls back to an unfiltered pass-through when perl is absent: losing the noise reduction is
+# always better than losing the installer's output.
 #-------------------------------------------------------------------------------
 guardrail_console_filter() {
     if [ "${DOT_GUARDRAIL_VERBOSE:-}" = 1 ]; then cat; return 0; fi
-    awk '
-        /^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):/ { hidden++; next }
-        /^web-research enforcement:/ { hidden++; next }
-        /^recipes / { hidden++; next }
-        /^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)/ { hidden++; next }
-        /^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)/ { hidden++; next }
-        /^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)/ { hidden++; next }
-        /^antigravity coverage:/ { hidden++; next }
-        /^  (configured MCP servers|declared MCP tools|uncontracted)/ { hidden++; next }
-        /^note: codex probes invoke the hook directly/ { hidden++; next }
-        /^setup: (registering|plane status)/ { hidden++; next }
-        /^guardrail v[0-9]/ { hidden++; next }
-        { print; fflush() }
-        END { if (hidden > 0) printf "  (%d routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)\n", hidden }
+    command -v perl >/dev/null 2>&1 || { cat; return 0; }
+    # LC_ALL=C for the same reason dotfiles-doctor.sh pins it on its own perl call: a host whose
+    # exported LANG was never generated makes perl print a 15-line "Setting locale failed" block
+    # before doing any work, and this filter sits in front of the guardrail output on EVERY
+    # `dot up` and `dot upgrade`. Nothing below is locale-sensitive - it is byte-oriented by
+    # construction - so pinning C costs nothing and keeps the console clean regardless of host.
+    LC_ALL=C perl -e '
+        my $GRACE = 0.2;            # seconds of silence that mark an unterminated line a prompt
+        my $hidden = 0;
+        my $buf = "";               # bytes of the line currently being assembled
+        my $shown = 0;              # how many of those bytes are already on screen
+        $| = 1;
+
+        # The hide list. Identical in content and order to the awk twin it replaces, and to
+        # Select-GuardrailConsoleLine in ps-skills.ps1 - tests/guardrail_console_filter_contract.sh
+        # executes all of them against the same captured installer output.
+        sub routine {
+            my ($l) = @_;
+            return 1 if $l =~ /^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):/;
+            return 1 if $l =~ /^web-research enforcement:/;
+            return 1 if $l =~ /^recipes /;
+            return 1 if $l =~ /^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)/;
+            return 1 if $l =~ /^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)/;
+            return 1 if $l =~ /^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)/;
+            return 1 if $l =~ /^antigravity coverage:/;
+            return 1 if $l =~ /^  (configured MCP servers|declared MCP tools|uncontracted)/;
+            return 1 if $l =~ /^note: codex probes invoke the hook directly/;
+            return 1 if $l =~ /^setup: (registering|plane status)/;
+            return 1 if $l =~ /^guardrail v[0-9]/;
+            return 0;
+        }
+
+        # One assembled line. A line whose prefix was already released as a prompt is FINISHED,
+        # never re-filtered: those bytes cannot be taken back off the screen.
+        sub emit {
+            my ($line) = @_;
+            if ($shown) { print substr($line, $shown), "\n"; $shown = 0 }
+            elsif (routine($line)) { $hidden++ }
+            else { print $line, "\n" }
+        }
+
+        my $rin = "";
+        vec($rin, fileno(STDIN), 1) = 1;
+        while (1) {
+            # No pending fragment -> block indefinitely (undef); otherwise wake after GRACE so a
+            # prompt from a writer that has gone quiet can be released.
+            my $timeout = (length($buf) > $shown) ? $GRACE : undef;
+            my $ready = select(my $rout = $rin, undef, undef, $timeout);
+            if ($ready) {
+                my $chunk;
+                my $n = sysread(STDIN, $chunk, 65536);
+                next unless defined $n;     # EINTR: retry
+                last if $n == 0;            # EOF
+                $buf .= $chunk;
+                while ($buf =~ s/^([^\n]*)\n//) { emit($1) }
+            } elsif (length($buf) > $shown) {
+                # Gone quiet mid-line: this is a prompt. Show it now, and remember how much of it
+                # the screen already has so the completion does not duplicate it.
+                print substr($buf, $shown);
+                $shown = length($buf);
+            }
+        }
+        emit($buf) if length($buf);         # unterminated final line
+        printf "  (%d routine guardrail status line(s) hidden; full output in the apply log, or DOT_GUARDRAIL_VERBOSE=1)\n", $hidden if $hidden > 0;
     '
 }
 

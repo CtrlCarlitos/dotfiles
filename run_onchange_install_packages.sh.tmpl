@@ -188,6 +188,62 @@ get_distro_info() {
     printf "%s|%s|%s" "$id" "$id_like" "$codename"
 }
 
+# dot_zshrc exports LANG=en_US.UTF-8, but Debian/Ubuntu generate only
+# C.UTF-8 by default: /etc/default/locale says `LANG=C.UTF-8` and
+# en_US.UTF-8 ships as a COMMENTED line in /etc/locale.gen. An exported
+# locale that was never generated makes every locale-aware child process
+# complain on stderr - one `dotfiles-doctor` run printed perl's 15-line
+# "Setting locale failed" block 21 times, once per spawn over ~/.ssh,
+# burying the health report it was supposed to show. So generate what the
+# shell config declares instead of leaving the two to disagree.
+#
+# apt-only by construction (reached from install_apt): macOS ships
+# en_US.UTF-8 generated, and there is no locale-gen to call there.
+# Idempotent: an already-generated locale returns at the first probe.
+ensure_locale() {
+    # `locale -a` spells it en_US.utf8; accept either spelling.
+    if locale -a 2>/dev/null | grep -qiE '^en_US\.utf-?8$'; then
+        return 0
+    fi
+    info "Generating the en_US.UTF-8 locale (dot_zshrc exports it)..."
+    # locale-gen/update-locale live in /usr/sbin, which is not on every
+    # user's PATH - resolve the names, then fall back to absolute paths.
+    local gen upd
+    gen="$(command -v locale-gen || true)"; [ -n "$gen" ] || gen=/usr/sbin/locale-gen
+    upd="$(command -v update-locale || true)"; [ -n "$upd" ] || upd=/usr/sbin/update-locale
+    if [ ! -x "$gen" ]; then
+        $SUDO apt install -y locales || {
+            warn "locales package install failed - leaving the locale ungenerated"
+            return 0
+        }
+    fi
+    if [ ! -x "$gen" ]; then
+        warn "locale-gen still not found after installing locales - leaving the locale ungenerated"
+        return 0
+    fi
+    # Uncomment (or add) the /etc/locale.gen entry before generating: a bare
+    # `locale-gen` and `dpkg-reconfigure locales` rebuild the archive from
+    # that file alone, so a locale generated only by argument would vanish
+    # the next time some package triggers a regeneration.
+    if [ -f /etc/locale.gen ]; then
+        if grep -qE '^[[:space:]]*#[[:space:]]*en_US\.UTF-8[[:space:]]+UTF-8' /etc/locale.gen; then
+            $SUDO sed -i 's/^[[:space:]]*#[[:space:]]*\(en_US\.UTF-8[[:space:]]\{1,\}UTF-8\)/\1/' /etc/locale.gen
+        elif ! grep -qE '^[[:space:]]*en_US\.UTF-8[[:space:]]+UTF-8' /etc/locale.gen; then
+            printf 'en_US.UTF-8 UTF-8\n' | $SUDO tee -a /etc/locale.gen >/dev/null
+        fi
+    fi
+    $SUDO "$gen" en_US.UTF-8 || {
+        warn "locale-gen en_US.UTF-8 failed - continuing"
+        return 0
+    }
+    # Make it the system default too, so non-login shells, systemd units and
+    # `sudo` children agree with dot_zshrc instead of falling back to C.
+    if [ -x "$upd" ]; then
+        $SUDO "$upd" LANG=en_US.UTF-8 || warn "update-locale failed - the locale is generated but not the default"
+    fi
+    success "en_US.UTF-8 locale generated"
+}
+
 install_fonts() {
     local font_dir="$HOME/.local/share/fonts"
     # Ensure wget and 7zip are available. apt only: this function is reached
@@ -482,7 +538,28 @@ install_agent_guardrails() {
     local code=0
     local log="$HOME/.local/state/guardrail/apply.log"
     mkdir -p "$(dirname "$log")"
+    # Terminal line discipline is snapshotted around the call and restored
+    # unconditionally. The installer can stop on an approval prompt
+    # ("Approve register guardrail on planes ...? [y/N]") and reads the answer
+    # from the terminal, but its stdout here is a PIPE (tee + the console
+    # filter), so an isatty(stdout) check inside it sees "not interactive".
+    # A tool that turns echo off to read one key and keys its restore path off
+    # that check leaves the terminal with echo off: the keystrokes still reach
+    # the prompt and the apply runs to completion, yet nothing the operator
+    # types is visible, which is indistinguishable from a hung terminal and
+    # cost a real session a terminal restart. `stty -g` round-trips the whole
+    # mode set, so this repairs whatever the installer left behind without
+    # having to know what it changed. Guards: no-op when stdin is not a
+    # terminal (CI, chezmoi apply under a pipe), and every call is tolerant -
+    # a failed probe must never fail the apply.
+    local tty_state=""
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+        tty_state="$(stty -g </dev/tty 2>/dev/null || true)"
+    fi
     sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
+    if [ -n "$tty_state" ]; then
+        stty "$tty_state" </dev/tty 2>/dev/null || true
+    fi
     rm -rf "$tmp"
     case "$code" in
         0) ;;
@@ -748,6 +825,9 @@ install_apt() {
     info "Installing core packages..."
     # Names come from .chezmoidata/packages.yaml (see #83).
     $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }}
+
+    # The locale dot_zshrc exports, before anything else runs under it.
+    ensure_locale
 
     # GitHub CLI - via the official apt repo rather than the distro-packaged
     # version, which lags upstream and is missing on Ubuntu 22.04 (jammy) since
@@ -1753,18 +1833,33 @@ install_chatgpt_cli() {
         warn "npm not found - skipping Codex CLI"
     fi
 
-    # Superpowers for Codex CLI: the official Codex plugin marketplace
-    # (`openai-curated-remote`, pre-configured in codex) carries superpowers,
-    # and `codex plugin add` installs it scriptably (obra/superpowers README,
-    # Codex CLI section; verified live on codex-cli 0.157.0 - the third-party
+    # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace
+    # carries superpowers, and `codex plugin add` installs it scriptably
+    # (obra/superpowers README, Codex CLI section - the third-party
     # `codex-plugin` npm helper this repo once rejected is not involved).
     # Re-running add on an installed plugin is a refresh, so this is
     # idempotent like the Claude/Antigravity Superpowers steps.
+    #
+    # The marketplace NAME is resolved at runtime, never hardcoded: codex
+    # 0.147.0 ships it as `openai-curated`, and the hardcoded
+    # `openai-curated-remote` this block used to pass made every apply end in
+    # "Error: plugin `superpowers` was not found in marketplace
+    # `openai-curated-remote`". `codex plugin list` prints one
+    # `<plugin>@<marketplace>` row per available plugin, so the name codex
+    # itself uses is right there - and a future rename cannot break us again.
     if command -v codex &>/dev/null; then
         info "Installing Superpowers plugin for Codex..."
-        # Output shown only on failure ("Added plugin ... Installed plugin root: ..." on every run).
-        codex_out="$(net_timeout 300 codex plugin add superpowers@openai-curated-remote 2>&1)" \
-            || { printf '%s\n' "$codex_out" >&2; warn "Superpowers plugin install for Codex failed - continuing"; }
+        # `|| true` inside the substitution: under `set -o pipefail` a codex
+        # that cannot list would abort the whole apply on the assignment.
+        codex_market="$(net_timeout 60 codex plugin list 2>/dev/null \
+            | sed -n 's/^superpowers@\([^[:space:]]*\).*/\1/p' | head -n 1 || true)"
+        if [ -z "$codex_market" ]; then
+            warn "no Codex marketplace lists a superpowers plugin - skipping"
+        else
+            # Output shown only on failure ("Added plugin ... Installed plugin root: ..." on every run).
+            codex_out="$(net_timeout 300 codex plugin add "superpowers@$codex_market" 2>&1)" \
+                || { printf '%s\n' "$codex_out" >&2; warn "Superpowers plugin install for Codex failed - continuing"; }
+        fi
         # MCP registration for Codex lives HERE, not in the serena section
         # above (see that section's note): codex only exists from this point
         # on a fresh/reinstall machine. Idempotent: serena's own setup tool

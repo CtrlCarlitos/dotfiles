@@ -271,7 +271,7 @@ The repo root carries a `guardrail.toml` — guardrail's own config overlay:
 
 ```toml
 [slots]
-  web_hosts = ["starship.rs"]
+  web_hosts = ["starship.rs", "code.claude.com"]
 ```
 
 Location semantics matter here: guardrail reads this overlay from the
@@ -279,9 +279,37 @@ Location semantics matter here: guardrail reads this overlay from the
 `guardrail.toml` copy in `$HOME` is dead weight — `guardrail doctor` run
 there reports `overlay: none` — which is why the file is on
 `.chezmoiignore`'s never-deploy list, pinned by
-`tests/home_scope_contract.sh`. The shipped entry (`starship.rs`, a docs
-site your prompt config references) is the only trusted web host; edit the
-file in the repo to change it — never a `$HOME` copy, which nothing reads.
+`tests/home_scope_contract.sh`. The two shipped entries are docs sites the
+prompt and agent configs reference; edit the file in the repo to change
+them — never a `$HOME` copy, which nothing reads.
+
+### The repo cannot grant itself a host
+
+Shipping a host here only *requests* it. Guardrail treats the repo overlay
+as untrusted input, so each entry must also be authorized by the operator
+in `~/.config/guardrail/waivers.toml` (`%APPDATA%\guardrail` on Windows).
+Until it is, every hook event prints a pair of lines like:
+
+```text
+guardrail: repo requested web_hosts entry starship.rs, which is NOT
+authorized in ~/.config/guardrail/waivers.toml — DROPPED
+```
+
+That is on *every tool call in every agent session*, so an unauthorized
+overlay is loud rather than silent. Authorize the entries once, as the
+operator, from a normal shell — not from inside an agent session, where
+guardrail denies it under `P5.self-config` ("the guarded plane cannot
+change its own guardrail posture"):
+
+```text
+guardrail egress grant --scope repo --host starship.rs
+guardrail egress grant --scope repo --host code.claude.com
+```
+
+The grants land in `waivers.toml`'s `[web_hosts]` table, which
+`dotbackup`/`dotrestore` carry between machines (see
+[backup-restore.md](backup-restore.md)) — so this is a once-per-operator
+step, not once per clone.
 
 ## Caveats
 
