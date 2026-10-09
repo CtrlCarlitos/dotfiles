@@ -107,6 +107,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 # tests/ps_template_define_before_use_contract.sh pins the order.
 {{ include "scripts/lib/ps-skills.ps1" }}
 {{ include "scripts/lib/ps-desktop-shortcuts.ps1" }}
+{{ include "scripts/lib/ps-timing.ps1" }}
 # [data.upgrade] desktop_shortcuts = false: the installers this run starts drop shortcuts on
 # the Desktop as well (Geany, OBS, ShareX and Termius did, 2026-10-07). Snapshot now; the new
 # ones go just before "Package installation complete!".
@@ -508,6 +509,9 @@ Install-NpmCatalogTool -Package @('{{ includeTemplate "pkg-names" (dict "manager
 {{ includeTemplate "winget-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
 {{- end }}
 
+# Where the time of a dot up goes (scripts/lib/ps-timing.ps1, inlined above): one mark per section,
+# one "Timings (dot up, ...)" line before "Package installation complete!". Twin of the sh installer.
+Add-DotTimingMark -Name 'choco packages'
 {{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
 # ONE batched local inventory instead of one `choco list --exact <pkg>` per
@@ -675,6 +679,7 @@ if ($wingetPackages.Count -gt 0) {
     }
 }
 
+Add-DotTimingMark -Name 'remote access'
 {{- if $remote_access_server }}
 # True only when the capability was missing and has just been added. It used to print "OpenSSH Server
 # prerequisite installed" on EVERY run, installed or not (the SSH post-install note at the end already
@@ -698,6 +703,7 @@ if (-not $IsAdmin) {
 }
 {{- end }}
 
+Add-DotTimingMark -Name 'modern CLI'
 {{- if $modern_cli }}
 # tealdeer's Chocolatey package puts its binary at tools\x64\tealdeer.exe -
 # Chocolatey's shim generator only picks up .exe files directly in a
@@ -806,6 +812,7 @@ $wtSettings = @(
     "$env:LOCALAPPDATA\Microsoft\Windows Terminal\settings.json"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
+Add-DotTimingMark -Name 'fonts'
 {{- if $fonts }}
 if ($wtSettings) {
     try {
@@ -855,6 +862,7 @@ $vsDefaults = [ordered]@{
     '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ end }}
 {{- end }}
 }
+Add-DotTimingMark -Name 'VS Code'
 $vsJunk = @({{ range $i, $g := (get $vsCfg "junk" | default list) }}{{ if $i }}, {{ end }}'{{ $g }}'{{ end }})
 $vsJunkMap = [ordered]@{}
 foreach ($s in $vsJunk) { $vsJunkMap[$s] = $true }
@@ -1039,6 +1047,7 @@ if (-not $vsApply) {
 
 
 
+Add-DotTimingMark -Name 'agent toolkit'
 {{- if $agent_toolkit }}
 # Agent Toolkit (spec section 2: the cross-vendor agent layer - Serena,
 # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
@@ -1343,6 +1352,7 @@ if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
 # scripts/lib/ps-skills.ps1, inlined above).
 Invoke-GraftRetirement
 
+Add-DotTimingMark -Name 'OpenCode'
 {{- if $opencode_cli }}
 # choco abandons lib-bkp\opencode whenever an upgrade ran while an opencode
 # session held the binary open (access denied x3 retries, then left behind -
@@ -1480,6 +1490,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
+Add-DotTimingMark -Name 'Claude Code'
 {{- if $claude_cli }}
 # Claude Code (Native Installer - Recommended). Deliberately NOT nested under
 # an npm-presence check (its former home, the old ai_tools npm block): the
@@ -1559,6 +1570,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
+Add-DotTimingMark -Name 'Codex'
 {{- if $chatgpt_cli }}
 # Codex CLI (the npm package named in .chezmoidata/agents.yaml). The
 # curated-skills pass below gates on this group too (chatgpt_cli sits in its
@@ -1615,6 +1627,7 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
+Add-DotTimingMark -Name 'Antigravity'
 {{- if $antigravity_cli }}
 # Superpowers plugin for Antigravity CLI (agy). Google Gemini Code
 #    Assist for individuals (which the standalone Gemini CLI used) was
@@ -1649,6 +1662,7 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
 }
 {{- end }}
 
+Add-DotTimingMark -Name 'agent skills'
 {{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}
 # Curated third-party agent skills via the `skills` CLI (vercel-labs/skills):
 # Matt Pocock's 12 + mp-code-review + Anthropic's frontend-design, installed
@@ -2104,6 +2118,7 @@ function Invoke-GuardrailNextStep {
         Write-Host "ACTION NEEDED: run 'guardrail setup' in an interactive terminal, approve with your passkey, then re-run chezmoi apply" -ForegroundColor Yellow
     }
 }
+Add-DotTimingMark -Name 'guardrail'
 {{- if $guardrail }}
 Invoke-GuardrailInstaller -State enabled
 {{- else }}
@@ -2117,6 +2132,7 @@ if (Test-Path $guardrailExe) {
 
 # ScreenRec (Desktop App - Manual Install)
 # https://screenrec.com
+Add-DotTimingMark -Name 'desktop apps'
 {{- if $dev_desktop }}
 $screenRecExe = "$env:LOCALAPPDATA\StreamingVideoProvider\ScreenRec_app\ScreenRec.exe"
 if (-not (Test-Path $screenRecExe)) {
@@ -2329,6 +2345,7 @@ if ($dropDesktopShortcuts) {
         foreach ($removed in $removedShortcuts) { Write-Host "    $removed" }
     }
 }
+Write-DotTimingSummary -Title 'dot up'
 Write-Host "Package installation complete!" -ForegroundColor Green
 
 {{- if or $dev_desktop $remote_access }}
