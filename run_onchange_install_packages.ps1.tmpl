@@ -1146,9 +1146,12 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
         if (Test-Path $agentBrowser) {
             $env:AGENT_BROWSER = $agentBrowser
+            # Output shown only on failure: on every run the setup printed an "Installing
+            # Chrome... already installed" pair (and a Linux warning on WSL) that are not about
+            # this install. Same as the sh twin.
             Invoke-WithTimeout -Description "agent-browser browser setup" -Seconds 600 -Action {
-                & $env:AGENT_BROWSER install
-                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+                $setupOutput = @(& $env:AGENT_BROWSER install 2>&1 | ForEach-Object { "$_" })
+                if ($LASTEXITCODE -ne 0) { $setupOutput; throw "exit $LASTEXITCODE" }
             }
             # -NoStream returns the job output, so the JSON is summarised here (the job
             # cannot see this session's functions) instead of dumped as a ~3 KB blob.

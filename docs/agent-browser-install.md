@@ -88,6 +88,9 @@ Unix, a machine without `jq`) is printed raw, never dropped. The summarisers
 are `agent_browser_doctor` in `scripts/lib/agent-skills.sh` and
 `Write-AgentBrowserDoctorSummary` in `scripts/lib/ps-skills.ps1`
 (`tests/quiet_output_contract.sh`, `tests/agent_browser_provisioning_contract.sh`).
+The browser setup (`agent-browser install`) is quiet the same way on both twins: its
+"Installing Chrome... already installed" pair (and a "Linux detected..." warning on WSL)
+printed on every run; now its output is shown only when the setup fails.
 
 `dot upgrade` (via `scripts/update_ai_tools.*`) re-runs the same global `npm
 install` and `agent-browser install`; the Unix updater only checks `doctor`'s

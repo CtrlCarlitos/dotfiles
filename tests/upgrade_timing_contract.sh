@@ -119,6 +119,12 @@ for f in scripts/dotupgrade.ps1 scripts/update_ai_tools.ps1; do
     [ "$(count "$f" '^Write-DotTimingSummary ')" = 1 ] || fail "$f: expected exactly one summary"
 done
 grep -Fq 'lib/timing.sh' "$repo_root/scripts/dotupgrade.sh" || fail "dotupgrade.sh must source lib/timing.sh"
+# `dot up` too: a WSL apply took 3m28s with nothing saying which part (2026-10-09). The marks sit
+# inside main(), so they are indented.
+inst="run_onchange_install_packages.sh.tmpl"
+grep -Fq 'include "scripts/lib/timing.sh"' "$repo_root/$inst" || fail "$inst must include scripts/lib/timing.sh"
+[ "$(count "$inst" '^[[:space:]]*dot_timing_mark ')" -ge 6 ] || fail "$inst: expected a mark at each section of main (found $(count "$inst" '^[[:space:]]*dot_timing_mark '))"
+[ "$(count "$inst" '^[[:space:]]*dot_timing_summary ')" = 1 ] || fail "$inst: expected exactly one summary"
 grep -Fq 'lib/timing.sh' "$repo_root/scripts/update_ai_tools.sh" || fail "update_ai_tools.sh must source lib/timing.sh"
 pass
 

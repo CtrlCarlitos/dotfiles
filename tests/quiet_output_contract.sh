@@ -41,7 +41,7 @@ pw_run() { # <summary> <exit> [verbose]; the block runs in a subshell, inside a 
         trap - EXIT   # called inside $( ): the parent's cleanup must not run when this subshell ends
         export PW_SUMMARY="$1" PW_EXIT="$2"
         DOT_APT_VERBOSE="${3:-0}"
-        net_timeout_tty() { shift; "$@"; }
+        sudo_net_timeout_tty() { shift 2; "$@"; }
         warn() { echo "WARN: $*" >&2; }
         PKG_MANAGER=apt; NPX_BIN="$tmp/fake-npx"; npm_sudo=""
         pw_block() {
