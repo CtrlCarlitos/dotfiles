@@ -188,11 +188,14 @@ if re.search(r'^(for \w+ in [^\n]*|\s*brew install [^\n]*|\s*\$SUDO apt install 
 # produced by the catalog - an `apt:` value, or a tool id whose record
 # documents its by-procedure install (ghostty, neovim, screenrec, zoxide).
 # The names below are base-image prerequisites (a keyring tool, an archive
-# unpacker, the remote_access_server SSH server), not tools; they are
-# deliberately not catalogued. Anything else appearing here means someone
-# hardcoded a package name in install_apt again - add the apt: key/record to
-# .chezmoidata/packages.yaml and render the line through "pkg-names".
-PREREQ = {"gpg", "unzip", "openssh-server"}
+# unpacker, the remote_access_server SSH server, the locale data ensure_locale
+# generates from), not tools; they are deliberately not catalogued - `locales`
+# in particular is Debian-only base OS data with no brew/winget analogue, so a
+# catalog row for it would invent an empty parity line in docs/tool-parity.md.
+# Anything else appearing here means someone hardcoded a package name in
+# install_apt again - add the apt: key/record to .chezmoidata/packages.yaml and
+# render the line through "pkg-names".
+PREREQ = {"gpg", "unzip", "openssh-server", "locales"}
 produced = set(apt) | set(ids)
 literal = set()
 for m in re.finditer(r'apt(?:-get)? install -y ([^|\n;"\'$]+)', sh):

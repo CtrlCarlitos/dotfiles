@@ -103,6 +103,48 @@ sh_verbose="$(DOT_GUARDRAIL_VERBOSE=1 sh_filter <"$tmp/fixture.txt")"
 [ "$(printf '' | sh_filter)" = "" ] || fail "an empty input must print nothing (shell: no 'hidden' note without hidden lines)"
 pass
 
+# --- shell twin: an unterminated prompt must appear WHILE the writer is still blocked ------------
+# The installer stops on "Approve ...? [y/N] " with NO trailing newline and waits for a keystroke.
+# The record-oriented awk this filter used to be could not emit an incomplete record, so it held
+# those bytes until EOF and the console stayed BLANK for as long as the installer waited: the
+# operator typed blind, the keystrokes did land (the apply ran to completion) with nothing echoed,
+# and the session ended in a terminal restart. Reproduced by a writer that prompts and then blocks;
+# the assertion is that the prompt is readable BEFORE the writer finishes, which is exactly what a
+# record-oriented filter cannot do.
+prompt_out="$tmp/prompt.txt"; : >"$prompt_out"
+{
+    printf 'guardrail v0.23.36-dev\n'
+    printf 'setup: registering /usr/local/bin/guardrail\n'
+    printf 'Approve register guardrail on planes: claude,codex? [y/N] '
+    sleep 3                       # the installer is blocked on a keystroke here
+    printf 'y\n'
+    printf 'claude enabled\n'
+} | sh_filter >"$prompt_out" 2>&1 &
+prompt_writer=$!
+prompt_seen=false
+waited=0
+while [ "$waited" -lt 25 ]; do    # up to 2.5s; the filter releases after ~0.2s of silence
+    if grep -Fq 'Approve register guardrail on planes: claude,codex? [y/N] ' "$prompt_out"; then
+        prompt_seen=true
+        break
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+done
+wait "$prompt_writer" 2>/dev/null || true
+$prompt_seen ||
+    fail "an unterminated prompt must reach the console while the writer is still blocked on it (a record-oriented filter holds it until EOF)"
+# The released prefix must not be duplicated when its newline finally arrives, and must not be
+# re-tested against the hide list - those bytes are already on the operator's screen.
+occurrences="$(grep -Fc 'Approve register guardrail on planes' "$prompt_out" || true)"
+[ "$occurrences" = 1 ] ||
+    fail "the released prompt prefix must appear exactly once, got $occurrences: $(cat "$prompt_out")"
+grep -Fq 'Approve register guardrail on planes: claude,codex? [y/N] y' "$prompt_out" ||
+    fail "the completed prompt line must carry the answer: $(cat "$prompt_out")"
+grep -Fq '  (2 routine guardrail status line(s) hidden' "$prompt_out" ||
+    fail "the routine lines around a prompt must still be hidden: $(cat "$prompt_out")"
+pass
+
 # --- PowerShell twin ------------------------------------------------------------------------------
 if command -v pwsh >/dev/null 2>&1; then
     cat >"$tmp/harness.ps1" <<'PSEOF'

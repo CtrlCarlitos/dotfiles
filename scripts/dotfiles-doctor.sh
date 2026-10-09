@@ -267,11 +267,20 @@ fi
 #-------------------------------------------------------------------------------
 # 8. SSH text files use LF on every platform. Only replace CRLF pairs;
 #    preserve other bytes, modes, binary files and symlink targets.
+#
+#    LC_ALL=C on the perl call: this spawns once per file under ~/.ssh, and a
+#    host whose exported LANG was never generated makes perl print a 15-line
+#    "Setting locale failed" block on EVERY one of them (21 copies on a real
+#    WSL box), burying the report above. The health check must read the same
+#    on any host's locale state, and nothing in the script below is
+#    locale-sensitive: it works on raw bytes and an explicit UTF-8 decode.
+#    The installer generates the declared locale (ensure_locale); this keeps
+#    the doctor honest on machines where it has not run yet.
 #-------------------------------------------------------------------------------
 if [ -d "$HOME/.ssh" ]; then
     crlf_count=0
     while IFS= read -r -d '' keyfile; do
-        if outcome="$(perl -MEncode=decode,FB_CROAK - "$keyfile" "$FIX" <<'PERL'
+        if outcome="$(LC_ALL=C perl -MEncode=decode,FB_CROAK - "$keyfile" "$FIX" <<'PERL'
 use strict;
 use warnings;
 my ($path, $fix) = @ARGV;
