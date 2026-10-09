@@ -25,12 +25,25 @@ deferred() { case ",${DOTUPGRADE_DEFER:-}," in *,"$1",*) return 0 ;; *) return 1
 # npm_global_current <pkg>: 0 when the globally installed <pkg> is already the registry's
 # latest, so the reinstall (9 s for codex on WSL) can be skipped. Unknown - no jq, not
 # installed, registry unreachable - returns 1 and the caller installs as before.
+CURRENT_NPM_VERSION=""
+LATEST_NPM_VERSION=""
 npm_global_current() {
     local pkg="$1" have want
     command -v jq &>/dev/null || return 1
     have="$(npm ls -g "$pkg" --depth=0 --json 2>/dev/null | jq -b -r --arg p "$pkg" '.dependencies[$p].version // empty' 2>/dev/null)" || have=""
     want="$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]')" || want=""
+    LATEST_NPM_VERSION="$want"
     [ -n "$have" ] && [ "$have" = "$want" ] && CURRENT_NPM_VERSION="$have"
+}
+
+# npm_global_upgrade <name> <version|""> <npm install -g args...> - the upgrade, quiet on
+# success. npm's own summary ("changed 2 packages in 20s", printed even at --loglevel=error)
+# says nothing useful; the version is the news. npm's output is shown only on failure.
+npm_global_upgrade() {
+    local name="$1" ver="$2" out; shift 2
+    out="$($npm_sudo npm install -g "$@" --loglevel=error --no-progress 2>&1)" \
+        || { printf '%s\n' "$out" >&2; return 1; }
+    echo "   $name upgraded to ${ver:-latest}"
 }
 
 # Codex ships its native binary as an optional dependency per platform
@@ -81,7 +94,7 @@ upgrade_codex_npm() {
         fi
         return 0
     fi
-    $npm_sudo npm install -g "${pkg}@latest" --loglevel=error --no-progress || { echo "   Codex upgrade failed - continuing"; return 0; }
+    npm_global_upgrade codex "$want" "${pkg}@latest" || { echo "   Codex upgrade failed - continuing"; return 0; }
     codex_works || echo "   codex was installed but cannot start (npm skipped its platform binary) - re-run dot upgrade in a few minutes"
     return 0
 }
@@ -126,7 +139,7 @@ if command -v npm &>/dev/null; then
         if npm_global_current "$npm_tool"; then
             echo "   $npm_tool is current ($CURRENT_NPM_VERSION)"
         else
-            $npm_sudo npm install -g "${npm_tool}@latest" --loglevel=error --no-progress || echo "   $npm_tool upgrade failed - continuing"
+            npm_global_upgrade "$npm_tool" "$LATEST_NPM_VERSION" "${npm_tool}@latest" || echo "   $npm_tool upgrade failed - continuing"
         fi
     done
 else
@@ -402,7 +415,7 @@ dot_timing_mark 'Playwright Chromium'
 # 4. Playwright Chromium (headless browser for agent automation)
 if command -v npx &>/dev/null; then
     echo "🌐 Updating Playwright Chromium..."
-    npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
+    net_timeout 600 npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
 fi
 
 dot_timing_mark 'agent-browser'
@@ -415,11 +428,11 @@ if command -v npm &>/dev/null; then
     if npm_global_current agent-browser; then
         echo "   agent-browser is current ($CURRENT_NPM_VERSION)"
     else
-        $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress || echo "   agent-browser install failed - skipping"
+        npm_global_upgrade agent-browser "$LATEST_NPM_VERSION" --allow-scripts=agent-browser agent-browser || echo "   agent-browser install failed - skipping"
     fi
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
-        "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
+        net_timeout 600 "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
         "$AGENT_BROWSER_BIN" doctor --json &>/dev/null || echo "   agent-browser verification failed - continuing"
     fi
 fi

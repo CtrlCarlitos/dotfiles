@@ -380,6 +380,31 @@ PSUseBOMForUnicodeEncodedFile on.
 
 ---
 
+## 17. `$SUDO` is a shell function: never put it under `timeout`
+
+The installer's `$SUDO` (and its copy `$npm_sudo`) names `dot_sudo`, a function
+that primes the password prompt on the first privileged command. coreutils
+`timeout` exec()s its argument, and a function is not a file.
+
+**The incident.** The lazy prime landed with every `net_timeout 300 $npm_sudo <cmd>`
+call site unchanged. On the next WSL `dot up` the Playwright deps step printed
+`timeout: failed to run command 'dot_sudo': No such file or directory` and warned
+"failed or timed out" on every run; the first `npm -g` install and the
+agent-browser install carried the same shape and would have failed the same way.
+A second latent hang hid behind it: the keep-alive loop the prime starts inherited
+the caller's stdout, so a first privileged command inside `$(...)` (the Codex
+install) would have held the substitution's pipe open for the life of the apply.
+
+**Obey it.** A privileged command that needs a wall clock goes through
+`sudo_net_timeout` / `sudo_net_timeout_tty "$npm_sudo" <secs> <cmd...>`, which
+primes through the function and puts the real `sudo` binary under the timeout.
+Background jobs started from a function close both streams.
+`tests/sudo_timeout_contract.sh` forbids a sudo variable under a timeout wrapper and
+executes both helpers against a stub sudo binary, with the `$(...)` case under a
+timeout of its own.
+
+---
+
 ## Checking yourself
 
 ```sh

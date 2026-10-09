@@ -28,6 +28,12 @@ ps1_updater="$ai_ps1"
 
 . "$repo_root/tests/lib.sh"
 
+# Every network step is under net_timeout (the 2026-08-30 hang class, header of
+# update_ai_tools.sh). The Playwright download and the agent-browser browser
+# setup were the two left bare.
+require "$ai_sh" 'net_timeout 600 npx --yes playwright install chromium'
+require "$ai_sh" 'net_timeout 600 "$AGENT_BROWSER_BIN" install'
+
 # The agent-guardrails installer owns the Defender exclusion (#132/#146);
 # the dotfiles never touch Defender.
 forbid "$ps1_installer" 'Add-MpPreference'
@@ -63,10 +69,12 @@ for c in npx git uv serena opencode agy codex; do
 done
 
 # npm: logs every argv; `prefix -g` answers $NPM_FAKE_PREFIX; installs fail
-# only when NPM_FAIL=1.
+# only when NPM_FAIL=1. A successful `install` prints npm's own summary line,
+# the one the real npm prints even at --loglevel=error.
 cat >"$bin/npm" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${NPM_LOG:?}"
+if [ "${1:-}" = install ] && [ "${NPM_FAIL:-0}" != 1 ]; then printf '\nchanged 2 packages in 20s\n'; fi
 if [ "${1:-}" = prefix ] && [ "${2:-}" = -g ]; then
     printf '%s\n' "${NPM_FAKE_PREFIX:?}"
     exit 0
@@ -230,6 +238,10 @@ grep -Fq 'claude.ai/install.sh' "$tmp/curl.log" || fail "a Claude Code behind th
 : >"$tmp/npm.log"
 NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c.log" || true
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "a stale codex must be reinstalled"
+# The news is the version, not npm's "changed 2 packages in 20s" (seen on a real dot upgrade,
+# 2026-10-09, with nothing saying what was changed).
+grep -Fq 'codex upgraded to 9.9.9' "$tmp/run5c.log" || fail "a codex upgrade must report the version it installed: $(grep -i codex "$tmp/run5c.log" | head -3)"
+if grep -Fq 'changed 2 packages' "$tmp/run5c.log"; then fail "npm's install summary must not reach the console on a successful codex upgrade"; else pass; fi
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" || fail "a stale agent-browser must be reinstalled"
 
 : >"$tmp/npm.log"

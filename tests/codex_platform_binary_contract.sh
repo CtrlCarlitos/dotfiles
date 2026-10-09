@@ -34,7 +34,7 @@ pass
 # --- bash twin, executed ------------------------------------------------------------------------
 if command -v jq >/dev/null 2>&1; then
     extract_fn() { awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; next} f{print} f && /^\}$/{exit}' "$repo_root/scripts/update_ai_tools.sh"; }
-    for fn in npm_global_current npm_platform_tag npm_platform_published codex_works upgrade_codex_npm; do extract_fn "$fn"; done >"$tmp/fns.sh"
+    for fn in npm_global_current npm_global_upgrade npm_platform_tag npm_platform_published codex_works upgrade_codex_npm; do extract_fn "$fn"; done >"$tmp/fns.sh"
     grep -q '^upgrade_codex_npm() {' "$tmp/fns.sh" || fail "upgrade_codex_npm() not found in update_ai_tools.sh"
     mkdir -p "$tmp/bin"
     # state: $tmp/have (installed version), $tmp/want (latest), $tmp/published (1/0), $tmp/works (1/0)
@@ -63,7 +63,7 @@ EOF
         printf '%s|%s' "$(printf '%s' "$out" | tr '\n' ' ' | sed 's/^ *//; s/ *$//')" "$(tr '\n' ',' <"$tmp/calls")"
     }
     r="$(sh_case 0.161.0 0.161.0 1 1)"; [ "$r" = "codex is current (0.161.0)|" ] || fail "sh a: runs and current must be left alone (got: $r)"
-    r="$(sh_case 0.161.0 0.161.0 1 0)"; [ "$r" = "|install," ] || fail "sh b: a codex that cannot start must be reinstalled (got: $r)"
+    r="$(sh_case 0.161.0 0.161.0 1 0)"; [ "$r" = "codex upgraded to 0.161.0|install," ] || fail "sh b: a codex that cannot start must be reinstalled, and the version reported (got: $r)"
     r="$(sh_case 0.160.0 0.161.0 0 1)"
     case "$r" in *"0.161.0 is out, but its linux-x64 binary is not published yet - keeping the installed one"*"|") ;; *) fail "sh c: a release without its binary must not replace a working codex (got: $r)" ;; esac
     r="$(sh_case 0.161.0 0.161.0 0 0)"
@@ -110,7 +110,7 @@ PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
     line() { printf '%s\n' "$out" | grep "^$1=" || true; }
     [ "$(line a)" = "a=codex is current (0.161.0)|" ] || fail "ps1 a: runs and current must be left alone (got: $(line a))"
-    [ "$(line b)" = "b=|install" ] || fail "ps1 b: a codex that cannot start must be reinstalled (got: $(line b))"
+    [ "$(line b)" = "b=codex upgraded to 0.161.0|install" ] || fail "ps1 b: a codex that cannot start must be reinstalled, and the version reported (got: $(line b))"
     case "$(line c)" in *"0.161.0 is out, but its win32-x64 binary is not published yet - keeping the installed one"*"|") ;; *) fail "ps1 c: got $(line c)" ;; esac
     case "$(line d)" in *"cannot start"*"re-run dot upgrade in a few minutes"*"|") ;; *) fail "ps1 d: got $(line d)" ;; esac
     case "$(line e)" in *"installed but cannot start"*"|install") ;; *) fail "ps1 e: got $(line e)" ;; esac

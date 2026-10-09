@@ -24,7 +24,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 [ -f "$tmpl" ] || { fail "missing $tmpl"; finish; }
 
-# 1. `sudo -v` may appear ONLY inside dot_sudo. Indentation proves nothing -
+# 1. `sudo -v` may appear ONLY inside dot_sudo_prime (dot_sudo and the
+#    sudo_net_timeout helpers call it - tests/sudo_timeout_contract.sh). Indentation proves nothing -
 #    the original bug was itself indented, inside the `if command -v sudo`
 #    block - so this compares the whole-file count against the count inside the
 #    function body. Any surplus is a second place that primes.
@@ -37,18 +38,19 @@ tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 code_only() { grep -vE '^[[:space:]]*#' "$1"; }
 prime_re='(^|[^-[:alnum:]_])sudo -v([^[:alnum:]]|$)'
 total_prime="$(code_only "$tmpl" | grep -cE "$prime_re" || true)"
-fn_prime="$(awk '/^dot_sudo\(\) \{/{f=1} f{print} f && /^}/{exit}' "$tmpl" \
+fn_prime="$(awk '/^dot_sudo_prime\(\) \{/{f=1} f{print} f && /^}/{exit}' "$tmpl" \
     | grep -vE '^[[:space:]]*#' | grep -cE "$prime_re" || true)"
 if [ "$fn_prime" != 1 ]; then
-    fail "dot_sudo must prime exactly once with 'sudo -v' (found $fn_prime in its body)"
+    fail "dot_sudo_prime must prime exactly once with 'sudo -v' (found $fn_prime in its body)"
 elif [ "$total_prime" != "$fn_prime" ]; then
-    fail "sudo is primed outside dot_sudo ($total_prime occurrences, $fn_prime inside) - an eager prime is back: $(grep -nE "$prime_re" "$tmpl" | grep -vE ':[[:space:]]*#' | head -3)"
+    fail "sudo is primed outside dot_sudo_prime ($total_prime occurrences, $fn_prime inside) - an eager prime is back: $(grep -nE "$prime_re" "$tmpl" | grep -vE ':[[:space:]]*#' | head -3)"
 else
     pass
 fi
 
 # 2. $SUDO names the function, and the function is defined.
 require "$tmpl" 'SUDO="dot_sudo"'
+require "$tmpl" 'dot_sudo_prime() {'
 require "$tmpl" 'dot_sudo() {'
 
 # 3. SUDO must stay shell-local: no export, no child shell.
@@ -65,9 +67,9 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 render_to "$tmp/installer.sh" sh '{"core":true}'
 
-# dot_sudo plus the flag it guards, lifted out of the render and run against a
-# stubbed sudo that records its arguments.
-sed -n '/^_DOT_SUDO_PRIMED=""/,/^}/p' "$tmp/installer.sh" >"$tmp/fn.sh"
+# dot_sudo, dot_sudo_prime and the flag they guard, lifted out of the render
+# and run against a stubbed sudo that records its arguments.
+awk '/^_DOT_SUDO_PRIMED=""/{f=1} f{print} f && /^# sudo-helpers: end/{exit}' "$tmp/installer.sh" >"$tmp/fn.sh"
 [ -s "$tmp/fn.sh" ] || { fail "dot_sudo not found in the rendered installer"; finish; }
 
 cat >"$tmp/drive.sh" <<'DRIVER'

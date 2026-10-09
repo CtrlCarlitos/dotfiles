@@ -249,6 +249,8 @@ Write-Host 'guardrail v0.23.36-dev'
 Write-Host 'setup: registering /usr/local/bin/guardrail'
 Write-Host -NoNewline 'Approve register guardrail on planes: claude,codex? [y/N] '
 Start-Sleep -Seconds 3
+# The block is over: the test must have seen the prompt BEFORE this file exists.
+New-Item -ItemType File -Path $env:PROMPT_RELEASED -Force | Out-Null
 Write-Host 'y'
 Write-Host 'claude enabled'
 PSEOF
@@ -261,22 +263,29 @@ Invoke-GuardrailInstallerProcess -FilePath 'pwsh' -ArgumentList @('-NoProfile', 
 PSEOF
     ps_prompt_out="$tmp/ps-prompt.txt"; : >"$ps_prompt_out"
     ps_prompt_log="$tmp/ps-prompt.log"
+    # Event-based, not clock-based: the writer creates $PROMPT_RELEASED when its block ends, so
+    # "seen while blocked" is "seen before that file exists". A fixed 2.5 s budget failed on a WSL
+    # where a cold pwsh start alone takes ~8 s (two nested starts here), with the filter correct.
+    ps_prompt_released="$tmp/prompt-released"
+    PROMPT_RELEASED="$(winpath "$ps_prompt_released")" \
     pwsh -NoProfile -File "$(winpath "$tmp/prompt-harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" \
         -Writer "$(winpath "$tmp/prompt-writer.ps1")" -Log "$(winpath "$ps_prompt_log")" >"$ps_prompt_out" 2>&1 &
     ps_prompt_writer=$!
     ps_prompt_seen=false
     waited=0
-    while [ "$waited" -lt 25 ]; do   # up to 2.5s; the filter releases after ~0.2s of silence
+    while [ "$waited" -lt 900 ]; do   # up to 90 s for the two pwsh starts; the block itself is 3 s
         if tr -d '\r' <"$ps_prompt_out" 2>/dev/null | grep -Fq 'Approve register guardrail on planes: claude,codex? [y/N]'; then
-            ps_prompt_seen=true
+            [ -e "$ps_prompt_released" ] || ps_prompt_seen=true
             break
         fi
+        [ -e "$ps_prompt_released" ] && break   # the writer moved on and the prompt never showed
+        kill -0 "$ps_prompt_writer" 2>/dev/null || break
         sleep 0.1
         waited=$((waited + 1))
     done
     wait "$ps_prompt_writer" 2>/dev/null || true
     $ps_prompt_seen ||
-        fail "PowerShell: an unterminated prompt must reach the console while the writer is still blocked on it"
+        fail "PowerShell: an unterminated prompt must reach the console while the writer is still blocked on it (released marker: $([ -e "$ps_prompt_released" ] && echo present || echo absent); output: $(tr -d '\r' <"$ps_prompt_out" | head -3 | tr '\n' '|'))"
     occurrences="$(tr -d '\r' <"$ps_prompt_out" | grep -Fc 'Approve register guardrail on planes' || true)"
     [ "$occurrences" = 1 ] ||
         fail "PowerShell: the released prompt prefix must appear exactly once, got $occurrences: $(cat "$ps_prompt_out")"

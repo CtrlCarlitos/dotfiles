@@ -662,9 +662,10 @@ function Update-CodexNpm {
         return
     }
     if (-not $PSCmdlet.ShouldProcess($Package, 'npm install -g')) { return }
-    $ErrorActionPreference = 'Continue'
-    & npm install -g "$($Package)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
-    $ErrorActionPreference = $previous
+    if (-not (Install-NpmGlobalLatest -Name 'codex' -Version $want -Arguments @("$($Package)@latest"))) {
+        Write-Host "  Codex upgrade failed - continuing" -ForegroundColor Red
+        return
+    }
     if (-not (Test-CodexWork)) {
         Write-Host "  codex was installed but cannot start (npm skipped its platform binary) - re-run dot upgrade in a few minutes" -ForegroundColor Red
     }
@@ -677,10 +678,36 @@ $script:NpmCurrentVersion = ''
 
 # True when the globally installed <Package> is already the registry's latest. On True,
 # $script:NpmCurrentVersion holds the version.
+# Install-NpmGlobalLatest -Name <n> -Version <v|''> -Arguments <npm install -g args>: the upgrade,
+# quiet on success. npm's own summary ("changed 2 packages in 20s", printed even at
+# --loglevel=error) says nothing useful; the version is the news. npm's output is shown only on
+# failure. Twin of npm_global_upgrade in scripts/update_ai_tools.sh.
+function Install-NpmGlobalLatest {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowEmptyString()][string]$Version,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+    $previous = $ErrorActionPreference
+    # PS 5.1 promotes native stderr to a terminating error under Stop; the exit code is the signal.
+    $ErrorActionPreference = 'Continue'
+    $out = @(& npm install -g @Arguments --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    if ($code -ne 0) {
+        $out | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        return $false
+    }
+    $shown = if ($Version) { $Version } else { 'latest' }
+    Write-Host "  $Name upgraded to $shown"
+    return $true
+}
+
 function Test-NpmGlobalCurrent {
     param([Parameter(Mandatory)][string]$Package)
 
     $script:NpmCurrentVersion = ''
+    $script:NpmLatestVersion = ''
     $previous = $ErrorActionPreference
     # PS 5.1 promotes native stderr to a terminating error under Stop; the answer is the signal.
     $ErrorActionPreference = 'Continue'
@@ -695,6 +722,7 @@ function Test-NpmGlobalCurrent {
             }
         }
         $want = ((npm view $Package version 2>$null) | Out-String).Trim()
+        $script:NpmLatestVersion = $want
         if ($have -and $have -eq $want) {
             $script:NpmCurrentVersion = $have
             return $true

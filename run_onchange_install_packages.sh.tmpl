@@ -41,18 +41,46 @@ fi
 # `command sudo`: quiet_apt_enable installs a sudo() shim that rewrites apt
 # invocations, and this must keep going through it.
 _DOT_SUDO_PRIMED=""
+dot_sudo_prime() {
+    [ -z "$_DOT_SUDO_PRIMED" ] || return 0
+    _DOT_SUDO_PRIMED=1
+    # A refused or mistyped password fails this one command, exactly as a
+    # bare `sudo` would - the caller's own || warn handles it from there.
+    sudo -v || return 1
+    # Keep-alive: refresh the sudo timestamp until this script exits. $$ is
+    # still the main shell inside a function, so the `kill -0` guard works.
+    # Both streams closed: the loop inherits the caller's fds, and a first
+    # privileged command inside `$(...)` (the Codex install is one) would
+    # otherwise hold that pipe open for the life of the script - the
+    # substitution never sees EOF and the apply hangs there.
+    while true; do sudo -n true; sleep 30; kill -0 "$$" || exit; done >/dev/null 2>&1 &
+}
 dot_sudo() {
-    if [ -z "$_DOT_SUDO_PRIMED" ]; then
-        _DOT_SUDO_PRIMED=1
-        # A refused or mistyped password fails this one command, exactly as a
-        # bare `sudo` would - the caller's own || warn handles it from there.
-        sudo -v || return 1
-        # Keep-alive: refresh the sudo timestamp until this script exits. $$ is
-        # still the main shell inside a function, so the `kill -0` guard works.
-        while true; do sudo -n true; sleep 30; kill -0 "$$" || exit; done 2>/dev/null &
-    fi
+    dot_sudo_prime || return 1
     sudo "$@"
 }
+
+# sudo_net_timeout / sudo_net_timeout_tty <sudo|""> <seconds> <cmd...> -
+# net_timeout for a command that may need sudo. coreutils `timeout` exec()s
+# its command, and dot_sudo is a shell function, not a file: every
+# `net_timeout 300 $npm_sudo <cmd>` died with "timeout: failed to run command
+# 'dot_sudo'" (WSL `dot up`, 2026-10-09: the Playwright deps step on every
+# run). So: prime through the function (the same once-per-run prompt), then
+# put the real sudo binary under the timeout, exactly as `net_timeout 300
+# sudo <cmd>` did before. The first argument is the caller's sudo decision
+# ($SUDO, or $npm_sudo which is empty for a user-managed npm); empty runs the
+# command bare. tests/sudo_timeout_contract.sh pins this.
+sudo_net_timeout() { _sudo_net_timeout net_timeout "$@"; }
+sudo_net_timeout_tty() { _sudo_net_timeout net_timeout_tty "$@"; }
+_sudo_net_timeout() {
+    local wrapper="$1" sudo_cmd="$2" secs="$3"; shift 3
+    if [ -n "$sudo_cmd" ]; then
+        dot_sudo_prime || return 1
+        set -- sudo "$@"
+    fi
+    "$wrapper" "$secs" "$@"
+}
+# sudo-helpers: end
 
 {{/* 16-group package taxonomy (docs/package-groups.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
@@ -154,6 +182,7 @@ dot_sudo() {
 # self-contained, so the installer cannot source the lib at runtime.
 #-------------------------------------------------------------------------------
 {{ include "scripts/lib/agent-skills.sh" }}
+{{ include "scripts/lib/timing.sh" }}
 
 #-------------------------------------------------------------------------------
 # add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its
@@ -487,7 +516,7 @@ install_npm_tools() {
     for pkg in "$@"; do
         if npm ls -g --depth=0 "$pkg" &>/dev/null; then continue; fi
         info "Installing $pkg (npm)..."
-        net_timeout 300 $npm_sudo npm install -g "$pkg" --loglevel=error --no-progress --fund=false || warn "$pkg install failed - continuing"
+        sudo_net_timeout "$npm_sudo" 300 npm install -g "$pkg" --loglevel=error --no-progress --fund=false || warn "$pkg install failed - continuing"
     done
 }
 
@@ -1628,10 +1657,10 @@ install_agent_toolkit() {
         # line only when something was installed.
         if [ "$PKG_MANAGER" = apt ]; then
             if [ "${DOT_APT_VERBOSE:-0}" = 1 ]; then
-                net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+                sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
             else
                 local pw_deps; pw_deps="$(mktemp)"
-                if net_timeout_tty 300 $npm_sudo "$NPX_BIN" --yes playwright install-deps chromium >"$pw_deps" 2>&1; then
+                if sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium >"$pw_deps" 2>&1; then
                     grep -E '^[0-9]+ upgraded, [0-9]+ newly installed' "$pw_deps" | grep -vE '^0 upgraded, 0 newly installed' | sed 's/^/  Playwright system deps: /' || true
                 else
                     cat "$pw_deps" >&2
@@ -1656,12 +1685,19 @@ install_agent_toolkit() {
             info "agent-browser is installed - skipping the npm install (dot upgrade updates it)."
         else
             info "Installing agent-browser..."
-            net_timeout 300 $npm_sudo "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
+            sudo_net_timeout "$npm_sudo" 300 "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
         fi
         if [[ -x "$AGENT_BROWSER_BIN" ]]; then
             # Playwright Chromium is already available above; agent-browser
-            # discovers it before downloading another browser.
-            net_timeout 600 "$AGENT_BROWSER_BIN" install || warn "agent-browser browser setup failed or timed out - continuing"
+            # discovers it before downloading another browser. Its output is shown only on
+            # failure: on every WSL run it printed a "Linux detected..." warning and an
+            # "Installing Chrome... already installed" pair that are not about this install.
+            ab_out="$(mktemp)"
+            if ! net_timeout 600 "$AGENT_BROWSER_BIN" install >"$ab_out" 2>&1; then
+                cat "$ab_out" >&2
+                warn "agent-browser browser setup failed or timed out - continuing"
+            fi
+            rm -f "$ab_out"
             agent_browser_doctor "$AGENT_BROWSER_BIN" || warn "agent-browser verification failed - continuing"
         else
             warn "agent-browser command was not installed - skipping browser setup"
@@ -2485,6 +2521,9 @@ main() {
         npm_sudo=""
     fi
 
+    # Where the time of a `dot up` goes (scripts/lib/timing.sh): one mark per section of main,
+    # one "Timings (dot up, ...)" line at the end - a WSL apply took 3m28s with nothing saying which part.
+    dot_timing_mark "$pkg_manager packages"
     case "$pkg_manager" in
         apt)  install_apt ;;
         brew) install_brew ;;
@@ -2498,12 +2537,14 @@ main() {
     # Bound to a variable first: the lint strips template actions, and a bare call would
     # then look argument-less (SC2120). Word splitting of the name list is the point.
     npm_tools="{{ includeTemplate "pkg-names" (dict "manager" "npm" "group" "modern_cli" "catalog" .catalog.packages) }}"
+    dot_timing_mark 'npm tools'
     # shellcheck disable=SC2086
     install_npm_tools $npm_tools
 {{- end }}
 
     # VS Code settings + extensions - hoisted out of install_apt (#124) so the
     # Darwin settings arm is reachable on macOS too.
+    dot_timing_mark 'VS Code'
     configure_vscode
 
     # Graft was dropped from the dotfiles (2026-10-09): remove it where an
@@ -2512,26 +2553,31 @@ main() {
     # quiet when there is nothing to do (graft_retire, scripts/lib/agent-skills.sh).
     graft_retire "$npm_sudo"
 
+    dot_timing_mark 'agent toolkit'
 {{- if $agent_toolkit }}
     install_agent_toolkit
 {{- else }}
     info "Agent toolkit disabled in config"
 {{- end }}
+    dot_timing_mark 'OpenCode'
 {{- if $opencode_cli }}
     install_opencode_cli
 {{- else }}
     info "OpenCode CLI disabled in config"
 {{- end }}
+    dot_timing_mark 'Claude Code'
 {{- if $claude_cli }}
     install_claude_cli
 {{- else }}
     info "Claude Code disabled in config"
 {{- end }}
+    dot_timing_mark 'Codex'
 {{- if $chatgpt_cli }}
     install_chatgpt_cli
 {{- else }}
     info "Codex CLI disabled in config"
 {{- end }}
+    dot_timing_mark 'Antigravity'
 {{- if $antigravity_cli }}
     install_antigravity_cli
 {{- else }}
@@ -2548,15 +2594,18 @@ main() {
     # enabled - the CLIs it writes to may have arrived from any of those
     # gates, and the pass is idempotent either way. npx presence is checked
     # inside the function.
+    dot_timing_mark 'agent skills'
     install_agent_skills
 {{- end }}
 
     # agent-guardrails binary + plane desired state - see install_agent_guardrails above.
+    dot_timing_mark 'guardrail'
     install_agent_guardrails
 
     # Desktop Apps (hosts only - see the top-of-file $isHost comment; $DISPLAY
     # is a second runtime check for genuine headless Linux hosts, not the
     # primary WSL/devcontainer guard anymore)
+    dot_timing_mark 'desktop apps'
 {{- if and $dev_desktop $isHost }}
     case "$(uname -s)" in
         Darwin)
@@ -2595,9 +2644,11 @@ main() {
     info "OpenCode Desktop disabled (WSL/Devcontainer/config)"
 {{- end }}
 
+    dot_timing_mark 'shell'
     # Ensure zsh is default
     setup_shell
 
+    dot_timing_summary 'dot up'
     success "Package installation complete!"
 {{- if and $dev_desktop $isHost }}
     echo ""

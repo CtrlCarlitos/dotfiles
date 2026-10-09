@@ -72,7 +72,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         if (Test-NpmGlobalCurrent $npmTool) {
             Write-Host "  $npmTool is current ($script:NpmCurrentVersion)"
         } else {
-            npm install -g "$($npmTool)@latest" --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>$null
+            if (-not (Install-NpmGlobalLatest -Name $npmTool -Version $script:NpmLatestVersion -Arguments @("$($npmTool)@latest"))) {
+                Write-Host "  $npmTool upgrade failed - continuing" -ForegroundColor Red
+            }
         }
     }
 } else {
@@ -540,13 +542,13 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "$($G.globe) Updating agent-browser..." -ForegroundColor Yellow
     # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
     # The browser setup and the verification below still run.
+    $abInstalled = $true
     if (Test-NpmGlobalCurrent 'agent-browser') {
         Write-Host "   agent-browser is current ($script:NpmCurrentVersion)"
-        $LASTEXITCODE = 0
     } else {
-        npm install -g --allow-scripts=agent-browser agent-browser --loglevel=error --no-progress 2>$null
+        $abInstalled = Install-NpmGlobalLatest -Name 'agent-browser' -Version $script:NpmLatestVersion -Arguments @('--allow-scripts=agent-browser', 'agent-browser')
     }
-    if ($LASTEXITCODE -ne 0) {
+    if (-not $abInstalled) {
         Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
     } else {
         $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'

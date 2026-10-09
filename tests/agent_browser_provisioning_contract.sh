@@ -48,7 +48,7 @@ awk '
     on {print}
     on && /agent-browser command was not installed/ {getline; print; exit}
 ' "$sh_rendered" >"$tmp/block.sh"
-grep -Fq 'net_timeout 300' "$tmp/block.sh" ||
+grep -Fq 'sudo_net_timeout "$npm_sudo" 300' "$tmp/block.sh" ||
     fail "sh block extraction lost the install step (source shape changed?)"
 # The verification now goes through agent_browser_doctor (scripts/lib/agent-skills.sh runs
 # `doctor --json` and prints a summary); the runtime assertion below still proves it ran.
@@ -61,7 +61,7 @@ sh_run() { # $1 = outfile; env pre-set by caller
     local outfile="$1"
     HOME="$tmp/home" PATH="$bin:/usr/bin:/bin" NPM_BIN="$bin/npm" npm_sudo="" \
         NPM_LOG="$tmp/npm.log" NPM_FAIL="${NPM_FAIL:-0}" NPM_FAKE_PREFIX="$prefix" \
-        AB_LOG="$tmp/ab.log" NPM_CREATES="${NPM_CREATES:-}" \
+        AB_LOG="$tmp/ab.log" NPM_CREATES="${NPM_CREATES:-}" AB_INSTALL_FAIL="${AB_INSTALL_FAIL:-0}" \
         timeout 60 bash "$tmp/harness.sh" >"$outfile" 2>&1
 }
 
@@ -91,6 +91,8 @@ make_ab_stub() {
 {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '. "%s"\n' "$repo_root/scripts/lib/agent-skills.sh" # info/warn/net_timeout
+    # The installer's sudo-aware wrapper (npm_sudo is "" here, so it is net_timeout)
+    printf '%s\n' 'sudo_net_timeout() { shift; net_timeout "$@"; }'
     cat "$tmp/block.sh"
 } >"$tmp/harness.sh"
 
@@ -119,6 +121,35 @@ grep -Fq 'agent-browser is installed - skipping the npm install' "$tmp/sh-presen
     fail "sh twin: the skip must say so"
 grep -Fq 'install' "$tmp/ab.log" || fail "sh twin: browser setup must still run when the CLI is already installed"
 grep -Fq 'doctor --json' "$tmp/ab.log" || fail "sh twin: verification must still run when the CLI is already installed"
+
+# 1c. The browser setup's own chatter ("⚠ Linux detected...", "Installing Chrome...",
+#     "✓ Chrome ... is already installed" on every WSL `dot up`) is shown only when the
+#     setup fails - like the Playwright download above it, and like `dot upgrade` already does.
+cat >"$prefix/bin/agent-browser" <<'EOF'
+#!/bin/sh
+printf "%s\n" "$*" >> "${AB_LOG:?}"
+if [ "${1:-}" = install ]; then
+    printf '%s\n' 'Linux detected. If browser fails to launch, run: agent-browser install --with-deps' 'Installing Chrome...' 'Chrome 155 is already installed'
+    exit "${AB_INSTALL_FAIL:-0}"
+fi
+exit 0
+EOF
+chmod +x "$prefix/bin/agent-browser"
+: >"$tmp/npm.log"; : >"$tmp/ab.log"
+sh_run "$tmp/sh-quiet.log"
+if grep -Fq 'Chrome 155 is already installed' "$tmp/sh-quiet.log"; then
+    fail "sh twin: a successful browser setup must not print agent-browser's install chatter"
+else
+    pass
+fi
+grep -Fq 'install' "$tmp/ab.log" || fail "sh twin: the quiet browser setup must still run"
+: >"$tmp/ab.log"
+AB_INSTALL_FAIL=1 sh_run "$tmp/sh-loud.log"
+grep -Fq 'Chrome 155 is already installed' "$tmp/sh-loud.log" ||
+    fail "sh twin: a failed browser setup must show agent-browser's output"
+grep -Fq 'agent-browser browser setup failed or timed out - continuing' "$tmp/sh-loud.log" ||
+    fail "sh twin: a failed browser setup must warn-and-continue"
+make_ab_stub
 
 # 2. Install failure: warning, no browser setup (the prefix lookup itself is
 #    unconditional in the source - only the setup is guarded; with no CLI left
@@ -266,10 +297,11 @@ EOF
 case "${OSTYPE:-}" in
     msys*|cygwin*)
         # %AB_LOG_WIN% stays a live cmd env reference (printf renders %% as %).
-        printf '@echo off\necho %%*>> "%%AB_LOG_WIN%%"\nexit /b 0\n' >"$prefix/agent-browser.cmd"
+        # `install` also prints the chatter the real CLI prints on every run (shown only on failure).
+        printf '@echo off\necho %%*>> "%%AB_LOG_WIN%%"\nif "%%1"=="install" echo Chrome 155 is already installed\nexit /b 0\n' >"$prefix/agent-browser.cmd"
         ;;
     *)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${AB_LOG:?}"\nexit 0\n' >"$prefix/agent-browser.cmd"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${AB_LOG:?}"\n[ "$1" = install ] && echo "Chrome 155 is already installed"\nexit 0\n' >"$prefix/agent-browser.cmd"
         chmod +x "$prefix/agent-browser.cmd"
         ;;
 esac
@@ -291,6 +323,12 @@ ps1_run present "$tmp/ps1-present.log" ||
 if grep -q 'FAIL' "$tmp/ps1-present.log"; then fail "ps1 twin present: $(cat "$tmp/ps1-present.log")"; else pass; fi
 grep -Fq 'agent-browser is installed - skipping the npm install' "$tmp/ps1-present.log" ||
     fail "ps1 twin: the skip must say so"
+# Like the sh twin (1c): the browser setup's own chatter is shown only when the setup fails.
+if grep -Fq 'Chrome 155 is already installed' "$tmp/ps1-present.log"; then
+    fail "ps1 twin: a successful browser setup must not print agent-browser's install chatter"
+else
+    pass
+fi
 
 rm -f "$prefix/agent-browser.cmd"
 : >"$tmp/npm.log"; rm -f "$tmp/ab.log"
