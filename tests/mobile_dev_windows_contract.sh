@@ -11,4 +11,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'function Install-MobileDev'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'EclipseAdoptium.Temurin.17.JDK'
 
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'commandlinetools'
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'ANDROID_HOME'
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sdkmanager'
+
 finish

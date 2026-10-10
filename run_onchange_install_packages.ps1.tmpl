@@ -412,6 +412,102 @@ function Install-MobileDev {
         [System.Environment]::SetEnvironmentVariable('JAVA_HOME', $jdkHome, 'Machine')
         $env:JAVA_HOME = $jdkHome
     }
+
+    # Android SDK command-line tools (design doc section 3.4): Studio is
+    # dropped entirely, so this downloads Google's own zip directly rather
+    # than going through Studio's install-time sdkmanager bootstrap.
+    # android_commandlinetools_* pins come from .chezmoidata.yaml, confirmed
+    # live against developer.android.com/studio this session.
+    $androidHome = [System.Environment]::GetEnvironmentVariable('ANDROID_HOME', 'Machine')
+    if (-not $androidHome) {
+        # Android's own conventional default - detect an existing manual
+        # install here first (Global Constraints: never silently rewrite an
+        # existing SDK location a user already configured).
+        $androidHome = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+    }
+    $sdkmanagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\sdkmanager.bat'
+    if (-not (Test-Path $sdkmanagerPath)) {
+        $ctVersion = '{{ .versions.android_commandlinetools_version }}'
+        $ctSha256 = '{{ .versions.android_commandlinetools_sha256_win }}'
+        $ctZipName = "commandlinetools-win-${ctVersion}_latest.zip"
+        $ctUrl = "https://dl.google.com/android/repository/$ctZipName"
+        $ctTmp = Join-Path $env:TEMP "mobile_dev-cmdlinetools-$ctVersion"
+        Write-Host "  Downloading the Android SDK command-line tools..." -ForegroundColor Yellow
+        try {
+            New-Item -ItemType Directory -Force -Path $ctTmp | Out-Null
+            $ctZipPath = Join-Path $ctTmp $ctZipName
+            Invoke-WebRequest -Uri $ctUrl -OutFile $ctZipPath -UseBasicParsing
+            $ctGotHash = (Get-FileHash -Algorithm SHA256 $ctZipPath).Hash
+            if ($ctGotHash -ne $ctSha256) {
+                Write-Host "  Warning: Android SDK command-line tools CHECKSUM MISMATCH - not installing (pin stale? re-check developer.android.com/studio)" -ForegroundColor Red
+            } else {
+                $ctExtract = Join-Path $ctTmp 'extracted'
+                Expand-Archive -Path $ctZipPath -DestinationPath $ctExtract -Force
+                # The zip's own root is "cmdline-tools" with no "latest" level;
+                # sdkmanager needs <sdkRoot>\cmdline-tools\latest\... (Google's
+                # own documented layout).
+                $ctLatestParent = Join-Path $androidHome 'cmdline-tools'
+                New-Item -ItemType Directory -Force -Path $ctLatestParent | Out-Null
+                $ctLatest = Join-Path $ctLatestParent 'latest'
+                if (Test-Path $ctLatest) { Remove-Item -Recurse -Force $ctLatest }
+                Move-Item -Path (Join-Path $ctExtract 'cmdline-tools') -Destination $ctLatest
+            }
+        } catch {
+            Write-Host "  Warning: Android SDK command-line tools download failed - $_" -ForegroundColor Red
+        } finally {
+            Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
+        }
+    }
+    if (Test-Path $sdkmanagerPath) {
+        if (-not [System.Environment]::GetEnvironmentVariable('ANDROID_HOME', 'Machine')) {
+            [System.Environment]::SetEnvironmentVariable('ANDROID_HOME', $androidHome, 'Machine')
+            $env:ANDROID_HOME = $androidHome
+        }
+        # #336's explicit caution: never create a second, conflicting ADB on
+        # PATH. An adb.exe that already resolves (a prior manual install, or
+        # scrcpy's bundled copy once the scrcpy step runs) keeps PATH
+        # precedence; platform-tools still installs under ANDROID_HOME for
+        # sdkmanager/emulator/Maestro to find, it just does not also fight
+        # for PATH order against whatever was already there.
+        $priorAdb = Get-Command adb -ErrorAction SilentlyContinue
+        $toolPaths = @(
+            (Join-Path $androidHome 'cmdline-tools\latest\bin'),
+            (Join-Path $androidHome 'emulator')
+        )
+        if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
+        $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+        foreach ($p in $toolPaths) {
+            if ($machinePath -notlike "*$p*") { $machinePath = "$machinePath;$p" }
+        }
+        [System.Environment]::SetEnvironmentVariable('Path', $machinePath, 'Machine')
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+        # platform-tools/emulator need their licenses accepted once; #336's
+        # explicit caution says never silently accept on the user's behalf,
+        # so this prompts before sdkmanager runs non-interactively. Gated on
+        # Test-Path, like Install-Node's version check above: once both are
+        # present, this block is skipped on every later `dot up` - no
+        # separate re-prompt or re-download bookkeeping needed.
+        $adbPath = Join-Path $androidHome 'platform-tools\adb.exe'
+        $emulatorPath = Join-Path $androidHome 'emulator\emulator.exe'
+        if (-not (Test-Path $adbPath) -or -not (Test-Path $emulatorPath)) {
+            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
+            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
+            if ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y') {
+                $previous = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                # sdkmanager prompts once per license; a generous repeated
+                # "y" feed covers every package this function ever installs
+                # (platform-tools/emulator here, the system image elsewhere).
+                $yesFeed = (@('y') * 20) -join "`n"
+                $yesFeed | & $sdkmanagerPath --licenses *>$null
+                & $sdkmanagerPath "platform-tools" "emulator" *>$null
+                $ErrorActionPreference = $previous
+            } else {
+                Write-Host "  Skipped - re-run dot up and accept to install platform-tools/the emulator." -ForegroundColor Yellow
+            }
+        }
+    }
 }
 
 {{- if $core }}
