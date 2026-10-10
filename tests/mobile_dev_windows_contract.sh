@@ -18,4 +18,6 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sdkmanager'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'HypervisorPlatform'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create avd'
 
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
+
 finish

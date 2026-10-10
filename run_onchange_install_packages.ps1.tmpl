@@ -553,6 +553,22 @@ function Install-MobileDev {
             }
         }
     }
+
+    # scrcpy (design doc section 3.4): screen mirroring/control. Its winget
+    # package also installs its own adb.exe - #336's explicit caution
+    # against a duplicate, conflicting ADB means this checks what the SDK
+    # platform-tools step above already left on PATH first, so a resulting
+    # shadow is a visible warning, not silent.
+    if (-not (Get-Command scrcpy -ErrorAction SilentlyContinue)) {
+        $adbBeforeScrcpy = Get-Command adb -ErrorAction SilentlyContinue
+        Write-Host "  Installing scrcpy..." -ForegroundColor Yellow
+        winget install --exact --id Genymobile.scrcpy --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Null
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $adbAfterScrcpy = Get-Command adb -ErrorAction SilentlyContinue
+        if ($adbBeforeScrcpy -and $adbAfterScrcpy -and $adbBeforeScrcpy.Source -ne $adbAfterScrcpy.Source) {
+            Write-Host "  Warning: scrcpy's bundled adb.exe ($($adbAfterScrcpy.Source)) now shadows the one already on PATH ($($adbBeforeScrcpy.Source)) - reconcile manually if this causes version drift." -ForegroundColor Red
+        }
+    }
 }
 
 {{- if $core }}
