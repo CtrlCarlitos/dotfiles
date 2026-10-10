@@ -2041,6 +2041,13 @@ for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
         if srv.get("type") == "remote":
             # Hosted, OAuth-authenticated server (e.g. Expo) - no command/args;
             # agy discovers OAuth automatically on first use (/mcp auth <name>).
+            # Converge like OpenCode's branch: an entry already pointing at the
+            # catalog url is left entirely alone (no field rewritten), so any
+            # OAuth state agy keeps in it survives re-runs. Only a new entry or
+            # a drifted httpUrl is (re)written.
+            existing = servers.get(name)
+            if isinstance(existing, dict) and existing.get("httpUrl") == srv["url"]:
+                continue
             servers[name] = {"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True}
         else:
             servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}

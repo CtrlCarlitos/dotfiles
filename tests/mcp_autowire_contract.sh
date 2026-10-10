@@ -134,6 +134,38 @@ else
     skip "chezmoi not installed"
 fi
 
+# agy's remote branch CONVERGES like OpenCode's: an entry already at the catalog
+# url is skipped whole, so OAuth state agy keeps inside it survives a re-run;
+# only a new or drifted entry is written. Executes the real agy merge heredoc.
+command -v python3 >/dev/null 2>&1 || skip 'python3 not installed'
+agy_tmp="$(mktemp -d)"
+render_to "$agy_tmp/rendered.sh" sh "$(groups true)"
+sed -n "/python3 - \"\$AGY_GLOBAL_MCP\" \"\$AGY_WANT\" <<'PYEOF'/,/^PYEOF\$/p" "$agy_tmp/rendered.sh" | sed '1d;$d' >"$agy_tmp/merge.py"
+[ -s "$agy_tmp/merge.py" ] || fail "rendered installer: no agy merge heredoc to execute"
+agy_cfg="$agy_tmp/mcp_config.json"
+agy_run() { python3 -I "$agy_tmp/merge.py" "$agy_cfg" expo >/dev/null; }
+agy_check() { # $1 = label, $2 = python expression over d that must be True
+    local got
+    got="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8-sig")); print(json.dumps(bool(eval(sys.argv[2]))))' "$agy_cfg" "$2")"
+    if [ "$got" = 'true' ]; then pass; else fail "agy $1 (expression: $2)"; fi
+}
+converged='{"httpUrl":"https://mcp.expo.dev/mcp","oauth":{"access_token":"tok","refresh_token":"ref"},"forceAllToolsEager":false}'
+printf '{"mcpServers":{"expo":%s,"mine":{"command":"x","args":[]}}}' "$converged" >"$agy_cfg"
+agy_run || fail "agy merge failed on an already-converged Expo entry"
+agy_check 'converged entry must be left whole (oauth state and every field kept)' \
+    'd["mcpServers"]["expo"] == {"httpUrl":"https://mcp.expo.dev/mcp","oauth":{"access_token":"tok","refresh_token":"ref"},"forceAllToolsEager":False}'
+agy_check 'a user server beside the converged entry must survive' 'd["mcpServers"]["mine"] == {"command":"x","args":[]}'
+
+printf '{"mcpServers":{"expo":{"httpUrl":"https://old.example/mcp","oauth":{"access_token":"tok"},"forceAllToolsEager":false}}}' >"$agy_cfg"
+agy_run || fail "agy merge failed on a drifted Expo entry"
+agy_check 'a drifted httpUrl must be repaired to the catalog url' \
+    'd["mcpServers"]["expo"] == {"httpUrl":"https://mcp.expo.dev/mcp","oauth":{},"forceAllToolsEager":True}'
+
+rm -f "$agy_cfg"
+agy_run || fail "agy merge failed with no config"
+agy_check 'a new Expo entry must be created as {httpUrl, oauth: {}, forceAllToolsEager: true}' \
+    'd["mcpServers"]["expo"] == {"httpUrl":"https://mcp.expo.dev/mcp","oauth":{},"forceAllToolsEager":True}'
+
 # Task 4 is OpenCode/agy only (Task 3 already handled Claude Code/Codex
 # Maestro registration directly) - Expo must not be wired into claude/codex
 # `mcp add`.
