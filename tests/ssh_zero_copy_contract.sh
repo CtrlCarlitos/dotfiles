@@ -7,10 +7,16 @@ trap 'rm -rf "$tmp"' EXIT
 : > "$tmp/empty.toml"
 data='{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8-microsoft"}},"accounts":[{"name":"Fixture","email":"a@example.test","username":"fixture","provider":"github","key":"id_git","auth_fingerprint":"SHA256:auth","signing_fingerprint":"SHA256:sign"}],"ssh_hosts":[{"name":"server1","hostname":"one.example.test","identity":"id_server","identity_fingerprint":"SHA256:host"},{"name":"server2","hostname":"two.example.test","identity":"id_server","identity_fingerprint":"SHA256:host"}]}'
 export SSH_AGENT_RELAY_DIR="$tmp/state"
-chezmoi execute-template --config "$tmp/empty.toml" --source "$root" --override-data "$data" < "$root/private_dot_ssh/private_config.tmpl" > "$tmp/config"
-if grep -q 'IdentityFile ~/.ssh/' "$tmp/config"; then echo 'FAIL: WSL local identity requirement'; exit 1; fi
+home="$tmp/home"
+mkdir -p "$home/.ssh"
+chezmoi execute-template --config "$tmp/empty.toml" --source "$root" --override-data "$data" < "$root/private_dot_ssh/private_config.tmpl" > "$home/.ssh/config"
+# Operator ssh_hosts (server1/server2) render into vscode_hosts, Include'd by
+# config - so VS Code's remote.SSH.configFile can point at vscode_hosts alone
+# without the github-<user> identity aliases above.
+chezmoi execute-template --config "$tmp/empty.toml" --source "$root" --override-data "$data" < "$root/private_dot_ssh/private_vscode_hosts.tmpl" > "$home/.ssh/vscode_hosts"
+if grep -q 'IdentityFile ~/.ssh/' "$home/.ssh/config" "$home/.ssh/vscode_hosts"; then echo 'FAIL: WSL local identity requirement'; exit 1; fi
 for alias in github-fixture server1 server2; do
-    ssh -G -F "$tmp/config" "$alias" > "$tmp/$alias"
+    HOME="$home" ssh -G -F "$home/.ssh/config" "$alias" > "$tmp/$alias"
     grep -q '^identityfile none$' "$tmp/$alias"
     grep -q '^identitiesonly no$' "$tmp/$alias"
 done

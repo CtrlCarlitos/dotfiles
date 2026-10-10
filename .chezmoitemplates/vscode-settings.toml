@@ -16,11 +16,13 @@
 
 # The two list tiers come first: in TOML a plain key after a [table] header belongs to that table.
 junk  = ["**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/node_modules/**", "**/*.pyc"]
-unset = ["remote.SSH.configFile"]
+unset = []
 
 [forced]
-"editor.fontFamily"              = "MesloLGS Nerd Font Mono"
-"terminal.integrated.fontFamily" = "MesloLGS Nerd Font Mono"
+"editor.fontFamily"                    = "FiraCode Nerd Font"
+"editor.fontLigatures"                 = true
+"terminal.integrated.fontFamily"       = "MesloLGS Nerd Font Mono"
+"terminal.integrated.gpuAcceleration"  = "off"
 
 [defaults]
 "files.autoSave"                               = "afterDelay"
@@ -49,7 +51,12 @@ unset = ["remote.SSH.configFile"]
 "terminal.integrated.enableWin32InputMode" = true
 
 [terminal_colors]
-"terminal.background"          = "#1E1E2E"
+# Not Catppuccin Mocha's own #1E1E2E: VS Code's built-in Dark Modern theme
+# (no workbench.colorTheme override here, so this is the default) uses #181818
+# for sideBar.background/panel.background, and a terminal panel lighter than
+# the sidebar around it reads as mismatched chrome. Every other terminal_colors
+# key stays Catppuccin Mocha.
+"terminal.background"          = "#181818"
 "terminal.foreground"          = "#CDD6F4"
 "terminalCursor.foreground"    = "#F5E0DC"
 "terminal.selectionBackground" = "#585B70"

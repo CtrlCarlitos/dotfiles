@@ -137,10 +137,14 @@ for g in sorted(documented - canonical - PRESETS):
 # The install_fonts class: prose naming a setting the installers never write.
 # The tiers live in each machine's chezmoi.toml, seeded from
 # .chezmoitemplates/vscode-settings.toml, and are rendered by both twins (#83),
-# so "is this setting actually written?" must look at the seed too.
+# so "is this setting actually written?" must look at the seed too. One key -
+# remote.SSH.configFile - needs this machine's home dir, which the seed (plain
+# TOML, strict-TOML-linted in CI) cannot compute, so .chezmoi.toml.tmpl injects
+# it into the forced tier after loading the seed; that counts as "written" too.
 installers = (read("run_onchange_install_packages.sh.tmpl")
               + read("run_onchange_install_packages.ps1.tmpl")
-              + read(".chezmoitemplates/vscode-settings.toml"))
+              + read(".chezmoitemplates/vscode-settings.toml")
+              + read(".chezmoi.toml.tmpl"))
 SETTING = re.compile(r"`((?:terminal\.integrated|remote\.SSH)\.[A-Za-z.]+)`")
 # Settings the docs REFERENCE but deliberately do not set. Each needs a reason:
 # the check exists to catch prose claiming we configure something we never

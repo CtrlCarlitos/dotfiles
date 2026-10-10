@@ -322,18 +322,26 @@ all of it, plus the VS Code terminal, OpenCode, and SSH hosts.
 ### Font
 
 The `fonts` package group installs **MesloLGS Nerd Font** (Chocolatey
-`nerd-fonts-meslo`), and the Terminal and VS Code settings select it. There's no
-manual step. To confirm the font is installed:
+`nerd-fonts-meslo`) and **FiraCode Nerd Font** (`nerd-fonts-FiraCode`); the
+Terminal and VS Code settings select which face goes where. There's no manual
+step. To confirm a font is installed:
 
 ```powershell
 Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter "*Meslo*"
+Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter "*FiraCode*"
 ```
 
 > **Face name:** the package (Nerd Fonts v3 naming) registers `MesloLGS Nerd Font`,
-> `MesloLGS Nerd Font Mono`, and `MesloLGS Nerd Font Propo`. There is no family
-> literally named `MesloLGS NF`, despite that being the font's common nickname. Use the
-> **`Mono`** variant in terminals: it keeps icon glyphs one cell wide, so prompt output
-> stays aligned. The plain and `Propo` variants are for proportional text in GUI editors.
+> `MesloLGS Nerd Font Mono`, and `MesloLGS Nerd Font Propo` (and the `FiraCode`
+> family the same way). There is no family literally named `MesloLGS NF`, despite
+> that being the font's common nickname. Use the **`Mono`** variant in terminals:
+> it keeps icon glyphs one cell wide, so prompt output stays aligned. The plain
+> and `Propo` variants are for proportional text in GUI editors - which is why
+> `editor.fontFamily` uses plain `FiraCode Nerd Font`, not the `Mono` face: the
+> editor never renders icon glyphs inline, and the plain face's ligatures
+> (`!=`, `=>`, `->`) are FiraCode's whole reason for being there. Terminals
+> (Windows Terminal, the VS Code integrated terminal, Ghostty) all stay on
+> `MesloLGS Nerd Font Mono` - see [Terminal Experience](terminal.md).
 
 ## VS Code Configuration
 

@@ -3,7 +3,12 @@
 One look and one set of keys across every place you type commands: Windows
 Terminal, the VS Code integrated terminal, WSL, and SSH sessions to Mac and Linux
 hosts. Colors are **Catppuccin Mocha** everywhere, and the font is
-**MesloLGS Nerd Font Mono**.
+**MesloLGS Nerd Font Mono**. One deliberate exception: the VS Code integrated
+terminal's `terminal.background` is `#181818`, not Catppuccin Mocha's own
+`#1E1E2E` - that's VS Code's own Dark Modern sidebar/panel black (no
+`workbench.colorTheme` override here, so it's the default), so the terminal
+panel matches the chrome around it instead of reading as a lighter, mismatched
+box. Windows Terminal and Ghostty keep Catppuccin Mocha's own background.
 
 ## Where it lives
 
@@ -404,6 +409,13 @@ Set by the installer's VS Code step (DEFAULTS tier: a value you set yourself win
 
 - Catppuccin Mocha terminal colors (`workbench.colorCustomizations`, terminal keys
   only; your editor theme is untouched) and a 16px font (about 12pt).
+- `terminal.integrated.gpuAcceleration: "off"` (FORCED). The terminal's default
+  GPU-accelerated renderer can lose correct antialiasing over a remote display -
+  confirmed pixelated/jagged glyphs in the VS Code terminal over RDP, with the
+  same font looking fine locally and in Windows Terminal over the same RDP
+  session (Windows Terminal and the editor pane don't use this renderer). Forcing
+  the DOM renderer costs a little CPU on very high-volume terminal output, never
+  correctness.
 - **Shift+Enter** (a newline in claude, codex, opencode): on Windows,
   `terminal.integrated.enableWin32InputMode`. CLIs sit behind ConPTY, which only
   passes the Shift key along in that mode. Windows Terminal always uses it, VS Code
@@ -497,6 +509,10 @@ What you get in its `SSH: <name>` tab:
 
 - **Icons show as boxes in a WSL tab:** the WSL profile lost its Nerd Font. Apply the
   Terminal template (`chezmoi apply` on the `settings.json` target).
+- **Terminal text looks pixelated/jagged only over RDP, only in VS Code:** the
+  GPU-accelerated terminal renderer, not the font. `terminal.integrated.gpuAcceleration`
+  is forced to `"off"` for exactly this; if you've excluded it
+  (`vscode_overrides.exclude_settings`), re-enable it or set `"off"` by hand.
 - **A setting keeps coming back after you changed it in the UI:** the template forces
   it. Change it in the template.
 - **Right-click doesn't paste in OpenCode:** expected, use Shift+right-click or

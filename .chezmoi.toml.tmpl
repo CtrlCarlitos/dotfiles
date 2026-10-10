@@ -191,6 +191,11 @@
 {{-   $vscodeSettings = .vscode.settings }}
 {{- else }}
 {{-   $vscodeSettings = includeTemplate "vscode-settings.toml" . | fromToml }}
+{{- /* remote.SSH.configFile needs this machine's home dir, which the seed
+   (plain .toml, strict-TOML-linted in CI) can't compute - injected here,
+   first-seed only. Forward slashes: the value lands in JSON (settings.json)
+   and in TOML (chezmoi.toml), and OpenSSH/VS Code both take them on Windows too. */}}
+{{-   $_ := set $vscodeSettings.forced "remote.SSH.configFile" (printf "%s/.ssh/vscode_hosts" (.chezmoi.homeDir | replace "\\" "/")) }}
 {{- end }}
 # VS Code settings for this machine, by tier (docs/vscode.md):
 #   forced = re-asserted every run; defaults / defaults_windows = written when absent;
