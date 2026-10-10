@@ -107,6 +107,21 @@ it is held out of the winget sweep (`winget pin add` for the sweep, removed afte
 yourself is left alone), or of the choco sweep on a machine not moved yet (`--except=docker-desktop`), and
 the winget summary names the pending version.
 
+**VS Code** has the same limit: its winget installer refuses to run while `Code.exe` is up (`Installer
+failed with exit code: 1`; the installer log says "Setup has detected that Visual Studio Code is currently
+running", 2026-10-09). When an upgrade is pending and VS Code is running, `dot upgrade` asks to close it
+(every window is asked to close, so hot exit keeps unsaved files; `--yes` answers yes). Without an answer,
+with `DOTUPGRADE_NO_PROMPT=1`, or when VS Code hosts the terminal running `dot upgrade` (never closed: that
+would end the command), it is held out of the winget sweep and the summary says why.
+
+**`dot up` installer output.** `choco install` and `winget install` print 20+ lines of licence text,
+validation banners, download URLs and hash checks per package. They still stream, but only lines that say
+something are shown (the version, what was installed, anything unexpected); the full text is kept in
+`~\.local\state\dotfiles\install.log`, and a failing install names that file. Chocolatey's "pending system
+reboot" warning, printed once per package, is said once per run instead.
+`scripts/lib/ps-installer-output.ps1` holds the patterns; only success boilerplate is matched, so an error
+is never hidden.
+
 #### Docker Desktop through winget
 
 Docker Desktop is installed and upgraded through winget (`Docker.DockerDesktop`, Docker's own EXE

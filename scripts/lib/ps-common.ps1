@@ -1096,6 +1096,65 @@ function Invoke-DockerDesktopStopOffer {
     return $false
 }
 
+# --- VS Code: its own upgrade needs it closed ---------------------------------------------------------
+# VS Code's winget installer (Inno Setup) refuses to run while Code.exe is up: "Setup has detected
+# that Visual Studio Code is currently running", reported by winget as `Installer failed with exit
+# code: 1` and, in the sweep summary, as a bare "Still pending" (2026-10-09: 11 Code processes,
+# downloaded and verified the installer for nothing). Same shape as Docker Desktop above.
+
+# The available version of one winget package, '' when nothing is pending or the probe fails.
+function Get-WingetPackageUpgrade {
+    param([Parameter(Mandatory)][string]$Id)
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& winget upgrade --id $Id --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+        $row = @(ConvertFrom-WingetUpgradeTable -Lines $lines | Where-Object { $_.Id -eq $Id }) | Select-Object -First 1
+        if ($row) { return [string]$row.Available }
+    }
+    catch { Write-Verbose "winget probe for $Id failed: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $previous }
+    return ''
+}
+
+# True when the VS Code upgrade can run (VS Code is not running, or the operator let it be
+# closed); False when it must be held out of the sweep. Same rules as the Docker Desktop offer:
+# nothing is closed unless the operator says so (--yes counts), DOTUPGRADE_NO_PROMPT=1 and a
+# non-interactive console keep "leave it running and say so", and a VS Code that hosts THIS
+# terminal (-ExcludeId: the invoker's ancestry) is never closed - that would end this command -
+# so while it is up the upgrade waits.
+function Invoke-VsCodeUpgradeOffer {
+    param([Parameter(Mandatory)][string]$Version, [int[]]$ExcludeId = @(), [int]$GraceSeconds = 20)
+    $all = @(Get-Process -Name 'Code' -ErrorAction SilentlyContinue)
+    if ($all.Count -eq 0) { return $true }
+    $closable = @($all | Where-Object { $ExcludeId -notcontains $_.Id })
+    if ($closable.Count -eq 0) {
+        Write-Host "  VS Code $Version is available, but VS Code hosts THIS terminal and its installer cannot replace a running app: run dot upgrade from another terminal (or run: winget upgrade Microsoft.VisualStudioCode after closing it)." -ForegroundColor Yellow
+        return $false
+    }
+    if ($env:DOTUPGRADE_NO_PROMPT -eq '1' -or -not (Test-InteractiveConsole)) {
+        Write-Host "  VS Code $Version is available but VS Code is running (its installer cannot replace a running app): left for the next run." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "  VS Code $Version is available, but VS Code is running ($($closable.Count) process(es)) and its installer cannot replace a running app." -ForegroundColor Yellow
+    if ($closable.Count -lt $all.Count) {
+        Write-Host "  VS Code also hosts THIS terminal, so it cannot be closed; the upgrade waits for the next run." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "  Closing it asks every window to close (unsaved files are kept by hot exit); reopen it afterwards." -ForegroundColor Yellow
+    $answer = (Read-DotAnswer "  Close VS Code so it can upgrade now? [y/N]").Trim().ToLower()
+    if ($answer -ne 'y') {
+        Write-Host "  VS Code left running; its upgrade waits for the next run." -ForegroundColor Yellow
+        return $false
+    }
+    if (Stop-VsCode -Process $closable -GraceSeconds $GraceSeconds) {
+        Write-Host "  VS Code closed for the upgrade; reopen it when you need it." -ForegroundColor Green
+        return $true
+    }
+    Write-Host "  Warning: VS Code did not close - its upgrade is left for the next run." -ForegroundColor Red
+    return $false
+}
+
 # --- Docker Desktop: who owns it ------------------------------------------------------------------
 # Chocolatey's docker-desktop package installs Docker's MSI; winget's Docker.DockerDesktop is
 # Docker's EXE installer. To Windows those are two install technologies, so `winget upgrade`

@@ -98,6 +98,17 @@ if (@(Get-DockerDesktopProcess).Count -gt 0) {
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
 }
 
+Add-DotTimingMark -Name 'VS Code'
+# --- VS Code: same story - its installer refuses to run while Code.exe is up (exit code 1, and a
+# bare "Still pending" afterwards). Probed only when VS Code is running; the offer closes it, or
+# the sweep holds VS Code out and says why.
+$vsCodeKept = $false
+$vsCodePendingVersion = ''
+if (@(Get-Process -Name 'Code' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    $vsCodePendingVersion = Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'
+    if ($vsCodePendingVersion) { $vsCodeKept = -not (Invoke-VsCodeUpgradeOffer -Version $vsCodePendingVersion -ExcludeId @(Get-AncestorProcessId)) }
+}
+
 Add-DotTimingMark -Name 'choco'
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
@@ -125,10 +136,13 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     if ($nodeMajor -gt 0 -and -not (Set-NodeLtsPin -Major $nodeMajor)) {
         Write-Host "  Warning: could not pin Node.js to $nodeMajor.x in winget - it may move to a newer LTS" -ForegroundColor Yellow
     }
-    $wingetRunningNote = ''
-    if ($dockerKept) { $wingetRunningNote = "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
+    $wingetRunningNotes = @()
+    if ($dockerKept) { $wingetRunningNotes += "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
+    if ($vsCodeKept) { $wingetRunningNotes += "VS Code $vsCodePendingVersion waits because VS Code is running: close it and re-run, or run: winget upgrade Microsoft.VisualStudioCode" }
+    $wingetRunningNote = $wingetRunningNotes -join ' '
     $wingetHold = @()
     if ($dockerKept) { $wingetHold += 'Docker.DockerDesktop' }   # running: its installer would fail mid-sweep
+    if ($vsCodeKept) { $wingetHold += 'Microsoft.VisualStudioCode' }   # running: Inno Setup exits 1
     # A live opencode session holds its binary open; replacing it races the running process.
     if (@($defer) -contains 'opencode') { $wingetHold += 'SST.opencode' }
     # Claude Desktop and Claude Code share the process name claude.exe, and its installer closes
