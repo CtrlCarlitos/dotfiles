@@ -131,6 +131,14 @@ while IFS= read -r line; do
     esac
 done <<<"$chosen_raw"
 
+# mobile_dev's installer assumes agent_toolkit's Serena/Playwright already
+# exist (Task 3) - auto-add agent_toolkit whenever mobile_dev ends up
+# selected, regardless of preset or whether the user explicitly checked it.
+# Soft default only: the user can still uncheck agent_toolkit next run.
+case "$chosen_keys" in
+*" mobile_dev "*) chosen_keys="$chosen_keys""agent_toolkit " ;;
+esac
+
 # ------------------------------------------------------------ persist -------
 
 section="[data.packages]"

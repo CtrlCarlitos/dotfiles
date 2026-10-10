@@ -140,6 +140,14 @@ if ($LASTEXITCODE -ne 0 -or $chosenRaw.Count -eq 0) {
 # Map chosen lines back to known keys (ignore anything unrecognized).
 $chosen = @($pkgGroups | Where-Object { $chosenRaw -contains $_ })
 
+# mobile_dev's installer assumes agent_toolkit's Serena/Playwright already
+# exist (Task 3) - auto-add agent_toolkit whenever mobile_dev ends up
+# selected, regardless of preset or whether the user explicitly checked it.
+# Soft default only: the user can still uncheck agent_toolkit next run.
+if ($chosen -contains 'mobile_dev' -and $chosen -notcontains 'agent_toolkit') {
+    $chosen += 'agent_toolkit'
+}
+
 # ------------------------------------------------------------ persist -------
 
 $nl = [Environment]::NewLine
