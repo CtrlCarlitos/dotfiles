@@ -31,6 +31,35 @@ repo never automates it (design doc section 3.3). The Firewall rule only
 allows that server's port 5037 from the WSL vEthernet subnet, never a
 LAN-wide opening.
 
+**If you decline a prompt** (the SDK licenses or the system-image
+download), `Install-MobileDev` tells you to accept next time - but
+`run_onchange_install_packages.ps1.tmpl` only re-runs when its own
+rendered content changes, not on every `dot up`. To force it to run again:
+
+```
+chezmoi state delete-bucket --bucket=scriptState
+dot up
+```
+
+**The first time** `adb -a -P 5037 nodaemon server` runs, Windows may show
+an "Allow access" dialog for `adb.exe`. Clicking "Allow" there creates its
+own Firewall rule for `adb.exe` scoped to whichever network profiles you
+pick (Private/Public), separate from and broader than the `MobileDevAdbBridge`
+rule this installer manages - which can undo the WSL-only scoping. Cancel
+that dialog instead; the managed rule already allows exactly what the
+bridge needs. Check what rules exist for `adb.exe` with:
+
+```
+Get-NetFirewallRule | Where-Object { (Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $_).Program -like '*adb.exe' }
+```
+
+**If the bridge stops working after it has worked before**, a second,
+different `adb.exe` may now be ahead of the SDK's own copy on `PATH` (a
+prior manual Android SDK install, or scrcpy's bundled copy) - two adb
+builds disagreeing over the ADB server protocol kill each other's
+connections. `Install-MobileDev` warns when it detects this; `adb version`
+on whichever `adb.exe` resolves first tells you which build is active.
+
 
 ## WSL setup
 
