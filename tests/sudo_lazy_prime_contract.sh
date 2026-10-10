@@ -94,4 +94,33 @@ pass
 grep -Fxq 'second=0' <<<"$out" || fail "a later privileged command must not re-prime (password asked twice): $out"
 pass
 
+# 5. Executed: the password prompt is timed as its own section. The first privileged command
+#    sits inside the apt section, and a WSL `dot up` booked the operator's typing as
+#    "apt packages 2m53s" (2026-10-09). A stub sudo whose `-n` probe says "password required"
+#    must see dot_timing_wait 'sudo password' before `sudo -v` and dot_timing_resume after it;
+#    a cached credential (the probe succeeds) opens no section and still primes.
+cat >"$tmp/timed.sh" <<'DRIVER'
+set -uo pipefail
+calls="$1"; cached="$3"
+sudo() { printf 'sudo %s\n' "$*" >>"$calls"; if [ "$1" = -n ]; then [ "$cached" = 1 ]; fi; }
+dot_timing_wait() { printf 'wait %s\n' "$*" >>"$calls"; }
+dot_timing_resume() { printf 'resume\n' >>"$calls"; }
+. "$2"
+: >"$calls"
+dot_sudo apt install -y probe
+DRIVER
+bash "$tmp/timed.sh" "$tmp/calls.txt" "$tmp/fn.sh" 0
+# the keep-alive's own `sudo -n true` and the command itself are not part of the sequence
+seq="$(grep -vE '^sudo (-n true|apt )' "$tmp/calls.txt" | tr '\n' '|')"
+[ "$seq" = 'wait sudo password|sudo -v|resume|' ] || fail "a password prompt must be timed as 'sudo password' around sudo -v (got: $seq)"
+pass
+bash "$tmp/timed.sh" "$tmp/calls.txt" "$tmp/fn.sh" 1
+if grep -qE '^(wait|resume)' "$tmp/calls.txt"; then
+    fail "a cached credential must not open a timing section: $(tr '\n' '|' <"$tmp/calls.txt")"
+else
+    pass
+fi
+grep -Fxq 'sudo -v' "$tmp/calls.txt" || fail "a cached credential must still prime once (the keep-alive depends on it)"
+pass
+
 finish

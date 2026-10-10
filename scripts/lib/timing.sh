@@ -34,14 +34,15 @@ dot_timing_mark() {
 }
 
 # 125 -> 2m05s, 45 -> 45s
-# dot_timing_wait / dot_timing_resume around a prompt: the time spent answering is its own
-# section ("your answers"), so it is not counted as the work it interrupted. No-ops when no
-# section is open (callers outside a timed run, tests).
+# dot_timing_wait [name] / dot_timing_resume around a prompt: the time spent answering is its
+# own section ("your answers" unless named - the installer's sudo prime names it "sudo
+# password"), so it is not counted as the work it interrupted. No-ops when no section is open
+# (callers outside a timed run, tests).
 DOT_TIMING_RESUME=""
 dot_timing_wait() {
     [ -n "$DOT_TIMING_LAST" ] || return 0
     DOT_TIMING_RESUME="$DOT_TIMING_LAST"
-    dot_timing_mark 'your answers'
+    dot_timing_mark "${1:-your answers}"
 }
 dot_timing_resume() {
     [ -n "$DOT_TIMING_RESUME" ] || return 0

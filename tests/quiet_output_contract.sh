@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2317,SC2030,SC2031  # the sourced library and pwsh consume these
+# shellcheck disable=SC2034,SC2317,SC2030,SC2031,SC1090  # the sourced library and pwsh consume these; $lib is sourced by path
 set -euo pipefail
 
 # Noise cut from `dot up` / `dot upgrade` (2026-10-05 logs) without hiding anything that
@@ -26,6 +26,39 @@ lib="$repo_root/scripts/lib/agent-skills.sh"
 # --- 2. curl is quiet ---------------------------------------------------------------------
 if grep -nE 'curl -fLo' "$lib" >/dev/null; then fail "fetch_and_verify still uses a progress-printing curl (-fLo); use -fsSL -o"; else pass; fi
 grep -Fq 'curl -fsSL -o "$dest/SHA256SUMS"' "$lib" || fail "fetch_and_verify must fetch SHA256SUMS with curl -fsSL -o"
+
+# --- 2b. the checksum check is quiet (executed) ----------------------------------------------
+# `sha256sum -c` printed "install.sh: OK" on every run (2026-10-09 logs, both dot up and dot
+# upgrade); it landed between unrelated steps and read as a result of whichever came before.
+# A verified fetch prints nothing at all; a mismatch still warns. curl is a stub that serves
+# files from a directory by the URL's basename, so the real net_timeout and checksum tool run.
+require "$lib" '$sha -c --quiet SHA256SUMS.one'
+mkdir -p "$tmp/fv/bin" "$tmp/fv/srv" "$tmp/fv/dest"
+cat >"$tmp/fv/bin/curl" <<'EOF'
+#!/bin/sh
+out=""; url=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done
+cp "${FV_SRV:?}/$(basename "$url")" "$out"
+EOF
+chmod +x "$tmp/fv/bin/curl"
+printf 'echo installer\n' >"$tmp/fv/srv/install.sh"
+fv_sum="$( ( . "$lib"; sha256_cmd ) )"
+[ -n "$fv_sum" ] || fail "no SHA-256 tool on this host - fetch_and_verify cannot be executed"
+( cd "$tmp/fv/srv" && $fv_sum install.sh >SHA256SUMS )
+fv_run() { # fetch_and_verify's whole output lands in fv_out, its exit status in fv_rc
+    fv_rc=0
+    fv_out="$( ( trap - EXIT; export FV_SRV="$tmp/fv/srv"; PATH="$tmp/fv/bin:$PATH"; . "$lib"
+        fetch_and_verify stub-installer "https://x.test/r/install.sh" "https://x.test/r/SHA256SUMS" install.sh "$tmp/fv/dest" ) 2>&1 )" || fv_rc=$?
+}
+fv_run
+[ "$fv_rc" -eq 0 ] || fail "a matching checksum must verify (exit $fv_rc: $fv_out)"
+[ -z "$fv_out" ] || fail "a verified fetch must print nothing - no 'install.sh: OK' (got: $fv_out)"
+pass
+printf 'echo tampered\n' >"$tmp/fv/srv/install.sh"
+fv_run
+[ "$fv_rc" -ne 0 ] || fail "a checksum mismatch must fail the fetch"
+printf '%s' "$fv_out" | grep -Fq 'CHECKSUM MISMATCH' || fail "a checksum mismatch must still warn (got: $fv_out)"
+pass
 
 # --- 3. Playwright install-deps is quiet (executed) ------------------------------------------
 awk '/# Quiet like the installer.s own apt calls/{f=1} f{print} f && /^        fi$/{exit}' "$repo_root/run_onchange_install_packages.sh.tmpl" >"$tmp/pwdeps.sh"

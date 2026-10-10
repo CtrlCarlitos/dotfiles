@@ -123,8 +123,11 @@ fetch_and_verify() {
         warn "$name: no SHA-256 tool found - cannot verify installer, skipping"
         return 1
     fi
+    # --quiet (GNU sha256sum, gsha256sum, perl shasum, uutils alike): the "install.sh: OK" line
+    # the check printed landed in the middle of dot up / dot upgrade output, where it read as a
+    # result of whatever step came before it. A mismatch still prints its FAILED line.
     if ! ( cd "$dest" && grep " ${asset_name}\$" SHA256SUMS >SHA256SUMS.one &&
-        $sha -c SHA256SUMS.one ); then
+        $sha -c --quiet SHA256SUMS.one ); then
         warn "$name: installer CHECKSUM MISMATCH - not running it"
         return 1
     fi

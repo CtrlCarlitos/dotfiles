@@ -22,8 +22,9 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
-# --- installers (static: the reinstall condition) ----------------------------------------------
-grep -Fq 'if ! { command -v codex &>/dev/null && codex --version &>/dev/null; }; then' "$repo_root/run_onchange_install_packages.sh.tmpl" ||
+# --- installers (static: the reinstall condition; tests/codex_mcp_contract.sh executes the sh
+#     block with a codex that is missing, that starts and that cannot start) -------------------
+grep -Fq 'if command -v codex &>/dev/null && codex --version &>/dev/null; then' "$repo_root/run_onchange_install_packages.sh.tmpl" ||
     fail "sh installer: a codex that cannot start must be reinstalled, not only a missing one"
 grep -Fq 'try { codex --version *> $null; $codexRuns = ($LASTEXITCODE -eq 0) }' "$repo_root/run_onchange_install_packages.ps1.tmpl" ||
     fail "ps1 installer: a codex that cannot start must be reinstalled, not only a missing one"
