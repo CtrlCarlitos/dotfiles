@@ -243,4 +243,62 @@ else
     skip "pwsh or python3 not available to drive select-packages.ps1 interactively"
 fi
 
+# ======================================================================
+# Part D: install-time safety net (Task 4) - the last-resort catch for a
+# hand-edited chezmoi.toml that bypasses both Part A (template default) and
+# Part B/C (menu auto-add): mobile_dev = true with agent_toolkit = false must
+# warn loudly and skip rather than silently assume agent_toolkit's tools
+# (Serena, Playwright) exist (design doc section 3.9a).
+# ======================================================================
+
+sh_tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
+ps1_tmpl="$repo_root/run_onchange_install_packages.ps1.tmpl"
+
+# Wiring: one Go template variable per package group, same hasKey pattern as
+# every other group (e.g. $agent_toolkit right above it in both files).
+for tmpl in "$sh_tmpl" "$ps1_tmpl"; do
+    require "$tmpl" '{{- $mobile_dev := false -}}'
+    require "$tmpl" '{{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}'
+    require "$tmpl" 'mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run'
+    # Defensive, self-documenting addition to the aggregate "is anything
+    # selected at all" gate: transitively covered already (Task 3 forces
+    # agent_toolkit on whenever mobile_dev is true, and agent_toolkit is
+    # already in this list), but every other group is listed explicitly too.
+    require "$tmpl" '$agent_toolkit $mobile_dev $opencode_cli'
+done
+
+# Behavior: render both installer twins (render_to, tests/lib.sh) across the
+# three states that matter.
+d_groups() { # $1 = agent_toolkit bool, $2 = mobile_dev bool
+    printf '{"core":true,"modern_cli":true,"fonts":true,"agent_toolkit":%s,"opencode_cli":true,"opencode_desktop":false,"claude_cli":true,"claude_desktop":false,"chatgpt_cli":true,"chatgpt_desktop":false,"antigravity_cli":true,"antigravity_desktop":false,"remote_access":true,"remote_access_server":true,"guardrail":false,"dev_desktop":true,"vscode_settings":false,"mobile_dev":%s}' "$1" "$2"
+}
+
+d_out="$(mktemp -d)/rendered"
+for platform in sh ps1; do
+    # mobile_dev=true, agent_toolkit=false -> warn and skip (the safety net).
+    render_to "$d_out" "$platform" "$(d_groups false true)"
+    if grep -Fq 'mobile_dev requires agent_toolkit' "$d_out"; then
+        pass
+    else
+        fail "$platform: mobile_dev=true/agent_toolkit=false did not render the warn-and-skip guard"
+    fi
+
+    # mobile_dev=true, agent_toolkit=true -> no warning (agent_toolkit's own
+    # tools are present; a sibling task's install call plugs in here).
+    render_to "$d_out" "$platform" "$(d_groups true true)"
+    if grep -Fq 'mobile_dev requires agent_toolkit' "$d_out"; then
+        fail "$platform: mobile_dev=true/agent_toolkit=true must not warn"
+    else
+        pass
+    fi
+
+    # mobile_dev=false -> never warn, regardless of agent_toolkit.
+    render_to "$d_out" "$platform" "$(d_groups true false)"
+    if grep -Fq 'mobile_dev requires agent_toolkit' "$d_out"; then
+        fail "$platform: mobile_dev=false must never render the warning"
+    else
+        pass
+    fi
+done
+
 finish
