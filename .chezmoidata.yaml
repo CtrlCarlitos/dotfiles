@@ -62,12 +62,29 @@ vscode:
 #   gum              - the bootstrap pin for the package menu
 #   claude_install_* - the official native-installer URLs, so `dot upgrade`
 #                      cannot install a different Claude than the installer did
+#   maestro_version/ - the mobile_dev group's Maestro CLI pin. The vendor's own
+#   maestro_sha256     `curl -fsSL https://get.maestro.mobile.dev | bash`
+#                      installer only runs `unzip -qt` on what it downloads -
+#                      a corruption check, not an authenticity one - so this
+#                      repo pins an exact version and verifies the sha256
+#                      itself, the same way install_powershell() does. The
+#                      digest is not computed by us: it is read from
+#                      mobile-dev-inc's own homebrew-tap formula, generated
+#                      by JReleaser at release time from the identical
+#                      release asset (scripts/update-versions.sh re-checks it
+#                      weekly).
 #   jdk_version      - the standalone JDK major mobile_dev's Maestro/Gradle/SDK
-#                      command-line tools need (design doc section 3.5), shared
-#                      by both installer twins
-#   android_commandlinetools_* - mobile_dev's Windows-side Android SDK
-#                      command-line tools zip (design doc section 3.4; Studio
-#                      is dropped entirely). Confirmed live against
+#                      command-line tools need (design doc section 3.5),
+#                      shared by both installer twins. 17 per Maestro's own
+#                      "Java 17 or higher" requirement - a deliberate pin
+#                      like node_major, NOT re-resolved by
+#                      scripts/update-versions.sh (package managers key JDK
+#                      packages by major version only; bump it by hand if
+#                      the floor ever needs to move).
+#   android_commandlinetools_* - mobile_dev's Android SDK command-line tools
+#                      zip, per platform/arch (win, linux, mac_x86_64,
+#                      mac_arm64 - design doc section 3.4; Studio is dropped
+#                      entirely). Confirmed live against
 #                      developer.android.com/studio#command-line-tools-only
 #                      2026-10-10 - a SHA-256 is published alongside the zip
 #                      on that same page, so this pins the digest, not a
@@ -90,6 +107,8 @@ versions:
   powershell_sha256_arm64: "924829e54c983648f6f1419a2dc7f9433c861b2fb5bd57736ff096c24f133729"
   claude_install_sh: "https://claude.ai/install.sh"
   claude_install_ps1: "https://claude.ai/install.ps1"
+  maestro_version: "2.11.0"
+  maestro_sha256: "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a"
 
 guardrail:
   version: v0.23.36-dev
