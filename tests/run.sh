@@ -46,7 +46,14 @@ skipped_names=""
 silent_names=""
 
 # Bound individual tests and identify the running test before capturing output.
-# GNU timeout is coreutils on Linux/Git Bash and gtimeout on Homebrew macOS.
+# GNU timeout is coreutils on Linux/Git Bash and gtimeout on Homebrew macOS -
+# but uutils (rust-coreutils) ships a compatible `timeout` too, and its
+# `--version` says "(uutils coreutils)", never "GNU coreutils" (the same swap
+# scripts/dotfiles-doctor.sh's coreutils probe calls out). Gating on that
+# literal string silently disabled every per-test time limit on a box that
+# had already swapped. Probe the actual invocation shape instead - `-k`
+# accepted, a real 124 on a command that outlives the limit - the same
+# behavioural-probe approach the doctor's coreutils check uses.
 test_timeout="${TEST_TIMEOUT_SECONDS:-180}"
 if ! [[ "$test_timeout" =~ ^[1-9][0-9]*$ ]]; then
     printf 'TEST_TIMEOUT_SECONDS must be a positive integer\n' >&2
@@ -54,13 +61,14 @@ if ! [[ "$test_timeout" =~ ^[1-9][0-9]*$ ]]; then
 fi
 test_command=(bash --)
 for timer in timeout gtimeout; do
-    if command -v "$timer" >/dev/null 2>&1 && "$timer" --version 2>/dev/null | grep -q 'GNU coreutils'; then
-        test_command=("$timer" -k 5s "$test_timeout" bash --)
-        break
-    fi
+    command -v "$timer" >/dev/null 2>&1 || continue
+    "$timer" -k 1 1 sleep 3 >/dev/null 2>&1
+    [ $? -eq 124 ] || continue
+    test_command=("$timer" -k 5s "$test_timeout" bash --)
+    break
 done
 if [ "${#test_command[@]}" -eq 2 ]; then
-    printf 'warning: GNU timeout unavailable; per-test time limits disabled\n' >&2
+    printf 'warning: no timeout/gtimeout honors -k with a real 124 on expiry; per-test time limits disabled\n' >&2
 fi
 
 # The operator's own state must survive the suite. A test that rewrote the real
