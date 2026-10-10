@@ -379,6 +379,41 @@ function Install-Node {
     Invoke-NpmUpgradeOnce
 }
 
+function Install-MobileDev {
+    # mobile_dev (design doc section 3.5): a standalone JDK, not Android
+    # Studio's bundled runtime (Studio is dropped entirely - section 3.4).
+    # Maestro, Gradle (via Expo's CLI) and the SDK command-line tools all
+    # need JAVA_HOME regardless of Studio. EclipseAdoptium.Temurin.17.JDK
+    # over Microsoft.OpenJDK.17 (design doc section 3.5 - either is
+    # acceptable; Temurin picked and used consistently here and in the test).
+    $jdkMajor = {{ .versions.jdk_version }}
+    $existingJava = Get-Command java -ErrorAction SilentlyContinue
+    $javaMajor = 0
+    if ($existingJava) {
+        # java -version writes to stderr; PS 5.1 promotes native stderr to a
+        # terminating error under Stop (see Test-NpmGlobalCurrent in
+        # scripts/lib/ps-common.ps1 for the same idiom).
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $versionLine = ((& java -version) 2>&1 | Select-Object -First 1 | Out-String).Trim()
+        $ErrorActionPreference = $previous
+        if ($versionLine -match '"(\d+)') { $javaMajor = [int]$Matches[1] }
+    }
+    if (-not $existingJava -or $javaMajor -lt $jdkMajor) {
+        Write-Host "  Installing a standalone JDK $jdkMajor+ (Temurin)..." -ForegroundColor Yellow
+        winget install --id EclipseAdoptium.Temurin.17.JDK --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $existingJava = Get-Command java -ErrorAction SilentlyContinue
+    }
+    if ($existingJava -and -not [System.Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')) {
+        # java.exe sits in <jdkHome>\bin - walk up once to the JDK's own root,
+        # rather than guessing the vendor's install path.
+        $jdkHome = Split-Path -Parent (Split-Path -Parent $existingJava.Source)
+        [System.Environment]::SetEnvironmentVariable('JAVA_HOME', $jdkHome, 'Machine')
+        $env:JAVA_HOME = $jdkHome
+    }
+}
+
 {{- if $core }}
 # Core tools
 # Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
@@ -1364,7 +1399,7 @@ if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
 # rather than silently assume agent_toolkit's tools exist.
 {{- if $mobile_dev }}
 {{- if $agent_toolkit }}
-# a sibling task (WSL/Windows installer plan) inserts the Install-MobileDev call here
+Install-MobileDev
 {{- else }}
 Write-Host "Warning: mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run" -ForegroundColor Yellow
 {{- end }}

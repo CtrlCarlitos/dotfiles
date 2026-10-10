@@ -62,9 +62,13 @@ vscode:
 #   gum              - the bootstrap pin for the package menu
 #   claude_install_* - the official native-installer URLs, so `dot upgrade`
 #                      cannot install a different Claude than the installer did
+#   jdk_version      - the standalone JDK major mobile_dev's Maestro/Gradle/SDK
+#                      command-line tools need (design doc section 3.5), shared
+#                      by both installer twins
 versions:
   node_major: 24
   node_choco: "24.19.0"
+  jdk_version: 17
   antigravity_hub: "2.19.1-6046815158665216"
   gum: "2.0.1"
   powershell: "7.6.6"
