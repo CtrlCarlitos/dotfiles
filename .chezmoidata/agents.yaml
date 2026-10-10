@@ -21,15 +21,29 @@ agents:
   # invoker, which guardrail denies by design; forceAllToolsEager promotes
   # them to native mcp_<server>_<tool> entries guardrail's registry already
   # classifies. A plugin bundle is not an alternative: it prefixes the server
-  # name, and guardrail does not know mcp_dotfiles-mcp_serena_*). Each
-  # consumer builds its own shape from command + args:
-  #   OpenCode  {type: local, command: [command, ...args], enabled: true}
-  #   agy       {command, args, forceAllToolsEager: true}
-  # Registration is still gated on the binary being present on the machine.
+  # name, and guardrail does not know mcp_dotfiles-mcp_serena_*). Each entry
+  # is either LOCAL (bare command + args - a binary the installer runs, e.g.
+  # serena) or REMOTE (type: remote + url - a hosted, OAuth-authenticated MCP
+  # server OpenCode/agy dial out to directly, e.g. Expo's mcp.expo.dev/mcp,
+  # design doc #3.8. Maestro's own MCP server is local - `maestro mcp` - and
+  # is registered for Claude Code/Codex directly, not through this catalog).
+  # Each consumer builds its own shape:
+  #   OpenCode local   {type: local, command: [command, ...args], enabled: true}
+  #   OpenCode remote  {type: remote, url: <url>, enabled: true}
+  #   agy local        {command, args, forceAllToolsEager: true}
+  #   agy remote       {httpUrl: <url>, oauth: {}, forceAllToolsEager: true}
+  # Registration is gated on the binary being present on the machine
+  # (`command -v <command>`) for a LOCAL entry. A REMOTE entry has no binary
+  # to probe, so it is instead gated on the owning package's install-time
+  # flag - Expo's is `mobile_dev` - see opencode_mcp_sync() and the agy merge
+  # block in run_onchange_install_packages.sh.tmpl.
   mcp:
     serena:
       command: serena
       args: [start-mcp-server, --context, ide-assistant]
+    expo:
+      type: remote
+      url: https://mcp.expo.dev/mcp
 
   # Serena's web dashboard opens a browser tab every time a client starts the
   # MCP server (one per agent per session). false keeps the dashboard running

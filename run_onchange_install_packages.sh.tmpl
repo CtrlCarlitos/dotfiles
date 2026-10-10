@@ -1947,8 +1947,19 @@ catalog = json.loads(r"""{{ .agents.mcp | toJson }}""")
 mcp = cfg.setdefault("mcp", {})
 changed = []
 for name in sorted(n for n in want if n in catalog):
-    cmd = [catalog[name]["command"]] + catalog[name]["args"]
     entry = mcp.get(name)
+    if catalog[name].get("type") == "remote":
+        # A hosted, OAuth-authenticated server (e.g. Expo) - no local binary,
+        # no command/args; converge on its url instead.
+        url = catalog[name]["url"]
+        if not isinstance(entry, dict):
+            mcp[name] = {"type": "remote", "url": url, "enabled": True}
+            changed.append(name)
+        elif entry.get("url") != url:
+            entry["url"] = url
+            changed.append(name)
+        continue
+    cmd = [catalog[name]["command"]] + catalog[name]["args"]
     if not isinstance(entry, dict):
         mcp[name] = {"type": "local", "command": cmd, "enabled": True}
         changed.append(name)
@@ -1966,7 +1977,13 @@ PYEOF
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         OC_PRESENT=()
 {{- range $name, $srv := .agents.mcp }}
+{{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
+{{- if $mobile_dev }}
+        OC_PRESENT+=({{ $name | quote }})
+{{- end }}
+{{- else }}
         command -v {{ $srv.command | quote }} &>/dev/null && OC_PRESENT+=({{ $name | quote }})
+{{- end }}
 {{- end }}
         if [ "${#OC_PRESENT[@]}" -gt 0 ]; then
             if OC_CHANGED="$(opencode_mcp_sync "$OC_GLOBAL" "${OC_PRESENT[@]}" 2>/dev/null)"; then
@@ -1989,6 +2006,13 @@ PYEOF
     AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
     AGY_WANT=""
     command -v serena &>/dev/null && AGY_WANT="serena"
+    # Remote entries (Expo) have no binary to probe; gate on the owning
+    # package's install-time flag instead (mobile_dev).
+{{- range $name, $srv := .agents.mcp }}
+{{- if and (hasKey $srv "type") (eq $srv.type "remote") $mobile_dev }}
+    AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
+{{- end }}
+{{- end }}
     if [ -n "$AGY_WANT" ]; then
         info "Registering MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)..."
         mkdir -p "$(dirname "$AGY_GLOBAL_MCP")"
@@ -2014,7 +2038,12 @@ if not isinstance(servers, dict):
 # file is passed through untouched.
 for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
     if name in want:
-        servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
+        if srv.get("type") == "remote":
+            # Hosted, OAuth-authenticated server (e.g. Expo) - no command/args;
+            # agy discovers OAuth automatically on first use (/mcp auth <name>).
+            servers[name] = {"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True}
+        else:
+            servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write(chr(10))
