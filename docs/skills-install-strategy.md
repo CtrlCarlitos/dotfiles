@@ -450,7 +450,7 @@ required) and against two past session transcripts (`retro`).
 | Claude Code | pass: 3 sections, small diff view, evidence honest ("no test run ... not verified"), merge danger with door + blast radius, `Refs` line kept | pass: explicit `/retro`; on a startup-only transcript it reported there was nothing to retro rather than invent findings; on a 35-turn session it gave 5 ranked, line-referenced proposals |
 | Codex | pass: same shape, shorter; read `~/.agents/skills/pr/SKILL.md` itself | pass: `$retro`; loaded `writing-for-agents`; 5 ranked proposals, each tied to something in the transcript, with unknowns named |
 | OpenCode (plan agent) | pass: loaded the `pr` skill through its skill tool | pass: `/retro` command loaded `retro` and `writing-for-agents`; 5 ranked proposals with transcript line references. First attempt could not read a transcript outside the project (`external_directory` auto-rejected) and returned nothing, so give it a path inside the working directory |
-| agy | pass (WSL, 2026-10-10, headless, `agy --dangerously-skip-permissions -p "..."` — the same flag the interactive alias already carries, passed explicitly since a non-interactive call never sources it): 3 sections, evidence grounded in the real commit (`tests/ps_template_define_before_use_contract.sh`, the actual before/after error and pass output), merge danger with door + blast radius, `Refs: #269` line kept | not run: same invocation form should work, not yet tried |
+| agy | pass (WSL, 2026-10-10, headless, `agy --dangerously-skip-permissions -p "..."` — the same flag the interactive alias already carries, passed explicitly since a non-interactive call never sources it): 3 sections, evidence grounded in the real commit (`tests/ps_template_define_before_use_contract.sh`, the actual before/after error and pass output), merge danger with door + blast radius, `Refs: #269` line kept | pass (WSL, 2026-10-10, same flag): defaulted to the current session, correctly found it startup-only and declined to invent findings there, then retro'd the *preceding* session (the `pr` run above) and gave 5 ranked, severity-ordered findings, each tied to a specific transcript step and grounded in real citations (e.g. `git grep` used on the working tree instead of `rg -n`, against `AGENTS.md:14-16`) |
 
 None of the runs changed a file, installed anything, or touched a steering file.
 Recurring `retro` findings were genuinely present in the transcript (a flaky temp-directory
@@ -459,10 +459,10 @@ lookup by `mtime`, a pin test printing `PASS (0 checks)`, a repeated pin-bump re
 **Applicability.** Windows (native): installed and smoke-tested above for three of four
 agents (agy untested on native Windows). WSL, Linux, macOS and devcontainers: the shell
 library is executed by the contract tests on Linux CI (install lists, verification pass,
-pruning); agy `pr` is now also real-agent smoke-tested on WSL (above). The Windows
-installer and updater twins are held to the same lists by the contract and exercise the
-same helper library (`ps-skills.ps1`) under `pwsh`; the full Windows install path was not
-re-run end to end. Untested combinations: agy `retro` on any OS, agy `pr` outside WSL,
+pruning); agy `pr` and `retro` are now also real-agent smoke-tested on WSL (above). The
+Windows installer and updater twins are held to the same lists by the contract and
+exercise the same helper library (`ps-skills.ps1`) under `pwsh`; the full Windows install
+path was not re-run end to end. Untested combinations: agy on native Windows/Linux/macOS,
 every agent on macOS, and any agent inside a devcontainer.
 
 ## GStack — do not wire in
