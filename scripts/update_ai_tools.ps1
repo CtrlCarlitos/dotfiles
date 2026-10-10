@@ -578,11 +578,26 @@ if (Get-Command serena -ErrorAction SilentlyContinue) {
         Write-Host "$($G.puzzle) Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
     } else {
         Write-Host "$($G.puzzle) Updating Serena..." -ForegroundColor Yellow
+        # uv's own news ("Nothing to upgrade" / "Upgraded serena-agent vX -> vY") prints to
+        # stderr, not stdout (confirmed live, uv 0.12.24) - discarding it with 2>$null left
+        # this step silent on every run, unlike every other tool here. Capture it instead.
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $serenaOutput = @()
+        $serenaCode = 1
         try {
-            uv tool upgrade serena-agent 2>$null
-            if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: serena upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+            $serenaOutput = @(& uv tool upgrade serena-agent 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+            $serenaCode = $LASTEXITCODE
         } catch {
-            Write-Host "  Warning: serena upgrade failed - continuing" -ForegroundColor Red
+            $serenaOutput = @("$($_.Exception.Message)")
+        } finally {
+            $ErrorActionPreference = $prevEap
+        }
+        if ($serenaCode -ne 0) {
+            Write-Host "  Warning: serena upgrade failed (exit $serenaCode) - continuing" -ForegroundColor Red
+            $serenaOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        } else {
+            $serenaOutput | ForEach-Object { Write-Host "  serena-agent: $_" }
         }
     }
 }
