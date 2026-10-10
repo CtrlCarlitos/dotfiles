@@ -449,11 +449,11 @@ if command -v serena &>/dev/null; then
         # stderr, not stdout (confirmed live, uv 0.12.24) - discarding it left this step
         # silent on every run, unlike every other tool here. Capture it instead.
         if serena_output=$(uv tool upgrade serena-agent 2>&1); then
-            [ -n "$serena_output" ] && echo "$serena_output" | sed 's/^/  serena-agent: /'
+            [ -n "$serena_output" ] && printf '%s\n' "$serena_output" | sed 's/^/  serena-agent: /'
         else
             serena_code=$?
             echo "  Warning: serena upgrade failed (exit $serena_code) - continuing"
-            [ -n "$serena_output" ] && echo "$serena_output" | sed 's/^/    /'
+            [ -n "$serena_output" ] && printf '%s\n' "$serena_output" | sed 's/^/    /'
         fi
     fi
 fi
