@@ -98,8 +98,6 @@ settle() { sleep 0.3; }
 # patterns the fakes use to find "their" processes
 export FAKE_VSCODE_PAT='/fake/usr/share/code/'
 export FAKE_DESKTOP_PAT='/fake/opt/docker-desktop/'
-mkdir -p "$tmp/dockerd-bin"
-cp "$(command -v sleep)" "$tmp/dockerd-bin/dockerd"
 
 # run <body>: the library, the test hooks, then the body; stdin is the operator's answer.
 # Prints the body's output; the calls the fakes recorded are in $tmp/calls.
@@ -199,16 +197,30 @@ grep -Fq 'systemctl --user stop docker-desktop' "$tmp/calls" || fail "stubborn D
 pass
 
 # =========================== Linux: engine only (no Desktop): VS Code closed, engine untouched ===
-e1="$("$tmp/dockerd-bin/dockerd" 300 >/dev/null 2>&1 & echo $!)"; spawned+=("$e1")
+# `pgrep -x dockerd` matches a process's comm, which the kernel sets from the
+# program actually exec'd - never from argv[0] (exec -a, used for the other
+# fakes above, only changes argv[0], as pgrep -f's full-cmdline match needs).
+# A real file literally named "dockerd" used to be faked by copying the
+# `sleep` binary over it, which works when `sleep` is its own standalone
+# binary (GNU coreutils) but not when it is a multicall binary dispatching on
+# its own basename (uutils coreutils): run directly as "dockerd", it refuses
+# with "coreutils: unknown program 'dockerd'" instead of ever sleeping. A
+# process may rename its own comm by writing to /proc/self/comm, so a bash
+# process does that to itself, then blocks (forking the real `sleep` as an
+# untracked child, which never touches its parent's renamed comm).
+dockerd_child_pidfile="$tmp/dockerd-child.pid"
+e1="$(bash -c 'echo -n dockerd >/proc/self/comm 2>/dev/null || true; sleep 300 & echo $! >"$1"; wait' _ "$dockerd_child_pidfile" >/dev/null 2>&1 & echo $!)"
+spawned+=("$e1")
 v1="$(spawn /fake/usr/share/code/code)"
 settle
+spawned+=("$(cat "$dockerd_child_pidfile" 2>/dev/null || true)")
 printf 'y\n' | FAKE_ENGINE=1 run 'dock_gate "docker-ce"; echo "rc=$?"' >"$tmp/out" || true
 settle
 grep -Fxq 'rc=0' "$tmp/out" || fail "engine only: the gate proceeds (got: $(cat "$tmp/out"))"
 if alive "$v1"; then fail "engine only: VS Code is still closed first"; fi
 if ! alive "$e1"; then fail "engine only: the package upgrade restarts the engine itself; it is not stopped here"; fi
 if grep -Fq 'docker-stop' "$tmp/calls"; then fail "engine only: no Docker Desktop to stop"; fi
-kill "$e1" 2>/dev/null || true
+kill "$e1" "$(cat "$dockerd_child_pidfile" 2>/dev/null || true)" 2>/dev/null || true
 pass
 
 # =========================== macOS ===============================================================
