@@ -84,12 +84,14 @@ if run_fonts "$home1" "$work1" >"$out1" 2>&1; then
 else
     fail "install_fonts must not abort the run when 7z extraction fails (warn-and-continue, #114): $(cat "$out1")"
 fi
-grep -q 'Meslo Nerd Font extraction failed' "$out1" &&
-    pass || fail "expected a warning naming the Meslo extraction failure: $(cat "$out1")"
-grep -q 'FiraCode Nerd Font extraction failed' "$out1" &&
-    pass || fail "a failed Meslo extraction must not stop FiraCode from being attempted: $(cat "$out1")"
-[ ! -e "$work1/Meslo.zip" ] && pass || fail "a failed extraction must not leave its zip behind"
-[ ! -e "$work1/FiraCode.zip" ] && pass || fail "a failed extraction must not leave its zip behind"
+grep -q 'Meslo Nerd Font extraction failed' "$out1" || fail "expected a warning naming the Meslo extraction failure: $(cat "$out1")"
+pass
+grep -q 'FiraCode Nerd Font extraction failed' "$out1" || fail "a failed Meslo extraction must not stop FiraCode from being attempted: $(cat "$out1")"
+pass
+[ ! -e "$work1/Meslo.zip" ] || fail "a failed extraction must not leave its zip behind"
+pass
+[ ! -e "$work1/FiraCode.zip" ] || fail "a failed extraction must not leave its zip behind"
+pass
 
 # --- 2. A successful extraction runs 7z quiet, same spirit as wget's -q ----
 log2="$tmp/7z-calls.log"
@@ -116,16 +118,23 @@ chmod +x "$tmp/bin/7z"
 home2="$tmp/home2"; work2="$tmp/work2"
 mkdir -p "$home2" "$work2"
 out2="$tmp/out2.log"
-run_fonts "$home2" "$work2" >"$out2" 2>&1 && pass || fail "install_fonts failed on a clean extraction: $(cat "$out2")"
-grep -q 'Meslo Nerd Font installed' "$out2" && pass || fail "Meslo was not reported installed: $(cat "$out2")"
-grep -q 'FiraCode Nerd Font installed' "$out2" && pass || fail "FiraCode was not reported installed: $(cat "$out2")"
+run_fonts "$home2" "$work2" >"$out2" 2>&1 || fail "install_fonts failed on a clean extraction: $(cat "$out2")"
+pass
+grep -q 'Meslo Nerd Font installed' "$out2" || fail "Meslo was not reported installed: $(cat "$out2")"
+pass
+grep -q 'FiraCode Nerd Font installed' "$out2" || fail "FiraCode was not reported installed: $(cat "$out2")"
+pass
 
 [ -f "$log2" ] || fail "7z was never invoked"
+pass
 calls="$(cat "$log2" 2>/dev/null || true)"
-[ "$(wc -l < "$log2")" -eq 2 ] && pass || fail "expected exactly 2 7z invocations (Meslo, FiraCode), got: $calls"
+[ "$(wc -l < "$log2")" -eq 2 ] || fail "expected exactly 2 7z invocations (Meslo, FiraCode), got: $calls"
+pass
 while IFS= read -r call; do
-    [[ "$call" == *-bso0* ]] && pass || fail "7z call missing the quiet-output flag -bso0 (would print its banner/progress): $call"
-    [[ "$call" == *-bsp0* ]] && pass || fail "7z call missing the quiet-progress flag -bsp0: $call"
+    [[ "$call" == *-bso0* ]] || fail "7z call missing the quiet-output flag -bso0 (would print its banner/progress): $call"
+    pass
+    [[ "$call" == *-bsp0* ]] || fail "7z call missing the quiet-progress flag -bsp0: $call"
+    pass
 done < "$log2"
 
 finish
