@@ -108,6 +108,9 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-skills.ps1" }}
 {{ include "scripts/lib/ps-desktop-shortcuts.ps1" }}
 {{ include "scripts/lib/ps-timing.ps1" }}
+{{ include "scripts/lib/ps-installer-output.ps1" }}
+# Installer boilerplate is logged, not shown (scripts/lib/ps-installer-output.ps1).
+Initialize-InstallerOutput
 # [data.upgrade] desktop_shortcuts = false: the installers this run starts drop shortcuts on
 # the Desktop as well (Geany, OBS, ShareX and Termius did, 2026-10-07). Snapshot now; the new
 # ones go just before "Package installation complete!".
@@ -514,6 +517,7 @@ Install-NpmCatalogTool -Package @('{{ includeTemplate "pkg-names" (dict "manager
 Add-DotTimingMark -Name 'choco packages'
 {{- if $hasChocolateyPackages }}
 Write-Host "Checking/Installing packages..." -ForegroundColor Cyan
+Write-PendingRebootNote
 # ONE batched local inventory instead of one `choco list --exact <pkg>` per
 # package: each probe spawned a fresh .NET choco process (~1.5s x ~40
 # packages per re-fire), and a single probe wedging pre-resolution on
@@ -604,8 +608,8 @@ foreach ($pkg in $packages) {
             # see the cap.
             $env:CHOCO_PKG = $pkg
             Invoke-WithTimeout -Description "install $pkg via Chocolatey" -Seconds 600 -Action {
-                choco install $env:CHOCO_PKG -y --no-progress
-                if ($LASTEXITCODE -ne 0) { exit 1 }
+                choco install $env:CHOCO_PKG -y --no-progress 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+                if ($LASTEXITCODE -ne 0) { "choco exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
             }
             Remove-Item Env:\CHOCO_PKG -ErrorAction SilentlyContinue
         }
@@ -668,8 +672,8 @@ if ($wingetPackages.Count -gt 0) {
             try {
                 Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
                     $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
-                    winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra
-                    if ($LASTEXITCODE -ne 0) { exit 1 }
+                    winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+                    if ($LASTEXITCODE -ne 0) { "winget exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
                 }
             } catch {
                 Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
@@ -2191,7 +2195,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         try {
             Write-Host "Installing Google Chrome (winget)..." -ForegroundColor Cyan
             Invoke-WithTimeout -Description "Google Chrome install" -Seconds 600 -Action {
-                winget install --id Google.Chrome --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+                winget install --id Google.Chrome --exact --source winget --silent --accept-package-agreements --accept-source-agreements 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
                 if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
             }
         } catch {
@@ -2219,7 +2223,7 @@ if (Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue) {
         # job Failed on a real winget error; Invoke-WithTimeout surfaces that
         # as a warning and never throws itself.
         Invoke-WithTimeout -Description "ChatGPT Work/Codex install" -Seconds 300 -Action {
-            winget install --id 9PLM9XGG6VKS --source msstore --silent --accept-package-agreements --accept-source-agreements
+            winget install --id 9PLM9XGG6VKS --source msstore --silent --accept-package-agreements --accept-source-agreements 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
             if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
         }
         if (Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue) {
@@ -2249,7 +2253,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         try {
             Write-Host "Installing Win-CodexBar (winget)..." -ForegroundColor Cyan
             Invoke-WithTimeout -Description "Win-CodexBar install" -Seconds 300 -Action {
-                winget install --id Finesssee.Win-CodexBar --exact --source winget --accept-package-agreements --accept-source-agreements
+                winget install --id Finesssee.Win-CodexBar --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
                 if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
             }
         } catch {
@@ -2279,7 +2283,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         try {
             Write-Host "Installing Docker Desktop (winget)..." -ForegroundColor Cyan
             Invoke-WithTimeout -Description "Docker Desktop install" -Seconds 900 -Action {
-                winget install --id Docker.DockerDesktop --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+                winget install --id Docker.DockerDesktop --exact --source winget --silent --accept-package-agreements --accept-source-agreements 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
                 if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
             }
         } catch {
@@ -2328,7 +2332,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         try {
             Write-Host "Installing Meld (winget)..." -ForegroundColor Cyan
             Invoke-WithTimeout -Description "Meld install" -Seconds 300 -Action {
-                winget install --id Meld.Meld --exact --source winget --accept-package-agreements --accept-source-agreements
+                winget install --id Meld.Meld --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
                 if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
             }
         } catch {
