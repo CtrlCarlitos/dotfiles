@@ -24,4 +24,30 @@ else
     skip "chezmoi not installed"
 fi
 
+# docs/mobile-development.md skeleton: the anchor both sibling plans write into.
+require "$repo_root/README.md" 'mobile-development.md'
+require "$repo_root/docs/README.md" 'mobile-development.md'
+[[ -f "$repo_root/docs/mobile-development.md" ]] || fail "docs/mobile-development.md missing"
+for heading in '## Windows setup' '## WSL setup' '## Linux and macOS' '## VS Code' '## Troubleshooting'; do
+    require "$repo_root/docs/mobile-development.md" "$heading"
+done
+require "$repo_root/docs/mobile-development.md" 'superpowers/specs/2026-10-10-mobile-dev-design.md'
+require "$repo_root/docs/mobile-development.md" '#336'
+
+# The 17-group count: every stale "16" spelling is gone and the 17 spelling is in place.
+require "$repo_root/README.md" 'preset → 17 groups'
+require "$repo_root/README.md" '17 package groups across 5 platforms'
+require "$repo_root/README.md" 'The 17-group taxonomy'
+require "$repo_root/README.md" 'Platform installers (17-group gated)'
+require "$repo_root/docs/README.md" 'the 17 groups, presets'
+require "$repo_root/docs/quickstart.md" 'the 17 groups, what each installs'
+require "$repo_root/docs/menu-demo.md" 'The real menu lists the 17 group'
+forbid "$repo_root/README.md" 'preset → 16 groups'
+forbid "$repo_root/README.md" '16 package groups'
+forbid "$repo_root/README.md" 'The 16-group taxonomy'
+forbid "$repo_root/README.md" 'Platform installers (16-group gated)'
+forbid "$repo_root/docs/README.md" 'the 16 groups'
+forbid "$repo_root/docs/quickstart.md" 'the 16 groups'
+forbid "$repo_root/docs/menu-demo.md" 'the real menu lists the 16 group'
+
 finish

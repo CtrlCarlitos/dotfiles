@@ -2,7 +2,7 @@
 
 When you run the installer, this is what you'll see. (Mirrors
 `scripts/select-packages.sh` / `.ps1`; the two header lines below are the
-scripts' own, so if they drift the scripts win. The real menu lists the 16 group
+scripts' own, so if they drift the scripts win. The real menu lists the 17 group
 names only; the descriptions in the demo are added here from
 [package-groups.md](package-groups.md).)
 

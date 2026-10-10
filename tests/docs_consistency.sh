@@ -12,9 +12,9 @@ forbid_regex() {
     fi
 }
 
-require README.md "16-group taxonomy"
-require README.md "Platform installers (16-group gated)"
-require README.md "Config template (16 promptBoolOnce groups)"
+require README.md "17-group taxonomy"
+require README.md "Platform installers (17-group gated)"
+require README.md "Config template (17 promptBoolOnce groups)"
 require README.md "cloudflared only"
 require README.md "Linux/macOS/WSL"
 require README.md "select-packages.ps1"

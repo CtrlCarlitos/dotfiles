@@ -153,7 +153,7 @@ four agent CLIs. `Esc` stops a running response. Full table in
 
 Read these when you need them, not now:
 
-- [Package Groups](package-groups.md) — the 16 groups, what each installs, how to change your selection
+- [Package Groups](package-groups.md) — the 17 groups, what each installs, how to change your selection
 - [Terminal Experience](terminal.md) — keys, colours, clipboard, SSH host tabs
 - [devprofile](devprofile.md) — multi-account git identities, SSH keys, commit signing
 - [SSH Agents](ssh-agents.md) — where private keys live and how containers borrow them

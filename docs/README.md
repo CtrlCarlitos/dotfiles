@@ -6,7 +6,7 @@ are reference.
 ## Getting started
 
 - [Quickstart](quickstart.md) — ten minutes from a fresh machine to a working environment, and the `dot` commands you will use
-- [Package Groups](package-groups.md) — the 16 groups, presets, and how to change your selection
+- [Package Groups](package-groups.md) — the 17 groups, presets, and how to change your selection
 - [Menu Demo](menu-demo.md) — what the selection menu actually looks like
 - [Backup & Restore](backup-restore.md) — `dot backup` / `dot restore`, the encrypted portable archive
 - [Versioning & releases](versioning.md) — `dot version`, the date-based tags, the generated `CHANGELOG.md`, cutting a release, rolling back
@@ -39,6 +39,7 @@ are reference.
 - [Tool Parity](tool-parity.md) — the full per-program table across all 5 platforms
 - [VS Code](vscode.md) — managed extensions, settings tiers, per-machine overrides
 - [Devcontainer Setup](devcontainer.md) — using the dotfiles in VS Code devcontainers
+- [Mobile Development](mobile-development.md) — the opt-in `mobile_dev` group: Android SDK, ADB bridge, emulator, Maestro, per-platform setup
 - [Remote Agent Sessions](remote-agent-sessions.md) — tmux/psmux across desk and phone: canonical keys, detach/attach, recovery
 - [Remote Access](remote-access.md) — `dot remote`: scripted SSH/RDP/tmux plumbing and the optional Cloudflare Access browser path
 - [Testing the dotfiles](testing.md) — the per-platform verify/fix playbook, plus how the test suite and CI run
