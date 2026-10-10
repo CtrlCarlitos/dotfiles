@@ -442,9 +442,16 @@ install_fonts() {
             continue
         fi
 
-        # Unzip with 7z/7zz
-        # 7z x -o{output_dir} {archive}
-        "$seven_z" x -y -o"$font_dir" "$WORK/$zip_name.zip"
+        # Unzip with 7z/7zz. -bso0 -bsp0 keep 7z's own banner and progress
+        # output out of the log (quiet_apt_enable's "errors are always shown"
+        # still holds: a failure's stderr is unaffected by those flags), and
+        # the failure is warned-and-continued rather than left to `set -e`,
+        # the same shape as the wget download just above (#114).
+        if ! "$seven_z" x -y -o"$font_dir" "$WORK/$zip_name.zip" -bso0 -bsp0; then
+            warn "$zip_name Nerd Font extraction failed - skipping"
+            rm -f "$WORK/$zip_name.zip"
+            continue
+        fi
         rm "$WORK/$zip_name.zip"
         installed_any=true
         success "$zip_name Nerd Font installed"
