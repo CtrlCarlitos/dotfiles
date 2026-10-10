@@ -164,6 +164,11 @@
     # dotfiles.
     guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
 
+    # mobile_dev - opt-in Expo/Android mobile development tooling (Maestro,
+    # agent-device, Expo MCP, Android SDK/emulator on Windows; see
+    # docs/mobile-development.md). Forces agent_toolkit on (Task 3).
+    mobile_dev = {{ if and $interactive (not $isDevcontainer) }}{{ promptBoolOnce . "packages.mobile_dev" "Install mobile_dev (opt-in Expo/Android mobile development tooling)?" false }}{{ else }}false{{ end }}
+
     # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
     # Host only: not prompted on WSL/containers, and enforced there too —
     # the package-install template gates the actual install on the same

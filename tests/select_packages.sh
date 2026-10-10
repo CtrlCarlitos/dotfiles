@@ -34,7 +34,8 @@ ok() { printf '  ok: %s\n' "$1"; }
 # config, and CI (plan Global Constraints).
 PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
     claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
-    antigravity_desktop dev_desktop remote_access remote_access_server guardrail)
+    antigravity_desktop dev_desktop remote_access remote_access_server guardrail \
+    mobile_dev)
 
 # Canonical section body the script is expected to write.
 expected_section() { # $@ = keys that are true

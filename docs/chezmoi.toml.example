@@ -98,6 +98,10 @@
     #             See docs/guardrail-install.md.
     guardrail = true
 
+    # mobile_dev — opt-in Expo/Android mobile development tooling. See
+    #              docs/mobile-development.md.
+    mobile_dev = false
+
     # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,
     #               ScreenRec, Termius, Handy... Host only: auto-skipped on
     #               WSL/containers even if true.

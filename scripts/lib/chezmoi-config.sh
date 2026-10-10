@@ -20,7 +20,8 @@
 # shellcheck disable=SC2034
 PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
     claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
-    antigravity_desktop dev_desktop remote_access remote_access_server guardrail)
+    antigravity_desktop dev_desktop remote_access remote_access_server guardrail \
+    mobile_dev)
 
 # Print the raw lines inside the file's [data.packages] section (the section
 # ends at the next [table] header or EOF). $1 = config file.

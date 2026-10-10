@@ -42,7 +42,7 @@ preset_set() {
     case "$1" in
     minimal) printf '%s\n' "core" ;;
     standard) printf '%s\n' core modern_cli fonts agent_toolkit opencode_cli claude_cli guardrail ;;
-    full) printf '%s\n' "${PKG_GROUPS[@]:0:14}" "${PKG_GROUPS[@]:15}" ;;
+    full) printf '%s\n' "${PKG_GROUPS[@]:0:14}" "${PKG_GROUPS[@]:15:1}" ;;
     *) return 0 ;; # custom (or anything unexpected): nothing pre-checked
     esac
 }

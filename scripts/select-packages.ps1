@@ -44,14 +44,14 @@ $configFile = Join-Path $configDir 'chezmoi.toml'
 $pkgGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
     'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
     'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
-    'remote_access', 'remote_access_server', 'guardrail')
+    'remote_access', 'remote_access_server', 'guardrail', 'mobile_dev')
 
 # Preset -> pre-check sets (spec section 3). Presets are NOT persisted.
 function Get-PresetSet([string]$preset) {
     switch ($preset) {
         'minimal' { return @('core') }
         'standard' { return @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli', 'claude_cli', 'guardrail') }
-        'full' { return @($script:pkgGroups | Where-Object { $_ -ne 'remote_access_server' }) }
+        'full' { return @($script:pkgGroups | Where-Object { $_ -ne 'remote_access_server' -and $_ -ne 'mobile_dev' }) }
         default { return @() } # custom (or anything unexpected): nothing pre-checked
     }
 }

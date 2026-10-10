@@ -59,6 +59,7 @@ dev_desktop = false
 remote_access = false
 remote_access_server = false
 guardrail = true
+mobile_dev = false
 EOF
 }
 

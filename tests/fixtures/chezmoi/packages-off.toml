@@ -18,3 +18,4 @@
   remote_access        = false
   remote_access_server = false
   guardrail            = false
+  mobile_dev           = false
