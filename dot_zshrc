@@ -175,7 +175,12 @@ if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && grep -qi microsoft /proc/version 2>/dev/
     # reachable at /etc/resolv.conf's nameserver.
     _adb_host="$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf 2>/dev/null)"
   fi
-  [[ -n "$_adb_host" ]] && export ADB_SERVER_SOCKET="tcp:$_adb_host:5037"
+  if [[ -n "$_adb_host" ]]; then
+    export ADB_SERVER_SOCKET="tcp:$_adb_host:5037"
+  else
+    # Warn, never abort: an inconclusive detection must not break shell startup.
+    print -u2 "zshrc: could not resolve the Windows host for ADB_SERVER_SOCKET (checked wslinfo and /etc/resolv.conf) - adb/Maestro/agent-device won't reach the Windows ADB server until this is set manually"
+  fi
   unset _adb_host
 fi
 

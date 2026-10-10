@@ -88,6 +88,8 @@ require "$zshrc" 'wslinfo --networking-mode'
 require "$zshrc" 'mirrored'
 require "$zshrc" '/etc/resolv.conf'
 require "$zshrc" 'nameserver'
+# Inconclusive detection warns on stderr instead of failing silently.
+require "$zshrc" 'could not resolve the Windows host for ADB_SERVER_SOCKET'
 
 docs_file="$repo_root/docs/mobile-development.md"
 [ -f "$docs_file" ] || { fail "$docs_file missing"; finish; }
