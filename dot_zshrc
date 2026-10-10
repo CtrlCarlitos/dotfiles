@@ -129,6 +129,25 @@ composer_home="${COMPOSER_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/composer}"
 [[ -d "$HOME/.composer/vendor/bin" ]] && path=("$HOME/.composer/vendor/bin" "${path[@]}")
 [[ -d "$composer_home/vendor/bin" ]] && path=("$composer_home/vendor/bin" "${path[@]}")
 
+# JDK (mobile_dev's Maestro CLI + agent-device need Java 17+): JAVA_HOME and
+# its bin dir, wherever a JDK landed. apt's openjdk-17-jdk wires `java` via
+# update-alternatives but sets no JAVA_HOME; brew's openjdk@17 is keg-only
+# (not linked into brew's shared bin), so its prefix has to be found
+# explicitly. First existing candidate wins; an already-exported JAVA_HOME
+# (another JDK manager, a devcontainer image) is left alone.
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  for _jdk17 in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk-arm64 \
+      /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 \
+      /home/linuxbrew/.linuxbrew/opt/openjdk@17 "$HOME/.linuxbrew/opt/openjdk@17"; do
+    if [[ -x "$_jdk17/bin/java" ]]; then
+      export JAVA_HOME="$_jdk17"
+      break
+    fi
+  done
+  unset _jdk17
+fi
+[[ -n "${JAVA_HOME:-}" ]] && path=("$JAVA_HOME/bin" "${path[@]}")
+
 # ZSH completions
 [[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 
