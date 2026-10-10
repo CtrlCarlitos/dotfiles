@@ -54,6 +54,15 @@ render_fixture "$mac_server" mac-server
 render_windows "$windows_remote" windows-remote
 render_windows "$windows_desktop" windows-desktop
 render_windows "$windows_server" windows-server
+# Every Install-* function in the Windows template is DEFINED unconditionally
+# (only its CALL is package-gated, same as Install-Node/-OpenSshServerCapability
+# elsewhere in this file) - so Install-MobileDev's own body, containing
+# New-NetFirewallRule for its own unrelated ADB bridge, is present in this
+# render even though remote_access_server alone never calls it. Strip that one
+# known, unreachable-here function body before the server-only omits checks
+# below, which are about what remote_access_server's OWN activated code does,
+# not every unconditionally-defined function in the file (mobile_dev#336).
+sed -i '/^function Install-MobileDev {$/,/^}$/d' "$tmp/windows-server"
 
 contains linux-remote 'tailscale.com/install.sh' 'Linux remote_access must install Tailscale'
 contains linux-remote 'add_apt_repo cloudflared' 'Linux remote_access must install cloudflared'
