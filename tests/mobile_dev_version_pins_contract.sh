@@ -31,8 +31,9 @@ version_script="$repo_root/scripts/update-versions.sh"
 
 # 1. jdk_version: a bare integer >= 17 (Maestro's own "Java 17 or higher").
 jdk="$(sed -n 's/^  jdk_version: \([0-9][0-9]*\)$/\1/p' "$data_file")"
-[ -n "$jdk" ] || fail ".chezmoidata.yaml: no 'jdk_version: <int>' pin found"
-if [ -n "$jdk" ] && [ "$jdk" -lt 17 ]; then
+if [ -z "$jdk" ]; then
+    fail ".chezmoidata.yaml: no 'jdk_version: <int>' pin found"
+elif [ "$jdk" -lt 17 ]; then
     fail ".chezmoidata.yaml: jdk_version=$jdk is below Maestro's Java 17 floor"
 else
     pass
@@ -46,17 +47,15 @@ case "$maestro_ver" in
 esac
 
 # 3. maestro_sha256: a real 64-char lowercase hex digest, not a placeholder.
+#    The full 64 characters are checked (not just a prefix) - a bash regex
+#    anchored at both ends, the same style tests/run.sh uses for its own
+#    format check.
 maestro_sha="$(sed -n 's/^  maestro_sha256: "\([^"]*\)"$/\1/p' "$data_file")"
-case "$maestro_sha" in
-    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
-        if [ "${#maestro_sha}" -eq 64 ]; then
-            pass
-        else
-            fail ".chezmoidata.yaml: maestro_sha256 is not 64 hex characters: '$maestro_sha'"
-        fi
-        ;;
-    *) fail ".chezmoidata.yaml: maestro_sha256='$maestro_sha' is not lowercase hex" ;;
-esac
+if [[ "$maestro_sha" =~ ^[0-9a-f]{64}$ ]]; then
+    pass
+else
+    fail ".chezmoidata.yaml: maestro_sha256='$maestro_sha' is not 64 lowercase hex characters"
+fi
 
 # 4. scripts/update-versions.sh carries a real handler for the Maestro pin -
 #    not just a grep for its own name, but the shape every other network pin
@@ -70,10 +69,18 @@ require "$version_script" 's|^  maestro_sha256: .*|  maestro_sha256: \"$MAESTRO_
 require "$version_script" 'jdk_version'
 forbid "$version_script" 'JDK_LATEST'
 
-# 6. Executable check: the exact parsing the script uses against a real
+# 6. Executable check: source the REAL scripts/update-versions.sh and call
+#    its real parse_maestro_version/parse_maestro_sha256 functions against a
 #    fixture of mobile-dev-inc/homebrew-tap's Formula/maestro.rb (captured
-#    2026-10-10), so a change to the sed patterns above is caught here
-#    instead of silently leaving the pin "unchanged" forever.
+#    2026-10-10) - not a hand-duplicated copy of the sed patterns. A
+#    duplicate copy would keep passing even if the real parsing in
+#    update-versions.sh were edited (correctly or incorrectly) without a
+#    matching edit here; sourcing the real file closes that gap (see
+#    docs/invariants.md #14). update-versions.sh detects being sourced and
+#    returns right after defining these functions, before any network call
+#    or file write and before it sets `set -e` on us.
+# shellcheck disable=SC1090
+. "$version_script"
 fixture='# Generated with JReleaser 1.13.1 at 2026-09-29T13:34:16.745212209Z
 
 class Maestro < Formula
@@ -84,11 +91,11 @@ class Maestro < Formula
   sha256 "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a"
   license "Apache-2.0"
 '
-got_ver="$(printf '%s\n' "$fixture" | sed -n 's/^ *version "\([^"]*\)"$/\1/p')"
-got_sha="$(printf '%s\n' "$fixture" | sed -n 's/^ *sha256 "\([^"]*\)"$/\1/p')"
-[ "$got_ver" = "2.11.0" ] || fail "formula parser: expected version 2.11.0, got '$got_ver'"
+got_ver="$(printf '%s\n' "$fixture" | parse_maestro_version)"
+got_sha="$(printf '%s\n' "$fixture" | parse_maestro_sha256)"
+[ "$got_ver" = "2.11.0" ] || fail "parse_maestro_version: expected version 2.11.0, got '$got_ver'"
 [ "$got_sha" = "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a" ] ||
-    fail "formula parser: expected the pinned sha256, got '$got_sha'"
+    fail "parse_maestro_sha256: expected the pinned sha256, got '$got_sha'"
 [ "$got_ver" = "2.11.0" ] && [ "$got_sha" = "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a" ] && pass
 
 finish

@@ -5,6 +5,31 @@
 # movement makes no change. See the per-pin comments below for the failure
 # lessons (gzip decoding, channel matching) baked into this script.
 
+# Maestro homebrew-tap formula parsing (used by section 2c below). Pulled out
+# into named functions - and defined above the sourcing guard right below -
+# so tests/mobile_dev_version_pins_contract.sh can `source` this file and call
+# the REAL parsing against its own fixture, instead of hand-duplicating the
+# sed patterns as a second, independent copy that would keep passing even if
+# this one broke (docs/invariants.md #14: an executable check must run the
+# real code).
+parse_maestro_version() { # stdin = homebrew-tap Formula/maestro.rb content
+    sed -n 's/^ *version "\([^"]*\)"$/\1/p'
+}
+
+parse_maestro_sha256() { # stdin = homebrew-tap Formula/maestro.rb content
+    sed -n 's/^ *sha256 "\([^"]*\)"$/\1/p'
+}
+
+# Sourcing guard: a test sources this file (`. scripts/update-versions.sh`) to
+# reach the functions above without running the network-fetching,
+# file-mutating main flow below (and without inheriting this script's `set
+# -e` into the caller's shell). $0 is the invoker when sourced, never this
+# file's own path, so this only matches when we are NOT sourced and lets
+# direct execution fall through to the real update flow.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+    return 0
+fi
+
 set -e
 
 # Shared helpers (issue #123): net_timeout + sha256_cmd (the sha256-tool
@@ -153,8 +178,8 @@ MAESTRO_FORMULA="$(net_timeout 60 curl -fsSL "https://raw.githubusercontent.com/
 if [ -z "$MAESTRO_FORMULA" ]; then
     echo "Warning: could not fetch mobile-dev-inc/homebrew-tap's maestro formula - pin left unchanged."
 else
-    MAESTRO_LATEST="$(printf '%s\n' "$MAESTRO_FORMULA" | sed -n 's/^ *version "\([^"]*\)"$/\1/p')"
-    MAESTRO_SHA="$(printf '%s\n' "$MAESTRO_FORMULA" | sed -n 's/^ *sha256 "\([^"]*\)"$/\1/p')"
+    MAESTRO_LATEST="$(printf '%s\n' "$MAESTRO_FORMULA" | parse_maestro_version)"
+    MAESTRO_SHA="$(printf '%s\n' "$MAESTRO_FORMULA" | parse_maestro_sha256)"
     if [ -z "$MAESTRO_LATEST" ] || [ -z "$MAESTRO_SHA" ]; then
         echo "Warning: homebrew-tap maestro formula is missing a version or sha256 line - pin left unchanged."
     else
