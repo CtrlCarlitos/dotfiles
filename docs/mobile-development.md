@@ -63,7 +63,35 @@ on whichever `adb.exe` resolves first tells you which build is active.
 
 ## WSL setup
 
-<!-- TODO: WSL/Linux/macOS plan Tasks 2-5 (docs/superpowers/plans/2026-10-10-mobile-dev-wsl-linux-macos.md) fill this in: Maestro, the MCP registrations, and the ADB bridge client (ADB_SERVER_SOCKET). -->
+The `mobile_dev` group installs Maestro, agent-device, and a standalone JDK
+inside WSL the same way it does on native Linux, and registers the Maestro
+MCP server for Claude Code and Codex. What WSL cannot do is run an Android
+device or emulator itself - that only exists on the Windows side (see
+"Windows setup" above) - so WSL's `adb`, Maestro, and agent-device need a
+bridge to the ADB server running on Windows.
+
+`dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
+templating involved - it is a plain file applied identically everywhere) and
+exports `ADB_SERVER_SOCKET` in every new shell, pointed at the Windows host.
+How it resolves that address depends on which WSL networking mode is active:
+
+- **Mirrored networking** (`wslinfo --networking-mode` prints `mirrored`):
+  the loopback interface is shared with Windows, so `ADB_SERVER_SOCKET` is
+  set to `tcp:127.0.0.1:5037`.
+- **NAT networking** (the default on older WSL builds, or whenever
+  `wslinfo` is unavailable or inconclusive): the Windows host is reached at
+  the nameserver address in `/etc/resolv.conf`, so `ADB_SERVER_SOCKET` is
+  set to `tcp:<that address>:5037`.
+
+This is recomputed fresh every time a new shell starts (the resolved address
+can change across Windows reboots or network reconnects) and never clobbers
+an `ADB_SERVER_SOCKET` you have exported yourself.
+
+The bridge only has something to reach once Carlos starts the ADB server on
+the Windows side each session. That manual step - the exact
+`adb -a -P 5037 nodaemon server` command and its Firewall rule - is
+documented authoritatively in "Windows setup" above; this section only
+covers the WSL side of the handshake.
 
 
 ## Linux and macOS

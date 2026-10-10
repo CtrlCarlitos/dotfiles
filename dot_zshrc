@@ -148,6 +148,37 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
 fi
 [[ -n "${JAVA_HOME:-}" ]] && path=("$JAVA_HOME/bin" "${path[@]}")
 
+# ADB bridge to the Windows host (mobile_dev's adb/Maestro/agent-device,
+# WSL only): unlike JAVA_HOME above, this is recomputed on EVERY new shell,
+# never cached - the resolved Windows host IP can change across Windows
+# reboots/network reconnects. Guarded so a user's own override is never
+# clobbered. dot_zshrc is applied byte-for-byte on every machine (WSL,
+# native Linux, macOS, devcontainer) - it carries no chezmoi template
+# variables, so WSL is detected here the portable way (/proc/version),
+# the shell-native equivalent of .chezmoi.toml.tmpl's $isWsl check. Best
+# effort throughout: nothing here aborts the shell, and an inconclusive
+# detection just leaves ADB_SERVER_SOCKET unset.
+if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+  _adb_host=""
+  # WSL2 mirrored networking shares the loopback interface bidirectionally,
+  # so 127.0.0.1 reaches the Windows host directly; `wslinfo` is the
+  # supported way to ask which networking mode is active. Any other
+  # answer (including "nat", an empty answer, or wslinfo not existing on
+  # an older WSL build) falls through to the NAT-mode method below.
+  if command -v wslinfo &>/dev/null; then
+    case "$(wslinfo --networking-mode 2>/dev/null)" in
+      mirrored) _adb_host="127.0.0.1" ;;
+    esac
+  fi
+  if [[ -z "$_adb_host" ]]; then
+    # NAT mode (docs/windows.md's Networking table): the Windows host is
+    # reachable at /etc/resolv.conf's nameserver.
+    _adb_host="$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf 2>/dev/null)"
+  fi
+  [[ -n "$_adb_host" ]] && export ADB_SERVER_SOCKET="tcp:$_adb_host:5037"
+  unset _adb_host
+fi
+
 # ZSH completions
 [[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 

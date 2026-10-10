@@ -65,6 +65,46 @@ require "$tmpl" 'codex mcp add maestro -- maestro mcp'
 require "$tmpl" 'claude mcp get maestro'
 require "$tmpl" 'codex mcp get maestro'
 
+# --- WSL: the ADB bridge to the Windows ADB server (Task 5) ---------------
+# install_mobile_dev() itself only prints a heads-up, gated on $isWsl like
+# everything else in this file - the actual export lives in dot_zshrc,
+# never in a run_onchange script (docs/invariants.md #3: a run_onchange
+# script must never write to a file chezmoi itself owns, and dot_zshrc is
+# applied byte-for-byte on every machine).
+require "$tmpl" 'ADB_SERVER_SOCKET'
+require "$tmpl" '{{- if $isWsl }}'
+
+zshrc="$repo_root/dot_zshrc"
+[ -f "$zshrc" ] || { fail "$zshrc missing"; finish; }
+
+require "$zshrc" 'ADB_SERVER_SOCKET'
+# Guarded so a user's own override is never clobbered.
+require "$zshrc" '[[ -z "${ADB_SERVER_SOCKET:-}" ]]'
+# WSL detection, shell-native (dot_zshrc has no chezmoi template variables).
+require "$zshrc" '/proc/version'
+require "$zshrc" 'microsoft'
+# Mirrored-vs-NAT resolution order: wslinfo first, resolv.conf fallback.
+require "$zshrc" 'wslinfo --networking-mode'
+require "$zshrc" 'mirrored'
+require "$zshrc" '/etc/resolv.conf'
+require "$zshrc" 'nameserver'
+
+docs_file="$repo_root/docs/mobile-development.md"
+[ -f "$docs_file" ] || { fail "$docs_file missing"; finish; }
+
+require "$docs_file" 'adb -a -P 5037 nodaemon server'
+require "$docs_file" 'ADB_SERVER_SOCKET'
+require "$docs_file" 'mirrored'
+# Task 6 territory is untouched.
+forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2-5'
+require "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6'
+
+# tests/zshrc_startup_contract.sh already runs `zsh -n` + shellcheck on the
+# whole file; a quick syntax check here just pins this task's own addition.
+if command -v zsh >/dev/null 2>&1; then
+    if zsh -n "$zshrc"; then pass; else fail "dot_zshrc has invalid zsh syntax after the ADB bridge addition"; fi
+fi
+
 # --- Wiring: the placeholder comment is replaced by a real call -----------
 forbid "$tmpl" 'a sibling task (WSL/Windows installer plan) inserts the mobile_dev install call here'
 require "$tmpl" 'install_mobile_dev'
@@ -102,6 +142,49 @@ if command -v chezmoi >/dev/null 2>&1; then
         fail "render (agent_toolkit=false): install_mobile_dev must not be called without agent_toolkit"
     else
         pass
+    fi
+
+    # --- WSL gating (Task 5): render_to's "sh" platform is always native
+    # Linux ("6.8.0-generic" - no "microsoft"), so it already proves the ADB
+    # bridge heads-up is a true no-op on native Linux/macOS (reused above:
+    # groups(true,true)'s render contains no ADB_SERVER_SOCKET at all).
+    # Forcing a WSL kernel release through the same render path proves the
+    # other half: the heads-up actually appears once $isWsl is true.
+    render_to "$out" sh "$(groups true true)"
+    if grep -Fq 'WSL detected' "$out"; then
+        fail "render (native Linux, mobile_dev=true): ADB bridge heads-up must be a no-op off WSL"
+    else
+        pass
+    fi
+
+    render_wsl_to() { # $1 = outfile, $2 = override JSON - render_to, forced to a WSL kernel release
+        command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+        local out="$1" override="$2" scratch config
+        scratch="$(mktemp -d "${TMPDIR:-/tmp}/render-wsl-repo-XXXXXX")"
+        config="$scratch/empty.toml"
+        mkdir -p "$scratch/repo/scripts"
+        cp "$repo_root/.chezmoidata.yaml" "$scratch/repo/"
+        cp -r "$repo_root/.chezmoidata" "$repo_root/.chezmoitemplates" "$scratch/repo/"
+        if [ -d "$repo_root/scripts/lib" ]; then
+            cp -r "$repo_root/scripts/lib" "$scratch/repo/scripts/"
+        fi
+        if [ -f "$repo_root/scripts/curated-agent-skills.txt" ]; then
+            cp "$repo_root/scripts/curated-agent-skills.txt" "$scratch/repo/scripts/"
+        fi
+        seed_vscode_config "$config"
+        chezmoi execute-template --config "$config" --source "$scratch/repo" \
+            --override-data "{\"chezmoi\":{\"os\":\"linux\",\"kernel\":{\"osrelease\":\"5.15.0-microsoft-standard-WSL2\"}},\"packages\":$override}" \
+            <"$tmpl" | tr -d '\r' >"$out"
+    }
+
+    render_wsl_to "$out" "$(groups true true)"
+    if grep -Fq 'WSL detected' "$out"; then
+        pass
+    else
+        fail "render (WSL, mobile_dev=true, agent_toolkit=true): ADB bridge heads-up missing under \$isWsl"
+    fi
+    if command -v bash >/dev/null 2>&1; then
+        bash -n "$out" || fail "WSL render has invalid bash syntax"
     fi
 else
     skip "chezmoi not installed"

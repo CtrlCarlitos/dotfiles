@@ -614,6 +614,23 @@ install_mobile_dev() {
         sudo_net_timeout "$npm_sudo" 300 npm install -g agent-device@latest --loglevel=error --no-progress --fund=false \
             || warn "agent-device install failed - continuing"
     fi
+
+    # --- WSL: heads-up about the ADB bridge to the Windows host -----------
+    # adb/Maestro/agent-device need a real device or emulator, which under
+    # WSL only exists on the Windows side (design doc §3.3/§3.10) - this is
+    # WSL-only (native Linux/macOS run their own ADB server and never need
+    # this at all), gated the same way `$isWsl` already gates everything
+    # else in this file. This step does NOT export ADB_SERVER_SOCKET itself:
+    # docs/invariants.md #3 forbids a run_onchange script writing to a file
+    # chezmoi itself owns (dot_zshrc is one, applied byte-for-byte on every
+    # machine), and the resolved Windows host IP can change across Windows
+    # reboots/network reconnects, so it must be recomputed fresh in every
+    # new shell rather than baked in once here. dot_zshrc's own WSL
+    # detection block does exactly that, unconditionally, on every shell
+    # start - this is just the one-time install-time heads-up.
+{{- if $isWsl }}
+    info "WSL detected: your shell profile (dot_zshrc) now exports ADB_SERVER_SOCKET on every new shell, pointing adb/maestro/agent-device at the ADB server you run manually on Windows - see docs/mobile-development.md's WSL setup section."
+{{- end }}
 }
 
 # Upgrade npm to latest - once per run (install_node is called by several groups; each
