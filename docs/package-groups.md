@@ -37,7 +37,7 @@ the persisted `[data.packages]` section is emitted in.
 | `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
 | `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
 | `guardrail` | Agent guardrails | opt-in desired state, passed to the pinned agent-guardrails installer: true = `--state enabled`; false = `--state disabled` only if a binary exists, never a download (never auto-removed). See [guardrail-install.md](guardrail-install.md) |
-| `mobile_dev` | opt-in Expo/Android mobile development tooling | Maestro, agent-device, Expo MCP, Android SDK/emulator on Windows; forces `agent_toolkit` on. See docs/mobile-development.md |
+| `mobile_dev` | Opt-in Expo/Android mobile development tooling | Maestro, agent-device, Expo MCP, Android SDK/emulator on Windows; forces `agent_toolkit` on. See [mobile-development.md](mobile-development.md) |
 
 ## Ground rules
 
@@ -131,7 +131,7 @@ old keys are simply ignored if they're still lying around in a config:
 — menu options, config keys, and CI seeds are the same names, and one test
 enforces that. Per-package keys would multiply the prompts, the CI seeds,
 and the drift surface without adding control the groups don't already give;
-sixteen lines is also what a person will actually read in a menu.
+seventeen lines is also what a person will actually read in a menu.
 
 **Does turning a group off uninstall anything?** No — disabling never
 uninstalls (see ground rules). Uninstalling stays manual.

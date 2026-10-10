@@ -21,7 +21,7 @@
 # ==============================================================================
 # Toggle what gets installed. Runs via `chezmoi apply`.
 #
-# The 16 package groups share one vocabulary across the menu
+# The 17 package groups share one vocabulary across the menu
 # (scripts/select-packages.*), these keys, and CI seeds. Full table, menu
 # flow, presets, and the rename map from the old install_* toggles:
 # docs/package-groups.md. `true` requests desired state on the next apply.

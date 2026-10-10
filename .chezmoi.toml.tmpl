@@ -106,8 +106,9 @@
 
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)
-  # All 16 toggles are independent on Linux, macOS, and Windows. `true` means
-  # desired state on the next apply. Groups marked "(host only)" are skipped in
+  # All 17 toggles are independent on Linux, macOS, and Windows, except
+  # mobile_dev, which forces agent_toolkit on. `true` means desired state on
+  # the next apply. Groups marked "(host only)" are skipped in
   # WSL and containers; every other group applies there too. The
   # package-selection menu rewrites this whole table.
   #
@@ -124,12 +125,30 @@
     # fonts - Nerd Fonts (MesloLGS NF), required for Starship
     fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
 
+{{/* mobile_dev must be resolved BEFORE agent_toolkit's line below, not just
+     before agent_toolkit's own position in the file: agent_toolkit's forced
+     override needs mobile_dev's answer from THIS SAME render (a fresh
+     `chezmoi init` answering both prompts in one pass, or any existing user
+     flipping mobile_dev on for the first time), not whatever (if anything)
+     was recorded for it in the previous config. Resolved the same way
+     mobile_dev's own line below resolves it; mobile_dev's line just emits
+     this variable, so emission order in the rendered TOML is unchanged. */}}
+{{- $mobileDev := false -}}
+{{- if and $interactive (not $isDevcontainer) -}}
+{{-   $mobileDev = promptBoolOnce . "packages.mobile_dev" "Install mobile_dev (opt-in Expo/Android mobile development tooling)?" false -}}
+{{- end -}}
+
     # agent_toolkit - cross-vendor agent layer (Serena, act, Playwright).
-    # Forced true whenever mobile_dev is already recorded true (Task 3):
-    # mobile_dev's installer assumes agent_toolkit's Serena/Playwright exist,
-    # so a prior explicit "false" answer here is overridden, not just the
-    # default offered to a fresh prompt.
-    agent_toolkit = {{ if and (hasKey . "packages") (hasKey .packages "mobile_dev") (.packages.mobile_dev) }}true{{ else }}{{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)?" true }}{{ else }}false{{ end }}{{ end }}
+    # Forced true whenever mobile_dev resolves true THIS render (see
+    # docs/package-groups.md): mobile_dev's installer assumes agent_toolkit's
+    # Serena/Playwright exist, so a prior explicit "false" answer here is
+    # overridden, not just the default offered to a fresh prompt. Using
+    # $mobileDev (not a re-read of the previous config's .packages.mobile_dev)
+    # is what makes this work on a single fresh pass, and what keeps a
+    # non-interactive (CI/devcontainer) render at agent_toolkit = false even
+    # when a prior mobile_dev = true is on record, since $mobileDev is false
+    # there too.
+    agent_toolkit = {{ if $mobileDev }}true{{ else }}{{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)?" true }}{{ else }}false{{ end }}{{ end }}
 
     # opencode_cli - OpenCode CLI + superpowers/skills/guardrail wiring
     opencode_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.opencode_cli" "Install opencode_cli (OpenCode CLI)?" true }}{{ else }}false{{ end }}
@@ -170,8 +189,10 @@
 
     # mobile_dev - opt-in Expo/Android mobile development tooling (Maestro,
     # agent-device, Expo MCP, Android SDK/emulator on Windows; see
-    # docs/mobile-development.md). Forces agent_toolkit on (Task 3).
-    mobile_dev = {{ if and $interactive (not $isDevcontainer) }}{{ promptBoolOnce . "packages.mobile_dev" "Install mobile_dev (opt-in Expo/Android mobile development tooling)?" false }}{{ else }}false{{ end }}
+    # docs/mobile-development.md). Forces agent_toolkit on (see
+    # docs/package-groups.md); resolved above (as $mobileDev) so that
+    # agent_toolkit's line can see this render's answer.
+    mobile_dev = {{ $mobileDev }}
 
     # dev_desktop - human desktop apps: Chrome, VS Code, Docker Desktop.
     # Host only: not prompted on WSL/containers, and enforced there too —

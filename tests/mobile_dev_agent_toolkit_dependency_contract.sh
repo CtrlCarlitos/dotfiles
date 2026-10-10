@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# mobile_dev's installer (a later task) assumes agent_toolkit's Serena/
-# Playwright already exist, so mobile_dev = true must force agent_toolkit on
-# wherever packages are chosen (Task 3):
+# mobile_dev's installer assumes agent_toolkit's Serena/Playwright already
+# exist, so mobile_dev = true must force agent_toolkit on wherever packages
+# are chosen (docs/package-groups.md):
 #
-#   - Template default: .chezmoi.toml.tmpl's agent_toolkit line renders
-#     unconditionally true whenever the existing config already carries
-#     packages.mobile_dev = true - bypassing promptBoolOnce entirely, so a
-#     PREVIOUSLY recorded agent_toolkit = false is overridden too, not just
-#     the default offered to a fresh prompt (promptBoolOnce never re-prompts
-#     an already-answered key, so changing only its default argument cannot
-#     reach that case).
+#   - Template default: .chezmoi.toml.tmpl resolves mobile_dev's answer into
+#     $mobileDev BEFORE agent_toolkit's line, and agent_toolkit's forced
+#     override reads $mobileDev - NOT a re-read of the previous config's
+#     .packages.mobile_dev. That ordering is what makes the override see a
+#     mobile_dev answer from THIS SAME render (a fresh `chezmoi init`
+#     answering both prompts in one pass, or an existing user flipping
+#     mobile_dev on for the first time) instead of only a value already on
+#     record from a previous render. It is also what keeps a non-interactive
+#     (CI/devcontainer) render at agent_toolkit = false even when a prior
+#     mobile_dev = true is on record, since $mobileDev is false in that mode
+#     regardless of what is on record (every key defaults false when
+#     non-interactive, by design).
 #   - Menu: scripts/select-packages.sh and scripts/select-packages.ps1 both
 #     auto-add agent_toolkit to the persisted [data.packages] selection
 #     whenever mobile_dev ends up selected, regardless of preset or whether
-#     the user explicitly checked agent_toolkit. Soft default, not a hard
-#     block - the install-time gate is a separate task.
+#     the user explicitly checked agent_toolkit. This auto-add is NOT a soft
+#     default the user can quietly override next run: unchecking
+#     agent_toolkit while mobile_dev stays checked is undone again on the
+#     very next run too - the install-time gate is a separate, last-resort
+#     backstop for a hand-edited config that bypasses the menu entirely.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
@@ -30,8 +38,23 @@ tmpl="$repo_root/.chezmoi.toml.tmpl"
 empty_config="$(mktemp -d)/empty.toml"
 : >"$empty_config"
 
-render_tmpl() { # $1 = --override-data JSON
+# The exact prompt text behind mobile_dev's promptBoolOnce call: --promptBool
+# is keyed by this text, not by the "packages.mobile_dev" data key, so it is
+# read straight out of the template rather than duplicated here (and risking
+# drift from it).
+mobile_dev_prompt="$(grep -oE 'promptBoolOnce \. "packages\.mobile_dev" "[^"]*"' "$tmpl" |
+    sed -E 's/^promptBoolOnce \. "packages\.mobile_dev" "(.*)"$/\1/')"
+[ -n "$mobile_dev_prompt" ] || fail "could not find mobile_dev's promptBoolOnce prompt text in $tmpl"
+
+render_tmpl() { # $1 = --override-data JSON (non-interactive: CI=1)
     CI=1 chezmoi execute-template --init --config "$empty_config" --source "$repo_root" \
+        --override-data "$1" <"$tmpl"
+}
+
+render_tmpl_interactive() { # $1 = --override-data JSON, $2 = mobile_dev's promptBool answer
+    env -u CI -u DEVCONTAINER -u REMOTE_CONTAINERS \
+        chezmoi execute-template --init --config "$empty_config" --source "$repo_root" \
+        --promptBool "$mobile_dev_prompt=$2" \
         --override-data "$1" <"$tmpl"
 }
 
@@ -39,21 +62,60 @@ agent_toolkit_line() { # $1 = rendered output
     printf '%s\n' "$1" | grep -E '^[[:space:]]*agent_toolkit[[:space:]]*=' | head -1
 }
 
-# mobile_dev already true, agent_toolkit never answered -> forced true.
+mobile_dev_line() { # $1 = rendered output
+    printf '%s\n' "$1" | grep -E '^[[:space:]]*mobile_dev[[:space:]]*=' | head -1
+}
+
+# stat "/.dockerenv" always true inside a Docker container regardless of env
+# vars, which would force $isDevcontainer true and make every interactive
+# case below impossible to simulate - skip those cases there rather than
+# produce a false failure.
+can_simulate_interactive=true
+[ -e /.dockerenv ] && can_simulate_interactive=false
+
+# --- fresh single-pass render (the bug this contract exists for) ---------
+# Prior agent_toolkit = false on record, mobile_dev freshly answered true IN
+# THIS SAME RENDER (never before recorded) -> agent_toolkit must still come
+# out true. Before the ordering fix, agent_toolkit's line rendered before
+# mobile_dev's answer existed and read the stale/absent prior value instead.
+if $can_simulate_interactive; then
+    out="$(render_tmpl_interactive '{"packages":{"agent_toolkit":false}}' true)" ||
+        fail "render (interactive, prior agent_toolkit=false, mobile_dev freshly answered true) failed"
+    case "$(agent_toolkit_line "$out")" in
+    *"= true"*) pass ;;
+    *) fail "mobile_dev freshly answered true in the same render must force agent_toolkit = true, got: $(agent_toolkit_line "$out")" ;;
+    esac
+    case "$(mobile_dev_line "$out")" in
+    *"= true"*) pass ;;
+    *) fail "mobile_dev's freshly-answered value must itself render true, got: $(mobile_dev_line "$out")" ;;
+    esac
+else
+    skip "running inside a container (/.dockerenv present): cannot simulate an interactive render"
+fi
+
+# --- non-interactive (CI/devcontainer) symptom: must be gone --------------
+# mobile_dev already true ON RECORD, but the render itself is non-interactive
+# -> agent_toolkit must default false too (every key defaults false when
+# non-interactive), NOT get force-true'd off the stale record.
 out="$(render_tmpl '{"packages":{"mobile_dev":true}}')" ||
-    fail "render (mobile_dev=true, agent_toolkit unanswered) failed"
+    fail "render (non-interactive, mobile_dev=true on record, agent_toolkit unanswered) failed"
 case "$(agent_toolkit_line "$out")" in
-*"= true"*) pass ;;
-*) fail "mobile_dev=true with agent_toolkit unanswered must render agent_toolkit = true, got: $(agent_toolkit_line "$out")" ;;
+*"= false"*) pass ;;
+*) fail "non-interactive render with mobile_dev=true on record must still render agent_toolkit = false, got: $(agent_toolkit_line "$out")" ;;
+esac
+case "$(mobile_dev_line "$out")" in
+*"= false"*) pass ;;
+*) fail "non-interactive render must render mobile_dev = false regardless of what is on record, got: $(mobile_dev_line "$out")" ;;
 esac
 
-# mobile_dev already true, agent_toolkit PREVIOUSLY recorded false -> still
-# forced true (the gap the brief's literal instruction would have missed).
+# mobile_dev true on record, agent_toolkit PREVIOUSLY recorded false,
+# non-interactive render -> both still default false (non-interactive floor
+# wins over any prior record for every key, including agent_toolkit).
 out="$(render_tmpl '{"packages":{"mobile_dev":true,"agent_toolkit":false}}')" ||
-    fail "render (mobile_dev=true, agent_toolkit=false recorded) failed"
+    fail "render (non-interactive, mobile_dev=true, agent_toolkit=false both on record) failed"
 case "$(agent_toolkit_line "$out")" in
-*"= true"*) pass ;;
-*) fail "mobile_dev=true must override a previously recorded agent_toolkit = false, got: $(agent_toolkit_line "$out")" ;;
+*"= false"*) pass ;;
+*) fail "non-interactive render must render agent_toolkit = false even with mobile_dev=true on record, got: $(agent_toolkit_line "$out")" ;;
 esac
 
 # mobile_dev absent/false -> unchanged non-interactive behavior (false).
@@ -261,8 +323,8 @@ for tmpl in "$sh_tmpl" "$ps1_tmpl"; do
     require "$tmpl" '{{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}'
     require "$tmpl" 'mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run'
     # Defensive, self-documenting addition to the aggregate "is anything
-    # selected at all" gate: transitively covered already (Task 3 forces
-    # agent_toolkit on whenever mobile_dev is true, and agent_toolkit is
+    # selected at all" gate: transitively covered already (docs/package-groups.md
+    # forces agent_toolkit on whenever mobile_dev is true, and agent_toolkit is
     # already in this list), but every other group is listed explicitly too.
     require "$tmpl" '$agent_toolkit $mobile_dev $opencode_cli'
 done

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # select-packages.sh — interactive package-group menu (gum), persisting the
-# 16-group selection to [data.packages] in ~/.config/chezmoi/chezmoi.toml.
+# 17-group selection to [data.packages] in ~/.config/chezmoi/chezmoi.toml.
 #
 # Run standalone to re-choose groups at any time, or from install.sh before
 # `chezmoi init --apply` (spec §4). Design contracts:
@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-# The 16-group list + the [data.packages] section scanner come from the shared
+# The 17-group list + the [data.packages] section scanner come from the shared
 # lib (issue #123) - one vocabulary and one scanner instead of three copies.
 . "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
 
@@ -42,7 +42,18 @@ preset_set() {
     case "$1" in
     minimal) printf '%s\n' "core" ;;
     standard) printf '%s\n' core modern_cli fonts agent_toolkit opencode_cli claude_cli guardrail ;;
-    full) printf '%s\n' "${PKG_GROUPS[@]:0:14}" "${PKG_GROUPS[@]:15:1}" ;;
+    full)
+        # Name-based exclusion (matches the .ps1 twin's `Where-Object { $_ -ne
+        # ... }`), not a count-limited index slice: a future 18th group then
+        # lands in `full` automatically instead of silently falling outside
+        # the slice (or inside it, if inserted before the old cutoff).
+        for g in "${PKG_GROUPS[@]}"; do
+            case "$g" in
+            remote_access_server | mobile_dev) ;;
+            *) printf '%s\n' "$g" ;;
+            esac
+        done
+        ;;
     *) return 0 ;; # custom (or anything unexpected): nothing pre-checked
     esac
 }
@@ -57,7 +68,7 @@ existing_true_keys() {
     done
 }
 
-# vscode_settings is an installer gate, not one of the 16 menu groups. Preserve
+# vscode_settings is an installer gate, not one of the 17 menu groups. Preserve
 # an explicit user value when the menu rewrites its otherwise-owned table.
 existing_vscode_settings() {
     [ -f "$CONFIG_FILE" ] || return 0
@@ -132,11 +143,20 @@ while IFS= read -r line; do
 done <<<"$chosen_raw"
 
 # mobile_dev's installer assumes agent_toolkit's Serena/Playwright already
-# exist (Task 3) - auto-add agent_toolkit whenever mobile_dev ends up
-# selected, regardless of preset or whether the user explicitly checked it.
-# Soft default only: the user can still uncheck agent_toolkit next run.
+# exist (docs/package-groups.md) - auto-add agent_toolkit whenever mobile_dev
+# ends up selected, regardless of preset or whether the user explicitly
+# checked it. NOT a soft default: this re-adds agent_toolkit on every run
+# mobile_dev stays selected, so unchecking agent_toolkit alone never sticks.
 case "$chosen_keys" in
-*" mobile_dev "*) chosen_keys="$chosen_keys""agent_toolkit " ;;
+*" mobile_dev "*)
+    case "$chosen_keys" in
+    *" agent_toolkit "*) ;;
+    *)
+        chosen_keys="$chosen_keys""agent_toolkit "
+        info "mobile_dev requires agent_toolkit - enabled it"
+        ;;
+    esac
+    ;;
 esac
 
 # ------------------------------------------------------------ persist -------

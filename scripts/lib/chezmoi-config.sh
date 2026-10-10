@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # scripts/lib/chezmoi-config.sh - the [data.packages] section scanner and the
-# 16-group taxonomy, shared by every shell consumer (issue #123).
+# 17-group taxonomy, shared by every shell consumer (issue #123).
 #
 # The awk scanner used to be copy-pasted five times (select-packages.sh x3,
-# dotfiles-doctor.sh, update_ai_tools.sh's guardrail flag) and the 16-group
+# dotfiles-doctor.sh, update_ai_tools.sh's guardrail flag) and the 17-group
 # list three times. This file is the one copy. tests/select_packages.sh and
 # tests/dotfiles_doctor.sh keep their own fixtures' copies deliberately: they
 # test the scripts' behavior, not the helper, and must not couple to it.
@@ -14,7 +14,7 @@
 # All bash-3.2-safe (stock macOS /bin/bash): no associative arrays, no
 # mapfile.
 
-# The 16 package groups, taxonomy order (docs/research/package-groups-spec.md
+# The 17 package groups, taxonomy order (docs/research/package-groups-spec.md
 # §2). This is the single vocabulary shared with the config template,
 # installers, and CI. Consumed by the sourcing scripts, never in this file.
 # shellcheck disable=SC2034

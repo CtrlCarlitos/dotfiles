@@ -48,6 +48,6 @@ forbid "$repo_root/README.md" 'The 16-group taxonomy'
 forbid "$repo_root/README.md" 'Platform installers (16-group gated)'
 forbid "$repo_root/docs/README.md" 'the 16 groups'
 forbid "$repo_root/docs/quickstart.md" 'the 16 groups'
-forbid "$repo_root/docs/menu-demo.md" 'the real menu lists the 16 group'
+forbid "$repo_root/docs/menu-demo.md" 'The real menu lists the 16 group'
 
 finish

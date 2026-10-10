@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 #
 # select-packages.ps1 - interactive package-group menu (gum), Windows twin of
-# scripts/select-packages.sh. Persists the 16-group selection to
+# scripts/select-packages.sh. Persists the 17-group selection to
 # [data.packages] in $env:USERPROFILE\.config\chezmoi\chezmoi.toml
 # ($env:HOME/.config/... on Linux/macOS pwsh).
 #
@@ -39,7 +39,7 @@ $homeDir = if ($isWin) { $env:USERPROFILE } else { $env:HOME }
 $configDir = Join-Path $homeDir '.config/chezmoi'
 $configFile = Join-Path $configDir 'chezmoi.toml'
 
-# The 16 package groups, taxonomy order (docs/research/package-groups-spec.md
+# The 17 package groups, taxonomy order (docs/research/package-groups-spec.md
 # section 2). The single vocabulary shared with the config template, installers, CI.
 $pkgGroups = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
     'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
@@ -141,11 +141,13 @@ if ($LASTEXITCODE -ne 0 -or $chosenRaw.Count -eq 0) {
 $chosen = @($pkgGroups | Where-Object { $chosenRaw -contains $_ })
 
 # mobile_dev's installer assumes agent_toolkit's Serena/Playwright already
-# exist (Task 3) - auto-add agent_toolkit whenever mobile_dev ends up
-# selected, regardless of preset or whether the user explicitly checked it.
-# Soft default only: the user can still uncheck agent_toolkit next run.
+# exist (docs/package-groups.md) - auto-add agent_toolkit whenever mobile_dev
+# ends up selected, regardless of preset or whether the user explicitly
+# checked it. NOT a soft default: this re-adds agent_toolkit on every run
+# mobile_dev stays selected, so unchecking agent_toolkit alone never sticks.
 if ($chosen -contains 'mobile_dev' -and $chosen -notcontains 'agent_toolkit') {
     $chosen += 'agent_toolkit'
+    Write-Host 'mobile_dev requires agent_toolkit - enabled it'
 }
 
 # ------------------------------------------------------------ persist -------

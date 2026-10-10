@@ -129,7 +129,7 @@ if (Test-Path -LiteralPath $config) {
     $keys = @('core', 'modern_cli', 'fonts', 'agent_toolkit', 'opencode_cli',
         'opencode_desktop', 'claude_cli', 'claude_desktop', 'chatgpt_cli',
         'chatgpt_desktop', 'antigravity_cli', 'antigravity_desktop', 'dev_desktop',
-        'remote_access', 'remote_access_server', 'guardrail')
+        'remote_access', 'remote_access_server', 'guardrail', 'mobile_dev')
     $missing = @($keys | Where-Object {
         -not [regex]::IsMatch($sectionBody, ("^\s*" + [regex]::Escape($_) + "\s*="), [System.Text.RegularExpressions.RegexOptions]::Multiline)
     })
