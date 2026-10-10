@@ -507,6 +507,51 @@ function Install-MobileDev {
                 Write-Host "  Skipped - re-run dot up and accept to install platform-tools/the emulator." -ForegroundColor Yellow
             }
         }
+
+        # WHPX (design doc section 3.3): Microsoft's current recommended
+        # accelerator for the Android emulator on Windows. Unlike the
+        # Hyper-V PowerShell module elsewhere in this file, this is never
+        # auto-enabled - a hypervisor platform toggle needs a restart and
+        # changes what else can virtualize on this machine, so it stays the
+        # user's own informed action.
+        try {
+            $whpx = Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop
+            if ($whpx.State -ne 'Enabled') {
+                Write-Host "  Warning: Windows Hypervisor Platform (WHPX) is not enabled - the Android emulator has no hardware acceleration without it." -ForegroundColor Yellow
+                Write-Host "    Enable it yourself, then restart: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red
+        }
+
+        # A default Pixel-like AVD, scripting what Android Studio's wizard
+        # used to do (design doc section 3.4). AOSP over Google APIs/Play
+        # Store (design doc section 5: lighter, sufficient for most Expo app
+        # testing). Gated on the AVD's own directory, like the license
+        # check above: once created, this is skipped on every later
+        # `dot up` - no separate re-prompt or re-download bookkeeping.
+        # avdmanager create avd -n <name> -k <image> -d <device>
+        $avdManagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\avdmanager.bat'
+        $avdName = 'mobile_dev_pixel'
+        $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
+        if ((Test-Path $avdManagerPath) -and -not (Test-Path $avdDir)) {
+            $systemImage = 'system-images;android-34;default;x86_64'
+            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)." -ForegroundColor Cyan
+            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
+            if ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y') {
+                $previous = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $yesFeed = (@('y') * 20) -join "`n"
+                $yesFeed | & $sdkmanagerPath --licenses *>$null
+                & $sdkmanagerPath $systemImage *>$null
+                # avdmanager asks whether to create a custom hardware
+                # profile; "no" keeps the device profile's own default.
+                'no' | & $avdManagerPath create avd -n $avdName -k $systemImage -d 'pixel_6' *>$null
+                $ErrorActionPreference = $previous
+            } else {
+                Write-Host "  Skipped - re-run dot up and accept to create the default AVD." -ForegroundColor Yellow
+            }
+        }
     }
 }
 
