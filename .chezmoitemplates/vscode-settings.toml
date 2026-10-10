@@ -23,7 +23,6 @@ unset = []
 "editor.fontLigatures"                 = true
 "terminal.integrated.fontFamily"       = "MesloLGS Nerd Font Mono"
 "terminal.integrated.gpuAcceleration"  = "off"
-"remote.SSH.configFile"                = {{ printf "%s/.ssh/vscode_hosts" (.chezmoi.homeDir | replace "\\" "/") | quote }}
 
 [defaults]
 "files.autoSave"                               = "afterDelay"

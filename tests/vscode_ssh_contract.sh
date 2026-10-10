@@ -171,34 +171,47 @@ fi
 
 # Remote-SSH reads remote.SSH.configFile, FORCED to ~/.ssh/vscode_hosts - not
 # ~/.ssh/config - so its host list excludes the github-<user> identity aliases.
-# The FORCED tier is in the chezmoi.toml seed (.chezmoitemplates/vscode-settings.toml,
-# both twins render it from [data.vscode.settings]); assert the value there, and
-# that both twins still render the (now-empty-by-default) UNSET tier mechanism.
+# The static seed (.chezmoitemplates/vscode-settings.toml) stays plain, strict
+# TOML - CI's "Validate all TOML and YAML files" step parses it with tomllib,
+# so it cannot hold a template expression. The value needs this machine's home
+# dir, which the seed cannot compute, so .chezmoi.toml.tmpl injects it into
+# [forced] right after loading the seed (first-seed only, same as every other
+# forced key - see docs/vscode.md's migration note for an existing machine).
 seed="$repo_root/.chezmoitemplates/vscode-settings.toml"
+config_tmpl_src="$repo_root/.chezmoi.toml.tmpl"
 grep -Eq '^unset = \[\]' "$seed" || fail "vscode-settings.toml: unset must be empty by default (remote.SSH.configFile moved to forced)"
-grep -Fq '"remote.SSH.configFile"' "$seed" || fail "vscode-settings.toml: remote.SSH.configFile is no longer set at all"
+if grep -Fq 'remote.SSH.configFile' "$seed"; then
+    fail "vscode-settings.toml: remote.SSH.configFile must not be a literal/template in the seed - it breaks CI's strict-TOML lint (tomllib)"
+fi
 if grep -Eq '^unset = \[.*"remote\.SSH\.configFile"' "$seed"; then
     fail "vscode-settings.toml: remote.SSH.configFile must not be back in the unset tier"
 fi
-grep -Fq 'vscode_hosts' "$seed" || fail "vscode-settings.toml: remote.SSH.configFile must point at vscode_hosts"
-# It must sit inside [forced], not merely appear anywhere in the file.
-awk '/^\[forced\]$/{f=1; next} /^\[/{f=0} f && /"remote\.SSH\.configFile"/{found=1} END{exit !found}' "$seed" ||
-    fail "vscode-settings.toml: remote.SSH.configFile must be under [forced]"
+python3 -c "import sys, tomllib; tomllib.load(sys.stdin.buffer)" <"$seed" ||
+    fail "vscode-settings.toml: must be valid raw TOML (CI lints it with tomllib, unlike a .tmpl file)"
+grep -Fq 'set $vscodeSettings.forced "remote.SSH.configFile"' "$config_tmpl_src" ||
+    fail "config template: no longer injects remote.SSH.configFile into the forced tier"
+grep -Fq 'vscode_hosts' "$config_tmpl_src" ||
+    fail "config template: remote.SSH.configFile injection must point at vscode_hosts"
 grep -Fq -- '(get $vsCfg "unset"' "$ps1_installer" ||
     fail "$ps1_installer: no longer renders the UNSET tier"
 grep -Fq -- '(get $vsCfg "unset"' "$sh_installer" ||
     fail "$sh_installer: no longer renders the UNSET tier"
 
-# Rendered end-to-end where chezmoi is available: a fresh machine's chezmoi.toml
-# gets remote.SSH.configFile forced to an absolute path ending in .ssh/vscode_hosts.
+# Rendered end-to-end through the real config template (not just the seed
+# fragment): a fresh machine's chezmoi.toml gets remote.SSH.configFile forced
+# to an absolute path ending in .ssh/vscode_hosts.
 if command -v chezmoi >/dev/null; then
     empty_cfg="$tmp/empty-for-seed.toml"
     : >"$empty_cfg"
-    value=$(chezmoi execute-template --config "$empty_cfg" --source "$repo_root" \
+    value=$(CI=1 chezmoi execute-template --init --config "$empty_cfg" --source "$repo_root" \
         --override-data '{"chezmoi":{"homeDir":"/home/operator"}}' \
-        '{{ $s := includeTemplate "vscode-settings.toml" . | fromToml }}{{ index $s.forced "remote.SSH.configFile" }}')
+        <"$config_tmpl_src" | python3 -c '
+import sys, tomllib
+data = tomllib.loads(sys.stdin.read())
+print(data["data"]["vscode"]["settings"]["forced"]["remote.SSH.configFile"])
+')
     [ "$value" = "/home/operator/.ssh/vscode_hosts" ] ||
-        fail "vscode-settings.toml: remote.SSH.configFile rendered '$value', want '/home/operator/.ssh/vscode_hosts'"
+        fail "config template: remote.SSH.configFile rendered '$value', want '/home/operator/.ssh/vscode_hosts'"
 fi
 
 finish

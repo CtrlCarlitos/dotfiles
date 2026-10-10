@@ -99,6 +99,14 @@ also listing every configured git account. `~/.ssh/config` `Include`s that file,
 so `ssh` and `dot ssh` still see every host exactly as before. See
 [Secrets & SSH Hosts](secrets.md#ssh-hosts-datassh_hosts).
 
+Unlike every other FORCED key, this one isn't a literal in the seed
+(`.chezmoitemplates/vscode-settings.toml`) - it needs this machine's home
+directory, and the seed is plain, strict TOML (CI's "Validate all TOML and
+YAML files" step parses it with Python's `tomllib`, so it can't hold a
+template expression). `.chezmoi.toml.tmpl` injects it into `[forced]` right
+after loading the seed, first-seed only - same "new machines only" rule as
+the note below.
+
 > [!NOTE]
 > **Existing machine, from before this split:** `chezmoi init` writes a table
 > back as-is when one already exists (see [Your settings in
