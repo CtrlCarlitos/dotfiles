@@ -592,6 +592,19 @@ install_mobile_dev() {
         fi
     fi
 
+    # --- Maestro MCP registration for Claude Code and Codex ----------------
+    # Same idempotent check-then-register shape as the serena precedent
+    # above (`command -v <agent>` guard, `mcp get` as the "already
+    # registered" check, warn-and-continue - never abort under `set -e`).
+    # Maestro has no vendor `setup <agent>` helper, unlike serena, so the raw
+    # `mcp add` call is used directly.
+    if command -v claude &>/dev/null && ! claude mcp get maestro &>/dev/null; then
+        net_timeout 60 claude mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
+    fi
+    if command -v codex &>/dev/null && ! codex mcp get maestro &>/dev/null; then
+        net_timeout 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
+    fi
+
     # --- agent-device: npm global, reusing core's Node (no duplicate Node
     # stack) --------------------------------------------------------------
     if ! command -v npm &>/dev/null; then

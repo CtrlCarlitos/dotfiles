@@ -55,6 +55,16 @@ require "$tmpl" 'openjdk-{{ .versions.jdk_version }}-jdk'
 require "$tmpl" 'openjdk@{{ .versions.jdk_version }}'
 require "$tmpl" 'JAVA_HOME'
 
+# --- Maestro MCP registration for Claude Code and Codex, idempotent -------
+# (Task 3): mirrors the serena precedent's own gating shape (command -v
+# <agent> guard, "mcp get" idempotency check, warn-and-continue on failure -
+# never abort under `set -e`). Maestro has no vendor setup helper, unlike
+# serena, so the raw "mcp add" call is used directly.
+require "$tmpl" 'claude mcp add maestro'
+require "$tmpl" 'codex mcp add maestro'
+require "$tmpl" 'claude mcp get maestro'
+require "$tmpl" 'codex mcp get maestro'
+
 # --- Wiring: the placeholder comment is replaced by a real call -----------
 forbid "$tmpl" 'a sibling task (WSL/Windows installer plan) inserts the mobile_dev install call here'
 require "$tmpl" 'install_mobile_dev'
