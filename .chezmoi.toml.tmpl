@@ -124,8 +124,12 @@
     # fonts - Nerd Fonts (MesloLGS NF), required for Starship
     fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
 
-    # agent_toolkit - cross-vendor agent layer (Serena, act, Playwright)
-    agent_toolkit = {{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)?" true }}{{ else }}false{{ end }}
+    # agent_toolkit - cross-vendor agent layer (Serena, act, Playwright).
+    # Forced true whenever mobile_dev is already recorded true (Task 3):
+    # mobile_dev's installer assumes agent_toolkit's Serena/Playwright exist,
+    # so a prior explicit "false" answer here is overridden, not just the
+    # default offered to a fresh prompt.
+    agent_toolkit = {{ if and (hasKey . "packages") (hasKey .packages "mobile_dev") (.packages.mobile_dev) }}true{{ else }}{{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)?" true }}{{ else }}false{{ end }}{{ end }}
 
     # opencode_cli - OpenCode CLI + superpowers/skills/guardrail wiring
     opencode_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.opencode_cli" "Install opencode_cli (OpenCode CLI)?" true }}{{ else }}false{{ end }}
