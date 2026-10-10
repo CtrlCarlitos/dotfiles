@@ -214,6 +214,7 @@ function Invoke-WithTimeout {
 {{- $remote_access_server := false -}}
 {{- $guardrail := false -}}
 {{- $vscodeSettings := true -}}
+{{- $mobile_dev := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
@@ -232,8 +233,9 @@ function Invoke-WithTimeout {
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
   {{- if hasKey .packages "vscode_settings" }}{{- if not .packages.vscode_settings }}{{- $vscodeSettings = false }}{{- end }}{{- end -}}
+  {{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}
 {{- end }}
-{{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
+{{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $mobile_dev $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
 
 {{- $curatedTotal := 0 -}}
 {{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}
@@ -1353,6 +1355,20 @@ if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
 }
 {{- end }}
 
+# mobile_dev install-time safety net (design doc section 3.9a): mobile_dev's
+# installer assumes agent_toolkit's tools (Serena, Playwright) already exist.
+# Task 3 forces agent_toolkit on wherever mobile_dev ends up selected (both the
+# .chezmoi.toml.tmpl template default and the menu scripts), but a hand-edited
+# chezmoi.toml can still reach this point with mobile_dev=true and
+# agent_toolkit=false - this is the last-resort catch: warn loudly and skip
+# rather than silently assume agent_toolkit's tools exist.
+{{- if $mobile_dev }}
+{{- if $agent_toolkit }}
+# a sibling task (WSL/Windows installer plan) inserts the Install-MobileDev call here
+{{- else }}
+Write-Host "Warning: mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run" -ForegroundColor Yellow
+{{- end }}
+{{- end }}
 # Graft was dropped from the dotfiles (2026-10-09): remove it where an earlier run installed it.
 # Every run and whatever the groups say (it was installed under agent_toolkit, which may since
 # have been turned off); quiet when there is nothing to do (Invoke-GraftRetirement,

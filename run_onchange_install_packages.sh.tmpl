@@ -126,6 +126,7 @@ _sudo_net_timeout() {
 {{- $remote_access_server := false -}}
 {{- $vscodeSettings := "true" -}}
 {{- $guardrail := false -}}
+{{- $mobile_dev := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
@@ -144,6 +145,7 @@ _sudo_net_timeout() {
   {{- if hasKey .packages "remote_access" }}{{- $remote_access = .packages.remote_access }}{{- end -}}
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
+  {{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}
 {{- end -}}
 
 {{- $curatedTotal := 0 -}}
@@ -990,7 +992,7 @@ install_linux_desktop() {
 }
 
 install_apt() {
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $mobile_dev $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
     # Index refresh only: `dot up` never upgrades (that is `dot upgrade`'s job, which runs the apt
     # sweep). It used to run `apt upgrade -y` here too, so a plain `dot up` upgraded every package
     # on the box (cloudflared moved 2026.9.3 -> 2026.10.0 during one) behind the back of the
@@ -2579,6 +2581,21 @@ main() {
     install_agent_toolkit
 {{- else }}
     info "Agent toolkit disabled in config"
+{{- end }}
+
+    # mobile_dev install-time safety net (design doc section 3.9a): mobile_dev's
+    # installer assumes agent_toolkit's tools (Serena, Playwright) already exist.
+    # Task 3 forces agent_toolkit on wherever mobile_dev ends up selected (both the
+    # chezmoi.toml template default and the menu scripts), but a hand-edited
+    # chezmoi.toml can still reach this point with mobile_dev=true and
+    # agent_toolkit=false - this is the last-resort catch: warn loudly and skip
+    # rather than silently assume agent_toolkit's tools exist.
+{{- if $mobile_dev }}
+{{- if $agent_toolkit }}
+    {{/* a sibling task (WSL/Windows installer plan) inserts the mobile_dev install call here */}}
+{{- else }}
+    warn "mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run"
+{{- end }}
 {{- end }}
     dot_timing_mark 'OpenCode'
 {{- if $opencode_cli }}
