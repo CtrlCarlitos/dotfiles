@@ -191,4 +191,19 @@ env -u CHEZMOI_CONFIG_DIR HOME="$H" bash "$doctor" >/dev/null 2>&1 ||
     fail "[7] doctor should pass after CRLF strip"
 echo "  ok: CRLF key files detected and stripped"
 
+# [8] Parity: the PowerShell doctor's own hardcoded $keys list (it can't
+# source the bash lib) must list exactly as many package groups as the
+# shared bash PKG_GROUPS taxonomy - a silent miscount here is exactly how
+# mobile_dev went unchecked on Windows in the first place.
+. "$repo_root/scripts/lib/chezmoi-config.sh"
+ps1_doctor="$repo_root/scripts/dotfiles-doctor.ps1"
+ps1_keys_line="$(grep -m1 '^\s*\$keys = @(' "$ps1_doctor")"
+ps1_keys_block="$ps1_keys_line
+$(awk '/\$keys = @\(/{f=1} f{print; if (/\)/) exit}' "$ps1_doctor" | tail -n +2)"
+ps1_key_count="$(printf '%s' "$ps1_keys_block" | grep -o "'[a-zA-Z0-9_]*'" | wc -l | tr -d ' ')"
+if [ "$ps1_key_count" -ne "${#PKG_GROUPS[@]}" ]; then
+    fail "scripts/dotfiles-doctor.ps1's \$keys list has $ps1_key_count entries, PKG_GROUPS has ${#PKG_GROUPS[@]} - they must match"
+fi
+echo "  ok: dotfiles-doctor.ps1's \$keys list matches PKG_GROUPS in count ($ps1_key_count)"
+
 finish

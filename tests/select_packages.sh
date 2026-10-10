@@ -15,7 +15,7 @@ esac
 # The script's contract (docs/research/package-groups-spec.md §4):
 #   - no TTY or no gum  -> exit 0, "skipping menu", config untouched (CI-safe)
 #   - fresh config      -> preset prompt (gum choose), then group multi-select,
-#                          then write [data.packages] with exactly the 16 keys
+#                          then write [data.packages] with exactly the 17 keys
 #   - existing section  -> NO preset prompt; current true keys become the gum
 #                          --selected pre-check set; rewrite ONLY the section
 #   - gum canceled      -> exit 0, config untouched
@@ -30,7 +30,7 @@ script_under_test="$repo_root/scripts/select-packages.sh"
 
 ok() { printf '  ok: %s\n' "$1"; }
 
-# The 16 groups in taxonomy order — the single vocabulary shared by menu,
+# The 17 groups in taxonomy order — the single vocabulary shared by menu,
 # config, and CI (plan Global Constraints).
 PKG_GROUPS=(core modern_cli fonts agent_toolkit opencode_cli opencode_desktop \
     claude_cli claude_desktop chatgpt_cli chatgpt_desktop antigravity_cli \
@@ -122,15 +122,15 @@ SEED='# seeded by the test
   secrets = "warning"
 '
 
-# --- (a) fresh machine, no config: file created with exactly the 16 keys ----
-echo "[1] fresh run creates the config with the 16 keys"
+# --- (a) fresh machine, no config: file created with exactly the 17 keys ----
+echo "[1] fresh run creates the config with the 17 keys"
 H1="$TMP/home1"
 mkdir -p "$H1"
 run_menu "core fonts guardrail" custom "$H1" || fail "fresh run: script exited non-zero"
 CFG="$H1/.config/chezmoi/chezmoi.toml"
 [ -f "$CFG" ] || fail "fresh run: $CFG was not created"
 assert_file_equals "$CFG" "$(expected_section core fonts guardrail)" "(a) fresh config content"
-ok "16 keys written, correct true/false values"
+ok "17 keys written, correct true/false values"
 
 # preset prompt happened (section was absent): 2 gum calls
 [ "$(wc -l <"$GUM_LOG")" -eq 2 ] || fail "fresh run: expected preset + groups calls, got $(wc -l <"$GUM_LOG")"
@@ -166,8 +166,8 @@ grep -q -- '--selected core,fonts,guardrail ' "$GUM_LOG" ||
     fail "(d): --selected set is not the existing keys: $(cat "$GUM_LOG")"
 ok "existing true keys became --selected, preset prompt skipped"
 
-# --- preset mapping: full pre-checks all but the server opt-in ---------------
-echo "[5] full preset omits the server opt-in"
+# --- preset mapping: full pre-checks all but the server opt-in and mobile_dev
+echo "[5] full preset omits the server opt-in and mobile_dev"
 H3="$TMP/home3"
 mkdir -p "$H3"
 run_menu "${PKG_GROUPS[*]}" full "$H3" || fail "preset run: script exited non-zero"
@@ -176,7 +176,7 @@ head -1 "$GUM_LOG" | grep -qv -- '--no-limit' || fail "preset run: first call wa
 grep -q -- '--selected core,modern_cli,fonts,agent_toolkit,opencode_cli,opencode_desktop,claude_cli,claude_desktop,chatgpt_cli,chatgpt_desktop,antigravity_cli,antigravity_desktop,dev_desktop,remote_access,guardrail ' "$GUM_LOG" ||
     fail "preset run: full --selected set wrong: $(cat "$GUM_LOG")"
 assert_file_equals "$H3/.config/chezmoi/chezmoi.toml" "$(expected_section "${PKG_GROUPS[@]}")" "preset run: all true"
-ok "full preset omits remote_access_server; full selection persisted"
+ok "full preset omits remote_access_server and mobile_dev; full selection persisted"
 
 # --- installer gate: preserve an explicit value with a TOML comment ---------
 echo "[6] re-run preserves the VS Code gate"

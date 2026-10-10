@@ -93,7 +93,7 @@ _sudo_net_timeout() {
 }
 # sudo-helpers: end
 
-{{/* 16-group package taxonomy (docs/package-groups.md).
+{{/* 17-group package taxonomy (docs/package-groups.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
@@ -2585,7 +2585,7 @@ main() {
 
     # mobile_dev install-time safety net (design doc section 3.9a): mobile_dev's
     # installer assumes agent_toolkit's tools (Serena, Playwright) already exist.
-    # Task 3 forces agent_toolkit on wherever mobile_dev ends up selected (both the
+    # docs/package-groups.md forces agent_toolkit on wherever mobile_dev ends up selected (both the
     # chezmoi.toml template default and the menu scripts), but a hand-edited
     # chezmoi.toml can still reach this point with mobile_dev=true and
     # agent_toolkit=false - this is the last-resort catch: warn loudly and skip

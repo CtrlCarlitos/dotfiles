@@ -32,7 +32,7 @@ set -euo pipefail
 FIX=false
 [ "${1:-}" = "--fix" ] && FIX=true
 
-# The 16-group list + the [data.packages] section scanner come from the
+# The 17-group list + the [data.packages] section scanner come from the
 # shared lib (issue #123) - one vocabulary and one scanner instead of copies.
 . "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
 
@@ -136,7 +136,7 @@ if [ -f "$config" ]; then
     if [ -n "$missing" ]; then
         result error prompted-keys "missing [data.packages] keys (map-has-no-entry outage class):$missing"
     else
-        result ok prompted-keys "all 16 [data.packages] keys present"
+        result ok prompted-keys "all ${#PKG_GROUPS[@]} [data.packages] keys present"
     fi
 
     # Git identity: either primary* prompt keys or at least one [[data.accounts]]
