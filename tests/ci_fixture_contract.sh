@@ -106,10 +106,10 @@ if multi is not None and [a.get("username") for a in multi] != ["alice", "bob"]:
 on = docs.get(("minimal", "on"))
 if on is not None:
     p = on["data"]["packages"]
-    for k in ("remote_access_server", "guardrail"):
+    for k in ("remote_access_server", "guardrail", "mobile_dev"):
         if p.get(k) is not False:
             err("packages-on: %s must stay false (see the comment in the file)" % k)
-    if not all(v is True for k, v in p.items() if k not in ("remote_access_server", "guardrail")):
+    if not all(v is True for k, v in p.items() if k not in ("remote_access_server", "guardrail", "mobile_dev")):
         err("packages-on: every other group must be true")
 off = docs.get(("minimal", "off"))
 if off is not None and any(v is not False for v in off["data"]["packages"].values()):

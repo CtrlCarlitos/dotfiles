@@ -4,14 +4,14 @@ _Added 2026-09-13 with the package-groups project (the design spec lived in
 the gitignored `docs/research/` scratch area and is not part of the repo;
 this page is the canonical taxonomy)._
 
-How this repo decides what to install. The 16 groups below are the single
+How this repo decides what to install. The 17 groups below are the single
 vocabulary shared by everything that touches packages: the interactive menu
 (`scripts/select-packages.{sh,ps1}`), the config template's `promptBoolOnce`
 keys, the installer templates' gates, and the CI seeds all use the same key
 names — `tests/check_workflow_config_keys.sh` exists to keep them from
 drifting apart.
 
-## The 16 groups
+## The 17 groups
 
 The "menu line" is the group's one-line description (what the config-template
 prompts show). The gum menu itself lists the bare keys in this order under
@@ -37,6 +37,7 @@ the persisted `[data.packages]` section is emitted in.
 | `remote_access` | Private mesh access and approved app tunneling | Tailscale and cloudflared; installs tools only, no sign-in, tunnel, or service setup |
 | `remote_access_server` | Explicit SSH-server prerequisite opt-in | OpenSSH-server prerequisites only; no keys, firewall, service, or configuration changes |
 | `guardrail` | Agent guardrails | opt-in desired state, passed to the pinned agent-guardrails installer: true = `--state enabled`; false = `--state disabled` only if a binary exists, never a download (never auto-removed). See [guardrail-install.md](guardrail-install.md) |
+| `mobile_dev` | opt-in Expo/Android mobile development tooling | Maestro, agent-device, Expo MCP, Android SDK/emulator on Windows; forces `agent_toolkit` on. See docs/mobile-development.md |
 
 ## Ground rules
 
@@ -74,7 +75,7 @@ config template. The flow by entry point:
   (no dependencies — naked-machine safe) → gum bootstrap (pinned static
   download if `gum` isn't on PATH; best-effort, warns and continues on
   failure) → preset pick (`minimal` / `standard` / `full` / `custom`) → the
-  16-group multi-select, pre-checked per the preset → `chezmoi init --apply`
+  17-group multi-select, pre-checked per the preset → `chezmoi init --apply`
   (accounts still prompted by chezmoi itself).
 - **Re-run:** your existing `[data.packages]` keys arrive pre-checked — one
   Enter accepts them unchanged. No preset prompt; presets are first-run
@@ -82,18 +83,18 @@ config template. The flow by entry point:
 - **Standalone re-choose:** run `scripts/select-packages.sh` (or `.ps1`)
   directly at any time, then `chezmoi apply` installs the difference.
 - **Bare `chezmoi init` (no installer, no gum):** the config template's
-  `promptBoolOnce` prompts take over — same 16 keys, one question each,
+  `promptBoolOnce` prompts take over — same 17 keys, one question each,
   defaults = the standard preset. Non-interactive renders (CI, containers,
   no TTY) take `false` for every key: explicit seeds and prompts are the
   only sources of truth.
-- **CI:** workflow configs are pre-seeded with all 16 keys and the menu
+- **CI:** workflow configs are pre-seeded with all 17 keys and the menu
   self-skips (no TTY / `$env:CI` set / no gum → prints "skipping menu",
   exits 0, never prompts).
 
 **`vscode_settings` is not a group.** `[data.packages]` also carries a
 `vscode_settings` flag (default `true`, no prompt, not in the menu) that gates
 VS Code settings and extension management; see [VS Code](vscode.md). It is not
-one of the 16, no preset touches it, and the menu preserves an existing value
+one of the 17, no preset touches it, and the menu preserves an existing value
 when it rewrites the section.
 
 ## Presets
@@ -102,11 +103,11 @@ when it rewrites the section.
 |---|---|
 | `minimal` | `core` |
 | `standard` | `core`, `modern_cli`, `fonts`, `agent_toolkit`, `opencode_cli`, `claude_cli`, `guardrail` |
-| `full` | all groups except `remote_access_server` |
+| `full` | all groups except `remote_access_server` and `mobile_dev` |
 | `custom` | nothing — hand-pick in the multi-select |
 
 Presets are **not persisted** — they're pre-check sets for the menu only.
-What lands in the config is always the 16 explicit booleans; the config
+What lands in the config is always the 17 explicit booleans; the config
 template's prompt defaults equal the standard preset.
 
 ## Rename map (clean break)
