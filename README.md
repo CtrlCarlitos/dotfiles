@@ -94,7 +94,7 @@ $PAT="your_github_pat_here"; iex "& {$(irm -Headers @{Authorization="token $PAT"
 <summary><strong>What does the installer actually do?</strong></summary>
 
 1. Installs `chezmoi` if missing
-2. Asks for consent, then shows the package-group menu (preset → 16 groups)
+2. Asks for consent, then shows the package-group menu (preset → 17 groups)
 3. Installs your selected packages and applies the configuration
 4. Generates git identities, SSH keys, shell profiles, and AI tool wiring
 
@@ -105,7 +105,7 @@ Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the
 
 ## 📦 What gets installed
 
-16 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
+17 package groups across 5 platforms. Here's the summary — the full per-program table is in [docs/tool-parity.md](docs/tool-parity.md):
 
 | Group | What's in it | Linux | macOS | Windows | WSL | Devcontainer* |
 |-------|-------------|:-----:|:-----:|:-------:|:---:|:--------------:|
@@ -174,7 +174,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Invariants](docs/invariants.md) | Rules this repo learned the expensive way — read before changing templates, ignores or tests |
 | [Testing the dotfiles](docs/testing.md) | The per-platform verify/fix playbook and how the test suite and CI run |
 | [Versioning & releases](docs/versioning.md) | `dot version`, date-based tags, the generated `CHANGELOG.md`, cutting a release |
-| [Package Groups](docs/package-groups.md) | The 16-group taxonomy, presets, and how to customize |
+| [Package Groups](docs/package-groups.md) | The 17-group taxonomy, presets, and how to customize |
 | [Tool Parity](docs/tool-parity.md) | Full per-program table across all 5 platforms |
 | [devprofile](docs/devprofile.md) | Git identity management — multi-account, SSH keys, signing |
 | [Git](docs/git.md) | Line endings, gitconfig defaults, delta, and aliases |
@@ -188,6 +188,7 @@ New to zsh, tmux, or neovim? Start here:
 | [SSH Agents](docs/ssh-agents.md) | One key vault, one filtered agent per account; WSL relay; devcontainer forwarding |
 | [Defender & build output](docs/devtmp.md) | `dot devtmp` (Windows): one folder for Go/test output and the printed Defender exclusion |
 | [Windows Setup](docs/windows.md) | Windows specifics: elevation, PowerShell profile, Git for Windows, SSH agent, troubleshooting |
+| [Mobile Development](docs/mobile-development.md) | The opt-in `mobile_dev` group: Android SDK, ADB bridge, emulator, Maestro, per-platform setup |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
 | [Backup & Restore](docs/backup-restore.md) | How to back up and restore your environment |
 | [Remote Access](docs/remote-access.md) | `dot remote` setup/status/fix: private SSH/RDP/tmux access and the optional Cloudflare Access browser path |
@@ -297,12 +298,12 @@ chezmoi doctor        # chezmoi's own health check
 
 ```
 install.sh / install.ps1              # Universal bootstrap (consent → menu → chezmoi init --apply)
-run_onchange_install_packages.*       # Platform installers (16-group gated)
+run_onchange_install_packages.*       # Platform installers (17-group gated)
 run_onchange_generate_identities.*    # Git identity + SSH key generation
 run_onchange_sync_pwsh_profiles.ps1.tmpl   # OneDrive-redirected profile sync (Windows)
 run_after_dotfiles-doctor.*           # dot doctor health check on every apply
 run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
-.chezmoi.toml.tmpl                    # Config template (16 promptBoolOnce groups)
+.chezmoi.toml.tmpl                    # Config template (17 promptBoolOnce groups)
 .chezmoidata.yaml + .chezmoidata/     # Curated data: VS Code baseline, package catalog, agents.yaml
 .chezmoiexternal.toml                 # Oh My Zsh + tmux plugin externals (pinned archives)
 .chezmoitemplates/                    # Shared template bodies (pkg-names, keybindings, ...)
