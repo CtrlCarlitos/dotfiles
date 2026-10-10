@@ -49,15 +49,19 @@ apply after the init writes them.
 ```toml
 [data.vscode.settings]
   junk  = ["**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/node_modules/**", "**/*.pyc"]
-  unset = ["remote.SSH.configFile"]
+  unset = []
   [data.vscode.settings.defaults]
     "files.autoSaveDelay" = 500
   [data.vscode.settings.defaults_windows]
     "terminal.integrated.enableWin32InputMode" = true
   [data.vscode.settings.forced]
-    "editor.fontFamily" = "MesloLGS Nerd Font Mono"
+    "editor.fontFamily" = "FiraCode Nerd Font"
+    "editor.fontLigatures" = true
+    "terminal.integrated.fontFamily" = "MesloLGS Nerd Font Mono"
+    "terminal.integrated.gpuAcceleration" = "off"
+    "remote.SSH.configFile" = "C:/Users/carlitos/.ssh/vscode_hosts"
   [data.vscode.settings.terminal_colors]
-    "terminal.background" = "#1E1E2E"
+    "terminal.background" = "#181818"
 ```
 
 `[data.vscode_overrides]` `exclude_settings` / `extra_settings` still work, but
@@ -67,15 +71,42 @@ editing the tiers here directly is simpler.
 
 | Tier | Keys | On re-apply | Local drift |
 |---|---|---|---|
-| FORCED | editor/terminal font (MesloLGS Nerd Font Mono) | re-asserted | exclude to stop |
+| FORCED | editor font + ligatures, terminal font, terminal GPU acceleration, `remote.SSH.configFile` (see below) | re-asserted | exclude to stop |
 | UPSERT | 21 curated defaults (+1 Windows-only), including the integrated terminal's (see below) | only written when absent | your value wins |
 | MERGE | `files.exclude` / `search.exclude` junk dirs; `workbench.colorCustomizations` terminal colors | only missing sub-keys added | your entries stay |
-| UNSET | `remote.SSH.configFile` | removed when present | exclude to keep |
+| UNSET | (none by default) | removed when present | — |
 
-UNSET exists for one key: `remote.SSH.configFile` pointed Remote-SSH at a hand-kept
-config outside `~/.ssh`, so those hosts never reached `ssh`, Windows Terminal, or
-chezmoi. Without it, Remote-SSH reads `~/.ssh/config`, which chezmoi renders from
-`[[data.ssh_hosts]]` (see [Secrets & SSH Hosts](secrets.md)).
+### Editor vs. terminal font
+
+`editor.fontFamily` and `terminal.integrated.fontFamily` are independent keys,
+set to different faces on purpose: the editor uses the plain **FiraCode Nerd
+Font** face (`editor.fontLigatures: true` turns `!=`, `=>`, `->` into their
+connected glyphs - the font's whole reason for being there), while every
+terminal surface (Windows Terminal, the VS Code integrated terminal, Ghostty)
+stays on **MesloLGS Nerd Font Mono** for its Nerd Font prompt icons - see
+[docs/windows.md](windows.md#font) for why each gets the face it does. Windows
+Terminal's own default font is kept in sync with `terminal.integrated.fontFamily`
+(not `editor.fontFamily`) by the installer, so the two terminal faces can never
+drift apart; see `run_onchange_install_packages.ps1.tmpl` ("Wire the Nerd Font").
+
+### `remote.SSH.configFile`
+
+Forced to `~/.ssh/vscode_hosts` (with `/` separators even on Windows, since the
+value lands in JSON and OpenSSH-style paths work either way there). That file holds
+only `[[data.ssh_hosts]]` - no `github-<user>` git identity aliases - so
+Remote-SSH's "Connect to Host" list shows real remote machines only, instead of
+also listing every configured git account. `~/.ssh/config` `Include`s that file,
+so `ssh` and `dot ssh` still see every host exactly as before. See
+[Secrets & SSH Hosts](secrets.md#ssh-hosts-datassh_hosts).
+
+> [!NOTE]
+> **Existing machine, from before this split:** `chezmoi init` writes a table
+> back as-is when one already exists (see [Your settings in
+> chezmoi.toml](#your-settings-in-chezmoitoml) above), so a machine whose
+> `chezmoi.toml` still has `unset = ["remote.SSH.configFile"]` from before this
+> change won't pick up the new FORCED value on its own. Delete that line (and
+> add the `remote.SSH.configFile` entry under `[data.vscode.settings.forced]` if
+> you want it before the next `chezmoi init` reseeds it) once, by hand.
 
 ### Integrated terminal
 

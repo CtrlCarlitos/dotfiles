@@ -52,7 +52,7 @@ if command -v chezmoi >/dev/null 2>&1; then
     q() { chezmoi execute-template --source "$repo_root" --config "$cfg" "$1"; }
     : >"$cfg"
     init || fail "chezmoi init failed on an empty config"
-    [ "$(q '{{ index .vscode.settings.forced "editor.fontFamily" }}')" = 'MesloLGS Nerd Font Mono' ] ||
+    [ "$(q '{{ index .vscode.settings.forced "editor.fontFamily" }}')" = 'FiraCode Nerd Font' ] ||
         fail "init must seed [data.vscode.settings] when the config has none"
     [ "$(q '{{ len .vscode.settings.defaults }}|{{ len .vscode.settings.junk }}|{{ len .vscode.extensions }}')" = "$(
         chezmoi execute-template --source "$repo_root" --config "$cfg" '{{ $s := includeTemplate "vscode-settings.toml" . | fromToml }}{{ len $s.defaults }}|{{ len $s.junk }}|{{ len .vscode.extensions }}')" ] ||
@@ -89,10 +89,15 @@ for f in "$sh_t" "$ps_t"; do
         if grep -Fq -- "$lit" "$f"; then fail "$(basename -- "$f"): '$lit' is hardcoded again - it comes from chezmoi.toml"; fi
     done
 done
-# The font is also Windows Terminal's default face: it must come from the same key.
+# Windows Terminal's default face must come from the TERMINAL font key, not the
+# editor's - the two are allowed to differ (FiraCode in the editor for
+# ligatures, Meslo in every terminal surface for prompt icons).
 # shellcheck disable=SC2016  # literal template text
-grep -Fq -- '$desiredFont = {{ get (get $vsCfg "forced" | default dict) "editor.fontFamily"' "$ps_t" ||
-    fail 'ps1 twin: $desiredFont no longer derives from the forced font'
+grep -Fq -- '$desiredFont = {{ get (get $vsCfg "forced" | default dict) "terminal.integrated.fontFamily"' "$ps_t" ||
+    fail 'ps1 twin: $desiredFont no longer derives from the forced TERMINAL font'
+if grep -Fq -- '$desiredFont = {{ get (get $vsCfg "forced" | default dict) "editor.fontFamily"' "$ps_t"; then
+    fail 'ps1 twin: $desiredFont still derives from editor.fontFamily - Windows Terminal would follow the editor font'
+fi
 pass
 
 # 4. The rendered twins. Every grep reads a here-string, never `printf | grep -q`
@@ -107,11 +112,15 @@ if command -v chezmoi >/dev/null 2>&1; then
     grep -qF "'files.eol' = \"$(printf '\140')n\"" <<<"$ps_out" || fail 'ps1 twin: files.eol did not render as backtick-n'
     if grep -qF '"terminal.integrated.enableWin32InputMode"' <<<"$sh_out"; then fail 'sh twin: rendered the Windows-only tier'; fi
     grep -qF "'terminal.integrated.enableWin32InputMode'" <<<"$ps_out" || fail 'ps1 twin: missing the Windows-only tier'
-    grep -qF '$desiredFont = "MesloLGS Nerd Font Mono"' <<<"$ps_out" || fail 'ps1 twin: Windows Terminal font did not render'
+    grep -qF '$desiredFont = "MesloLGS Nerd Font Mono"' <<<"$ps_out" || fail 'ps1 twin: Windows Terminal font did not render (from terminal.integrated.fontFamily)'
     grep -qF 'local vs_cfg_missing="false"' <<<"$sh_out" || fail 'sh twin: a seeded config must not skip the settings step'
     grep -qF '$vsCfgMissing = $false' <<<"$ps_out" || fail 'ps1 twin: a seeded config must not skip the settings step'
-    grep -qF '"editor.fontFamily": "MesloLGS Nerd Font Mono"' <<<"$sh_out" || grep -qF '"editor.fontFamily":"MesloLGS Nerd Font Mono"' <<<"$sh_out" ||
-        fail 'sh twin: the forced font did not render from the seeded config'
+    grep -qF '"editor.fontFamily": "FiraCode Nerd Font"' <<<"$sh_out" || grep -qF '"editor.fontFamily":"FiraCode Nerd Font"' <<<"$sh_out" ||
+        fail 'sh twin: the forced editor font did not render from the seeded config'
+    grep -qF '"editor.fontLigatures": true' <<<"$sh_out" || grep -qF '"editor.fontLigatures":true' <<<"$sh_out" ||
+        fail 'sh twin: the forced editor.fontLigatures did not render from the seeded config'
+    grep -qF '"terminal.integrated.gpuAcceleration": "off"' <<<"$sh_out" || grep -qF '"terminal.integrated.gpuAcceleration":"off"' <<<"$sh_out" ||
+        fail 'sh twin: the forced terminal.integrated.gpuAcceleration did not render from the seeded config'
 
     pass
 

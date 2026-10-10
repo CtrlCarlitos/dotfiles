@@ -733,9 +733,12 @@ if (-not (Get-Command tldr -ErrorAction SilentlyContinue)) {
 # Note: ConvertTo-Json reformats the entire file (different indentation than
 # each app's own writer), not just the font key - functionally identical,
 # cosmetically a full-file diff the first time this runs.
-# Same source as the VS Code font tier, so the Windows Terminal default font
-# and editor.fontFamily cannot drift apart.
-$desiredFont = {{ get (get $vsCfg "forced" | default dict) "editor.fontFamily" | default "MesloLGS Nerd Font Mono" | quote }}
+# Same source as the VS Code TERMINAL font tier (not editor.fontFamily -
+# the editor and the integrated terminal are allowed to use different faces,
+# e.g. a ligature font for code vs. a Nerd Font for prompt icons), so the
+# Windows Terminal default font and terminal.integrated.fontFamily cannot
+# drift apart.
+$desiredFont = {{ get (get $vsCfg "forced" | default dict) "terminal.integrated.fontFamily" | default "MesloLGS Nerd Font Mono" | quote }}
 
 # ConvertFrom-JsonC: both Windows Terminal and VS Code settings.json are
 # JSONC (comments and trailing commas are legal there; strict JSON parsers
@@ -850,7 +853,7 @@ if ($wtSettings) {
 # where ConvertFrom-Json has no -AsHashtable and returns a PSCustomObject.
 $vsForced = @{
 {{- range $k, $v := (get $vsCfg "forced" | default dict) }}
-    '{{ $k }}' = "{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"
+    '{{ $k }}' = {{ if kindIs "bool" $v }}${{ $v }}{{ else }}"{{ $v | replace "`" "``" | replace "$" "`$" | replace "\"" "`\"" | replace "\n" "`n" }}"{{ end }}
 {{- end }}
 }
 $vsDefaults = [ordered]@{

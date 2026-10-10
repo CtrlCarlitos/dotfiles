@@ -405,6 +405,41 @@ timeout of its own.
 
 ---
 
+## 18. An `Include` after a `Host` block is nested inside it, silently
+
+`ssh_config`'s `Include` has no block of its own: OpenSSH treats it as just
+another directive, so one written after a `Host` line (with nothing but that
+host's own directives between them) is parsed as *belonging to* that `Host`
+block. Every `Host` pattern the included file defines then has to match
+*both* its own alias *and* the enclosing one - which never happens for an
+unrelated alias - so the included hosts stop resolving, with no error from
+`ssh` at all.
+
+**The incident.** Splitting `~/.ssh/config`'s `[[data.ssh_hosts]]` section into
+a separate `vscode_hosts` file (so VS Code's `remote.SSH.configFile` could
+point at only real remote hosts, never the `github-<user>` git identity
+aliases) put `Include vscode_hosts` right where that section used to live:
+after the `github-<user>` `Host` blocks. `chezmoi execute-template` rendered
+it without complaint, and a quick render-only check (no `accounts` in the
+fixture, so no preceding `Host` block existed to nest under) passed. Only an
+executable test that rendered BOTH files into a real `~/.ssh/` and resolved a
+host through `ssh -G` - with a real account in the fixture - caught it:
+`ssh -G server1` silently returned `hostname server1` (the literal alias,
+unresolved) instead of the host's real `HostName`.
+
+**Obey it.** An `Include` that is meant to add top-level `Host`/`Match` blocks
+must sit before the first `Host`/`Match` line in the file (or immediately
+after an unconditional `Match all`, which resets the enclosing context). It
+cannot be reasoned about from the rendered text alone - a human reviewer
+reads `Host github-fixture` ... blank line ... `Include vscode_hosts` and sees
+nothing wrong, same as this file's own first render-only test did.
+`tests/ssh_zero_copy_contract.sh` and `tests/vscode_ssh_contract.sh` both
+render `private_config.tmpl` and `private_vscode_hosts.tmpl` into a real
+`~/.ssh/` with at least one account configured, then resolve a host from each
+with `ssh -G`, so a regression here fails loudly instead of silently.
+
+---
+
 ## Checking yourself
 
 ```sh

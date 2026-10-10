@@ -38,10 +38,14 @@ dropped at the next `chezmoi init`.
 
 ## SSH hosts (`[[data.ssh_hosts]]`)
 
-Rendered into `~/.ssh/config` by `private_dot_ssh/private_config.tmpl` on
-every apply — VS Code Remote-SSH (installed by the global extension set)
-reads `~/.ssh/config` natively, so aliases appear in the Remote-SSH host
-list automatically. On Windows each host also becomes a Windows Terminal
+Rendered into `~/.ssh/vscode_hosts` by `private_dot_ssh/private_vscode_hosts.tmpl`
+on every apply, which `~/.ssh/config` (`private_dot_ssh/private_config.tmpl`)
+`Include`s — so `ssh` and `dot ssh` see these hosts exactly as if they were
+written directly into `~/.ssh/config`. VS Code's `remote.SSH.configFile` (the
+FORCED tier in [VS Code](vscode.md)) points straight at `~/.ssh/vscode_hosts`
+instead of `~/.ssh/config`, so Remote-SSH's "Connect to Host" list shows only
+these — never the `github-<user>` git identity aliases that also live in
+`~/.ssh/config`. On Windows each host also becomes a Windows Terminal
 profile named `SSH: <name>` (see [Terminal Experience](terminal.md#windows-terminal)).
 In any terminal, `dot ssh` picks one of these hosts and connects (joining its tmux session
 when it sets `tmux`); `dot ssh <name>` connects directly.
@@ -75,12 +79,11 @@ for fingerprint synchronization and verification before removing old selectors.
 Add hosts, run `chezmoi apply`, done. Remove the entry and apply to retire
 the alias.
 
-`~/.ssh/config` is the only SSH config. The installers unset VS Code's
-`remote.SSH.configFile` when present (the UNSET tier in [VS Code](vscode.md); exclude it
-there to keep your own), so Remote-SSH, `ssh`, and the Windows
-Terminal `SSH: <name>` profiles all read the same file. Hosts from a hand-kept
-config (the old OneDrive `Documents\_ssh\config`) go into `[[data.ssh_hosts]]`
-by hand.
+`~/.ssh/config` and the `~/.ssh/vscode_hosts` it `Include`s are the only SSH
+config — chezmoi owns both, and together they're what `ssh`, `dot ssh`, the
+Windows Terminal `SSH: <name>` profiles, and Remote-SSH all resolve, no
+hand-kept file outside `~/.ssh` in the loop. Hosts from a hand-kept config (the
+old OneDrive `Documents\_ssh\config`) go into `[[data.ssh_hosts]]` by hand.
 
 ## Remote-access login keys (`[[data.remote_access.login_keys]]`)
 

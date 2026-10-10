@@ -119,15 +119,16 @@
 # docs/vscode.md. Shortened:
 # [data.vscode.settings]
 #   junk  = ["**/__pycache__/**", "**/node_modules/**"]   # files.exclude + search.exclude
-#   unset = ["remote.SSH.configFile"]                     # removed when present
+#   unset = []                                            # removed when present (empty by default)
 #   [data.vscode.settings.forced]                         # re-asserted every run
-#     "editor.fontFamily" = "MesloLGS Nerd Font Mono"
+#     "editor.fontFamily" = "FiraCode Nerd Font"
+#     "remote.SSH.configFile" = "C:/Users/you/.ssh/vscode_hosts"
 #   [data.vscode.settings.defaults]                       # written when absent
 #     "files.autoSave" = "afterDelay"
 #   [data.vscode.settings.defaults_windows]               # the same, Windows only
 #     "terminal.integrated.enableWin32InputMode" = true
 #   [data.vscode.settings.terminal_colors]                # merged into colorCustomizations
-#     "terminal.background" = "#1E1E2E"
+#     "terminal.background" = "#181818"
 
 # ==============================================================================
 # VS CODE MACHINE-LOCAL OVERRIDES

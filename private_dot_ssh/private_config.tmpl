@@ -30,6 +30,26 @@ AddKeysToAgent yes
 UseKeychain yes
 {{- end }}
 
+#===============================================================================
+# OPERATOR SSH HOSTS
+# Rendered into vscode_hosts (private_vscode_hosts.tmpl), not here, and
+# Include'd right here - BEFORE any Host block below, deliberately. OpenSSH
+# parses an Include as belonging to whatever Host/Match block precedes it in
+# the file (nesting its contents: a nested Host pattern then has to match
+# BOTH its own alias AND the enclosing one, which never happens for an
+# unrelated alias - confirmed live: moving this Include after the
+# `github-<user>` block below made every [[data.ssh_hosts]] alias silently
+# stop resolving, with no error, because each was implicitly nested inside
+# `Host github-<user>`). Keeping it here, before the first Host block, keeps
+# it a top-level Include. The split itself keeps VS Code's
+# remote.SSH.configFile pointed at a file with ONLY these hosts, never the
+# git identity aliases below - so Remote-SSH's "Connect to Host" list stops
+# listing github-<user>. `ssh` and `dot ssh` are unaffected: this Include
+# folds vscode_hosts back into the same resolution ssh has always used.
+# See docs/secrets.md.
+#===============================================================================
+Include vscode_hosts
+
 {{- if and (hasKey . "accounts") .accounts }}
 {{- range .accounts }}
 {{- $username := "" }}
@@ -59,77 +79,6 @@ Host {{ $alias }}
 
 # No accounts configured yet.
 # Run 'chezmoi init' to set up your git identity.
-{{- end }}
-
-#===============================================================================
-# OPERATOR SSH HOSTS (data-driven: [[data.ssh_hosts]] in chezmoi.toml)
-#
-# Machine-local and NEVER git-tracked: host aliases live in
-# ~/.config/chezmoi/chezmoi.toml, this template renders them. Fields:
-#   name     (required)  Host alias
-#   hostname (required)  IP or DNS name
-#   user     (optional)  login user
-#   port     (optional)  SSH port (default 22)
-#   identity (optional)  key NAME in ~/.ssh (e.g. "id_work") - its .pub half
-#                        is used on native hosts. On WSL identity_fingerprint
-#                        selects a Windows-agent key without a local file.
-#   identity_fingerprint SHA256 fingerprint populated by dot ssh-fingerprints
-#   proxy    (optional)  ProxyJump target alias (e.g. a bastion `name`)
-#   comment  (optional)  free text - rendered as the block's header comment
-#                        so `grep ~/.ssh/config` answers "what was this host?"
-#   os       (optional)  "mac" | "linux" - not an SSH option; picks the tab
-#                        color/icon of the host's Windows Terminal profile
-#   tmux     (optional)  true | "<session>" - not an SSH option; that Terminal
-#                        profile re-attaches to a remote tmux session
-#
-# Example (chezmoi.toml):
-#   [[data.ssh_hosts]]
-#     name     = "prod-jump"
-#     hostname = "10.0.0.5"
-#     user     = "carlitos"
-#     identity = "id_personal"
-#     comment  = "Bastion for the staging VPC - only reachable from office IP"
-#===============================================================================
-{{- if hasKey . "ssh_hosts" }}
-
-{{- range .ssh_hosts }}
-{{- $name := "" }}{{- $hostname := "" }}
-{{- if hasKey . "name" }}{{ $name = .name }}{{ end }}
-{{- if hasKey . "hostname" }}{{ $hostname = .hostname }}{{ end }}
-{{- if and $name $hostname }}
-
-{{- if hasKey . "comment" }}
-# {{ .comment }}
-{{- end }}
-
-Host {{ $name }}
-    HostName {{ $hostname }}
-{{- if hasKey . "user" }}
-    User {{ .user }}
-{{- end }}
-{{- if hasKey . "port" }}
-    Port {{ .port }}
-{{- end }}
-{{- if and (hasKey . "identity") .identity }}
-{{- if $relayWsl }}
-    IdentityAgent {{ printf "%s/host-%s.agent" $relayDir (.identity | sha256sum | trunc 16) | quote }}
-    IdentityFile none
-    IdentitiesOnly no
-{{- else }}
-    # Native hosts match this public selector against their local agent.
-    # Load the corresponding private key into that agent before connecting.
-    IdentityFile ~/.ssh/{{ .identity }}.pub
-    IdentitiesOnly yes
-{{- end }}
-{{- end }}
-{{- if hasKey . "proxy" }}
-    ProxyJump {{ .proxy }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- else }}
-# No [[data.ssh_hosts]] configured. Add hosts to ~/.config/chezmoi/chezmoi.toml
-# (see docs/secrets.md) and re-run `chezmoi apply`.
 {{- end }}
 
 # Security and connection defaults. This Host * block is intentionally last:
