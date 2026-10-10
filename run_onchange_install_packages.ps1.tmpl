@@ -1583,7 +1583,6 @@ Add-DotTimingMark -Name 'Codex'
 # plane wiring is done by the agent-guardrails installer.
 Install-Node
 if (Get-Command npm -ErrorAction SilentlyContinue) {
-    Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
     # Global NPM packages are usually added to PATH during Node.js install
     # (--fetch-timeout/--fetch-retries cap a stalled registry fetch)
     # Missing, or present but unable to start (npm skipped its platform binary, published minutes
@@ -1593,7 +1592,12 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     if (Get-Command codex -ErrorAction SilentlyContinue) {
         try { codex --version *> $null; $codexRuns = ($LASTEXITCODE -eq 0) } catch { $codexRuns = $false }
     }
-    if (-not $codexRuns) {
+    if ($codexRuns) {
+        # Same wording as the agent-browser skip above: "Installing Codex CLI..." used to print on
+        # every run, including the ones that installed nothing.
+        Write-Host "  Codex CLI is installed - skipping the npm install (dot upgrade updates it)." -ForegroundColor Yellow
+    } else {
+         Write-Host "Installing Codex CLI..." -ForegroundColor Cyan
          # npm's "added 1 package, and changed 1 package" summary is shown only on failure.
          Invoke-Quietly -Description "Failed to install Codex CLI" -Action {
              $codexNpmOut = @(npm install -g {{ .agents.npm.codex }} --loglevel=error --no-progress --fetch-timeout=120000 --fetch-retries=2 2>&1 | ForEach-Object { "$_" })

@@ -46,7 +46,18 @@ dot_sudo_prime() {
     _DOT_SUDO_PRIMED=1
     # A refused or mistyped password fails this one command, exactly as a
     # bare `sudo` would - the caller's own || warn handles it from there.
-    sudo -v || return 1
+    # The prompt is timed as its own section ("sudo password", scripts/lib/timing.sh): the
+    # first privileged command sits inside the apt section, and a WSL `dot up` reported
+    # "apt packages 2m53s" of which a good part was the operator typing (and retyping) the
+    # password. `sudo -n true` says whether a prompt is coming at all; a cached credential
+    # adds no section. The timing helpers are included further down the file and are
+    # no-ops outside a timed run, so a missing definition must not fail the prime.
+    local rc=0 prompt=0
+    sudo -n true >/dev/null 2>&1 || prompt=1
+    [ "$prompt" = 0 ] || dot_timing_wait 'sudo password' 2>/dev/null || true
+    sudo -v || rc=$?
+    [ "$prompt" = 0 ] || dot_timing_resume 2>/dev/null || true
+    [ "$rc" -eq 0 ] || return 1
     # Keep-alive: refresh the sudo timestamp until this script exits. $$ is
     # still the main shell inside a function, so the `kill -0` guard works.
     # Both streams closed: the loop inherits the caller's fds, and a first
@@ -1043,9 +1054,8 @@ install_apt() {
 {{- end }}
 
 {{- if $remote_access }}
-{{- if $isWsl }}
-    info "Tailscale remains on Windows; WSL uses the Windows host's tailnet connection."
-{{- else }}
+{{- /* WSL: Tailscale stays on Windows; the [Post-Install] block in main says so once. */}}
+{{- if not $isWsl }}
     if ! command -v tailscale &>/dev/null; then
         info "Installing Tailscale..."
         net_timeout 180 bash -c 'curl -fsSL https://tailscale.com/install.sh | sh' \
@@ -1067,7 +1077,7 @@ install_apt() {
 {{- if $remote_access_server }}
     info "Installing OpenSSH Server prerequisites..."
     $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
-    info "SSH service activation and access configuration remain manual. See docs/remote-access.md."
+    # The "activation is manual" notice is the [Post-Install] block's, once (it used to print here too).
 {{- end }}
 
 {{- if $modern_cli }}
@@ -1964,7 +1974,6 @@ install_chatgpt_cli() {
         install_node
     fi
     if command -v npm &>/dev/null; then
-        info "Installing Codex CLI..."
         NPM_BIN="$(which npm)"
 
         # Check if npm is user-managed (e.g. nvm, homebrew) to avoid sudo permission issues
@@ -1975,7 +1984,12 @@ install_chatgpt_cli() {
         # Missing, or present but unable to start (npm skipped its platform binary - see
         # update_ai_tools.sh): install.
         # npm's "added 1 package, and changed 1 package" summary is shown only on failure.
-        if ! { command -v codex &>/dev/null && codex --version &>/dev/null; }; then
+        # The skip says so (same wording as agent-browser's): "Installing Codex CLI..." used to
+        # print on every run, including the ones that installed nothing.
+        if command -v codex &>/dev/null && codex --version &>/dev/null; then
+            info "Codex CLI is installed - skipping the npm install (dot upgrade updates it)."
+        else
+            info "Installing Codex CLI..."
             codex_npm_out="$($npm_sudo "$NPM_BIN" install -g {{ .agents.npm.codex }} --loglevel=error --no-progress 2>&1)" \
                 || { printf '%s\n' "$codex_npm_out" >&2; warn "Codex CLI install failed - continuing"; }
         fi

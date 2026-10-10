@@ -62,6 +62,18 @@ contains mac-remote 'brew install cloudflared' 'macOS remote_access must install
 contains wsl-remote 'add_apt_repo cloudflared' 'WSL remote_access must install cloudflared'
 contains wsl-remote 'Tailscale remains on Windows' 'WSL remote_access must explicitly skip Tailscale'
 
+# Once each: the Tailscale and SSH notices were printed mid-section AND again under
+# [Post-Install] (2026-10-09 WSL log). The [Post-Install] line is the one that stays.
+once() { # $1 = output filename, $2 = fixed text, $3 = assertion label
+    local n
+    n="$(grep -cF -- "$2" "$tmp/$1" || true)"
+    if [ "$n" -eq 1 ]; then pass; else fail "$3 (found $n lines)"; fi
+}
+once wsl-remote 'Tailscale remains on Windows' 'WSL remote_access must say Tailscale remains on Windows exactly once'
+linux_server_host='{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"core":true,"remote_access_server":true}}'
+render_fixture "$linux_server_host" linux-server-host
+once linux-server-host 'SSH service activation' 'a host with remote_access_server must say SSH activation is manual exactly once'
+
 omits linux-desktop 'tailscale.com/install.sh' 'dev_desktop must not install Tailscale'
 omits linux-desktop 'add_apt_repo cloudflared' 'dev_desktop must not install cloudflared'
 
