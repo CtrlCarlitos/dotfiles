@@ -20,4 +20,8 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create a
 
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
 
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-NetFirewallRule'
+forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-Service'
+require "$repo_root/docs/mobile-development.md" 'adb -a -P 5037 nodaemon server'
+
 finish

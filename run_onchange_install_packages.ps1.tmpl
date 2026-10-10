@@ -569,6 +569,39 @@ function Install-MobileDev {
             Write-Host "  Warning: scrcpy's bundled adb.exe ($($adbAfterScrcpy.Source)) now shadows the one already on PATH ($($adbBeforeScrcpy.Source)) - reconcile manually if this causes version drift." -ForegroundColor Red
         }
     }
+
+    # ADB bridge Firewall rule (design doc section 3.3). The ADB server
+    # itself (`adb -a -P 5037 nodaemon server`) stays a manual, per-session
+    # command Carlos runs himself - the single most important constraint in
+    # this plan is that nothing here starts or registers it as a service.
+    # This only scopes the Firewall rule `adb -a` needs to the WSL vEthernet
+    # subnet, never a LAN-wide opening (#336's explicit caution).
+    $wslAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'vEthernet (WSL*' -and $_.Status -eq 'Up' } | Select-Object -First 1
+    if ($wslAdapter) {
+        $wslIp = Get-NetIPAddress -InterfaceIndex $wslAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wslIp) {
+            # The network address from the adapter's own host IP + prefix.
+            # WSL can be in NAT or mirrored networking mode (section 3.3) -
+            # this reads whatever subnet the live adapter actually reports,
+            # the same math either way, never a hardcoded guess.
+            $ipBytes = ([System.Net.IPAddress]::Parse($wslIp.IPAddress)).GetAddressBytes()
+            $prefixLen = $wslIp.PrefixLength
+            $netBytes = for ($i = 0; $i -lt 4; $i++) {
+                $bits = [Math]::Min(8, [Math]::Max(0, $prefixLen - ($i * 8)))
+                [byte]($ipBytes[$i] -band ([byte](0xFF -shl (8 - $bits) -band 0xFF)))
+            }
+            $wslSubnet = ($netBytes -join '.') + "/$prefixLen"
+            if (-not (Get-NetFirewallRule -Name 'MobileDevAdbBridge' -ErrorAction SilentlyContinue)) {
+                New-NetFirewallRule -Name 'MobileDevAdbBridge' -DisplayName 'mobile_dev: ADB bridge (WSL only)' `
+                    -Direction Inbound -Protocol TCP -LocalPort 5037 `
+                    -RemoteAddress $wslSubnet -Action Allow | Out-Null
+            }
+        } else {
+            Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  Warning: no WSL vEthernet adapter found - skipping the ADB bridge Firewall rule (install/start WSL first)." -ForegroundColor Red
+    }
 }
 
 {{- if $core }}
