@@ -60,8 +60,8 @@ require "$tmpl" 'JAVA_HOME'
 # <agent> guard, "mcp get" idempotency check, warn-and-continue on failure -
 # never abort under `set -e`). Maestro has no vendor setup helper, unlike
 # serena, so the raw "mcp add" call is used directly.
-require "$tmpl" 'claude mcp add maestro'
-require "$tmpl" 'codex mcp add maestro'
+require "$tmpl" 'claude mcp add maestro -- maestro mcp'
+require "$tmpl" 'codex mcp add maestro -- maestro mcp'
 require "$tmpl" 'claude mcp get maestro'
 require "$tmpl" 'codex mcp get maestro'
 
