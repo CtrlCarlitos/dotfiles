@@ -138,6 +138,20 @@ Library/Application Support/Code/**
 AppData/Roaming/Code/**
 {{- end }}
 
+# Geany (GTK dark preference + color scheme): Windows only, and only where Geany
+# is installed or has a config dir. A modify_ template runs with empty stdin on a
+# machine without the tool and would create the file anyway.
+{{- $geany := false }}
+{{- if eq .chezmoi.os "windows" }}
+{{-   range $d := list (joinPath (env "ProgramFiles") "Geany") (joinPath .chezmoi.homeDir "AppData/Local/Programs/Geany") (joinPath .chezmoi.homeDir "AppData/Roaming/geany") }}
+{{-     if stat $d }}{{ $geany = true }}{{ end }}
+{{-   end }}
+{{- end }}
+{{- if not $geany }}
+AppData/Local/gtk-3.0/**
+AppData/Roaming/geany/**
+{{- end }}
+
 # Agent config dirs (Codex / OpenCode): their modify_ templates MERGE with an
 # existing install, and chezmoi runs a modify_ template with empty stdin when
 # the target is absent - which CREATES the file. On a machine that never

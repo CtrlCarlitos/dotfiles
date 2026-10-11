@@ -71,7 +71,7 @@ it within seconds of the first apply — it does so on every Settings UI save, a
 whenever it detects a new VS Code, WSL or PowerShell install — so every
 subsequent `dot up` hit chezmoi's *"changed since chezmoi last wrote it"* prompt.
 
-**Obey it.** The repo has four of these, and they are the pattern to copy:
+**Obey it.** The repo has six of these, and they are the pattern to copy:
 
 | File | Rewritten by |
 |---|---|
@@ -79,6 +79,11 @@ subsequent `dot up` hit chezmoi's *"changed since chezmoi last wrote it"* prompt
 | `dot_config/opencode/modify_tui.json` | OpenCode |
 | `dot_codex/modify_config.toml` | Codex |
 | `*/modify_keybindings.json` | VS Code |
+| `AppData/Roaming/geany/modify_geany.conf` | Geany (every exit) |
+| `AppData/Local/gtk-3.0/modify_settings.ini` | other GTK apps |
+
+The last two share `.chezmoitemplates/ini-force`; `tests/geany_config_contract.sh`
+executes them.
 
 Ask one question: *does this program ever write this file itself?* If yes, merge.
 
