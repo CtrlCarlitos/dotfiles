@@ -280,11 +280,15 @@ EOF
     ps_home="$ps_tmp/home"
     mkdir -p "$ps_home"
     ps_script="$repo_root/scripts/select-packages.ps1"
+    ps_run_log="$ps_tmp/ps_run.log"
 
-    HOME="$ps_home" USERPROFILE="$ps_home" PATH="$ps_bin:$PATH" \
+    if HOME="$ps_home" USERPROFILE="$ps_home" PATH="$ps_bin:$PATH" \
         FAKE_GUM_LOG="$ps_gum_log" FAKE_MULTI="mobile_dev" FAKE_PRESET="custom" \
-        "$py" "$ptyrunner" 30 pwsh -NoProfile -File "$ps_script" >/dev/null 2>&1 ||
-        fail "select-packages.ps1: menu run exited non-zero"
+        "$py" "$ptyrunner" 30 pwsh -NoProfile -File "$ps_script" >"$ps_run_log" 2>&1; then
+        :
+    else
+        fail "select-packages.ps1: menu run exited non-zero - output: $(tail -c 2000 "$ps_run_log")"
+    fi
 
     ps_cfg="$ps_home/.config/chezmoi/chezmoi.toml"
     if [ -f "$ps_cfg" ]; then
@@ -299,7 +303,7 @@ EOF
             fail "select-packages.ps1: mobile_dev itself was not persisted true"
         fi
     else
-        fail "select-packages.ps1: $ps_cfg was not created"
+        fail "select-packages.ps1: $ps_cfg was not created - output: $(tail -c 2000 "$ps_run_log")"
     fi
 else
     skip "pwsh or python3 not available to drive select-packages.ps1 interactively"
