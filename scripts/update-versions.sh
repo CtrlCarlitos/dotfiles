@@ -174,7 +174,7 @@ fi
 # published digest" shape install_powershell() uses for hashes.sha256. A pin
 # is left unchanged unless BOTH the version and sha256 resolve.
 echo "Fetching latest Maestro CLI version..."
-MAESTRO_FORMULA="$(net_timeout 60 curl -fsSL "https://raw.githubusercontent.com/mobile-dev-inc/homebrew-tap/master/Formula/maestro.rb")"
+MAESTRO_FORMULA="$(net_timeout 60 curl -fsSL "https://raw.githubusercontent.com/mobile-dev-inc/homebrew-tap/master/Formula/maestro.rb")" || MAESTRO_FORMULA=""
 if [ -z "$MAESTRO_FORMULA" ]; then
     echo "Warning: could not fetch mobile-dev-inc/homebrew-tap's maestro formula - pin left unchanged."
 else

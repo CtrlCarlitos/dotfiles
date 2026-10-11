@@ -98,4 +98,20 @@ got_sha="$(printf '%s\n' "$fixture" | parse_maestro_sha256)"
     fail "parse_maestro_sha256: expected the pinned sha256, got '$got_sha'"
 [ "$got_ver" = "2.11.0" ] && [ "$got_sha" = "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a" ] && pass
 
+# 7. A failed formula fetch must not abort the whole weekly run (final fix
+#    round, I2): under `set -e` a bare `X="$(failing)"` exits the script, so
+#    the "pin left unchanged" warning branch was unreachable. Executes the
+#    script's REAL Maestro section (from the fetch line through the end of its
+#    if/else) under `set -e` with a net_timeout that always fails.
+maestro_section="$(sed -n '/^MAESTRO_FORMULA="\$(net_timeout/,/^fi$/p' "$version_script")"
+if [ -z "$maestro_section" ]; then
+    fail "scripts/update-versions.sh: Maestro fetch section not found"
+else
+    got="$(bash -c 'set -e; net_timeout() { return 1; }; '"$maestro_section"$'\n''echo reached' 2>&1)" || true
+    case "$got" in
+        *'pin left unchanged'*'reached'*) pass ;;
+        *) fail "update-versions.sh: a failed Maestro formula fetch must warn and continue under set -e (got: $got)" ;;
+    esac
+fi
+
 finish
