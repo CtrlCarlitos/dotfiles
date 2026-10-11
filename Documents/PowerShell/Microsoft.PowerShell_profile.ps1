@@ -163,7 +163,11 @@ function dot {
                 # overwrite $LASTEXITCODE with THEIR exit code by the time this returns -
                 # save chezmoi's and restore it below, so the caller still sees chezmoi's.
                 $updateExitCode = $LASTEXITCODE
-                $src = Join-Path $HOME '.local\share\chezmoi'
+                # Chained, not a single '.local\share\chezmoi' literal: Join-Path only applies
+                # the current platform's separator between its own two arguments - an embedded
+                # backslash in the second one is never reinterpreted as a separator on pwsh/Linux
+                # (CI runs this profile's logic through pwsh there to test it for real).
+                $src = Join-Path (Join-Path (Join-Path $HOME '.local') 'share') 'chezmoi'
                 $curBranch = (git -C $src symbolic-ref --quiet --short HEAD 2>$null)
                 $goneLine = (git -C $src status -sb 2>$null | Select-Object -First 1)
                 if ($curBranch -and $goneLine -match '\[gone\]') {

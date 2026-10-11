@@ -89,15 +89,17 @@ if command -v pwsh >/dev/null 2>&1; then
         awk '/^function dot \{/{f=1} f{print} f && /^\}$/{exit}' "$tmp/profile.ps1" >"$tmp/dot.ps1"
         [ -s "$tmp/dot.ps1" ] || { fail "could not extract the dot function from $profile"; continue; }
 
-        run_ps_up() { # $1 = USERPROFILE-style home dir containing .local\share\chezmoi
-            # $HOME (the automatic variable the real profile code reads) is derived from
-            # USERPROFILE once at process startup - setting it mid-script is too late.
+        run_ps_up() { # $1 = home dir containing .local/share/chezmoi
+            # pwsh's $HOME (the automatic variable the real profile code reads) is derived
+            # once at process startup - from USERPROFILE on Windows, from HOME on Linux (where
+            # CI's lint job runs this same profile logic through pwsh to test it for real).
+            # Setting either mid-script is too late; set both before the process starts.
             {
                 printf '%s\n' 'function chezmoi { if ($args[0] -eq "update") { $global:LASTEXITCODE = 1 } else { $global:LASTEXITCODE = 0 } }'
                 cat "$tmp/dot.ps1"
                 printf '%s\n' '$global:LASTEXITCODE = 0' 'dot up *>&1 | Out-String | Write-Output' 'Write-Output "rc=$global:LASTEXITCODE"'
             } >"$tmp/run-dot.ps1"
-            USERPROFILE="$(winpath "$1")" pwsh -NoProfile -File "$(winpath "$tmp/run-dot.ps1")" 2>&1
+            HOME="$(winpath "$1")" USERPROFILE="$(winpath "$1")" pwsh -NoProfile -File "$(winpath "$tmp/run-dot.ps1")" 2>&1
         }
 
         home_gone="$tmp/ps-home-gone-$(basename "$profile")"
