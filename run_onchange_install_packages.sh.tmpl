@@ -858,11 +858,21 @@ install_mobile_dev() {
     # Native Linux/macOS get the full SDK with the emulator and a default
     # AVD; WSL gets only platform-tools, because the emulator only ever runs
     # on the Windows side (design doc §3.3) and WSL just needs an adb client
-    # for the ADB_SERVER_SOCKET bridge.
+    # for the ADB_SERVER_SOCKET bridge. Devcontainers get neither: #336's
+    # explicit caution is "no GUI/emulator at all" in a container, and
+    # design doc §3.10 leaves the exact CLI-only-or-fully-gated-off choice
+    # to the builder - fully gated off here, matching this repo's existing
+    # conservative default for every other GUI/host-only group in a
+    # container (dev_desktop, remote_access, etc. - see $isHost's own
+    # definition above). A devcontainer still gets Maestro/agent-device/JDK
+    # from the rest of install_mobile_dev() - those are CLI-only and safe
+    # anywhere; only the SDK's emulator half is gated here.
 {{- if $isWsl }}
     install_android_sdk adb || warn "Android platform-tools (adb) install failed - continuing"
-{{- else }}
+{{- else if $isHost }}
     install_android_sdk full || warn "Android SDK install failed - continuing"
+{{- else }}
+    info "Android SDK/emulator skipped (no GUI/emulator in a devcontainer) - Maestro, agent-device, and the JDK above are still installed"
 {{- end }}
 
     # --- WSL: heads-up about the ADB bridge to the Windows host -----------

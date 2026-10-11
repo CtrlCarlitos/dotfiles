@@ -380,6 +380,18 @@ if command -v chezmoi >/dev/null 2>&1; then
     else
         fail "render (native Linux): install_mobile_dev must call 'install_android_sdk full', never 'adb'"
     fi
+
+    # Devcontainers get neither mode (#336: no GUI/emulator in a container).
+    # $isDevcontainer is derived from env/`/.dockerenv` at render time, not
+    # overridable via --override-data like os/kernel - so this pins the
+    # template's own branch structure (a real executable render of the
+    # devcontainer path isn't available to this test harness) rather than
+    # executing it.
+    if grep -Fq '{{- else if $isHost }}' "$tmpl" && grep -Fq 'Android SDK/emulator skipped (no GUI/emulator in a devcontainer)' "$tmpl"; then
+        pass
+    else
+        fail "install_mobile_dev must gate the Android SDK's full/adb modes on \$isHost/\$isWsl, leaving devcontainers with neither"
+    fi
     for pin in sha256_linux sha256_mac_x86_64 sha256_mac_arm64; do
         want_pin="$(sed -n "s/^  android_commandlinetools_${pin}: \"\\([^\"]*\\)\"\$/\\1/p" "$repo_root/.chezmoidata.yaml")"
         if [ -n "$want_pin" ] && grep -Fq "want='$want_pin'" "$sdk_render"; then
