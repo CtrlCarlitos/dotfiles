@@ -52,7 +52,9 @@ if command -v chezmoi >/dev/null 2>&1; then
     grep -Eq '^ *brew install .*\blychee\b.*\bvale\b' "$fx/darwin.sh" || fail "macOS render: lychee and vale must come from brew"
     render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$on}" --file "$ps_t" >"$fx/win.ps1"
     grep -Fq "Install-NpmCatalogTool -Package @('markdownlint-cli2' -split ' '" "$fx/win.ps1" || fail "windows render: markdownlint-cli2 is not installed through Install-NpmCatalogTool"
-    grep -Fq '$wingetPackages += "lycheeverse.lychee||lychee"' "$fx/win.ps1" || fail "windows render: lychee is not in the winget list"
+    # lychee's winget package is "portable" (user scope by default) - machine-wide like the
+    # rest of tests/winget_machine_scope_contract.sh's list.
+    grep -Fq '$wingetPackages += "lycheeverse.lychee|--scope machine|lychee"' "$fx/win.ps1" || fail "windows render: lychee is not in the winget list"
     grep -Fq '$packages += "vale"' "$fx/win.ps1" || fail "windows render: vale is not in the choco list"
     pass
 else

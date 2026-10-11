@@ -24,6 +24,12 @@ Sudo-style alternatives to opening a separate elevated terminal:
   builds; `gsudo dot up` behaves like Linux sudo, including credential
   caching.
 
+`install.ps1` (the one-time bootstrap one-liner) holds to the same policy: it offers to
+restart itself elevated, and refuses rather than continuing non-admin. It used to offer a
+degraded "continue as standard user" path, but `chezmoi init --apply` at the end of that same
+run reaches the installer's gate above within moments anyway - the degraded path only delayed
+the same failure by one step, behind a message that implied a working install.
+
 ### `dot up` vs `dot upgrade`
 
 | | `dot up` | `dot upgrade` |
@@ -126,10 +132,15 @@ upgrades, each pending package is asked about by id, and the ones it refuses mov
 into `Not upgradeable through winget (installed another way; its own updater handles it): ...`.
 
 `dot upgrade` runs elevated, and winget cannot upgrade a **per-user** package from an elevated shell
-(`The package installed for user scope cannot be uninstalled when running with administrator privileges`),
-so the catalog installs such tools machine-wide (`winget_args: "--scope machine"`; gum today). A per-user
-copy from before that is reported by `dot up`; the one-time fix is `winget uninstall --id charmbracelet.gum
---exact` from a non-elevated terminal, then `dot up`.
+(`The package installed for user scope cannot be uninstalled when running with administrator privileges`).
+winget's "portable" installer type - most of this catalog's small CLI tools (gum, ripgrep, fzf, jq, bat,
+lazygit, and two dozen more; see `tests/winget_machine_scope_contract.sh` for the full list) - defaults to
+**user** scope unless told otherwise, so the catalog installs them with `winget_args: "--scope machine"`.
+chezmoi itself (`install.ps1`, not in the catalog) and scrcpy (the mobile_dev block) get the same
+`--scope machine` flag directly on their own winget install calls. A per-user copy from before that fix is
+reported by `dot up`; the one-time fix is `winget uninstall --id <winget-id> --exact` from a non-elevated
+terminal, then re-run `dot up` (or, for chezmoi, `winget install --id twpayne.chezmoi --exact --scope
+machine` right after, since it isn't in the catalog's own re-install sweep).
 
 Two more holds in the sweep: a new **Python minor** (3.14 to 3.15) is left out of `choco upgrade all`
 because venvs and uv/pipx tools are bound to their minor (patch releases still upgrade); take it with

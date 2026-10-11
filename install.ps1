@@ -94,28 +94,34 @@ if (-not $IsNonInteractive) {
     }
 }
 
+# Hard requirement, not a recommendation: Chocolatey, winget's machine-scope installs, and
+# `chezmoi init --apply` below (which runs run_onchange_install_packages.ps1.tmpl immediately)
+# all need admin. That template has its own hard elevation gate and exits 1 the moment it's
+# reached - so "continuing as standard user" used to just delay the same failure by one step,
+# behind a message that implied a working degraded install. Fail here instead, before anything
+# is touched, same policy as that gate (docs/windows.md, Run dot up as Administrator).
 if (-not $IsAdmin) {
-    Write-Info "Running without Administrator privileges."
     if ($IsNonInteractive) {
-        Write-Info "Non-interactive environment detected - continuing as standard user without prompting."
-    } else {
-        $response = Read-Host "Administrator rights are recommended for full installation (Chocolatey, etc). Restart as Admin? (Y/n)"
-        if ($response -ne 'n') {
-            Write-Info "Restarting as Administrator..."
-            if ($PSCommandPath) {
-                # Running from file - restart file
-                Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-            } else {
-                # Running from one-liner - restart command
-                # Using 'iex' inside the new process to re-download and run
-                $cmd = "iex (irm $InstallerUrl)"
-                Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`""
-            }
-            exit
-        } else {
-            Write-Info "Continuing as standard user. Some features (Chocolatey) will be skipped."
-        }
+        Write-Fail "This installer requires an elevated PowerShell (Chocolatey and machine-wide winget installs need it, and the dotfiles apply that follows hard-requires it too). Re-run from an Administrator PowerShell."
+        exit 1
     }
+    Write-Info "Running without Administrator privileges."
+    $response = Read-Host "This installer requires Administrator rights (Chocolatey, machine-wide installs). Restart as Admin? (Y/n)"
+    if ($response -eq 'n') {
+        Write-Info "Aborted - nothing was installed. Re-run from an Administrator PowerShell."
+        exit 0
+    }
+    Write-Info "Restarting as Administrator..."
+    if ($PSCommandPath) {
+        # Running from file - restart file
+        Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    } else {
+        # Running from one-liner - restart command
+        # Using 'iex' inside the new process to re-download and run
+        $cmd = "iex (irm $InstallerUrl)"
+        Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`""
+    }
+    exit
 }
 
 try {
@@ -201,7 +207,13 @@ try {
         try {
             # winget is the primary Windows manager (twpayne.chezmoi); `dot upgrade`'s winget sweep
             # then keeps chezmoi current. Chocolatey only where winget is missing.
-            $wingetFlags = @('--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+            # chezmoi's winget package is "portable", which defaults to user scope - and `dot
+            # upgrade` runs elevated, which cannot upgrade a user-scope copy ("installed for user
+            # scope cannot be uninstalled when running with administrator privileges"; the same
+            # reason gum's catalog entry carries --scope machine, .chezmoidata/packages.yaml).
+            # Unconditional, not $IsAdmin-gated: the elevation gate above already guarantees admin
+            # by the time execution reaches here.
+            $wingetFlags = @('--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--scope', 'machine')
             if (Get-Command winget -ErrorAction SilentlyContinue) {
                 if ($chezmoiPin) {
                     winget install --id twpayne.chezmoi --version $chezmoiPin @wingetFlags
