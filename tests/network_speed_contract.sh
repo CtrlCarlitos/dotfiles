@@ -64,7 +64,7 @@ pass
 if [ "$(uname -s)" = Linux ] && command -v script >/dev/null 2>&1; then
     ask() {
         printf '%s\n' "$1" | env PATH="$tmp/bin:$PATH" FAKE_CURL_OUT='1250000|10000000' DOTUPGRADE_PROMPT_TIMEOUT=5 \
-            script -qec "bash $tmp/drive.sh $repo_root" /dev/null 2>&1 | tr -d '\r' | grep -E '^choice=' || true
+            script -qec "bash $tmp/drive.sh $repo_root" /dev/null 2>&1 | tr -d '\r' | grep -oE 'choice=[a-z]+' | tail -n 1 || true
     }
     [ "$(ask s)" = 'choice=skip' ] || fail "shell: answering s must skip the sweep"
     [ "$(ask q)" = 'choice=stop' ] || fail "shell: answering q must stop"
