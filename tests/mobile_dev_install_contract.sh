@@ -60,6 +60,19 @@ require "$tmpl" 'openjdk-{{ .versions.jdk_version }}-jdk'
 require "$tmpl" 'openjdk@{{ .versions.jdk_version }}'
 require "$tmpl" 'JAVA_HOME'
 
+# --- scrcpy (Task 10): apt + brew branches, command -v guarded -----------
+# apt DOES carry a `scrcpy` package on current Ubuntu (universe repo,
+# confirmed live via `apt-cache madison scrcpy` while writing this test) -
+# both branches install it, no "apt doesn't have it" case to assert here.
+# Quoted literal, like the standalone JDK's own package names right above -
+# that is what keeps this install_mobile_dev()-local package name out of
+# tests/package_catalog_contract.sh's "no literal apt install bypasses the
+# catalog" scan (that scan is for install_apt()'s group-wide catalog
+# installs, not install_mobile_dev()'s own conditional, host-gated ones).
+require "$tmpl" 'apt install -y "scrcpy"'
+require "$tmpl" 'brew install "scrcpy"'
+require "$tmpl" 'command -v scrcpy'
+
 # --- Maestro MCP registration for Claude Code and Codex, idempotent -------
 # (Task 3, moved by the final fix round): mirrors the serena precedent's own
 # gating shape ("mcp get" idempotency check, warn-and-continue on failure -
@@ -427,6 +440,27 @@ if command -v chezmoi >/dev/null 2>&1; then
         pass
     else
         fail "render (devcontainer): install_android_sdk must not be called (full or adb) - only the skip message"
+    fi
+
+    # --- scrcpy (Task 10): host-only ($isHost), same reasoning and render
+    # pattern as the Android SDK checks directly above - $out still holds
+    # the WSL render from render_wsl_to, sdk_render the native Linux one,
+    # devc_render the devcontainer one. scrcpy's install must run only on
+    # the native Linux render, never under WSL or in a devcontainer.
+    if grep -Fq 'command -v scrcpy' "$out"; then
+        fail "render (WSL): scrcpy install must not run under \$isHost=false (WSL)"
+    else
+        pass
+    fi
+    if grep -Fq 'command -v scrcpy' "$sdk_render"; then
+        pass
+    else
+        fail "render (native Linux): scrcpy install must run under \$isHost=true"
+    fi
+    if grep -Fq 'command -v scrcpy' "$devc_render"; then
+        fail "render (devcontainer): scrcpy install must not run under \$isHost=false (devcontainer)"
+    else
+        pass
     fi
     # I-A (second final fix round): execute the REAL rendered
     # install_mobile_dev() with Maestro and agent-device already on PATH

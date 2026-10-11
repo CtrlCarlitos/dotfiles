@@ -128,7 +128,10 @@ the Maestro CLI (pinned and checksum-verified, under
 global), and a standalone JDK 17 (apt's `openjdk-17-jdk` or brew's
 `openjdk@17`), plus the same MCP registrations described under "MCP
 servers" below - and the full Android SDK, because here everything runs on
-a single host, with no Windows/WSL split:
+a single host, with no Windows/WSL split. It also installs **scrcpy**
+(`command -v`-guarded, apt's `scrcpy` package or brew's `scrcpy` formula)
+for mirroring and controlling a real device or emulator's screen from the
+desktop:
 
 - **SDK command-line tools** (`sdkmanager`, `avdmanager`): Google's zip for
   this OS (Linux, Mac Intel or Mac ARM), pinned in `.chezmoidata.yaml` and
@@ -167,8 +170,8 @@ when it launches.
 **Caveat:** no CI job ever performs a live `mobile_dev` install. The
 real-install fixture (`tests/fixtures/chezmoi/packages-on.toml`, used by
 `.github/workflows/full-install-test.yml`) sets `mobile_dev = false`, so
-Maestro, agent-device, the JDK and the Android SDK are never actually
-downloaded or installed on GitHub Actions' `ubuntu-latest` or
+Maestro, agent-device, the JDK, scrcpy and the Android SDK are never
+actually downloaded or installed on GitHub Actions' `ubuntu-latest` or
 `macos-latest` runners. CI coverage for `mobile_dev` comes only from
 `tests/mobile_dev_install_contract.sh` (and the MCP catalog checks in
 `tests/mcp_autowire_contract.sh`), which `ci.yml` runs on every push via
