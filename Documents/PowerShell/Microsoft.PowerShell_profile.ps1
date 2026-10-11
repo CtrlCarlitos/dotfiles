@@ -154,7 +154,28 @@ function dot {
             # Pull WITHOUT applying, re-run the config template on the pulled source, then ONE
             # apply with the fresh config (applying before init ran the installer twice).
             chezmoi update --apply=false
-            if ($LASTEXITCODE -ne 0) { return }
+            if ($LASTEXITCODE -ne 0) {
+                # A feature branch merged (often squashed, as this repo's own PRs are) and
+                # auto-deleted upstream leaves `git pull` nothing to merge into it - raw git
+                # error, no hint (lived 2026-10-11: feat/mobile-dev's PR #352). fetch.prune
+                # (on by default) already marked it [gone] by the time the pull failed.
+                # The diagnostic's own `git` calls are native processes too, and would
+                # overwrite $LASTEXITCODE with THEIR exit code by the time this returns -
+                # save chezmoi's and restore it below, so the caller still sees chezmoi's.
+                $updateExitCode = $LASTEXITCODE
+                $src = Join-Path $HOME '.local\share\chezmoi'
+                $curBranch = (git -C $src symbolic-ref --quiet --short HEAD 2>$null)
+                $goneLine = (git -C $src status -sb 2>$null | Select-Object -First 1)
+                if ($curBranch -and $goneLine -match '\[gone\]') {
+                    $defaultBranch = (git -C $src symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null) -replace '^origin/', ''
+                    Write-Host "dot up: '$curBranch' tracks a remote branch that's gone - it was likely merged and deleted upstream, so there's nothing left to pull into it." -ForegroundColor Yellow
+                    if ($defaultBranch -and $curBranch -ne $defaultBranch) {
+                        Write-Host "  Fix: git -C `"$src`" checkout $defaultBranch; git -C `"$src`" pull; git -C `"$src`" branch -D $curBranch" -ForegroundColor Yellow
+                    }
+                }
+                $global:LASTEXITCODE = $updateExitCode
+                return
+            }
             chezmoi init
             if ($LASTEXITCODE -ne 0) { return }
             chezmoi apply
