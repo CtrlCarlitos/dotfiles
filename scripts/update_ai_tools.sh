@@ -10,7 +10,7 @@ set -e
 # net_timeout (the updater previously had none - the 2026-08-30 hang class),
 # sha256_cmd, fetch_and_verify, skills_add_all, verify_curated_skill_targets.
 . "${BASH_SOURCE[0]%/*}/lib/agent-skills.sh"
-# The [data.packages] scanner + the 16-group taxonomy (issue #123).
+# The [data.packages] scanner + the 17-group taxonomy (issue #123).
 . "${BASH_SOURCE[0]%/*}/lib/chezmoi-config.sh"
 # Where the time goes: marks at each section, a summary at the end.
 . "${BASH_SOURCE[0]%/*}/lib/timing.sh"

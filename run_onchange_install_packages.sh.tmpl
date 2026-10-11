@@ -93,7 +93,7 @@ _sudo_net_timeout() {
 }
 # sudo-helpers: end
 
-{{/* 16-group package taxonomy (docs/package-groups.md).
+{{/* 17-group package taxonomy (docs/package-groups.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
@@ -126,6 +126,7 @@ _sudo_net_timeout() {
 {{- $remote_access_server := false -}}
 {{- $vscodeSettings := "true" -}}
 {{- $guardrail := false -}}
+{{- $mobile_dev := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
@@ -144,6 +145,7 @@ _sudo_net_timeout() {
   {{- if hasKey .packages "remote_access" }}{{- $remote_access = .packages.remote_access }}{{- end -}}
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
+  {{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}
 {{- end -}}
 
 {{- $curatedTotal := 0 -}}
@@ -472,6 +474,475 @@ install_fonts() {
         info "Updating font cache..."
         fc-cache -f
     fi
+}
+
+# android_sdk_interactive - true only when a person can answer a prompt: the
+# same `[[ -t 0 ]] && [[ -z "${CI:-}" ]]` check main()'s Docker
+# WSL-Integration prompt uses. A function of its own so
+# tests/mobile_dev_install_contract.sh can drive both answers without a real
+# terminal.
+android_sdk_interactive() {
+    [[ -t 0 ]] && [[ -z "${CI:-}" ]]
+}
+
+# android_cmdline_tools_install SDK_ROOT - download the pinned Android SDK
+# command-line tools zip for this OS/arch, verify its sha256 against
+# .chezmoidata.yaml's android_commandlinetools_* pins, and lay it out as
+# SDK_ROOT/cmdline-tools/latest. Picked by `uname`, not $PKG_MANAGER: the zip
+# is a plain download, not a package, and brew can drive a Linux host too.
+# Returns 1 (after warning) on any failure; the caller skips everything that
+# needs sdkmanager.
+android_cmdline_tools_install() {
+    local sdk="$1" ver want zip url tmp got sha_cmd
+    ver='{{ .versions.android_commandlinetools_version }}'
+    case "$(uname -s)" in
+        Linux)
+            zip="commandlinetools-linux-${ver}_latest.zip"
+            want='{{ .versions.android_commandlinetools_sha256_linux }}'
+            ;;
+        Darwin)
+            case "$(uname -m)" in
+                arm64)
+                    zip="commandlinetools-mac_arm64-${ver}_latest.zip"
+                    want='{{ .versions.android_commandlinetools_sha256_mac_arm64 }}'
+                    ;;
+                *)
+                    zip="commandlinetools-mac_x86_64-${ver}_latest.zip"
+                    want='{{ .versions.android_commandlinetools_sha256_mac_x86_64 }}'
+                    ;;
+            esac
+            ;;
+        *)
+            warn "Android SDK: no command-line tools pin for $(uname -s) - skipping"
+            return 1
+            ;;
+    esac
+    url="https://dl.google.com/android/repository/$zip"
+    sha_cmd="$(sha256_cmd)"
+    if [[ -z "$sha_cmd" ]]; then
+        warn "Android SDK: no SHA-256 tool found - cannot verify the command-line tools download, skipping"
+        return 1
+    fi
+    if ! command -v unzip &>/dev/null; then
+        warn "Android SDK: unzip not found - cannot extract the command-line tools, skipping"
+        return 1
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        warn "Android SDK: could not create a temporary directory - skipping"
+        return 1
+    fi
+    info "Installing the Android SDK command-line tools $ver (sdkmanager, avdmanager) into $sdk..."
+    if ! net_timeout 600 curl -fsSLo "$tmp/$zip" "$url"; then
+        warn "Android SDK command-line tools download failed or timed out - skipping"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
+    got="$($sha_cmd "$tmp/$zip" 2>/dev/null | cut -d' ' -f1)"
+    if [[ "$want" != "$got" ]]; then
+        warn "Android SDK command-line tools CHECKSUM MISMATCH for $zip - not installing (pin stale? re-check developer.android.com/studio)"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # The zip's own root is "cmdline-tools" with no "latest" level, but
+    # sdkmanager resolves the SDK root from its own location and needs
+    # <sdk>/cmdline-tools/latest/bin/sdkmanager (Google's documented layout,
+    # the same gotcha the Windows twin documents). The caller only reaches
+    # here when cmdline-tools/latest is absent or this installer's own.
+    rm -rf "$sdk/cmdline-tools/latest" "$sdk/cmdline-tools/.incoming"
+    if mkdir -p "$sdk/cmdline-tools" \
+        && unzip -q "$tmp/$zip" -d "$sdk/cmdline-tools/.incoming" \
+        && mv "$sdk/cmdline-tools/.incoming/cmdline-tools" "$sdk/cmdline-tools/latest" \
+        && [[ -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]]; then
+        rm -rf "$sdk/cmdline-tools/.incoming" "$tmp"
+        success "Android SDK command-line tools $ver installed ($sdk/cmdline-tools/latest)"
+        return 0
+    fi
+    warn "Android SDK command-line tools install failed - skipping"
+    rm -rf "$sdk/cmdline-tools/.incoming" "$tmp"
+    return 1
+}
+
+# install_android_sdk MODE - mobile_dev's Android SDK (design doc §3.10):
+#   full  native Linux/macOS: command-line tools, platform-tools (adb), the
+#         emulator, the android-34 system image and a default AVD
+#         (mobile_dev_pixel, pixel_6 profile - the Windows twin's choices).
+#   adb   WSL: command-line tools + platform-tools only, so `adb` exists for
+#         dot_zshrc's ADB_SERVER_SOCKET bridge. No emulator or AVD: under WSL
+#         the device only ever runs on the Windows side (design doc §3.3).
+#
+# Single-user like Maestro: $HOME/.local/opt/android-sdk, no $SUDO. Android
+# SDK components are not system packages on any platform this repo targets.
+# An SDK the user already has (ANDROID_HOME, ANDROID_SDK_ROOT, or Android
+# Studio's default location) is used in place and only ever added to, never
+# replaced or re-pointed; dot_zshrc's ANDROID_HOME/PATH block covers only
+# this installer's own location.
+#
+# No confirmation before the downloads themselves (the Ollama precedent: a
+# long net_timeout and warn-and-continue). What IS gated is accepting
+# Google's Android SDK licenses, which sdkmanager requires before
+# platform-tools/emulator/the system image: only a person may agree to them,
+# so a non-interactive run (android_sdk_interactive) skips the licenses and
+# everything that depends on them, with a warning saying how to re-run.
+#
+# Called as `install_android_sdk <mode> || warn ...`: errexit is suspended in
+# here, and every failure warns and returns 0.
+install_android_sdk() {
+    local mode="$1"
+    local own_sdk="$HOME/.local/opt/android-sdk" sdk="" candidate
+    for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk" "$HOME/Library/Android/sdk"; do
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            sdk="$candidate"
+            break
+        fi
+    done
+    if [[ -n "${ANDROID_HOME:-}" && -n "${ANDROID_SDK_ROOT:-}" && "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ]]; then
+        warn "ANDROID_HOME ($ANDROID_HOME) and ANDROID_SDK_ROOT ($ANDROID_SDK_ROOT) disagree - using $sdk; reconcile them yourself if that is wrong."
+    fi
+    if [[ -z "$sdk" ]]; then
+        sdk="$own_sdk"
+    elif [[ "$sdk" != "$own_sdk" ]]; then
+        info "Android SDK: using your existing SDK at $sdk (only missing pieces are added; its ANDROID_HOME/PATH stay yours to manage)"
+    fi
+
+    if [[ "$mode" = adb ]]; then
+        local existing_adb
+        existing_adb="$(command -v adb || true)"
+        if [[ -n "$existing_adb" && "$existing_adb" != "$sdk/platform-tools/adb" ]]; then
+            info "adb already on PATH ($existing_adb) - not installing Android platform-tools"
+            return 0
+        fi
+    fi
+
+    # The emulator's hardware acceleration on Linux is KVM (the counterpart
+    # of the Windows twin's WHPX check). Reported whatever happens below:
+    # even if the SDK steps fail, whether the emulator can ever be
+    # accelerated here is worth knowing. Never fixed for the user - a group
+    # membership or firmware change is theirs to make. macOS has no
+    # counterpart here: the emulator uses Apple's Hypervisor.framework, part
+    # of the OS rather than an optional feature; if acceleration is
+    # unavailable anyway, the emulator reports it when it launches.
+    if [[ "$mode" = full && "$(uname -s)" = Linux ]]; then
+        if [[ ! -e /dev/kvm ]]; then
+            warn "No /dev/kvm - the Android emulator has no hardware acceleration here. Enable virtualization (VT-x/AMD-V) in the firmware and load the kvm module."
+        elif [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            warn "/dev/kvm is not accessible to $(id -un) - the Android emulator needs it for hardware acceleration. Run: sudo usermod -aG kvm \"\$USER\", then log out and back in."
+        fi
+    fi
+
+    local sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+    if [[ ! -x "$sdkmanager" ]]; then
+        if [[ "$sdk" != "$own_sdk" && -e "$sdk/cmdline-tools/latest" ]]; then
+            warn "Android SDK: $sdk/cmdline-tools/latest exists but has no sdkmanager - not replacing a directory this installer did not create; repair or remove it, then re-run"
+            return 0
+        fi
+        android_cmdline_tools_install "$sdk" || return 0
+    fi
+
+    local abi image avd_name=mobile_dev_pixel avd_home need_avd=false
+    local -a want_pkgs=()
+    case "$(uname -m)" in
+        arm64|aarch64) abi=arm64-v8a ;;
+        *) abi=x86_64 ;;
+    esac
+    image="system-images;android-34;default;$abi"
+    avd_home="${ANDROID_AVD_HOME:-${ANDROID_USER_HOME:-$HOME/.android}/avd}"
+    [[ -x "$sdk/platform-tools/adb" ]] || want_pkgs+=(platform-tools)
+    if [[ "$mode" = full ]]; then
+        [[ -x "$sdk/emulator/emulator" ]] || want_pkgs+=(emulator)
+        [[ -d "$sdk/system-images/android-34/default/$abi" ]] || want_pkgs+=("$image")
+        [[ -d "$avd_home/$avd_name.avd" ]] || need_avd=true
+    fi
+
+    if [[ ${#want_pkgs[@]} -gt 0 ]]; then
+        # run_onchange re-runs only when this script's rendered content
+        # changes, so "just run dot up again" would not re-enter here; the
+        # real re-entry point is clearing chezmoi's recorded script state.
+        if ! android_sdk_interactive; then
+            warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
+            warn "  To accept them, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            return 0
+        fi
+        info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
+        info "  Review them first with: $sdkmanager --licenses"
+        local android_accept=""
+        read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
+        if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
+            warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            return 0
+        fi
+        # sdkmanager asks once per license; a generous "y" feed answers
+        # every one the person just agreed to (the Windows twin's approach).
+        if ! printf 'y\n%.0s' {1..50} | net_timeout 300 "$sdkmanager" --licenses >/dev/null; then
+            warn "sdkmanager --licenses failed or timed out - not downloading ${want_pkgs[*]}"
+            return 0
+        fi
+        info "Downloading ${want_pkgs[*]} with sdkmanager (this can take a while)..."
+        net_timeout 1800 "$sdkmanager" "${want_pkgs[@]}" </dev/null \
+            || warn "sdkmanager ${want_pkgs[*]} failed or timed out - continuing"
+    fi
+
+    if [[ "$need_avd" = true ]]; then
+        if [[ -d "$sdk/system-images/android-34/default/$abi" ]]; then
+            # avdmanager asks whether to create a custom hardware profile;
+            # "no" keeps the pixel_6 device profile's own defaults.
+            if echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd -n "$avd_name" -k "$image" -d pixel_6 >/dev/null; then
+                success "Default AVD created ($avd_name: $image, pixel_6)"
+            else
+                warn "avdmanager create avd failed - continuing (create one yourself with avdmanager)"
+            fi
+        else
+            warn "Android system image $image is not installed - default AVD not created"
+        fi
+    fi
+
+    local sdk_adb="$sdk/platform-tools/adb" path_adb
+    if [[ -x "$sdk_adb" ]]; then
+        # Google's platform-tools ship native binaries; on a host they were
+        # not built for, adb exists but cannot run - say so instead of
+        # leaving a broken adb behind silently.
+        if ! "$sdk_adb" version >/dev/null 2>&1; then
+            warn "$sdk_adb does not run on this machine ($(uname -s) $(uname -m)) - install your OS's own adb package instead"
+            return 0
+        fi
+        # Two different adb builds kill each other's server ("adb server
+        # version (X) doesn't match this client (Y); killing..."), which
+        # would also defeat the WSL ADB bridge. dot_zshrc APPENDS the SDK's
+        # dirs, so an adb already on PATH keeps precedence; flag the pair.
+        path_adb="$(command -v adb || true)"
+        if [[ -n "$path_adb" && "$path_adb" != "$sdk_adb" ]]; then
+            warn "Two adb builds are present: $path_adb (first on PATH) and $sdk_adb. Mismatched adb versions kill each other's server - keep only one if adb misbehaves."
+        fi
+        if [[ "$sdk" = "$own_sdk" ]]; then
+            success "Android SDK ready at $sdk - open a new shell for ANDROID_HOME and adb/sdkmanager$([[ "$mode" = full ]] && printf '/emulator') on PATH (dot_zshrc)"
+        fi
+    fi
+    return 0
+}
+
+# install_mobile_dev() - mobile_dev group: Maestro CLI, agent-device, a
+# standalone JDK 17+ (Maestro's own "Java 17 or higher" requirement,
+# .chezmoidata.yaml's jdk_version), and the Android SDK (install_android_sdk
+# above: the full SDK with emulator and AVD on native Linux/macOS, only the
+# adb client under WSL).
+#
+# Maestro is NOT installed via the vendor's own curl-piped-to-bash installer
+# one-liner (see .chezmoidata.yaml's versions comment for its exact URL):
+# that installer only runs `unzip -qt` on what it downloads - a corruption check,
+# not an authenticity one (see .chezmoidata.yaml's maestro_version/
+# maestro_sha256 comment) - which would make this repo's own pin meaningless
+# ("latest" fetched with no checksum enforced at all). Instead this downloads
+# the EXACT pinned release asset and verifies its sha256 itself, the same
+# shape install_powershell() already uses for its own pinned download
+# (net_timeout-wrapped curl, sha256_cmd, warn-and-continue on a mismatch -
+# never abort under `set -e`). The release tag is "cli-$maestro_ver" - the
+# "cli-" prefix is part of the URL only, never part of the stored version
+# string - confirmed directly against the real
+# mobile-dev-inc/maestro release (`gh release download`, sha256sum): the zip
+# extracts into its own maestro/ directory (maestro/bin/maestro, a standard
+# Gradle POSIX launcher that resolves JAVA_HOME or falls back to `java` on
+# PATH, plus maestro/lib/*.jar) - a plain -d destination is enough, unlike
+# install_powershell()'s FLAT tarball which needs a directory of our own
+# making.
+#
+# Maestro is single-user (unlike install_powershell()'s system-wide
+# /opt/microsoft install): no $SUDO, lands under $HOME/.local/opt, symlinked
+# from $HOME/.local/bin - already on PATH per dot_zshrc's "Local binaries"
+# block and docs/agent-context-tools.md (uv's own tool shims land there the
+# same way).
+install_mobile_dev() {
+    # --- Standalone JDK 17+ ------------------------------------------------
+    # jdk_home is computed BEFORE deciding whether to install: brew's
+    # openjdk@{{ .versions.jdk_version }} is keg-only (deliberately not
+    # linked into brew's shared bin, to avoid shadowing macOS's own java), so
+    # `command -v javac` never finds it even once installed - `brew --prefix`
+    # is the only reliable "is it already here" check on that manager.
+    local jdk_home=""
+    case "$PKG_MANAGER" in
+        apt)
+            jdk_home="/usr/lib/jvm/java-{{ .versions.jdk_version }}-openjdk-$(dpkg --print-architecture 2>/dev/null)" || jdk_home=""
+            ;;
+        brew)
+            jdk_home="$(brew --prefix "openjdk@{{ .versions.jdk_version }}" 2>/dev/null)" || jdk_home=""
+            ;;
+    esac
+    [[ -n "$jdk_home" && -x "$jdk_home/bin/javac" ]] || jdk_home=""
+    if [[ -z "$jdk_home" ]]; then
+        info "Installing JDK {{ .versions.jdk_version }} (Maestro + agent-device need Java 17+)..."
+        case "$PKG_MANAGER" in
+            apt)
+                if $SUDO apt install -y "openjdk-{{ .versions.jdk_version }}-jdk"; then
+                    jdk_home="/usr/lib/jvm/java-{{ .versions.jdk_version }}-openjdk-$(dpkg --print-architecture 2>/dev/null)" || jdk_home=""
+                else
+                    warn "JDK install failed - continuing"
+                fi
+                ;;
+            brew)
+                if brew install "openjdk@{{ .versions.jdk_version }}"; then
+                    jdk_home="$(brew --prefix "openjdk@{{ .versions.jdk_version }}" 2>/dev/null)" || jdk_home=""
+                else
+                    warn "JDK install failed - continuing"
+                fi
+                ;;
+            *)
+                warn "Skipping JDK install (unsupported manager: $PKG_MANAGER)"
+                ;;
+        esac
+    fi
+    # JAVA_HOME for the REST OF THIS RUN only (agent-device/maestro below,
+    # and anything mobile_dev adds later). dot_zshrc's own "Language
+    # ecosystem binaries" detection - the same GOPATH/composer_home idiom
+    # already there - is what persists JAVA_HOME into every future shell;
+    # nothing here writes to a shell profile (run_onchange scripts must stay
+    # idempotent against files chezmoi itself owns, docs/invariants.md #3).
+    if [[ -z "${JAVA_HOME:-}" && -n "$jdk_home" ]]; then
+        export JAVA_HOME="$jdk_home"
+    fi
+
+    # --- Maestro CLI: manual pinned+verified install -----------------------
+    if ! command -v maestro &>/dev/null; then
+        local maestro_ver maestro_want maestro_got maestro_sha_cmd maestro_tmp maestro_asset maestro_url
+        maestro_ver='{{ .versions.maestro_version }}'
+        maestro_want='{{ .versions.maestro_sha256 }}'
+        maestro_asset="maestro.zip"
+        maestro_url="https://github.com/mobile-dev-inc/maestro/releases/download/cli-$maestro_ver/$maestro_asset"
+        maestro_sha_cmd="$(sha256_cmd)"
+        if [[ -z "$maestro_sha_cmd" ]]; then
+            warn "maestro: no SHA-256 tool found - cannot verify the download, skipping"
+        elif ! command -v unzip &>/dev/null; then
+            warn "maestro: unzip not found - cannot extract the download, skipping"
+        elif ! maestro_tmp="$(mktemp -d)"; then
+            warn "maestro: could not create a temporary directory - skipping"
+        else
+            info "Installing Maestro $maestro_ver (CLI for mobile_dev)..."
+            if ! net_timeout 300 curl -fsSLo "$maestro_tmp/$maestro_asset" "$maestro_url"; then
+                warn "maestro download failed or timed out - skipping"
+            else
+                # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
+                maestro_got="$($maestro_sha_cmd "$maestro_tmp/$maestro_asset" 2>/dev/null | cut -d' ' -f1)"
+                if [ "$maestro_want" != "$maestro_got" ]; then
+                    warn "maestro CHECKSUM MISMATCH for $maestro_asset - not installing (pin stale? re-run scripts/update-versions.sh)"
+                else
+                    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+                    rm -rf "$HOME/.local/opt/maestro"
+                    if unzip -q "$maestro_tmp/$maestro_asset" -d "$HOME/.local/opt" \
+                        && chmod +x "$HOME/.local/opt/maestro/bin/maestro" \
+                        && ln -sf "$HOME/.local/opt/maestro/bin/maestro" "$HOME/.local/bin/maestro"; then
+                        success "Maestro $maestro_ver installed (maestro)"
+                    else
+                        warn "maestro install failed - continuing"
+                    fi
+                fi
+            fi
+            rm -rf "$maestro_tmp"
+        fi
+    fi
+
+    # Maestro's MCP server is NOT registered here: main() runs this before
+    # install_claude_cli/install_chatgpt_cli, so on a fresh machine neither
+    # agent exists yet. Claude Code's and Codex's registrations live in their
+    # own install functions (after the binary exists); OpenCode's and agy's
+    # come from the agents.mcp catalog via sync_agent_mcp_catalog().
+
+    # --- agent-device: npm global, reusing core's Node (no duplicate Node
+    # stack) --------------------------------------------------------------
+    if ! command -v npm &>/dev/null; then
+        warn "npm not found - skipping agent-device"
+    elif ! command -v agent-device &>/dev/null; then
+        info "Installing agent-device (npm)..."
+        sudo_net_timeout "$npm_sudo" 300 npm install -g agent-device@latest --loglevel=error --no-progress --fund=false \
+            || warn "agent-device install failed - continuing"
+    fi
+
+    # --- Android SDK (after the JDK: sdkmanager/avdmanager run on Java) ---
+    # Native Linux/macOS get the full SDK with the emulator and a default
+    # AVD; WSL gets only platform-tools, because the emulator only ever runs
+    # on the Windows side (design doc §3.3) and WSL just needs an adb client
+    # for the ADB_SERVER_SOCKET bridge. Devcontainers get neither: #336's
+    # explicit caution is "no GUI/emulator at all" in a container, and
+    # design doc §3.10 leaves the exact CLI-only-or-fully-gated-off choice
+    # to the builder - fully gated off here, matching this repo's existing
+    # conservative default for every other GUI/host-only group in a
+    # container (dev_desktop, remote_access, etc. - see $isHost's own
+    # definition above). A devcontainer still gets Maestro/agent-device/JDK
+    # from the rest of install_mobile_dev() - those are CLI-only and safe
+    # anywhere; only the SDK's emulator half is gated here.
+{{- if $isWsl }}
+    install_android_sdk adb || warn "Android platform-tools (adb) install failed - continuing"
+{{- else if $isHost }}
+    install_android_sdk full || warn "Android SDK install failed - continuing"
+{{- else }}
+    info "Android SDK/emulator skipped (no GUI/emulator in a devcontainer) - Maestro, agent-device, and the JDK above are still installed"
+{{- end }}
+
+    # --- scrcpy: screen mirroring/control for a real device or emulator ---
+    # (Task 10, added post-hoc: design doc §3.4/§5 committed to scrcpy but no
+    # task actually installed it until this one). Host-only ($isHost), same
+    # reasoning as the Android SDK's emulator half just above: scrcpy mirrors
+    # a real device/emulator's screen, meaningless under WSL (the emulator
+    # only ever runs on the Windows side, design doc §3.3/§3.10) or in a
+    # devcontainer (#336's "no GUI/emulator at all" stance). A devcontainer
+    # still gets Maestro/agent-device/JDK/adb from the rest of this function.
+    #
+    # apt DOES carry a `scrcpy` package on current Ubuntu (universe repo,
+    # confirmed live via `apt-cache madison scrcpy` while implementing this
+    # task - the design doc's "apt might not have it" contingency never
+    # materialized), so both branches install it here, matching the
+    # Maestro/agent-device command -v guarded, warn-and-continue style used
+    # elsewhere in this function (NOT the JDK block above, which deliberately
+    # avoids command -v - brew's openjdk@17 is keg-only and would never be
+    # found that way; scrcpy's own brew formula isn't keg-only, so the
+    # simpler guard is correct here). The quoted literal is what keeps this
+    # install_mobile_dev() package name - not a group-wide catalog install -
+    # out of tests/package_catalog_contract.sh's "no literal apt install
+    # bypasses the catalog" scan, exactly like the JDK package name above.
+{{- if $isHost }}
+    if ! command -v scrcpy &>/dev/null; then
+        info "Installing scrcpy (screen mirroring/control for mobile_dev)..."
+        case "$PKG_MANAGER" in
+            apt)
+                $SUDO apt install -y "scrcpy" || warn "scrcpy install failed - continuing"
+                ;;
+            brew)
+                brew install "scrcpy" || warn "scrcpy install failed - continuing"
+                ;;
+            *)
+                warn "Skipping scrcpy install (unsupported manager: $PKG_MANAGER)"
+                ;;
+        esac
+    fi
+{{- end }}
+
+    # --- Runtime marker: "mobile_dev's installer ran on this machine" ------
+    # dot_zshrc's JAVA_HOME and ADB_SERVER_SOCKET blocks gate on this file,
+    # not on Maestro's ~/.local/bin/maestro symlink: that symlink only exists
+    # when THIS function downloaded Maestro, so a Maestro already on PATH
+    # from a manual install (skipped above) or a failed Maestro download
+    # would leave both blocks dark even though the JDK/Android SDK installed.
+    # Written unconditionally - this function is only ever CALLED when
+    # mobile_dev is selected. ~/.local/state is not chezmoi-managed (nothing
+    # in the source tree targets it), so this is not a run_onchange write to
+    # a chezmoi-owned file (docs/invariants.md #3).
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+    mkdir -p "$HOME/.local/state/dotfiles" && touch "$HOME/.local/state/dotfiles/mobile_dev" \
+        || warn "could not write the mobile_dev marker (~/.local/state/dotfiles/mobile_dev) - new shells won't export JAVA_HOME/ADB_SERVER_SOCKET"
+
+    # --- WSL: heads-up about the ADB bridge to the Windows host -----------
+    # adb/Maestro/agent-device need a real device or emulator, which under
+    # WSL only exists on the Windows side (design doc §3.3/§3.10) - this is
+    # WSL-only (native Linux/macOS run their own ADB server and never need
+    # this at all), gated the same way `$isWsl` already gates everything
+    # else in this file. This step does NOT export ADB_SERVER_SOCKET itself:
+    # docs/invariants.md #3 forbids a run_onchange script writing to a file
+    # chezmoi itself owns (dot_zshrc is one, applied byte-for-byte on every
+    # machine), and the resolved Windows host IP can change across Windows
+    # reboots/network reconnects, so it must be recomputed fresh in every
+    # new shell rather than baked in once here. dot_zshrc's own WSL
+    # detection block does exactly that, unconditionally, on every shell
+    # start - this is just the one-time install-time heads-up.
+{{- if $isWsl }}
+    info "WSL detected: your shell profile (dot_zshrc) now exports ADB_SERVER_SOCKET on every new shell, pointing adb/maestro/agent-device at the ADB server you run manually on Windows - see docs/mobile-development.md's WSL setup section."
+{{- end }}
 }
 
 # Upgrade npm to latest - once per run (install_node is called by several groups; each
@@ -990,7 +1461,7 @@ install_linux_desktop() {
 }
 
 install_apt() {
-{{- if or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
+{{- if or $core $modern_cli $fonts $agent_toolkit $mobile_dev $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail }}
     # Index refresh only: `dot up` never upgrades (that is `dot upgrade`'s job, which runs the apt
     # sweep). It used to run `apt upgrade -y` here too, so a plain `dot up` upgraded every package
     # on the box (cloudflared moved 2026.9.3 -> 2026.10.0 during one) behind the back of the
@@ -1599,6 +2070,21 @@ install_claude_cli() {
         info "Installing Superpowers plugin for Claude Code..."
         claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
         claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+{{- if $mobile_dev }}
+        # Maestro MCP registration for Claude Code lives HERE, not in
+        # install_mobile_dev(): main() runs that first, before claude exists
+        # on a fresh machine. -s user: the default scope (local) is private to
+        # the installer's own working directory, invisible from any project.
+        if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
+            net_timeout 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
+        fi
+        # agent-device MCP registration for Claude Code lives HERE too, same
+        # reason as Maestro's above: main() runs install_mobile_dev() (which
+        # installs agent-device) before claude exists on a fresh machine.
+        if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
+            net_timeout 60 claude mcp add -s user agent-device -- agent-device mcp || warn "agent-device MCP registration for Claude Code failed - continuing"
+        fi
+{{- end }}
     fi
 }
 
@@ -1782,126 +2268,6 @@ install_agent_toolkit() {
         fi
     fi
 
-    # opencode: global config mcp keys (merge, never clobber the plugin
-    # key). opencode loads MCP ONLY from this global block - a server missing
-    # here is missing from every session (surveyed live 2026-09-20).
-    # The registration CONVERGES on the catalog (#230): a server whose binary is
-    # present is added when absent, and an existing entry has only its `command`
-    # repaired - a stale `npx -y <pkg> mcp` once kept a server at a ~46 s npx
-    # cold start long after the catalog named the installed binary. `enabled` and every other key the user
-    # set survive, and nothing is written when nothing differs. Prints the names
-    # it changed. Tested by executing it: tests/opencode_mcp_sync_contract.sh.
-    opencode_mcp_sync() {
-        python3 - "$@" <<'PYEOF'
-import json, os, sys
-p, want = sys.argv[1], sys.argv[2:]
-cfg = {}
-if os.path.exists(p) and os.path.getsize(p) > 0:
-    with open(p, encoding="utf-8-sig") as f:
-        cfg = json.load(f)
-# MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
-# JSON's own escapes intact. OpenCode wants command + args as one list.
-catalog = json.loads(r"""{{ .agents.mcp | toJson }}""")
-mcp = cfg.setdefault("mcp", {})
-changed = []
-for name in sorted(n for n in want if n in catalog):
-    cmd = [catalog[name]["command"]] + catalog[name]["args"]
-    entry = mcp.get(name)
-    if not isinstance(entry, dict):
-        mcp[name] = {"type": "local", "command": cmd, "enabled": True}
-        changed.append(name)
-    elif entry.get("command") != cmd:
-        entry["command"] = cmd
-        changed.append(name)
-if changed:
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-print("\n".join(changed))
-PYEOF
-    }
-    if command -v opencode &>/dev/null; then
-        OC_GLOBAL="$HOME/.config/opencode/opencode.json"
-        OC_PRESENT=()
-{{- range $name, $srv := .agents.mcp }}
-        command -v {{ $srv.command | quote }} &>/dev/null && OC_PRESENT+=({{ $name | quote }})
-{{- end }}
-        if [ "${#OC_PRESENT[@]}" -gt 0 ]; then
-            if OC_CHANGED="$(opencode_mcp_sync "$OC_GLOBAL" "${OC_PRESENT[@]}" 2>/dev/null)"; then
-                [ -z "$OC_CHANGED" ] || info "Registered/updated MCP in opencode ($(printf '%s' "$OC_CHANGED" | tr '\n' ' '))"
-            else
-                warn "opencode MCP registration failed - continuing"
-            fi
-        fi
-    fi
-    # agy: MCP via the TOP-LEVEL mcp_config.json, each server with
-    # forceAllToolsEager - agy marks every server's tools lazy by default,
-    # and lazy tools are only reachable through the generic call_mcp_tool
-    # invoker, which guardrail denies by design (dotfiles #175: serena was
-    # effectively unusable in agy). forceAllToolsEager promotes
-    # each server's tools to native mcp_<server>_<tool> entries that
-    # guardrail's registry already classifies. A plugin bundle is not an
-    # alternative: it prefixes the server name, and guardrail does not know
-    # mcp_dotfiles-mcp_serena_*. Merge, never clobber: user-added servers
-    # and other keys survive. Idempotent: rewriting our keys is a refresh.
-    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
-    AGY_WANT=""
-    command -v serena &>/dev/null && AGY_WANT="serena"
-    if [ -n "$AGY_WANT" ]; then
-        info "Registering MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)..."
-        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")"
-        python3 - "$AGY_GLOBAL_MCP" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP registration failed - continuing"
-import json, os, sys
-p = sys.argv[1]
-want = set(filter(None, sys.argv[2].split(",")))
-cfg = {}
-if os.path.exists(p) and os.path.getsize(p) > 0:
-    try:
-        with open(p) as f:
-            cfg = json.load(f)
-    except Exception:
-        sys.exit(0)
-if not isinstance(cfg, dict):
-    cfg = {}
-servers = cfg.get("mcpServers")
-if not isinstance(servers, dict):
-    servers = {}
-    cfg["mcpServers"] = servers
-# MCP servers come from .chezmoidata/agents.yaml (see #83); only the ones
-# whose binary is present (want) are (re)written; everything else in the
-# file is passed through untouched.
-for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
-    if name in want:
-        servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
-with open(p, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write(chr(10))
-PYEOF
-    fi
-    # One-time migration: retire the dotfiles-mcp plugin bundle this repo
-    # wrote before #175 - plugin-prefixed server names (mcp_dotfiles-mcp_*)
-    # are unknown to guardrail's registry, and a second MCP source doubles
-    # every server the global file now declares. Only OUR dir is removed;
-    # other plugins (superpowers) are never touched.
-    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
-    if [ -d "$AGY_PLUGIN_DIR" ]; then
-        if rm -rf "$AGY_PLUGIN_DIR"; then
-            info "Retired the dotfiles-mcp plugin bundle (the global mcp_config.json is the only MCP source now)"
-        else
-            warn "could not remove the dotfiles-mcp plugin bundle - continuing"
-        fi
-    fi
-    # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
-    # object (guardrail's coverage gate cannot read either state,
-    # agent-guardrails#334). A non-empty file is never touched here.
-    if [ ! -s "$AGY_GLOBAL_MCP" ]; then
-        if mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" && printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP"; then
-            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)"
-        else
-            warn "could not repair agy global mcp_config.json - continuing"
-        fi
-    fi
-
     # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
     # No apt package exists; uses the official install script. Note: act runs
     # every job inside a real Docker container, and this repo's isDevcontainer
@@ -1935,13 +2301,197 @@ PYEOF
     esac
 }
 
+# sync_agent_mcp_catalog() - registers .chezmoidata/agents.yaml's agents.mcp
+# catalog for OpenCode (global opencode.json) and agy (global mcp_config.json).
+# A top-level function called from main() AFTER every installer that can put a
+# catalog binary or agent CLI on the machine (agent_toolkit's serena,
+# mobile_dev's maestro, the OpenCode/agy CLIs themselves) - never from inside
+# one of them. It used to live inside install_agent_toolkit(), which main()
+# runs before install_mobile_dev() and install_opencode_cli(): on a fresh
+# machine `command -v maestro`/`command -v opencode` were still false there,
+# so the run_onchange script (which only re-runs when its rendered content
+# changes) skipped those registrations for good. Every entry self-gates
+# (`command -v` for a local entry, the mobile_dev flag for a remote one).
+sync_agent_mcp_catalog() {
+    # opencode: global config mcp keys (merge, never clobber the plugin
+    # key). opencode loads MCP ONLY from this global block - a server missing
+    # here is missing from every session (surveyed live 2026-09-20).
+    # The registration CONVERGES on the catalog (#230): a server whose binary is
+    # present is added when absent, and an existing entry has only its `command`
+    # repaired - a stale `npx -y <pkg> mcp` once kept a server at a ~46 s npx
+    # cold start long after the catalog named the installed binary. `enabled` and every other key the user
+    # set survive, and nothing is written when nothing differs. Prints the names
+    # it changed. Tested by executing it: tests/opencode_mcp_sync_contract.sh.
+    opencode_mcp_sync() {
+        python3 - "$@" <<'PYEOF'
+import json, os, sys
+p, want = sys.argv[1], sys.argv[2:]
+cfg = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    with open(p, encoding="utf-8-sig") as f:
+        cfg = json.load(f)
+# MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
+# JSON's own escapes intact. OpenCode wants command + args as one list.
+catalog = json.loads(r"""{{ .agents.mcp | toJson }}""")
+mcp = cfg.setdefault("mcp", {})
+changed = []
+for name in sorted(n for n in want if n in catalog):
+    entry = mcp.get(name)
+    if catalog[name].get("type") == "remote":
+        # A hosted, OAuth-authenticated server (e.g. Expo) - no local binary,
+        # no command/args; converge on its url instead.
+        url = catalog[name]["url"]
+        if not isinstance(entry, dict):
+            mcp[name] = {"type": "remote", "url": url, "enabled": True}
+            changed.append(name)
+        elif entry.get("url") != url:
+            entry["url"] = url
+            changed.append(name)
+        continue
+    cmd = [catalog[name]["command"]] + catalog[name]["args"]
+    if not isinstance(entry, dict):
+        mcp[name] = {"type": "local", "command": cmd, "enabled": True}
+        changed.append(name)
+    elif entry.get("command") != cmd:
+        entry["command"] = cmd
+        changed.append(name)
+if changed:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+print("\n".join(changed))
+PYEOF
+    }
+    if command -v opencode &>/dev/null; then
+        OC_GLOBAL="$HOME/.config/opencode/opencode.json"
+        OC_PRESENT=()
+        # Catalog walk (.chezmoidata/agents.yaml's agents.mcp): an entry with
+        # a `group` is skipped outright when that package group is off; then
+        # a LOCAL entry needs its binary present, a REMOTE one is included.
+{{- range $name, $srv := .agents.mcp }}
+{{- $groupOn := true }}
+{{- if hasKey $srv "group" }}{{ $groupOn = false }}{{ if hasKey $ "packages" }}{{ if hasKey $.packages $srv.group }}{{ $groupOn = index $.packages $srv.group }}{{ end }}{{ end }}{{ end }}
+{{- if $groupOn }}
+{{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
+        OC_PRESENT+=({{ $name | quote }})
+{{- else }}
+        command -v {{ $srv.command | quote }} &>/dev/null && OC_PRESENT+=({{ $name | quote }})
+{{- end }}
+{{- end }}
+{{- end }}
+        if [ "${#OC_PRESENT[@]}" -gt 0 ]; then
+            if OC_CHANGED="$(opencode_mcp_sync "$OC_GLOBAL" "${OC_PRESENT[@]}" 2>/dev/null)"; then
+                [ -z "$OC_CHANGED" ] || info "Registered/updated MCP in opencode ($(printf '%s' "$OC_CHANGED" | tr '\n' ' '))"
+            else
+                warn "opencode MCP registration failed - continuing"
+            fi
+        fi
+    fi
+    # agy: MCP via the TOP-LEVEL mcp_config.json, each server with
+    # forceAllToolsEager - agy marks every server's tools lazy by default,
+    # and lazy tools are only reachable through the generic call_mcp_tool
+    # invoker, which guardrail denies by design (dotfiles #175: serena was
+    # effectively unusable in agy). forceAllToolsEager promotes
+    # each server's tools to native mcp_<server>_<tool> entries that
+    # guardrail's registry already classifies. A plugin bundle is not an
+    # alternative: it prefixes the server name, and guardrail does not know
+    # mcp_dotfiles-mcp_serena_*. Merge, never clobber: user-added servers
+    # and other keys survive. Idempotent: rewriting our keys is a refresh.
+    AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
+    AGY_WANT=""
+    # Same generic catalog walk as OC_PRESENT above: an entry whose `group`
+    # (maestro, agent-device, Expo: mobile_dev) is off is never wanted; an
+    # ungrouped one (serena) is never skipped on a flag. Then a LOCAL entry is
+    # wanted when its binary is present; a REMOTE entry has no binary to probe.
+{{- range $name, $srv := .agents.mcp }}
+{{- $groupOn := true }}
+{{- if hasKey $srv "group" }}{{ $groupOn = false }}{{ if hasKey $ "packages" }}{{ if hasKey $.packages $srv.group }}{{ $groupOn = index $.packages $srv.group }}{{ end }}{{ end }}{{ end }}
+{{- if $groupOn }}
+{{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
+    AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
+{{- else }}
+    command -v {{ $srv.command | quote }} &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
+{{- end }}
+{{- end }}
+{{- end }}
+    if [ -n "$AGY_WANT" ]; then
+        info "Registering MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)..."
+        mkdir -p "$(dirname "$AGY_GLOBAL_MCP")"
+        python3 - "$AGY_GLOBAL_MCP" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP registration failed - continuing"
+import json, os, sys
+p = sys.argv[1]
+want = set(filter(None, sys.argv[2].split(",")))
+cfg = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    try:
+        with open(p) as f:
+            cfg = json.load(f)
+    except Exception:
+        sys.exit(0)
+if not isinstance(cfg, dict):
+    cfg = {}
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    servers = {}
+    cfg["mcpServers"] = servers
+# MCP servers come from .chezmoidata/agents.yaml (see #83); only the ones
+# whose binary is present (want) are (re)written; everything else in the
+# file is passed through untouched.
+for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
+    if name in want:
+        if srv.get("type") == "remote":
+            # Hosted, OAuth-authenticated server (e.g. Expo) - no command/args;
+            # agy discovers OAuth automatically on first use (/mcp auth <name>).
+            # Converge like OpenCode's branch: an entry already pointing at the
+            # catalog url is left entirely alone (no field rewritten), so any
+            # OAuth state agy keeps in it survives re-runs. Only a new entry or
+            # a drifted httpUrl is (re)written.
+            existing = servers.get(name)
+            if isinstance(existing, dict) and existing.get("httpUrl") == srv["url"]:
+                continue
+            servers[name] = {"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True}
+        else:
+            servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write(chr(10))
+PYEOF
+    fi
+    # One-time migration: retire the dotfiles-mcp plugin bundle this repo
+    # wrote before #175 - plugin-prefixed server names (mcp_dotfiles-mcp_*)
+    # are unknown to guardrail's registry, and a second MCP source doubles
+    # every server the global file now declares. Only OUR dir is removed;
+    # other plugins (superpowers) are never touched.
+    AGY_PLUGIN_DIR="$HOME/.gemini/config/plugins/dotfiles-mcp"
+    if [ -d "$AGY_PLUGIN_DIR" ]; then
+        if rm -rf "$AGY_PLUGIN_DIR"; then
+            info "Retired the dotfiles-mcp plugin bundle (the global mcp_config.json is the only MCP source now)"
+        else
+            warn "could not remove the dotfiles-mcp plugin bundle - continuing"
+        fi
+    fi
+    # Repair an absent or 0-byte global mcp_config.json to an empty mcpServers
+    # object (guardrail's coverage gate cannot read either state,
+    # agent-guardrails#334). A non-empty file is never touched here.
+    if [ ! -s "$AGY_GLOBAL_MCP" ]; then
+        if mkdir -p "$(dirname "$AGY_GLOBAL_MCP")" && printf '{\n  "mcpServers": {}\n}\n' > "$AGY_GLOBAL_MCP"; then
+            info "agy global mcp_config.json was absent or empty - wrote an empty mcpServers object (guardrail coverage gate)"
+        else
+            warn "could not repair agy global mcp_config.json - continuing"
+        fi
+    fi
+}
+
 install_opencode_cli() {
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # wiring is done by the agent-guardrails installer, and the Serena MCP
-    # registration into opencode.json stays with Serena in agent_toolkit
-    # (same precedent as `serena setup claude-code`).
+    # wiring is done by the agent-guardrails installer, and MCP registration
+    # into opencode.json (serena, maestro, expo) lives in the standalone
+    # sync_agent_mcp_catalog(), called from main() after every agent install
+    # - not here, and not inside install_agent_toolkit either (moved out
+    # during the mobile_dev final review, 2026-10-10: it used to run before
+    # any of Maestro/OpenCode/agy existed on a fresh machine).
     # The --version re-check matters: a legacy npm-global opencode-ai shim can
     # sit on PATH with a dead binary inside (its postinstall never fetched the
     # platform binary - confirmed live 2026-08-31: "opencode-ai's postinstall
@@ -2046,6 +2596,19 @@ install_chatgpt_cli() {
         # rewrites its entry.
         serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
             || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
+{{- if $mobile_dev }}
+        # Maestro's Codex registration lives HERE too, not in
+        # install_mobile_dev() (which main() runs before codex exists on a
+        # fresh machine). Codex has no scope flag: one global config.toml.
+        if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
+            net_timeout 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
+        fi
+        # agent-device's Codex registration lives HERE too, same reason as
+        # Maestro's above. Codex has no scope flag: one global config.toml.
+        if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
+            net_timeout 60 codex mcp add agent-device -- agent-device mcp || warn "agent-device MCP registration for Codex failed - continuing"
+        fi
+{{- end }}
     fi
 }
 
@@ -2603,6 +3166,21 @@ main() {
 {{- else }}
     info "Agent toolkit disabled in config"
 {{- end }}
+
+    # mobile_dev install-time safety net (design doc section 3.9a): mobile_dev's
+    # installer assumes agent_toolkit's tools (Serena, Playwright) already exist.
+    # docs/package-groups.md forces agent_toolkit on wherever mobile_dev ends up selected (both the
+    # chezmoi.toml template default and the menu scripts), but a hand-edited
+    # chezmoi.toml can still reach this point with mobile_dev=true and
+    # agent_toolkit=false - this is the last-resort catch: warn loudly and skip
+    # rather than silently assume agent_toolkit's tools exist.
+{{- if $mobile_dev }}
+{{- if $agent_toolkit }}
+    install_mobile_dev
+{{- else }}
+    warn "mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run"
+{{- end }}
+{{- end }}
     dot_timing_mark 'OpenCode'
 {{- if $opencode_cli }}
     install_opencode_cli
@@ -2626,6 +3204,18 @@ main() {
     install_antigravity_cli
 {{- else }}
     info "Antigravity CLI disabled in config"
+{{- end }}
+
+    # OpenCode/agy MCP registration from the agents.mcp catalog. Called HERE,
+    # after install_mobile_dev (maestro) AND the OpenCode/agy installs - not
+    # from inside install_agent_toolkit, where it used to run before any of
+    # them existed on a fresh machine (see sync_agent_mcp_catalog()). Gated on
+    # agent_toolkit exactly as before the move (it also repairs agy's
+    # mcp_config.json, a write that must not happen with the toolkit off;
+    # mobile_dev itself requires agent_toolkit, see the safety net above).
+{{- if $agent_toolkit }}
+    dot_timing_mark 'agent MCP catalog'
+    sync_agent_mcp_catalog
 {{- end }}
 
 {{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}

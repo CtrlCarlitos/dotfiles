@@ -499,7 +499,7 @@ WSL2 has its own network adapter. To access services:
 | Direction | How |
 |-----------|-----|
 | Windows → WSL | `localhost:PORT` (usually works) |
-| WSL → Windows | Use host IP from `cat /etc/resolv.conf` |
+| WSL → Windows | Use the default gateway from `ip route show default` (NAT mode; `/etc/resolv.conf`'s nameserver is a DNS proxy when DNS tunneling is on), or `localhost` in mirrored mode |
 
 ## Post-install notes
 

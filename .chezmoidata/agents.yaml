@@ -21,15 +21,47 @@ agents:
   # invoker, which guardrail denies by design; forceAllToolsEager promotes
   # them to native mcp_<server>_<tool> entries guardrail's registry already
   # classifies. A plugin bundle is not an alternative: it prefixes the server
-  # name, and guardrail does not know mcp_dotfiles-mcp_serena_*). Each
-  # consumer builds its own shape from command + args:
-  #   OpenCode  {type: local, command: [command, ...args], enabled: true}
-  #   agy       {command, args, forceAllToolsEager: true}
-  # Registration is still gated on the binary being present on the machine.
+  # name, and guardrail does not know mcp_dotfiles-mcp_serena_*). Each entry
+  # is either LOCAL (bare command + args - a binary the installer runs, e.g.
+  # serena) or REMOTE (type: remote + url - a hosted, OAuth-authenticated MCP
+  # server OpenCode/agy dial out to directly, e.g. Expo's mcp.expo.dev/mcp,
+  # design doc #3.8). Maestro's MCP server (`maestro mcp`, installed by
+  # mobile_dev) is a LOCAL entry here, so OpenCode/agy get it from this
+  # catalog like serena; Claude Code/Codex get it from their own install
+  # functions (`claude mcp add -s user` / `codex mcp add`), not from here.
+  # Each consumer builds its own shape:
+  #   OpenCode local   {type: local, command: [command, ...args], enabled: true}
+  #   OpenCode remote  {type: remote, url: <url>, enabled: true}
+  #   agy local        {command, args, forceAllToolsEager: true}
+  #   agy remote       {httpUrl: <url>, oauth: {}, forceAllToolsEager: true}
+  # `group: <packages key>` (optional) names the package group that owns the
+  # entry: when that group's install-time flag (.packages.<group>) is off,
+  # the entry is never registered, local or remote, even if a same-named
+  # binary happens to be on PATH from an unrelated install (a disabled group
+  # has no side effects). Absent `group` (serena's case) means the entry
+  # belongs to no optional group and is registered whenever it otherwise
+  # qualifies. Then, per kind: a LOCAL entry is registered only when its
+  # binary is present (`command -v <command>`); a REMOTE entry has no binary
+  # to probe, so its `group` flag is its whole gate. See
+  # sync_agent_mcp_catalog() (run_onchange_install_packages.sh.tmpl). The
+  # Windows twin's $mcpCatalog (.chezmoitemplates/mcp-servers-ps1) reads only
+  # command/args and ignores `group`.
   mcp:
     serena:
       command: serena
       args: [start-mcp-server, --context, ide-assistant]
+    maestro:
+      command: maestro
+      args: [mcp]
+      group: mobile_dev
+    agent-device:
+      command: agent-device
+      args: [mcp]
+      group: mobile_dev
+    expo:
+      type: remote
+      url: https://mcp.expo.dev/mcp
+      group: mobile_dev
 
   # Serena's web dashboard opens a browser tab every time a client starts the
   # MCP server (one per agent per session). false keeps the dashboard running

@@ -2,7 +2,7 @@
 
 When you run the installer, this is what you'll see. (Mirrors
 `scripts/select-packages.sh` / `.ps1`; the two header lines below are the
-scripts' own, so if they drift the scripts win. The real menu lists the 16 group
+scripts' own, so if they drift the scripts win. The real menu lists the 17 group
 names only; the descriptions in the demo are added here from
 [package-groups.md](package-groups.md).)
 
@@ -15,7 +15,7 @@ Preset? minimal=core only | standard=recommended | full=everything | custom=hand
 ? (use the arrows)
   minimal    core only — terminal fundamentals
   standard   recommended (see the pre-checked groups below)
-  full       everything except remote_access_server
+  full       everything except remote_access_server and mobile_dev
 > custom     hand-pick (nothing pre-checked)
 ```
 
@@ -41,6 +41,7 @@ Toggle package groups (space=toggle, a=all, enter=confirm)
   [ ] remote_access     Tailscale and cloudflared tools (no sign-in or tunnel setup)
   [ ] remote_access_server  OpenSSH-server prerequisites (manual setup required)
   [x] guardrail         Agent guardrails (hook enforcement)
+  [ ] mobile_dev        Opt-in Expo/Android mobile dev tooling (Maestro, forces agent_toolkit on)
 ```
 
 (That pre-check set is the **standard** preset. Host-only groups — the

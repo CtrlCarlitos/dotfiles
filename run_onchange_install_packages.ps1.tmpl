@@ -180,7 +180,7 @@ function Invoke-WithTimeout {
     if ($NoStream) { return $collected }
 }
 
-{{/* 16-group package taxonomy (spec section 2, docs/research/package-groups-spec.md).
+{{/* 17-group package taxonomy (spec section 2, docs/research/package-groups-spec.md).
       Variable names = config keys = menu options = CI seeds, one vocabulary.
       Old install_* keys: clean break, ignored (no migration) - rename map in
       docs/package-groups.md. Missing keys render as false (hasKey-guarded), so
@@ -214,6 +214,7 @@ function Invoke-WithTimeout {
 {{- $remote_access_server := false -}}
 {{- $guardrail := false -}}
 {{- $vscodeSettings := true -}}
+{{- $mobile_dev := false -}}
 {{- if hasKey . "packages" -}}
   {{- if hasKey .packages "core" }}{{- $core = .packages.core }}{{- end -}}
   {{- if hasKey .packages "modern_cli" }}{{- $modern_cli = .packages.modern_cli }}{{- end -}}
@@ -232,8 +233,9 @@ function Invoke-WithTimeout {
   {{- if hasKey .packages "remote_access_server" }}{{- $remote_access_server = .packages.remote_access_server }}{{- end -}}
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
   {{- if hasKey .packages "vscode_settings" }}{{- if not .packages.vscode_settings }}{{- $vscodeSettings = false }}{{- end }}{{- end -}}
+  {{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}
 {{- end }}
-{{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
+{{- $hasChocolateyPackages := or $core $modern_cli $fonts $agent_toolkit $mobile_dev $opencode_cli $opencode_desktop $claude_cli $claude_desktop $chatgpt_cli $chatgpt_desktop $antigravity_cli $antigravity_desktop $dev_desktop $remote_access $guardrail -}}
 
 {{- $curatedTotal := 0 -}}
 {{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}
@@ -375,6 +377,365 @@ function Install-Node {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
     Invoke-NpmUpgradeOnce
+}
+
+# Shared by Install-MobileDev's sdkmanager/avdmanager calls: captures
+# output and surfaces $LASTEXITCODE instead of redirecting every stream to
+# null - a silent multi-GB download or a silent hang are exactly the
+# "confusing partial state" the mobile_dev plan's Review Focus warns about.
+# None of these tools raise a PowerShell-level terminating error on their
+# own, so nothing else would ever notice a failure.
+function Invoke-MobileDevTool {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$ToolArguments,
+        [string]$StdIn,
+        [Parameter(Mandatory)][string]$FailureLabel
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($StdIn) {
+            $output = ($StdIn | & $Path @ToolArguments 2>&1 | Out-String)
+        } else {
+            $output = (& $Path @ToolArguments 2>&1 | Out-String)
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Warning: $FailureLabel failed (exit code $LASTEXITCODE):" -ForegroundColor Red
+        ($output -split "`r?`n" | Select-Object -Last 15) | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+    }
+    return $LASTEXITCODE
+}
+
+# Appends entries to the Machine PATH without flattening existing %VAR%
+# references. [System.Environment]::GetEnvironmentVariable(...,'Machine')
+# returns the EXPANDED value, and writing that straight back with
+# SetEnvironmentVariable permanently bakes in today's %SystemRoot% etc as
+# literal text (confirmed live: this machine's raw Machine PATH does carry
+# %...% tokens). This reads/writes the raw, unexpanded registry value
+# instead, comparing entries exactly rather than with a wildcard substring
+# match, and only writes when something is actually missing.
+function Add-MobileDevMachinePath {
+    param([Parameter(Mandatory)][string[]]$Paths)
+    $envKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+    $raw = (Get-Item -LiteralPath $envKey).GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $entries = @($raw -split ';' | Where-Object { $_ })
+    $changed = $false
+    foreach ($p in $Paths) {
+        if ($entries -notcontains $p) {
+            $entries += $p
+            $changed = $true
+        }
+    }
+    if ($changed) {
+        Set-ItemProperty -LiteralPath $envKey -Name Path -Value ($entries -join ';') -Type ExpandString
+    }
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+# java -version/-XshowSettings:properties write to stderr; PS 5.1 promotes
+# native stderr to a terminating error under Stop (see Test-NpmGlobalCurrent
+# in scripts/lib/ps-common.ps1 for the same idiom). Scans every line, not
+# just the first, since a "Picked up JAVA_TOOL_OPTIONS" banner can precede
+# the real version/java.home lines. java.home is the JDK's own reported
+# root, not a guess from java.exe's path (an Oracle javapath shim's
+# grandparent directory is not a JDK).
+function Get-MobileDevJavaInfo {
+    param([Parameter(Mandatory)][string]$JavaCommand)
+    $info = [pscustomobject]@{ Major = 0; Home = $null }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = ((& $JavaCommand -XshowSettings:properties -version) 2>&1 | Out-String)
+    $ErrorActionPreference = $previous
+    foreach ($line in ($raw -split "`r?`n")) {
+        if ($info.Major -eq 0 -and $line -match 'version "(\d+)') { $info.Major = [int]$Matches[1] }
+        if (-not $info.Home -and $line -match 'java\.home\s*=\s*(.+)$') { $info.Home = $Matches[1].Trim() }
+    }
+    return $info
+}
+
+function Install-MobileDev {
+    # mobile_dev (design doc section 3.5): a standalone JDK, not Android
+    # Studio's bundled runtime (Studio is dropped entirely - section 3.4).
+    # Maestro, Gradle (via Expo's CLI) and the SDK command-line tools all
+    # need JAVA_HOME regardless of Studio. EclipseAdoptium.Temurin.17.JDK
+    # over Microsoft.OpenJDK.17 (design doc section 3.5 - either is
+    # acceptable; Temurin picked and used consistently here and in the test).
+    $jdkMajor = {{ .versions.jdk_version }}
+    $existingJava = Get-Command java -ErrorAction SilentlyContinue
+    $javaInfo = [pscustomobject]@{ Major = 0; Home = $null }
+    if ($existingJava) { $javaInfo = Get-MobileDevJavaInfo -JavaCommand 'java' }
+    if (-not $existingJava -or $javaInfo.Major -lt $jdkMajor) {
+        Write-Host "  Installing a standalone JDK $jdkMajor+ (Temurin)..." -ForegroundColor Yellow
+        # winget first, Chocolatey fallback (Global Constraints) - and
+        # try/catch so a missing/failing winget never aborts the ~1000 lines
+        # of unrelated installer that follow Install-MobileDev's call site
+        # (the script runs under $ErrorActionPreference = "Stop").
+        try {
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                winget install --id EclipseAdoptium.Temurin.17.JDK --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+            } else {
+                choco install temurin17 -y --no-progress | Out-Null
+            }
+        } catch {
+            Write-Host "  Warning: standalone JDK install failed - $_" -ForegroundColor Red
+        }
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $existingJava = Get-Command java -ErrorAction SilentlyContinue
+        if ($existingJava) { $javaInfo = Get-MobileDevJavaInfo -JavaCommand 'java' }
+        if ($javaInfo.Major -lt $jdkMajor) {
+            Write-Host "  Warning: java on PATH is still version $($javaInfo.Major) after installing Temurin $jdkMajor - another JDK earlier on PATH may be shadowing it." -ForegroundColor Red
+        }
+    }
+    $existingMachineJavaHome = [System.Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+    if ($javaInfo.Home -and -not $existingMachineJavaHome) {
+        [System.Environment]::SetEnvironmentVariable('JAVA_HOME', $javaInfo.Home, 'Machine')
+        $env:JAVA_HOME = $javaInfo.Home
+    } elseif ($existingMachineJavaHome -and $javaInfo.Major -gt 0 -and $javaInfo.Major -lt $jdkMajor) {
+        Write-Host "  Warning: JAVA_HOME ($existingMachineJavaHome) points at a JDK older than $jdkMajor - mobile_dev's tools need $jdkMajor+ there." -ForegroundColor Red
+    }
+
+    # Android SDK command-line tools (design doc section 3.4): Studio is
+    # dropped entirely, so this downloads Google's own zip directly rather
+    # than going through Studio's install-time sdkmanager bootstrap.
+    # android_commandlinetools_* pins come from .chezmoidata.yaml, confirmed
+    # live against developer.android.com/studio this session.
+    #
+    # Detect an existing manual install first (Global Constraints: never
+    # silently rewrite an existing SDK location a user already configured)
+    # - both ANDROID_HOME and the older ANDROID_SDK_ROOT, in both Machine
+    # and User scope, since a prior manual install could have set either.
+    $androidHomeCandidates = foreach ($pair in @(
+            @('ANDROID_HOME', 'Machine'), @('ANDROID_HOME', 'User'),
+            @('ANDROID_SDK_ROOT', 'Machine'), @('ANDROID_SDK_ROOT', 'User')
+        )) {
+        $val = [System.Environment]::GetEnvironmentVariable($pair[0], $pair[1])
+        if ($val -and (Test-Path $val)) { $val }
+    }
+    $androidHomeCandidates = @($androidHomeCandidates | Select-Object -Unique)
+    if ($androidHomeCandidates.Count -gt 1) {
+        Write-Host "  Warning: multiple existing Android SDK locations found ($($androidHomeCandidates -join ', ')) - using the first; reconcile ANDROID_HOME/ANDROID_SDK_ROOT yourself if that is wrong." -ForegroundColor Red
+    }
+    $androidHome = if ($androidHomeCandidates.Count -gt 0) { $androidHomeCandidates[0] } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
+    $sdkmanagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\sdkmanager.bat'
+    if (-not (Test-Path $sdkmanagerPath)) {
+        $ctVersion = '{{ .versions.android_commandlinetools_version }}'
+        $ctSha256 = '{{ .versions.android_commandlinetools_sha256_win }}'
+        $ctZipName = "commandlinetools-win-${ctVersion}_latest.zip"
+        $ctUrl = "https://dl.google.com/android/repository/$ctZipName"
+        $ctTmp = Join-Path $env:TEMP "mobile_dev-cmdlinetools-$ctVersion"
+        Write-Host "  Downloading the Android SDK command-line tools..." -ForegroundColor Yellow
+        try {
+            New-Item -ItemType Directory -Force -Path $ctTmp | Out-Null
+            $ctZipPath = Join-Path $ctTmp $ctZipName
+            Invoke-WebRequest -Uri $ctUrl -OutFile $ctZipPath -UseBasicParsing
+            $ctGotHash = (Get-FileHash -Algorithm SHA256 $ctZipPath).Hash
+            if ($ctGotHash -ne $ctSha256) {
+                Write-Host "  Warning: Android SDK command-line tools CHECKSUM MISMATCH - not installing (pin stale? re-check developer.android.com/studio)" -ForegroundColor Red
+            } else {
+                $ctExtract = Join-Path $ctTmp 'extracted'
+                Expand-Archive -Path $ctZipPath -DestinationPath $ctExtract -Force
+                # The zip's own root is "cmdline-tools" with no "latest" level;
+                # sdkmanager needs <sdkRoot>\cmdline-tools\latest\... (Google's
+                # own documented layout).
+                $ctLatestParent = Join-Path $androidHome 'cmdline-tools'
+                New-Item -ItemType Directory -Force -Path $ctLatestParent | Out-Null
+                $ctLatest = Join-Path $ctLatestParent 'latest'
+                if (Test-Path $ctLatest) { Remove-Item -Recurse -Force $ctLatest }
+                Move-Item -Path (Join-Path $ctExtract 'cmdline-tools') -Destination $ctLatest
+            }
+        } catch {
+            Write-Host "  Warning: Android SDK command-line tools download failed - $_" -ForegroundColor Red
+        } finally {
+            Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
+        }
+    }
+    # WHPX (design doc section 3.3): Microsoft's current recommended
+    # accelerator for the Android emulator on Windows. Unlike the Hyper-V
+    # PowerShell module elsewhere in this file, this is never auto-enabled
+    # - a hypervisor platform toggle needs a restart and changes what else
+    # can virtualize on this machine, so it stays the user's own informed
+    # action. Reported unconditionally (Review Focus item 1) - even when
+    # the SDK command-line tools above failed to install, Carlos still
+    # needs to know whether the emulator can ever be accelerated here.
+    try {
+        $whpx = Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop
+        if ($whpx.State -ne 'Enabled') {
+            Write-Host "  Warning: Windows Hypervisor Platform (WHPX) is not enabled - the Android emulator has no hardware acceleration without it." -ForegroundColor Yellow
+            Write-Host "    Enable it yourself, then restart: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red
+    }
+
+    if (Test-Path $sdkmanagerPath) {
+        if (-not [System.Environment]::GetEnvironmentVariable('ANDROID_HOME', 'Machine')) {
+            [System.Environment]::SetEnvironmentVariable('ANDROID_HOME', $androidHome, 'Machine')
+            $env:ANDROID_HOME = $androidHome
+        }
+        # #336's explicit caution: never create a second, conflicting ADB on
+        # PATH. An adb.exe that already resolves (a prior manual install, or
+        # scrcpy's bundled copy once the scrcpy step runs) keeps PATH
+        # precedence; platform-tools still installs under ANDROID_HOME for
+        # sdkmanager/emulator/Maestro to find, it just does not also fight
+        # for PATH order against whatever was already there.
+        $priorAdb = Get-Command adb -ErrorAction SilentlyContinue
+        $toolPaths = @(
+            (Join-Path $androidHome 'cmdline-tools\latest\bin'),
+            (Join-Path $androidHome 'emulator')
+        )
+        if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
+        Add-MobileDevMachinePath -Paths $toolPaths
+
+        # platform-tools/emulator need their licenses accepted once; #336's
+        # explicit caution says never silently accept on the user's behalf,
+        # so this prompts before sdkmanager runs non-interactively. Gated on
+        # Test-Path, like Install-Node's version check above: once both are
+        # present, this block is skipped on every later `dot up` - no
+        # separate re-prompt or re-download bookkeeping needed.
+        $adbPath = Join-Path $androidHome 'platform-tools\adb.exe'
+        $emulatorPath = Join-Path $androidHome 'emulator\emulator.exe'
+        if (-not (Test-Path $adbPath) -or -not (Test-Path $emulatorPath)) {
+            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
+            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
+            if ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y') {
+                # sdkmanager prompts once per license; a generous repeated
+                # "y" feed covers every package this function ever installs
+                # (platform-tools/emulator here, the system image elsewhere).
+                $yesFeed = (@('y') * 20) -join "`n"
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('--licenses') -StdIn $yesFeed -FailureLabel 'sdkmanager --licenses' | Out-Null
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' | Out-Null
+            } else {
+                # run_onchange only re-runs when its OWN rendered content changes
+                # (a template/version-pin edit, not a blanket "every dot up") -
+                # "just re-run dot up" would not actually re-enter this block.
+                # The documented, real re-entry point: clear chezmoi's recorded
+                # script hash so the next apply re-runs this script in full.
+                Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
+            }
+        }
+
+        # A prior adb (from a manual install) and the SDK's own adb can be
+        # different builds; two adb builds disagreeing over the ADB server
+        # protocol kill each other's connections ("adb server version (X)
+        # doesn't match this client (Y); killing..."), which would silently
+        # defeat the whole point of the ADB bridge (docs/mobile-development.md).
+        if ($priorAdb -and (Test-Path $adbPath) -and ($priorAdb.Source -ne $adbPath)) {
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $priorAdbVersion = ((& $priorAdb.Source version) 2>&1 | Select-String 'version' | Select-Object -First 1 | Out-String).Trim()
+            $sdkAdbVersion = ((& $adbPath version) 2>&1 | Select-String 'version' | Select-Object -First 1 | Out-String).Trim()
+            $ErrorActionPreference = $previous
+            if ($priorAdbVersion -ne $sdkAdbVersion) {
+                Write-Host "  Warning: two different adb builds are present - PATH resolves $($priorAdb.Source) ($priorAdbVersion), the SDK's own copy at $adbPath is $sdkAdbVersion. Mismatched adb servers can kill each other's connections, including the manual ADB bridge." -ForegroundColor Red
+            }
+        }
+
+        # A default Pixel-like AVD, scripting what Android Studio's wizard
+        # used to do (design doc section 3.4). AOSP over Google APIs/Play
+        # Store (design doc section 5: lighter, sufficient for most Expo app
+        # testing). Gated on the AVD's own directory, like the license
+        # check above: once created, this is skipped on every later
+        # `dot up` - no separate re-prompt or re-download bookkeeping.
+        # avdmanager create avd -n <name> -k <image> -d <device>
+        $avdManagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\avdmanager.bat'
+        $avdName = 'mobile_dev_pixel'
+        $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
+        if ((Test-Path $avdManagerPath) -and -not (Test-Path $avdDir)) {
+            $systemImage = 'system-images;android-34;default;x86_64'
+            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)." -ForegroundColor Cyan
+            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
+            if ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y') {
+                $yesFeed = (@('y') * 20) -join "`n"
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('--licenses') -StdIn $yesFeed -FailureLabel 'sdkmanager --licenses' | Out-Null
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" | Out-Null
+                # avdmanager asks whether to create a custom hardware
+                # profile; "no" keeps the device profile's own default.
+                Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
+            } else {
+                Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # scrcpy (design doc section 3.4): screen mirroring/control. Its winget
+    # package also installs its own adb.exe - #336's explicit caution
+    # against a duplicate, conflicting ADB means this checks what the SDK
+    # platform-tools step above already left on PATH first, so a resulting
+    # shadow is a visible warning, not silent.
+    if (-not (Get-Command scrcpy -ErrorAction SilentlyContinue)) {
+        $adbBeforeScrcpy = Get-Command adb -ErrorAction SilentlyContinue
+        Write-Host "  Installing scrcpy..." -ForegroundColor Yellow
+        # winget first, Chocolatey fallback (Global Constraints) - and
+        # try/catch so a missing/failing winget never aborts the rest of
+        # the installer (the script runs under $ErrorActionPreference = "Stop").
+        try {
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                winget install --exact --id Genymobile.scrcpy --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+            } else {
+                choco install scrcpy -y --no-progress | Out-Null
+            }
+        } catch {
+            Write-Host "  Warning: scrcpy install failed - $_" -ForegroundColor Red
+        }
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $adbAfterScrcpy = Get-Command adb -ErrorAction SilentlyContinue
+        if ($adbBeforeScrcpy -and $adbAfterScrcpy -and $adbBeforeScrcpy.Source -ne $adbAfterScrcpy.Source) {
+            Write-Host "  Warning: scrcpy's bundled adb.exe ($($adbAfterScrcpy.Source)) now shadows the one already on PATH ($($adbBeforeScrcpy.Source)) - mismatched adb servers can kill each other's connections, including the manual ADB bridge." -ForegroundColor Red
+        }
+    }
+
+    # ADB bridge Firewall rule (design doc section 3.3). The ADB server
+    # itself (`adb -a -P 5037 nodaemon server`) stays a manual, per-session
+    # command Carlos runs himself - the single most important constraint in
+    # this plan is that nothing here starts or registers it as a service.
+    # This only scopes the Firewall rule `adb -a` needs to the WSL vEthernet
+    # subnet, never a LAN-wide opening (#336's explicit caution). Wrapped in
+    # try/catch so a Firewall service that is off, or managed by Group
+    # Policy, never aborts the rest of the installer.
+    $wslAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'vEthernet (WSL*' -and $_.Status -eq 'Up' } | Select-Object -First 1
+    if ($wslAdapter) {
+        $wslIp = Get-NetIPAddress -InterfaceIndex $wslAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wslIp) {
+            # The network address from the adapter's own host IP + prefix.
+            # WSL can be in NAT or mirrored networking mode (section 3.3) -
+            # this reads whatever subnet the live adapter actually reports,
+            # the same math either way, never a hardcoded guess.
+            $ipBytes = ([System.Net.IPAddress]::Parse($wslIp.IPAddress)).GetAddressBytes()
+            $prefixLen = $wslIp.PrefixLength
+            $netBytes = for ($i = 0; $i -lt 4; $i++) {
+                $bits = [Math]::Min(8, [Math]::Max(0, $prefixLen - ($i * 8)))
+                [byte]($ipBytes[$i] -band ([byte](0xFF -shl (8 - $bits) -band 0xFF)))
+            }
+            $wslSubnet = ($netBytes -join '.') + "/$prefixLen"
+            try {
+                $existingRule = Get-NetFirewallRule -Name 'MobileDevAdbBridge' -ErrorAction SilentlyContinue
+                if (-not $existingRule) {
+                    New-NetFirewallRule -Name 'MobileDevAdbBridge' -DisplayName 'mobile_dev: ADB bridge (WSL only)' `
+                        -Direction Inbound -Protocol TCP -LocalPort 5037 `
+                        -RemoteAddress $wslSubnet -Action Allow | Out-Null
+                } else {
+                    # WSL's subnet can change across a reboot (NAT mode
+                    # especially) - a rule left pointing at the old subnet is
+                    # exactly the "silently half-working bridge" Review Focus
+                    # item 5 warns about.
+                    $existingFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
+                    if (($existingFilter.RemoteAddress -join ',') -ne $wslSubnet) {
+                        Set-NetFirewallRule -Name 'MobileDevAdbBridge' -RemoteAddress $wslSubnet
+                    }
+                }
+            } catch {
+                Write-Host "  Warning: could not create/update the ADB bridge Firewall rule - $_" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  Warning: no WSL vEthernet adapter found - skipping the ADB bridge Firewall rule (install/start WSL first)." -ForegroundColor Red
+    }
 }
 
 {{- if $core }}
@@ -1375,6 +1736,20 @@ if (-not (Test-Path $agyGlobalMcp) -or (Get-Item $agyGlobalMcp).Length -eq 0) {
 }
 {{- end }}
 
+# mobile_dev install-time safety net (design doc section 3.9a): mobile_dev's
+# installer assumes agent_toolkit's tools (Serena, Playwright) already exist.
+# docs/package-groups.md forces agent_toolkit on wherever mobile_dev ends up selected (both the
+# .chezmoi.toml.tmpl template default and the menu scripts), but a hand-edited
+# chezmoi.toml can still reach this point with mobile_dev=true and
+# agent_toolkit=false - this is the last-resort catch: warn loudly and skip
+# rather than silently assume agent_toolkit's tools exist.
+{{- if $mobile_dev }}
+{{- if $agent_toolkit }}
+Install-MobileDev
+{{- else }}
+Write-Host "Warning: mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run" -ForegroundColor Yellow
+{{- end }}
+{{- end }}
 # Graft was dropped from the dotfiles (2026-10-09): remove it where an earlier run installed it.
 # Every run and whatever the groups say (it was installed under agent_toolkit, which may since
 # have been turned off); quiet when there is nothing to do (Invoke-GraftRetirement,

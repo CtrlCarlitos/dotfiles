@@ -129,6 +129,107 @@ composer_home="${COMPOSER_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/composer}"
 [[ -d "$HOME/.composer/vendor/bin" ]] && path=("$HOME/.composer/vendor/bin" "${path[@]}")
 [[ -d "$composer_home/vendor/bin" ]] && path=("$composer_home/vendor/bin" "${path[@]}")
 
+# JDK (mobile_dev's Maestro CLI + agent-device need Java 17+): JAVA_HOME and
+# its bin dir, wherever a JDK landed. apt's openjdk-17-jdk wires `java` via
+# update-alternatives but sets no JAVA_HOME; brew's openjdk@17 is keg-only
+# (not linked into brew's shared bin), so its prefix has to be found
+# explicitly. First existing candidate wins; an already-exported JAVA_HOME
+# (another JDK manager, a devcontainer image) is left alone.
+# Inert unless mobile_dev ran here: dot_zshrc is applied on every machine,
+# and a disabled group must have no side effects. The runtime signal is the
+# marker install_mobile_dev() touches at ~/.local/state/dotfiles/mobile_dev
+# (not chezmoi-managed) - NOT Maestro's ~/.local/bin/maestro symlink, which
+# is missing whenever Maestro was already on PATH from a manual install or
+# its own download failed, while the JDK/Android SDK still installed.
+if [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]]; then
+  if [[ -z "${JAVA_HOME:-}" ]]; then
+    for _jdk17 in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk-arm64 \
+        /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 \
+        /home/linuxbrew/.linuxbrew/opt/openjdk@17 "$HOME/.linuxbrew/opt/openjdk@17"; do
+      if [[ -x "$_jdk17/bin/java" ]]; then
+        export JAVA_HOME="$_jdk17"
+        break
+      fi
+    done
+    unset _jdk17
+  fi
+  [[ -n "${JAVA_HOME:-}" ]] && path=("$JAVA_HOME/bin" "${path[@]}")
+fi
+
+# _adb_resolve_host MODE ROUTE RESOLV_FILE - prints the host the Windows ADB
+# server is reachable at from WSL, or nothing. MODE is `wslinfo
+# --networking-mode`'s answer, ROUTE is `ip route show default`'s output,
+# RESOLV_FILE is a resolv.conf path. Pure (arguments in, host out) so
+# tests/mobile_dev_install_contract.sh can execute it against fixtures.
+#   mirrored: WSL2 mirrored networking shares the loopback interface
+#     bidirectionally, so 127.0.0.1 reaches the Windows host directly.
+#   anything else (nat, empty, no wslinfo on an older build): the default
+#     route's gateway IS the Windows host's vEthernet (WSL) address. NOT
+#     resolv.conf's nameserver: with DNS tunneling (on by default on current
+#     WSL builds) that is 10.255.255.254, a WSL-side DNS proxy nothing else
+#     listens on - observed live on a NAT-mode WSL2 machine (nameserver
+#     10.255.255.254, default via 172.21.144.1). resolv.conf is only the last
+#     resort for a minimal distro with no `ip` (older builds, or DNS
+#     tunneling off, still point it at the host).
+_adb_resolve_host() {
+  local _host=""
+  if [[ "$1" == mirrored ]]; then
+    printf '%s\n' 127.0.0.1
+    return 0
+  fi
+  _host="$(printf '%s\n' "$2" | awk '/^default/ { print $3; exit }')"
+  [[ -z "$_host" ]] && _host="$(awk '/^nameserver/ { print $2; exit }' "$3" 2>/dev/null)"
+  [[ -n "$_host" ]] && printf '%s\n' "$_host"
+  return 0
+}
+
+# ADB bridge to the Windows host (mobile_dev's adb/Maestro/agent-device,
+# WSL only): unlike JAVA_HOME above, this is recomputed on EVERY new shell,
+# never cached - the resolved Windows host IP can change across Windows
+# reboots/network reconnects. Guarded so a user's own override is never
+# clobbered, and inert unless mobile_dev ran here (the same
+# ~/.local/state/dotfiles/mobile_dev marker as the JDK block above). dot_zshrc is applied byte-for-byte on every
+# machine (WSL, native Linux, macOS, devcontainer) - it carries no chezmoi
+# template variables, so WSL is detected here the portable way
+# (/proc/version), the shell-native equivalent of .chezmoi.toml.tmpl's
+# $isWsl check. Best effort throughout: nothing here aborts the shell, and an
+# inconclusive detection just leaves ADB_SERVER_SOCKET unset.
+if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]] \
+    && grep -qi microsoft /proc/version 2>/dev/null; then
+  _adb_mode="" _adb_route=""
+  command -v wslinfo &>/dev/null && _adb_mode="$(wslinfo --networking-mode 2>/dev/null)"
+  if [[ "$_adb_mode" != mirrored ]] && command -v ip &>/dev/null; then
+    _adb_route="$(ip route show default 2>/dev/null)"
+  fi
+  _adb_host="$(_adb_resolve_host "$_adb_mode" "$_adb_route" /etc/resolv.conf)"
+  if [[ -n "$_adb_host" ]]; then
+    export ADB_SERVER_SOCKET="tcp:$_adb_host:5037"
+  else
+    # Warn, never abort: an inconclusive detection must not break shell startup.
+    print -u2 "zshrc: could not resolve the Windows host for ADB_SERVER_SOCKET (checked wslinfo, ip route show default and /etc/resolv.conf) - adb/Maestro/agent-device won't reach the Windows ADB server until this is set manually"
+  fi
+  unset _adb_mode _adb_route _adb_host
+fi
+unset -f _adb_resolve_host
+
+# Android SDK (mobile_dev): ANDROID_HOME and the SDK's tool dirs, for the SDK
+# the installer's install_android_sdk lays down at ~/.local/opt/android-sdk
+# (the full SDK with the emulator on native Linux/macOS, platform-tools only
+# under WSL). Inert unless that directory exists - its presence is the
+# runtime proxy for "mobile_dev installed an SDK here" - and it never
+# re-points an ANDROID_HOME you exported for an SDK of your own. The dirs are
+# APPENDED, so an adb already on PATH (a distro package, your own SDK) keeps
+# precedence over the SDK's copy.
+_android_sdk="$HOME/.local/opt/android-sdk"
+if [[ -d "$_android_sdk" ]] && [[ -z "${ANDROID_HOME:-}" || "$ANDROID_HOME" == "$_android_sdk" ]]; then
+  export ANDROID_HOME="$_android_sdk"
+  for _android_dir in platform-tools emulator cmdline-tools/latest/bin; do
+    [[ -d "$_android_sdk/$_android_dir" ]] && path+=("$_android_sdk/$_android_dir")
+  done
+  unset _android_dir
+fi
+unset _android_sdk
+
 # ZSH completions
 [[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 

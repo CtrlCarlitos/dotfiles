@@ -62,9 +62,46 @@ vscode:
 #   gum              - the bootstrap pin for the package menu
 #   claude_install_* - the official native-installer URLs, so `dot upgrade`
 #                      cannot install a different Claude than the installer did
+#   maestro_version/ - the mobile_dev group's Maestro CLI pin. The vendor's own
+#   maestro_sha256     `curl -fsSL https://get.maestro.mobile.dev | bash`
+#                      installer only runs `unzip -qt` on what it downloads -
+#                      a corruption check, not an authenticity one - so this
+#                      repo pins an exact version and verifies the sha256
+#                      itself, the same way install_powershell() does. The
+#                      digest is not computed by us: it is read from
+#                      mobile-dev-inc's own homebrew-tap formula, generated
+#                      by JReleaser at release time from the identical
+#                      release asset (scripts/update-versions.sh re-checks it
+#                      weekly).
+#   jdk_version      - the standalone JDK major mobile_dev's Maestro/Gradle/SDK
+#                      command-line tools need (design doc section 3.5),
+#                      shared by both installer twins. 17 per Maestro's own
+#                      "Java 17 or higher" requirement - a deliberate pin
+#                      like node_major, NOT re-resolved by
+#                      scripts/update-versions.sh (package managers key JDK
+#                      packages by major version only; bump it by hand if
+#                      the floor ever needs to move).
+#   android_commandlinetools_* - the mobile_dev group's Android SDK
+#                      command-line tools zip (sdkmanager/avdmanager), per
+#                      platform/arch (win, linux, mac_x86_64, mac_arm64 -
+#                      design doc section 3.4; Studio is dropped entirely),
+#                      one version shared by every OS, one SHA-256 per zip.
+#                      Confirmed live against
+#                      developer.android.com/studio#command-line-tools-only
+#                      on 2026-10-10, where Google publishes each digest next
+#                      to its zip - so this pins the digest, never a bare
+#                      "latest" URL. A deliberate hand pin like jdk_version,
+#                      NOT re-resolved by scripts/update-versions.sh: bump the
+#                      version and all four digests together from that page.
 versions:
   node_major: 24
   node_choco: "24.19.0"
+  jdk_version: 17
+  android_commandlinetools_version: "15859902"
+  android_commandlinetools_sha256_win: "90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a"
+  android_commandlinetools_sha256_linux: "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
+  android_commandlinetools_sha256_mac_x86_64: "c5a6378ab5cf7e0d5701921405115befff13e9ff7417fb588389338f8bd050f3"
+  android_commandlinetools_sha256_mac_arm64: "835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e"
   antigravity_hub: "2.22.0-5446056071266304"
   gum: "2.0.1"
   powershell: "7.6.6"
@@ -77,6 +114,8 @@ versions:
   powershell_sha256_arm64: "924829e54c983648f6f1419a2dc7f9433c861b2fb5bd57736ff096c24f133729"
   claude_install_sh: "https://claude.ai/install.sh"
   claude_install_ps1: "https://claude.ai/install.ps1"
+  maestro_version: "2.11.0"
+  maestro_sha256: "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a"
 
 guardrail:
   version: v0.23.36-dev

@@ -98,10 +98,17 @@ def read(n): return io.open("%s/%s" % (tmp, n), encoding="utf-8", newline="").re
 
 a = json.load(open(tmp + "/agents.json", encoding="utf-8"))
 
-# 1. shape
+# 1. shape: LOCAL (command + args - a binary the installer runs) or REMOTE
+# (type: remote + url - a hosted server with no local binary, e.g. Expo,
+# SDD plan 2026-10-10-mobile-dev-wsl-linux-macos Task 4).
 mcp = a.get("mcp", {})
 if not mcp: err("agents.mcp is empty")
+mcp_local = {}
 for name, srv in mcp.items():
+    if srv.get("type") == "remote":
+        if not isinstance(srv.get("url"), str) or not srv["url"]: err("mcp.%s: url must be a non-empty string" % name)
+        continue
+    mcp_local[name] = srv
     if not isinstance(srv.get("command"), str) or not srv["command"]: err("mcp.%s: command must be a non-empty string" % name)
     if not isinstance(srv.get("args"), list) or not srv["args"]: err("mcp.%s: args must be a non-empty list" % name)
 if "serena" not in mcp: err("mcp.serena missing - both installers register it")
@@ -132,18 +139,27 @@ ps_list = ", ".join("'%s'" % x for x in agents)
 if ps1.count("$skAgents = @(%s)" % ps_list) < 1: err("ps1 render: skills agent list not rendered")
 if ("AGENTS=(%s)" % " ".join(agents)) not in sh: err("sh render: skills agent list not rendered")
 
-# MCP: the ps1 gets a $mcpCatalog hashtable; both consumers reference it
+# MCP: the ps1 gets a $mcpCatalog hashtable; both consumers reference it.
+# REMOTE entries are deliberately absent from $mcpCatalog (the ps1/Windows
+# OpenCode+agy remote-registration branch is out of scope for Task 4, which
+# covers the .sh twin only) - checked against mcp_local, not the full catalog.
 m = re.search(r"\$mcpCatalog = @\{(.*?)\n\}", ps1, re.S)
 if not m: err("ps1 render: $mcpCatalog not rendered")
 else:
     body = m.group(1)
-    for name, srv in mcp.items():
-        want = "%s = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
+    # Keys are quoted ('name' = @{...}), not bare, so a hyphenated catalog
+    # name (agent-device) doesn't break PowerShell's hashtable-key parser
+    # (confirmed live 2026-10-10: a bare hyphenated key is a parse error).
+    for name, srv in mcp_local.items():
+        want = "'%s' = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
         if want not in body: err("ps1 render: $mcpCatalog lacks %s as %s" % (name, want))
+    for name in mcp:
+        if name not in mcp_local and ("'%s' = @{" % name) in body:
+            err("ps1 render: $mcpCatalog must not carry remote entry %s (out of scope for the ps1 twin)" % name)
     for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.serena.args"):
         if ref not in ps1: err("ps1 render: OpenCode/agy wiring does not consume %s" % ref)
 # the sh embeds the table as JSON inside its python heredocs. #124: the two
-# registration blocks live in the shared install_agent_toolkit now, so the
+# registration blocks live in the shared sync_agent_mcp_catalog now, so the
 # table renders twice (opencode + agy), not four times (was 2 blocks x
 # apt/brew). Count by CONTENT, not by the shape of the consuming code (#230:
 # the OpenCode registration assigns the table to `catalog` now, where it used

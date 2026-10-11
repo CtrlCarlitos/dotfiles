@@ -21,7 +21,7 @@
 # ==============================================================================
 # Toggle what gets installed. Runs via `chezmoi apply`.
 #
-# The 16 package groups share one vocabulary across the menu
+# The 17 package groups share one vocabulary across the menu
 # (scripts/select-packages.*), these keys, and CI seeds. Full table, menu
 # flow, presets, and the rename map from the old install_* toggles:
 # docs/package-groups.md. `true` requests desired state on the next apply.
@@ -97,6 +97,10 @@
     #             Deliberately a separate opt-in from the agent groups.
     #             See docs/guardrail-install.md.
     guardrail = true
+
+    # mobile_dev — opt-in Expo/Android mobile development tooling. See
+    #              docs/mobile-development.md.
+    mobile_dev = false
 
     # dev_desktop — Human desktop apps: Chrome, VS Code, Docker Desktop,
     #               ScreenRec, Termius, Handy... Host only: auto-skipped on
