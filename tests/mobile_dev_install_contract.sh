@@ -373,8 +373,13 @@ if command -v chezmoi >/dev/null 2>&1; then
     else
         fail "render (WSL): install_mobile_dev must call 'install_android_sdk adb' (platform-tools only), never 'full'"
     fi
+    # $isDevcontainer reads the DEVCONTAINER/REMOTE_CONTAINERS env vars at
+    # render time (not override-data) - unset them so this "native Linux"
+    # render is never accidentally mistaken for a devcontainer one when the
+    # suite itself runs inside one (tests/mobile_dev_agent_toolkit_dependency_contract.sh's
+    # own render_tmpl_interactive masks the same two vars the same way).
     sdk_render="$(mktemp -d)/linux.sh"
-    render_to "$sdk_render" sh "$(groups true true)"
+    ( unset DEVCONTAINER REMOTE_CONTAINERS; render_to "$sdk_render" sh "$(groups true true)" )
     if grep -Eq '^    install_android_sdk full \|\| warn' "$sdk_render" && ! grep -Eq '^    install_android_sdk adb' "$sdk_render"; then
         pass
     else
@@ -382,15 +387,16 @@ if command -v chezmoi >/dev/null 2>&1; then
     fi
 
     # Devcontainers get neither mode (#336: no GUI/emulator in a container).
-    # $isDevcontainer is derived from env/`/.dockerenv` at render time, not
-    # overridable via --override-data like os/kernel - so this pins the
-    # template's own branch structure (a real executable render of the
-    # devcontainer path isn't available to this test harness) rather than
-    # executing it.
-    if grep -Fq '{{- else if $isHost }}' "$tmpl" && grep -Fq 'Android SDK/emulator skipped (no GUI/emulator in a devcontainer)' "$tmpl"; then
+    # $isDevcontainer IS forceable via the DEVCONTAINER env var at render
+    # time (tests/mobile_dev_flag_contract.sh's own devcontainer render does
+    # exactly this) - a real executable render, not a structural grep.
+    devc_render="$(mktemp -d)/devcontainer.sh"
+    DEVCONTAINER=true render_to "$devc_render" sh "$(groups true true)"
+    if grep -Fq 'Android SDK/emulator skipped (no GUI/emulator in a devcontainer)' "$devc_render" \
+        && ! grep -Eq '^    install_android_sdk (full|adb) \|\| warn' "$devc_render"; then
         pass
     else
-        fail "install_mobile_dev must gate the Android SDK's full/adb modes on \$isHost/\$isWsl, leaving devcontainers with neither"
+        fail "render (devcontainer): install_android_sdk must not be called (full or adb) - only the skip message"
     fi
     for pin in sha256_linux sha256_mac_x86_64 sha256_mac_arm64; do
         want_pin="$(sed -n "s/^  android_commandlinetools_${pin}: \"\\([^\"]*\\)\"\$/\\1/p" "$repo_root/.chezmoidata.yaml")"
