@@ -978,7 +978,6 @@ function Invoke-WingetUpgradeAll {
     catch { $LogPath = $null; Write-Verbose "upgrade log unavailable: $($_.Exception.Message)" }
 
     $installed = 0
-    $userScopeBlocked = $false
     $allLines = New-Object System.Collections.Generic.List[string]
     $previous = $ErrorActionPreference
     $pinned = @()
@@ -999,7 +998,6 @@ function Invoke-WingetUpgradeAll {
             $allLines.Add($line)
             if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
             if ($line -match 'Successfully installed') { $installed++ }
-            if ($line -match 'installed for user scope cannot be uninstalled when running with administrator') { $userScopeBlocked = $true }
             # spinner frames, blank lines and download bars carry no information
             if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
             # the blocked note is explained (or repeated) by the summary below
@@ -1025,7 +1023,7 @@ function Invoke-WingetUpgradeAll {
         Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
         if ($RunningNote) { Write-Host "  $RunningNote" -ForegroundColor Yellow }
     }
-    if ($userScopeBlocked) {
+    if (@($allLines | Where-Object { $_ -match 'installed for user scope cannot be uninstalled when running with administrator' }).Count -gt 0) {
         Write-Host "  A per-user winget package cannot be upgraded from this elevated shell. Upgrade it from a NON-elevated terminal (winget upgrade <id>), or reinstall it machine-wide: winget uninstall <id> there, then winget install --scope machine <id> here." -ForegroundColor Yellow
     }
     elseif ($installed -eq 0 -and @($pending.Other).Count -eq 0) {
