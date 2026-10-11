@@ -317,7 +317,7 @@ else
 fi
 expect '   OpenCode: 7.0.0 (current)'
 expect '   Antigravity: 7.0.0 (current)'
-expect '   Codex: 6.4.2 - behind upstream v7.0.0 (the marketplace catalog offers 6.4.2 - nothing to do here)'
+expect '   Codex: 6.4.2 (marketplace latest - upstream v7.0.0 is not published there yet)'
 pass
 # no cache yet (a fresh machine before OpenCode's first start), and a deferred opencode
 rm -rf "$home/.cache/opencode"

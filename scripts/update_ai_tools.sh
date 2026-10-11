@@ -520,12 +520,13 @@ superpowers_report() {
         codex_cat="$(codex_superpowers_catalog_version || true)"
         # Codex installs only from a marketplace: when the catalog itself is behind upstream there
         # is nothing `codex plugin add` could fetch, and nothing for the dotfiles to do.
-        if [ -n "$codex_cat" ] && [ "$codex_ver" = "$codex_cat" ]; then
-            note="the marketplace catalog offers $codex_cat - nothing to do here"
+        # That is not a problem to act on, so it prints as "latest there", not as "behind".
+        if [ -n "$codex_cat" ] && [ "$codex_ver" = "$codex_cat" ] && [ -n "$upstream" ] && [ "$codex_ver" != "$upstream" ]; then
+            printf '   Codex: %s (marketplace latest - upstream v%s is not published there yet)
+' "$codex_ver" "$upstream"
         else
-            note="the marketplace offers ${codex_cat:-nothing}; re-run dot upgrade"
+            superpowers_version_line Codex "$codex_ver" "$upstream" "the marketplace offers ${codex_cat:-nothing}; re-run dot upgrade"
         fi
-        superpowers_version_line Codex "$codex_ver" "$upstream" "$note"
     fi
 }
 superpowers_report

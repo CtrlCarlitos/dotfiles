@@ -379,35 +379,67 @@ function Install-Node {
     Invoke-NpmUpgradeOnce
 }
 
-# Shared by Install-MobileDev's sdkmanager/avdmanager calls: captures
-# output and surfaces $LASTEXITCODE instead of redirecting every stream to
-# null - a silent multi-GB download or a silent hang are exactly the
-# "confusing partial state" the mobile_dev plan's Review Focus warns about.
-# None of these tools raise a PowerShell-level terminating error on their
-# own, so nothing else would ever notice a failure.
+# Shared by Install-MobileDev's sdkmanager/avdmanager calls. Runs the tool with
+# its output going to files, polls it, and prints a heartbeat line every
+# $HeartbeatSeconds so a multi-GB download never looks like a hang (the old
+# `| Out-String` capture printed nothing until the tool exited - a 74 minute
+# `dot up` showed no sign of life). The heartbeat adds how much is staged in
+# $ProgressDir\.temp, where sdkmanager downloads to. Output stays captured and
+# $LASTEXITCODE-style failure is still surfaced (last 15 lines) instead of
+# redirecting every stream to null - a silent partial state is the failure the
+# mobile_dev plan's Review Focus warns about. None of these tools raise a
+# PowerShell-level terminating error on their own, so nothing else would ever
+# notice a failure. stdin always comes from a file (the answers, or empty = EOF)
+# so a tool that unexpectedly asks something fails fast instead of hanging.
 function Invoke-MobileDevTool {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string[]]$ToolArguments,
         [string]$StdIn,
-        [Parameter(Mandatory)][string]$FailureLabel
+        [Parameter(Mandatory)][string]$FailureLabel,
+        [string]$ProgressDir,
+        [int]$HeartbeatSeconds = 30
     )
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("mobile_dev-tool-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $inFile = Join-Path $tmp 'in.txt'
+    $outFile = Join-Path $tmp 'out.txt'
+    $errFile = Join-Path $tmp 'err.txt'
+    $exitCode = 1
     try {
-        if ($StdIn) {
-            $output = ($StdIn | & $Path @ToolArguments 2>&1 | Out-String)
-        } else {
-            $output = (& $Path @ToolArguments 2>&1 | Out-String)
+        [System.IO.File]::WriteAllText($inFile, $(if ($StdIn) { $StdIn + "`n" } else { '' }))
+        $proc = Start-Process -FilePath $Path -ArgumentList $ToolArguments -NoNewWindow -PassThru `
+            -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+        $null = $proc.Handle   # caches the handle so ExitCode is readable after exit
+        $started = Get-Date
+        $nextBeat = $started.AddSeconds($HeartbeatSeconds)
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            if ((Get-Date) -ge $nextBeat) {
+                $nextBeat = (Get-Date).AddSeconds($HeartbeatSeconds)
+                $elapsed = Format-DotDuration -Seconds ((Get-Date) - $started).TotalSeconds
+                $staged = ''
+                if ($ProgressDir) {
+                    $stageDir = Join-Path $ProgressDir '.temp'
+                    if (Test-Path -LiteralPath $stageDir) {
+                        $bytes = (Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        if ($bytes) { $staged = ', {0} MB staged' -f [math]::Round($bytes / 1MB) }
+                    }
+                }
+                Write-Host "    ... $FailureLabel still running ($elapsed$staged)" -ForegroundColor DarkGray
+            }
+        }
+        $proc.WaitForExit()
+        $exitCode = $proc.ExitCode
+        if ($exitCode -ne 0) {
+            $output = ((Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue)) -join "`n"
+            Write-Host "  Warning: $FailureLabel failed (exit code $exitCode):" -ForegroundColor Red
+            ($output -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 15) | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
         }
     } finally {
-        $ErrorActionPreference = $previous
+        Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Warning: $FailureLabel failed (exit code $LASTEXITCODE):" -ForegroundColor Red
-        ($output -split "`r?`n" | Select-Object -Last 15) | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-    }
-    return $LASTEXITCODE
+    return $exitCode
 }
 
 # Appends entries to the Machine PATH without flattening existing %VAR%
@@ -464,6 +496,66 @@ function Install-MobileDev {
     # need JAVA_HOME regardless of Studio. EclipseAdoptium.Temurin.17.JDK
     # over Microsoft.OpenJDK.17 (design doc section 3.5 - either is
     # acceptable; Temurin picked and used consistently here and in the test).
+    # Android SDK command-line tools (design doc section 3.4): Studio is
+    # dropped entirely, so this downloads Google's own zip directly rather
+    # than going through Studio's install-time sdkmanager bootstrap.
+    # android_commandlinetools_* pins come from .chezmoidata.yaml, confirmed
+    # live against developer.android.com/studio this session.
+    #
+    # Detect an existing manual install first (Global Constraints: never
+    # silently rewrite an existing SDK location a user already configured)
+    # - both ANDROID_HOME and the older ANDROID_SDK_ROOT, in both Machine
+    # and User scope, since a prior manual install could have set either.
+    $androidHomeCandidates = foreach ($pair in @(
+            @('ANDROID_HOME', 'Machine'), @('ANDROID_HOME', 'User'),
+            @('ANDROID_SDK_ROOT', 'Machine'), @('ANDROID_SDK_ROOT', 'User')
+        )) {
+        $val = [System.Environment]::GetEnvironmentVariable($pair[0], $pair[1])
+        if ($val -and (Test-Path $val)) { $val }
+    }
+    $androidHomeCandidates = @($androidHomeCandidates | Select-Object -Unique)
+    if ($androidHomeCandidates.Count -gt 1) {
+        Write-Host "  Warning: multiple existing Android SDK locations found ($($androidHomeCandidates -join ', ')) - using the first; reconcile ANDROID_HOME/ANDROID_SDK_ROOT yourself if that is wrong." -ForegroundColor Red
+    }
+    $androidHome = if ($androidHomeCandidates.Count -gt 0) { $androidHomeCandidates[0] } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
+    $sdkmanagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\sdkmanager.bat'
+    $adbPath = Join-Path $androidHome 'platform-tools\adb.exe'
+    $emulatorPath = Join-Path $androidHome 'emulator\emulator.exe'
+    $avdManagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\avdmanager.bat'
+    $avdName = 'mobile_dev_pixel'
+    $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
+    $systemImage = 'system-images;android-34;default;x86_64'
+
+    # Every question is asked HERE, before the first download, so the long part
+    # of the run (JDK, SDK tools, a multi-GB system image) goes unattended and a
+    # prompt left unanswered can never stall it half way. #336's explicit
+    # caution: nothing accepts Google's licenses silently on the user's behalf.
+    # Gated on Test-Path, like Install-Node's version check: once adb, the
+    # emulator and the AVD exist this is skipped on every later `dot up` - no
+    # separate re-prompt or re-download bookkeeping. The marks keep the time
+    # spent waiting for answers out of the sections around them.
+    $needPackages = (-not (Test-Path $adbPath)) -or (-not (Test-Path $emulatorPath))
+    $needAvd = -not (Test-Path $avdDir)
+    $acceptLicenses = $false
+    $createAvd = $false
+    if ($needPackages -or $needAvd) {
+        Add-DotTimingMark -Name 'your answers'
+        if ($needPackages) {
+            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
+            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
+            $acceptLicenses = ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y')
+        }
+        # The system image sits behind the licenses: asked only when they were
+        # accepted above, or (packages already present) as its own consent.
+        if ($needAvd -and ($acceptLicenses -or -not $needPackages)) {
+            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)$(if (-not $needPackages) { ' and accepts the Android SDK licenses it needs' })." -ForegroundColor Cyan
+            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
+            $createAvd = ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y')
+            if ($createAvd) { $acceptLicenses = $true }
+        }
+    }
+    Add-DotTimingMark -Name 'mobile_dev: JDK'
+
     $jdkMajor = {{ .versions.jdk_version }}
     $existingJava = Get-Command java -ErrorAction SilentlyContinue
     $javaInfo = [pscustomobject]@{ Major = 0; Home = $null }
@@ -498,29 +590,6 @@ function Install-MobileDev {
         Write-Host "  Warning: JAVA_HOME ($existingMachineJavaHome) points at a JDK older than $jdkMajor - mobile_dev's tools need $jdkMajor+ there." -ForegroundColor Red
     }
 
-    # Android SDK command-line tools (design doc section 3.4): Studio is
-    # dropped entirely, so this downloads Google's own zip directly rather
-    # than going through Studio's install-time sdkmanager bootstrap.
-    # android_commandlinetools_* pins come from .chezmoidata.yaml, confirmed
-    # live against developer.android.com/studio this session.
-    #
-    # Detect an existing manual install first (Global Constraints: never
-    # silently rewrite an existing SDK location a user already configured)
-    # - both ANDROID_HOME and the older ANDROID_SDK_ROOT, in both Machine
-    # and User scope, since a prior manual install could have set either.
-    $androidHomeCandidates = foreach ($pair in @(
-            @('ANDROID_HOME', 'Machine'), @('ANDROID_HOME', 'User'),
-            @('ANDROID_SDK_ROOT', 'Machine'), @('ANDROID_SDK_ROOT', 'User')
-        )) {
-        $val = [System.Environment]::GetEnvironmentVariable($pair[0], $pair[1])
-        if ($val -and (Test-Path $val)) { $val }
-    }
-    $androidHomeCandidates = @($androidHomeCandidates | Select-Object -Unique)
-    if ($androidHomeCandidates.Count -gt 1) {
-        Write-Host "  Warning: multiple existing Android SDK locations found ($($androidHomeCandidates -join ', ')) - using the first; reconcile ANDROID_HOME/ANDROID_SDK_ROOT yourself if that is wrong." -ForegroundColor Red
-    }
-    $androidHome = if ($androidHomeCandidates.Count -gt 0) { $androidHomeCandidates[0] } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
-    $sdkmanagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\sdkmanager.bat'
     if (-not (Test-Path $sdkmanagerPath)) {
         $ctVersion = '{{ .versions.android_commandlinetools_version }}'
         $ctSha256 = '{{ .versions.android_commandlinetools_sha256_win }}'
@@ -528,6 +597,11 @@ function Install-MobileDev {
         $ctUrl = "https://dl.google.com/android/repository/$ctZipName"
         $ctTmp = Join-Path $env:TEMP "mobile_dev-cmdlinetools-$ctVersion"
         Write-Host "  Downloading the Android SDK command-line tools..." -ForegroundColor Yellow
+        Add-DotTimingMark -Name 'mobile_dev: SDK tools'
+        # Windows PowerShell 5.1 renders Invoke-WebRequest's progress bar so
+        # slowly that it throttles the download itself; silence it for this call.
+        $priorProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
         try {
             New-Item -ItemType Directory -Force -Path $ctTmp | Out-Null
             $ctZipPath = Join-Path $ctTmp $ctZipName
@@ -550,6 +624,7 @@ function Install-MobileDev {
         } catch {
             Write-Host "  Warning: Android SDK command-line tools download failed - $_" -ForegroundColor Red
         } finally {
+            $ProgressPreference = $priorProgress
             Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
         }
     }
@@ -590,32 +665,24 @@ function Install-MobileDev {
         if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
         Add-MobileDevMachinePath -Paths $toolPaths
 
-        # platform-tools/emulator need their licenses accepted once; #336's
-        # explicit caution says never silently accept on the user's behalf,
-        # so this prompts before sdkmanager runs non-interactively. Gated on
-        # Test-Path, like Install-Node's version check above: once both are
-        # present, this block is skipped on every later `dot up` - no
-        # separate re-prompt or re-download bookkeeping needed.
-        $adbPath = Join-Path $androidHome 'platform-tools\adb.exe'
-        $emulatorPath = Join-Path $androidHome 'emulator\emulator.exe'
-        if (-not (Test-Path $adbPath) -or -not (Test-Path $emulatorPath)) {
-            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
-            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
-            if ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y') {
-                # sdkmanager prompts once per license; a generous repeated
-                # "y" feed covers every package this function ever installs
-                # (platform-tools/emulator here, the system image elsewhere).
-                $yesFeed = (@('y') * 20) -join "`n"
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('--licenses') -StdIn $yesFeed -FailureLabel 'sdkmanager --licenses' | Out-Null
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' | Out-Null
-            } else {
-                # run_onchange only re-runs when its OWN rendered content changes
-                # (a template/version-pin edit, not a blanket "every dot up") -
-                # "just re-run dot up" would not actually re-enter this block.
-                # The documented, real re-entry point: clear chezmoi's recorded
-                # script hash so the next apply re-runs this script in full.
-                Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
+        # The answers were collected up front (see $acceptLicenses/$createAvd
+        # above); the licenses are accepted ONCE here for everything below. The
+        # y feed covers every license sdkmanager can ask for.
+        if ($acceptLicenses) {
+            Add-DotTimingMark -Name 'mobile_dev: SDK packages'
+            $yesFeed = (@('y') * 20) -join "`n"
+            Write-Host "  Accepting the Android SDK licenses and installing platform-tools and the emulator (a heartbeat line prints while it runs)..." -ForegroundColor Yellow
+            Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('--licenses') -StdIn $yesFeed -FailureLabel 'sdkmanager --licenses' -ProgressDir $androidHome | Out-Null
+            if ($needPackages) {
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' -ProgressDir $androidHome | Out-Null
             }
+        } elseif ($needPackages) {
+            # run_onchange only re-runs when its OWN rendered content changes
+            # (a template/version-pin edit, not a blanket "every dot up") -
+            # "just re-run dot up" would not actually re-enter this block.
+            # The documented, real re-entry point: clear chezmoi's recorded
+            # script hash so the next apply re-runs this script in full.
+            Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
         }
 
         # A prior adb (from a manual install) and the SDK's own adb can be
@@ -637,21 +704,14 @@ function Install-MobileDev {
         # A default Pixel-like AVD, scripting what Android Studio's wizard
         # used to do (design doc section 3.4). AOSP over Google APIs/Play
         # Store (design doc section 5: lighter, sufficient for most Expo app
-        # testing). Gated on the AVD's own directory, like the license
-        # check above: once created, this is skipped on every later
-        # `dot up` - no separate re-prompt or re-download bookkeeping.
+        # testing). Whether to create it was answered up front; the licenses
+        # were accepted by the single --licenses run above.
         # avdmanager create avd -n <name> -k <image> -d <device>
-        $avdManagerPath = Join-Path $androidHome 'cmdline-tools\latest\bin\avdmanager.bat'
-        $avdName = 'mobile_dev_pixel'
-        $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
-        if ((Test-Path $avdManagerPath) -and -not (Test-Path $avdDir)) {
-            $systemImage = 'system-images;android-34;default;x86_64'
-            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)." -ForegroundColor Cyan
-            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
-            if ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y') {
-                $yesFeed = (@('y') * 20) -join "`n"
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('--licenses') -StdIn $yesFeed -FailureLabel 'sdkmanager --licenses' | Out-Null
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" | Out-Null
+        if ((Test-Path $avdManagerPath) -and $needAvd) {
+            if ($createAvd) {
+                Add-DotTimingMark -Name 'mobile_dev: system image'
+                Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
+                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
                 # avdmanager asks whether to create a custom hardware
                 # profile; "no" keeps the device profile's own default.
                 Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
@@ -666,6 +726,7 @@ function Install-MobileDev {
     # against a duplicate, conflicting ADB means this checks what the SDK
     # platform-tools step above already left on PATH first, so a resulting
     # shadow is a visible warning, not silent.
+    Add-DotTimingMark -Name 'mobile_dev: scrcpy and ADB'
     if (-not (Get-Command scrcpy -ErrorAction SilentlyContinue)) {
         $adbBeforeScrcpy = Get-Command adb -ErrorAction SilentlyContinue
         Write-Host "  Installing scrcpy..." -ForegroundColor Yellow
