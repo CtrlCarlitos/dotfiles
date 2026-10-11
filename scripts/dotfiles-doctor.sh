@@ -390,7 +390,11 @@ if [ -f "$config" ]; then
                 done
             done
         fi
-        if [ -n "$md_missing" ]; then
+        if [ "$md_missing" = " maestro" ]; then
+            # `dot upgrade` installs a missing Maestro by itself (install_maestro is shared,
+            # #359): no need to re-enter the whole run_onchange installer for it.
+            result warn mobile-dev "missing: maestro - run: dot upgrade (it installs the pinned Maestro)"
+        elif [ -n "$md_missing" ]; then
             result warn mobile-dev "missing:$md_missing - re-run the installer: chezmoi state delete-bucket --bucket=scriptState && dot up"
         elif [ -n "$IN_APPLY" ]; then
             result ok mobile-dev "maestro, agent-device, adb present (MCP registrations are checked standalone)"

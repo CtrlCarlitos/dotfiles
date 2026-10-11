@@ -170,8 +170,9 @@ from a terminal, run
 The installer is a `run_onchange` script: it re-runs only when its rendered
 content changes, so a download that failed (Maestro's 300 MB asset on a slow
 link, say) or an MCP registration that was killed is not retried by the next
-`dot up`. Every such warning now names the re-entry command above. Two other
-places pick up the slack:
+`dot up`. Every such warning names its fix: `dot upgrade` for Maestro (it
+installs a missing Maestro by itself), the re-entry command above for the
+rest. Two other places pick up the slack:
 
 - `dot upgrade` sweeps the group wherever its installer ran: Maestro follows
   the pin in `.chezmoidata.yaml` (installed, or reinstalled on a pin bump -
@@ -180,8 +181,8 @@ places pick up the slack:
   installer's own SDK gets `sdkmanager --update`.
 - `dot doctor` has a `mobile-dev` check: with `mobile_dev = true` it names
   whatever is missing - `maestro`, `agent-device`, `adb`, and the Maestro and
-  agent-device MCP registrations of each installed agent - with the re-entry
-  command.
+  agent-device MCP registrations of each installed agent - with the fix:
+  `dot upgrade` when only Maestro is missing, the re-entry command otherwise.
 
 Maestro's download is guarded by a stall limit, not a wall clock (`curl
 --speed-limit 10240 --speed-time 60`): a dead transfer is killed, a slow one

@@ -54,7 +54,10 @@ require "$lib" 'mobile-dev-inc/maestro/releases/download/cli-'
 require "$lib" 'maestro CHECKSUM MISMATCH'
 require "$lib" '$HOME/.local/opt'
 require "$lib" '$HOME/.local/bin/maestro'
-require "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket --bucket=scriptState && dot up'"
+# The retry hint is `dot upgrade`: since #359 it installs a missing Maestro by itself (install_maestro
+# is shared), so a failed download no longer needs the whole run_onchange installer re-entered.
+require "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'dot upgrade'"
+forbid "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket"
 forbid "$tmpl" 'net_timeout 300 curl -fsSLo "$maestro_tmp'
 
 # --- agent-device: npm global, reusing core's Node, command -v guarded ----
@@ -530,8 +533,10 @@ if command -v chezmoi >/dev/null 2>&1; then
         [ -n "$body" ] || fail "render: $fn() not found"
         lf_fns+="$body"$'\n'
     done
+    # PATH is controlled: the host's own Maestro (~/.local/bin where `dot up` installed it) would
+    # make the rendered install_maestro skip its download, and the first curl line never comes.
     run_lf() { # $1 = answer on stdin, $2 = interactive (0 yes / 1 no)
-        printf '%s\n' "$1" | env -u ANDROID_HOME -u ANDROID_SDK_ROOT LF_INTERACTIVE="$2" HOME="$lf/home" PATH="$lf/stubs:$PATH" PKG_MANAGER=none \
+        printf '%s\n' "$1" | env -u ANDROID_HOME -u ANDROID_SDK_ROOT LF_INTERACTIVE="$2" HOME="$lf/home" PATH="$lf/stubs:/usr/bin:/bin" PKG_MANAGER=none \
             bash -c 'set -euo pipefail; '"$lf_fns"$'\n''install_mobile_dev; echo rc=0' 2>&1
     }
     # `read -p` shows its prompt only on a terminal, so the question is located by the

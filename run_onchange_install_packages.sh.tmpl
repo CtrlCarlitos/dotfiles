@@ -196,6 +196,7 @@ _sudo_net_timeout() {
 #-------------------------------------------------------------------------------
 {{ include "scripts/lib/agent-skills.sh" }}
 {{ include "scripts/lib/timing.sh" }}
+{{ include "scripts/lib/vscode-wsl.sh" }}
 
 #-------------------------------------------------------------------------------
 # add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its
@@ -894,9 +895,10 @@ install_mobile_dev() {
 
     # --- Maestro CLI: pinned+verified install (install_maestro, scripts/lib/
     # agent-skills.sh - shared with `dot upgrade`, which follows the same pin).
-    # The retry hint is the run_onchange re-entry command: a failed download
-    # is otherwise never retried by the next `dot up` (2026-10-11).
-    install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket --bucket=scriptState && dot up'
+    # The retry hint is `dot upgrade`: a failed download is never retried by the
+    # next `dot up` (run_onchange, 2026-10-11), but `dot upgrade` installs a
+    # missing Maestro by itself, so the whole installer need not be re-entered.
+    install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'dot upgrade'
 
     # Maestro's MCP server is NOT registered here: main() runs this before
     # install_claude_cli/install_chatgpt_cli, so on a fresh machine neither
@@ -2013,6 +2015,12 @@ PYEOF
     if [ "$VSCODE_SETTINGS" = "true" ]; then
         command -v code &>/dev/null && configure_vscode_font
         if command -v code &>/dev/null; then
+            # WSL: `code` is the Windows client's launcher, and its first call after a VS Code
+            # update downloads the WSL server (200+ MB) before answering - a `dot up` sat 22
+            # silent minutes in the listing below (2026-10-11). Fetch it visibly first
+            # (vscode_wsl_server_fetch, scripts/lib/vscode-wsl.sh); a failed fetch skips the
+            # step this run. No-op on native Linux/macOS and when the server is present.
+            vscode_wsl_server_fetch 'dot upgrade' || return 0
             info "Installing VS Code extensions (global, idempotent)..."
             # Machine-local drift, hasKey pattern (chezmoi.toml [vscode]):
             #   extra_extensions    - appended to the repo baseline

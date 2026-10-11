@@ -31,6 +31,8 @@ DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DOT_SCRIPT_DIR/lib/agent-skills.sh"
 . "$DOT_SCRIPT_DIR/lib/docker-vscode.sh"
 . "$DOT_SCRIPT_DIR/lib/netspeed.sh"
+# vscode_wsl_server_fetch: on WSL, the VS Code server download a `code` call hides.
+. "$DOT_SCRIPT_DIR/lib/vscode-wsl.sh"
 
 echo "dot upgrade - sweeping all tooling..."
 # Two marks, so the Timings line says which half is slow: the scan and the stop, then the
@@ -74,7 +76,10 @@ descendant_pids() {
         echo "$child"
     done
 }
-is_interactive() { [ -t 0 ] && [ -t 1 ]; }
+# stdin for the answer, stderr for the question: stop_live_sessions is called with stdout to
+# /dev/null (its count travels there), so a `-t 1` test made the offer unreachable on every
+# Linux/WSL run (2026-10-11; tests/dotupgrade_stop_offer_tty_contract.sh).
+is_interactive() { [ -t 0 ] && [ -t 2 ]; }
 # TERM the whole tree (Serena leaves language-server children), give it five seconds, KILL
 # whatever is left.
 stop_pid_tree() {
@@ -211,6 +216,10 @@ case "$NET_CHOICE:$(uname -s)" in
             apt_q=(-qq)
             if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
             if sudo apt-get "${apt_q[@]}" update; then
+                # The password was just typed (or cached): keep it alive for the rest of the run -
+                # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
+                # (lib/agent-skills.sh, 2026-10-11).
+                dot_sudo_keepalive
                 if dock_docker_running; then
                     dock_pending="$(dock_pending_linux | tr '\n' ' ')"
                     if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
@@ -289,7 +298,11 @@ vscode_extensions_report() {
 
 vscode_ext_pid=""
 vscode_ext_out=""
-if command -v code &>/dev/null; then
+# WSL: after a VS Code update on Windows, the first `code` call downloads the WSL server (200+ MB)
+# before answering - inside the 300 s below it would be killed halfway and leave a partial tarball
+# under ~/.vscode-server/bin. Fetch it first, visibly (lib/vscode-wsl.sh); a failed fetch skips
+# the update this run. No-op on native Linux/macOS and when the server is present.
+if command -v code &>/dev/null && vscode_wsl_server_fetch 're-run dot upgrade'; then
     echo "  Updating VS Code extensions (in the background)..."
     vscode_ext_out="$(mktemp)"
     timeout 300 code --update-extensions >"$vscode_ext_out" 2>&1 &
