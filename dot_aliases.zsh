@@ -198,7 +198,26 @@ dot() {
     local repo_scripts="${DOTFILES_DIR:-$(chezmoi source-path)}/scripts"
     case "$sub" in
         up)
-            chezmoi update --apply=false || return
+            chezmoi update --apply=false
+            local update_rc=$?
+            if [ "$update_rc" -ne 0 ]; then
+                # A feature branch merged (often squashed, as this repo's own PRs are) and
+                # auto-deleted upstream leaves `git pull` nothing to merge into it - raw git
+                # error, no hint (lived 2026-10-11: feat/mobile-dev's PR #352). fetch.prune
+                # (on by default) already marked it [gone] by the time the pull failed.
+                local src="${DOTFILES_DIR:-$(chezmoi source-path)}"
+                local cur_branch
+                cur_branch="$(git -C "$src" symbolic-ref --quiet --short HEAD 2>/dev/null)"
+                if [ -n "$cur_branch" ] && git -C "$src" status -sb 2>/dev/null | head -1 | grep -q '\[gone\]'; then
+                    local default_branch
+                    default_branch="$(git -C "$src" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+                    echo "dot up: '$cur_branch' tracks a remote branch that's gone - it was likely merged and deleted upstream, so there's nothing left to pull into it." >&2
+                    if [ -n "$default_branch" ] && [ "$cur_branch" != "$default_branch" ]; then
+                        echo "  Fix: git -C \"$src\" checkout $default_branch && git -C \"$src\" pull && git -C \"$src\" branch -D $cur_branch" >&2
+                    fi
+                fi
+                return "$update_rc"
+            fi
             chezmoi init || return
             chezmoi apply || return
             # zsh caches every PATH dir's listing on first command lookup
