@@ -1657,6 +1657,13 @@ function Invoke-DotNetworkCheck {
         return 'continue'
     }
     Write-Host ('  Network is slow: {0} Mbit/s (under {1}). Large downloads (winget, choco) may take a long time.' -f $mbps, $threshold) -ForegroundColor Yellow
+    # This prompt's answers are c/s/q, not y/N - Read-DotAnswer's --yes branch always prints "y"
+    # (right for the y/N prompts elsewhere), which would be a nonsense answer here. --yes always
+    # continues anyway (never blocks an unattended run), so say that directly instead of asking.
+    if ((Get-Variable -Name DotAnswerYes -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+        Write-Host '  Continuing (unattended).' -ForegroundColor DarkGray
+        return 'continue'
+    }
     $answer = (Read-DotAnswer '  [c] continue with everything (default)  [s] skip the winget and choco sweeps  [q] stop').Trim()
     if ($answer -match '^[sS]') { return 'skip' }
     if ($answer -match '^[qQ]') { return 'stop' }
