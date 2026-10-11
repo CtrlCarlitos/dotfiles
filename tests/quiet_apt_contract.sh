@@ -74,6 +74,67 @@ EOF
 CALLS="$tmp/calls" FAKE_EXIT=100 PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" >/dev/null 2>&1 || true
 [ "$(cat "$tmp/codes")" = "100 100" ] || fail "the exit status of apt must come through (got: $(cat "$tmp/codes" 2>/dev/null))"
 
+# --- dpkg's own stdout is captured, kept in apt.log, and shown only when apt fails -------------------------
+# `apt-get -qq` silences apt but not dpkg: a WSL `dot up` (2026-10-11) still printed the whole
+# "Selecting previously unselected package ... / Unpacking ... / Setting up ... / update-alternatives"
+# wall for one JDK. stdout goes to ~/.local/state/dotfiles/apt.log (XDG_STATE_HOME-aware, one
+# header per call) and comes back on the terminal only when the command fails; stderr - where apt
+# and dpkg put their errors - is never captured. DOT_APT_VERBOSE=1 leaves everything on the terminal.
+for t in apt apt-get; do
+    cat >"$tmp/bin/$t" <<EOF
+#!/bin/sh
+echo "$t \$*" >>"\$CALLS"
+for a; do last=\$a; done
+echo "Selecting previously unselected package \$last."
+echo "E: on stderr" >&2
+exit "\${FAKE_EXIT:-0}"
+EOF
+    chmod +x "$tmp/bin/$t"
+done
+state="$tmp/state"
+rm -rf "$state"
+cat >"$tmp/snippet.sh" <<EOF
+set -u
+. "$repo_root/scripts/lib/agent-skills.sh"
+info() { :; }
+quiet_apt_enable
+rc=0; sudo apt install -y libxt-dev || rc=\$?
+echo "rc=\$rc"
+EOF
+out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" 2>"$tmp/stderr")"
+[ "$out" = "rc=0" ] || fail "a successful install must print nothing of dpkg's on stdout (got: $(printf '%s' "$out" | tr '\n' '|'))"
+grep -Fxq 'E: on stderr' "$tmp/stderr" || fail "stderr must pass through live even when stdout is captured (got: $(tr '\n' '|' <"$tmp/stderr"))"
+grep -Fq 'Selecting previously unselected package libxt-dev.' "$state/dotfiles/apt.log" 2>/dev/null \
+    || fail "the captured dpkg output must land in \$XDG_STATE_HOME/dotfiles/apt.log (got: $(/bin/cat "$state/dotfiles/apt.log" 2>/dev/null | tr '\n' '|'))"
+grep -Eq '^=== [0-9T:-]+ .*apt-get -qq install -y libxt-dev' "$state/dotfiles/apt.log" 2>/dev/null \
+    || fail "every captured call must start with a dated header naming the command (got: $(/bin/cat "$state/dotfiles/apt.log" 2>/dev/null | tr '\n' '|'))"
+pass
+out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" FAKE_EXIT=100 PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" 2>/dev/null)"
+case "$out" in
+    *'Selecting previously unselected package libxt-dev.'*'rc=100'*) pass ;;
+    *) fail "a failed install must replay the captured stdout before the caller's own || warn, and keep the exit code (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" DOT_APT_VERBOSE=1 PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" 2>/dev/null)"
+case "$out" in
+    *'Selecting previously unselected package libxt-dev.'*) pass ;;
+    *) fail "DOT_APT_VERBOSE=1 must leave dpkg's output on the terminal (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+# other apt subcommands are never captured
+out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" PATH="$tmp/bin:$PATH" bash -c 'set -u; . "$1"; info() { :; }; quiet_apt_enable; sudo apt-get remove -y x' _ "$repo_root/scripts/lib/agent-skills.sh" 2>/dev/null)"
+case "$out" in
+    *'Selecting previously unselected package x.'*) pass ;;
+    *) fail "only install/update are captured; remove must keep its stdout (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+# restore the silent fakes for the scenarios below
+for t in apt apt-get; do
+    cat >"$tmp/bin/$t" <<EOF
+#!/bin/sh
+echo "$t \$*" >>"\$CALLS"
+exit "\${FAKE_EXIT:-0}"
+EOF
+    chmod +x "$tmp/bin/$t"
+done
+
 # --- off switch, and nothing is defined before the call ----------------------------------------------------
 out="$(run 'DOT_APT_VERBOSE=1 quiet_apt_enable; sudo apt install -y git; apt update')"
 want="sudo apt install -y git${nl}apt install -y git${nl}apt update"

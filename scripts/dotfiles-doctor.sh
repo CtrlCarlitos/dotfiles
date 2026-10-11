@@ -359,6 +359,49 @@ else
     fi
 fi
 
+#-------------------------------------------------------------------------------
+# 10. mobile_dev completeness. The group's installer is a run_onchange script:
+#     a failed Maestro download (300 MB on a slow link) and a killed
+#     `claude mcp add` both happened on one WSL `dot up` (2026-10-11), and the
+#     next `dot up` retried neither - nothing re-enters the script until its
+#     rendered content changes. With mobile_dev on, name what the installer
+#     should have left behind and is not there, plus the re-entry command.
+#     The MCP registrations are asked of the agents that are installed, and
+#     only for the servers whose binary exists (the installer gates the same
+#     way); `claude mcp get` takes a second or two each, so that half runs
+#     standalone only, not after every apply.
+#-------------------------------------------------------------------------------
+if [ -f "$config" ]; then
+    if [ "$(pkg_config_flag_true "$config" mobile_dev)" = true ]; then
+        md_missing=""
+        command -v maestro >/dev/null 2>&1 || md_missing="$md_missing maestro"
+        command -v agent-device >/dev/null 2>&1 || md_missing="$md_missing agent-device"
+        md_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/.local/opt/android-sdk}}"
+        if ! command -v adb >/dev/null 2>&1 && [ ! -x "$md_sdk/platform-tools/adb" ]; then
+            md_missing="$md_missing adb"
+        fi
+        [ -f "$HOME/.local/state/dotfiles/mobile_dev" ] || md_missing="$md_missing marker(~/.local/state/dotfiles/mobile_dev)"
+        if [ -z "$IN_APPLY" ]; then
+            for md_agent in claude codex; do
+                command -v "$md_agent" >/dev/null 2>&1 || continue
+                for md_srv in maestro agent-device; do
+                    command -v "$md_srv" >/dev/null 2>&1 || continue
+                    "$md_agent" mcp get "$md_srv" >/dev/null 2>&1 || md_missing="$md_missing $md_agent:$md_srv"
+                done
+            done
+        fi
+        if [ -n "$md_missing" ]; then
+            result warn mobile-dev "missing:$md_missing - re-run the installer: chezmoi state delete-bucket --bucket=scriptState && dot up"
+        elif [ -n "$IN_APPLY" ]; then
+            result ok mobile-dev "maestro, agent-device, adb present (MCP registrations are checked standalone)"
+        else
+            result ok mobile-dev "maestro, agent-device, adb and the MCP registrations present"
+        fi
+    else
+        result skip mobile-dev "mobile_dev off (opt-in via packages.mobile_dev)"
+    fi
+fi
+
 if [ "$errors" -gt 0 ]; then
     printf '\n%d error(s). ' "$errors"
     if $FIX; then printf '(--fix applied where safe)\n'; else printf 're-run with --fix for auto-repairable items\n'; fi

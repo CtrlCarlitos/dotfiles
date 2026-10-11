@@ -50,6 +50,11 @@ grep -Fq '@latest"' "$ai_ps1" ||
 # tests/graft_retirement_contract.sh) and never upgrades it.
 grep -Fq 'Invoke-GraftRetirement' "$ai_ps1" || fail "$ai_ps1: must retire Graft"
 forbid "$ai_ps1" '@nanonets/graft@latest'
+# mobile_dev's sweep (the sh twin's 5c below, executed): Windows installs no Maestro or
+# agent-device, so its half is the SDK's own `sdkmanager --update`, gated on packages.mobile_dev.
+grep -Fq "Add-DotTimingMark -Name 'mobile_dev'" "$ai_ps1" || fail "$ai_ps1: mobile_dev must be its own timing section"
+grep -Eq 'mobile_dev\\s\*=\\s\*true' "$ai_ps1" || fail "$ai_ps1: the sweep must be gated on [data.packages] mobile_dev = true"
+grep -Fq "'--update'" "$ai_ps1" || fail "$ai_ps1: the SDK's sdkmanager must get --update"
 
 [ -f "$ai_sh" ] || { fail "$ai_sh missing"; finish; }
 command -v timeout >/dev/null 2>&1 || skip "coreutils timeout not installed"
@@ -247,6 +252,39 @@ grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log"
 : >"$tmp/npm.log"
 run_updater "$tmp/run5d.log" || true
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" || fail "unknown codex versions must not skip the reinstall"
+
+# --- 5c. mobile_dev is swept when its installer ran here -----------------------
+# `dot upgrade` did not know the group existed (2026-10-11): Maestro, agent-device
+# and the Android platform-tools were never refreshed, and a Maestro whose `dot up`
+# download had failed stayed missing. Gated on the installer's own marker
+# (~/.local/state/dotfiles/mobile_dev, what dot_zshrc gates on too): Maestro follows
+# the repo's pin through the shared install_maestro (the stub curl hands it a file
+# that fails the sha256 check, which proves the real pins were used), agent-device
+# follows the npm registry like the other npm globals, and the SDK's own sdkmanager
+# gets --update.
+: >"$tmp/npm.log"; : >"$tmp/curl.log"
+CURL_LOG="$tmp/curl.log" run_updater "$tmp/run5c-mobile-off.log" || true
+if grep -Fq 'Updating mobile_dev' "$tmp/run5c-mobile-off.log"; then fail "without the mobile_dev marker nothing of the group may run"; else pass; fi
+mkdir -p "$home/.local/state/dotfiles" "$home/.local/opt/android-sdk/cmdline-tools/latest/bin"
+touch "$home/.local/state/dotfiles/mobile_dev"
+printf '#!/bin/sh\nprintf "sdkmanager %%s\\n" "$*" >> "${STUB_LOG:?}"\necho "WARNING: The SDK Manager CLI tool (sdkmanager) is deprecated. Use Android CLI instead." >&2\nexit 0\n' >"$home/.local/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager"
+chmod +x "$home/.local/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager"
+: >"$tmp/npm.log"; : >"$tmp/curl.log"; : >"$tmp/agent-browser.log"
+CURL_LOG="$tmp/curl.log" NPM_LS_VERSION=9.9.8 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c-mobile.log" || true
+grep -Fq 'Updating mobile_dev' "$tmp/run5c-mobile.log" || fail "with the marker the group must be swept: $(tail -5 "$tmp/run5c-mobile.log")"
+maestro_pin="$(sed -n 's/^  maestro_version: "\([^"]*\)"$/\1/p' "$repo_root/.chezmoidata.yaml")"
+grep -Fq "mobile-dev-inc/maestro/releases/download/cli-$maestro_pin/maestro.zip" "$tmp/curl.log" ||
+    fail "Maestro must be fetched at the repo's pin ($maestro_pin); curl saw: $(tr '\n' ' ' <"$tmp/curl.log")"
+grep -Fq 'maestro CHECKSUM MISMATCH' "$tmp/run5c-mobile.log" || fail "the download must be verified against the pinned sha256 (got: $(grep -i maestro "$tmp/run5c-mobile.log" | head -3))"
+grep -Fq 'install -g agent-device@latest' "$tmp/npm.log" || fail "a stale agent-device must be upgraded; npm saw: $(tr '\n' ' ' <"$tmp/npm.log")"
+grep -Fq 'sdkmanager --update' "$tmp/agent-browser.log" || fail "the installer's own sdkmanager must get --update (stub log: $(tr '\n' ' ' <"$tmp/agent-browser.log"))"
+if grep -Fq 'sdkmanager) is deprecated' "$tmp/run5c-mobile.log"; then fail "sdkmanager's deprecation banner must not reach the terminal"; else pass; fi
+grep -Fq 'AI Tools Update Complete' "$tmp/run5c-mobile.log" || fail "the mobile_dev sweep must not abort the updater"
+: >"$tmp/npm.log"
+NPM_LS_VERSION=9.9.9 NPM_VIEW_VERSION=9.9.9 run_updater "$tmp/run5c-mobile-current.log" || true
+grep -Fq 'agent-device is current (9.9.9)' "$tmp/run5c-mobile-current.log" || fail "a current agent-device must be reported, not reinstalled"
+if grep -Fq 'install -g agent-device@latest' "$tmp/npm.log"; then fail "agent-device 9.9.9 == latest must not reinstall"; else pass; fi
+rm -f "$home/.local/state/dotfiles/mobile_dev"
 
 # --- 6. dot upgrade retires Graft, in the prefix it lives in -------------------
 # Graft was dropped from the dotfiles; the updater removes it (graft_retire, whose

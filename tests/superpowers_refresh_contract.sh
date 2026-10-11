@@ -122,7 +122,7 @@ STUB
 cat >"$bin/claude" <<'STUB'
 #!/bin/sh
 [ -n "${STUB_LOG:-}" ] && printf 'claude %s\n' "$*" >>"$STUB_LOG"
-if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"; exit 0; fi
+if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then [ "${CLAUDE_PLUGIN_LIST_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"; exit 0; fi
 [ "${1:-}" = --version ] && printf '9.9.9 (Claude Code)\n'
 exit 0
 STUB
@@ -337,6 +337,13 @@ GIT_TAGS_DIR=/nonexistent run_updater "$out"
 grep -Fq 'Superpowers versions (upstream: unreachable):' "$out" || fail "offline, the report must say upstream is unreachable"
 grep -Fq '   Codex: 6.4.2 (upstream unreachable)' "$out" || fail "offline, no harness is judged behind (got: $(grep -F 'Codex:' "$out"))"
 pass
+# a `claude plugin list --json` that fails or hangs (2026-10-11: killed by net_timeout after 60 s on
+# a WSL box with a user-scope 7.0.0 install) is a failed lookup, never "not installed"
+out="$tmp/updater-6.log"
+CLAUDE_PLUGIN_LIST_FAIL=1 run_updater "$out"
+grep -Fq '   Claude Code: lookup failed (claude plugin list --json errored or timed out - re-run dot upgrade)' "$out" \
+    || fail "a failed plugin lookup must be reported as such (got: $(grep -F 'Claude Code:' "$out" | tr '\n' '|'))"
+if grep -Fq '   Claude Code: not installed' "$out"; then fail "a failed lookup must not read as 'not installed'"; else pass; fi
 
 # --- D. dotupgrade.sh: the VS Code extension line and the release-lag note, executed -------------
 up_harness="$tmp/dotupgrade-fns.sh"

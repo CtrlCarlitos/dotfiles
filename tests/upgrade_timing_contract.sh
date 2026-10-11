@@ -135,5 +135,11 @@ grep -Fq 'ps-timing.ps1' "$repo_root/scripts/lib/ps-common.ps1" || fail "ps-comm
 grep -Fq 'function Add-DotTimingMark' "$repo_root/scripts/lib/ps-timing.ps1" 2>/dev/null || fail "scripts/lib/ps-timing.ps1 must define Add-DotTimingMark"
 grep -Fq 'lib/timing.sh' "$repo_root/scripts/update_ai_tools.sh" || fail "update_ai_tools.sh must source lib/timing.sh"
 pass
+# Two sections that hid inside their neighbours (2026-10-11): a WSL `dot up` reported "agent
+# toolkit 54m03s" when the time was mobile_dev's, and a `dot upgrade` reported "OpenCode 3m40s"
+# when most of it was the Superpowers refresh inside OpenCode's cache.
+grep -Eq "^[[:space:]]*dot_timing_mark 'mobile_dev'$" "$repo_root/$inst" || fail "$inst: mobile_dev must be its own timing section"
+grep -Eq "^[[:space:]]*dot_timing_mark 'Superpowers \(OpenCode\)'$" "$repo_root/scripts/update_ai_tools.sh" || fail "update_ai_tools.sh: the Superpowers (OpenCode) refresh must be its own timing section (the ps1 twin already has one)"
+pass
 
 finish

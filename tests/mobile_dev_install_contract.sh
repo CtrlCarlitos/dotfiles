@@ -43,20 +43,31 @@ tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 require "$tmpl" 'install_mobile_dev()'
 
 # --- Maestro: manual pinned+verified install, NOT the vendor curl|bash ----
+# The install itself is install_maestro in scripts/lib/agent-skills.sh (executed
+# by tests/maestro_install_contract.sh), shared with `dot upgrade`; the template
+# renders the pins into the call and passes the run_onchange re-entry command as
+# the retry hint, because a failed download is otherwise never retried.
+lib="$repo_root/scripts/lib/agent-skills.sh"
 forbid "$tmpl" 'get.maestro.mobile.dev'
-require "$tmpl" 'mobile-dev-inc/maestro/releases/download/cli-'
-require "$tmpl" '.versions.maestro_version'
-require "$tmpl" '.versions.maestro_sha256'
-require "$tmpl" 'maestro CHECKSUM MISMATCH'
-require "$tmpl" '$HOME/.local/opt'
-require "$tmpl" '$HOME/.local/bin/maestro'
+forbid "$lib" 'get.maestro.mobile.dev'
+require "$lib" 'mobile-dev-inc/maestro/releases/download/cli-'
+require "$lib" 'maestro CHECKSUM MISMATCH'
+require "$lib" '$HOME/.local/opt'
+require "$lib" '$HOME/.local/bin/maestro'
+require "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket --bucket=scriptState && dot up'"
+forbid "$tmpl" 'net_timeout 300 curl -fsSLo "$maestro_tmp'
 
 # --- agent-device: npm global, reusing core's Node, command -v guarded ----
 require "$tmpl" 'npm install -g agent-device'
 require "$tmpl" 'command -v agent-device'
 
 # --- Standalone JDK 17+: apt + brew branches, JAVA_HOME persisted ----------
-require "$tmpl" 'openjdk-{{ .versions.jdk_version }}-jdk'
+# apt: the headless JDK. openjdk-17-jdk pulled libxt-dev and the X11 runtime
+# into a WSL box for a CLI-only toolchain (2026-10-11); Maestro, agent-device
+# and sdkmanager only need javac/java, which the -headless package ships at
+# the same /usr/lib/jvm path the JAVA_HOME lookup already uses.
+require "$tmpl" 'openjdk-{{ .versions.jdk_version }}-jdk-headless'
+forbid "$tmpl" '"openjdk-{{ .versions.jdk_version }}-jdk"'
 require "$tmpl" 'openjdk@{{ .versions.jdk_version }}'
 require "$tmpl" 'JAVA_HOME'
 
@@ -98,6 +109,14 @@ forbid "$tmpl" 'claude mcp add agent-device -- agent-device mcp'
 require "$tmpl" 'codex mcp add agent-device -- agent-device mcp'
 require "$tmpl" 'claude mcp get agent-device'
 require "$tmpl" 'codex mcp get agent-device'
+# A failed registration is never retried by the next `dot up` (run_onchange), so
+# every one of the four warnings names the re-entry command (2026-10-11: a killed
+# `claude mcp add` left agent-device unregistered with nothing saying how to redo it).
+for who in Maestro agent-device; do
+    for agent in 'Claude Code' Codex; do
+        require "$tmpl" "$who MCP registration for $agent failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+    done
+done
 
 # --- WSL: the ADB bridge to the Windows ADB server (Task 5) ---------------
 # install_mobile_dev() itself only prints a heads-up, gated on $isWsl like
@@ -474,7 +493,10 @@ if command -v chezmoi >/dev/null 2>&1; then
         printf '#!/bin/sh\nexit 0\n' >"$mk/stubs/$stub"
         chmod +x "$mk/stubs/$stub"
     done
-    mk_fns='info() { :; }; success() { :; }; warn() { printf "warn: %s\n" "$1" >&2; }; install_android_sdk() { return 0; }'$'\n'
+    mk_fns='info() { :; }; success() { :; }; warn() { printf "warn: %s\n" "$1" >&2; }; install_android_sdk() { return 0; }; android_sdk_ask_licenses() { return 0; }'$'\n'
+    # install_maestro comes from the included library (scripts/lib/agent-skills.sh)
+    # and is part of what runs here: a Maestro already on PATH makes it a no-op.
+    mk_fns+="$(fn_body "$sdk_render" install_maestro)"$'\n'
     mk_fns+="$(fn_body "$sdk_render" install_mobile_dev)"
     got="$(HOME="$mk/home" PATH="$mk/stubs:$PATH" PKG_MANAGER=none \
         bash -c 'set -euo pipefail; '"$mk_fns"$'\n''install_mobile_dev; echo rc=0' 2>&1)"
@@ -485,6 +507,72 @@ if command -v chezmoi >/dev/null 2>&1; then
         fail "install_mobile_dev (Maestro pre-installed): must write ~/.local/state/dotfiles/mobile_dev even though it lays down no Maestro symlink"
     fi
     rm -rf "$mk"
+    # Licenses first (2026-10-11: the question sat behind the JDK, Maestro,
+    # agent-device and command-line-tools downloads and waited 41 minutes for an
+    # operator who had walked away; the timing summary then booked that wait as
+    # "agent toolkit 54m03s"). Executes the REAL rendered install_mobile_dev()
+    # with a Maestro download that fails fast (the first download it reaches),
+    # install_android_sdk replaced by a probe of the answer it is handed, and the
+    # timing helpers replaced by probes.
+    lf="$(mktemp -d)"
+    mkdir -p "$lf/home" "$lf/stubs"
+    for stub in agent-device npm; do
+        printf '#!/bin/sh\nexit 0\n' >"$lf/stubs/$stub"
+        chmod +x "$lf/stubs/$stub"
+    done
+    printf '#!/bin/sh\necho "curl $*"\nexit 28\n' >"$lf/stubs/curl"
+    chmod +x "$lf/stubs/curl"
+    lf_fns='info() { printf "info: %s\n" "$1"; }; success() { :; }; warn() { printf "warn: %s\n" "$1" >&2; }; sha256_cmd() { echo sha256sum; }'
+    lf_fns+='; android_sdk_interactive() { return "${LF_INTERACTIVE:-0}"; }; dot_timing_wait() { echo "timing-wait:$1"; }; dot_timing_resume() { echo "timing-resume"; }'
+    lf_fns+='; install_android_sdk() { echo "install_android_sdk $1 licenses=${ANDROID_LICENSES:-unset}"; }'$'\n'
+    for fn in install_maestro android_sdk_abi android_sdk_root android_sdk_wanted android_sdk_ask_licenses install_mobile_dev; do
+        body="$(fn_body "$sdk_render" "$fn")"
+        [ -n "$body" ] || fail "render: $fn() not found"
+        lf_fns+="$body"$'\n'
+    done
+    run_lf() { # $1 = answer on stdin, $2 = interactive (0 yes / 1 no)
+        printf '%s\n' "$1" | env -u ANDROID_HOME -u ANDROID_SDK_ROOT LF_INTERACTIVE="$2" HOME="$lf/home" PATH="$lf/stubs:$PATH" PKG_MANAGER=none \
+            bash -c 'set -euo pipefail; '"$lf_fns"$'\n''install_mobile_dev; echo rc=0' 2>&1
+    }
+    # `read -p` shows its prompt only on a terminal, so the question is located by the
+    # info line that precedes it.
+    line_of() { { printf '%s\n' "$1" | grep -n -F -- "$2" || true; } | head -n1 | cut -d: -f1; }
+    got="$(run_lf y 0)"
+    case "$got" in *rc=0*) pass ;; *) fail "licenses-first (y): did not complete (output: $got)" ;; esac
+    l_prompt="$(line_of "$got" 'Android SDK licenses accepted to download')"
+    l_curl="$(line_of "$got" 'curl ')"
+    l_wait="$(line_of "$got" 'timing-wait:Android licenses')"
+    l_resume="$(line_of "$got" 'timing-resume')"
+    if [ -n "$l_prompt" ] && [ -n "$l_curl" ] && [ "$l_prompt" -lt "$l_curl" ]; then
+        pass
+    else
+        fail "licenses-first (y): the license question must come before the first download (prompt line: ${l_prompt:-none}, curl line: ${l_curl:-none}; output: $got)"
+    fi
+    if [ -n "$l_wait" ] && [ -n "$l_resume" ] && [ "$l_prompt" -lt "$l_wait" ] && [ "$l_wait" -lt "$l_resume" ] && [ "$l_resume" -lt "$l_curl" ]; then
+        pass
+    else
+        fail "licenses-first (y): the wait must be timed as its own 'Android licenses' section around the prompt (output: $got)"
+    fi
+    case "$got" in *'install_android_sdk full licenses=y'*) pass ;; *) fail "licenses-first (y): install_android_sdk must receive the yes (output: $got)" ;; esac
+    got="$(run_lf n 0)"
+    case "$got" in *'install_android_sdk full licenses=n'*) pass ;; *) fail "licenses-first (n): install_android_sdk must receive the no (output: $got)" ;; esac
+    got="$(run_lf '' 1)"
+    case "$got" in
+        *'Android SDK licenses accepted to download'*) fail "licenses-first (non-interactive): must not prompt (output: $got)" ;;
+        *'install_android_sdk full licenses=unset'*) pass ;;
+        *) fail "licenses-first (non-interactive): install_android_sdk must still run, with no answer (output: $got)" ;;
+    esac
+    # Nothing to ask when everything is already there: no prompt, no wait section.
+    mkdir -p "$lf/home/.local/opt/android-sdk/platform-tools" "$lf/home/.local/opt/android-sdk/emulator" \
+        "$lf/home/.local/opt/android-sdk/system-images/android-34/default/$(uname -m | sed 's/aarch64/arm64-v8a/; s/arm64$/arm64-v8a/; s/x86_64/x86_64/')"
+    printf '#!/bin/sh\n' >"$lf/home/.local/opt/android-sdk/platform-tools/adb"; chmod +x "$lf/home/.local/opt/android-sdk/platform-tools/adb"
+    printf '#!/bin/sh\n' >"$lf/home/.local/opt/android-sdk/emulator/emulator"; chmod +x "$lf/home/.local/opt/android-sdk/emulator/emulator"
+    got="$(run_lf y 0)"
+    case "$got" in
+        *'Android SDK licenses accepted to download'*|*'timing-wait'*) fail "licenses-first (nothing missing): must ask nothing (output: $got)" ;;
+        *) pass ;;
+    esac
+    rm -rf "$lf"
     for pin in sha256_linux sha256_mac_x86_64 sha256_mac_arm64; do
         want_pin="$(sed -n "s/^  android_commandlinetools_${pin}: \"\\([^\"]*\\)\"\$/\\1/p" "$repo_root/.chezmoidata.yaml")"
         if [ -n "$want_pin" ] && grep -Fq "want='$want_pin'" "$sdk_render"; then
@@ -504,7 +592,7 @@ if command -v chezmoi >/dev/null 2>&1; then
     # The logging helpers are one-liners over color variables, so they are
     # stubbed; everything the SDK logic itself runs is the rendered code.
     sdk_fns='info() { printf "info: %s\n" "$1"; }; success() { printf "ok: %s\n" "$1"; }; warn() { printf "warn: %s\n" "$1" >&2; }; error() { printf "error: %s\n" "$1" >&2; }'$'\n'
-    for fn in net_timeout sha256_cmd android_sdk_interactive android_cmdline_tools_install install_android_sdk; do
+    for fn in net_timeout _net_timeout_report sha256_cmd android_sdk_interactive android_sdk_abi android_sdk_root android_sdk_wanted android_sdkmanager android_cmdline_tools_install install_android_sdk; do
         body="$(fn_body "$sdk_render" "$fn")"
         if [ -z "$body" ]; then fail "render: $fn() not found"; fi
         sdk_fns+="$body"$'\n'
@@ -512,7 +600,7 @@ if command -v chezmoi >/dev/null 2>&1; then
     st="$(mktemp -d)"
     mkdir -p "$st/bin" "$st/fixture/cmdline-tools/bin"
     bash_bin="$(command -v bash)"
-    for tool in mkdir rm mv cut mktemp unzip sha256sum shasum timeout gtimeout id perl cat; do
+    for tool in mkdir rm mv cut mktemp unzip sha256sum shasum timeout gtimeout id perl cat grep; do
         tp="$(command -v "$tool" 2>/dev/null || true)"
         [ -n "$tp" ] && ln -s "$tp" "$st/bin/$tool"
     done
@@ -533,6 +621,10 @@ EOF
     cat >"$st/fixture/cmdline-tools/bin/sdkmanager" <<EOF
 #!$bash_bin
 sdk="\${0%/cmdline-tools/latest/bin/sdkmanager}"
+echo "WARNING: The SDK Manager CLI tool (sdkmanager) is deprecated. Use Android CLI instead." >&2
+echo "The 'android' binary can also be found in the cmdline-tools directory, and 'android sdk' is the replacement for 'sdkmanager'." >&2
+echo "To learn more about the Android CLI and how to use it, see the documentation (https://d.android.com/tools/agents/android-cli)" >&2
+echo "" >&2
 if [ "\$1" = --licenses ]; then
     n=0; while IFS= read -r line; do [ "\$line" = y ] && n=\$((n + 1)); done
     echo "sdkmanager --licenses (fed \$n y)" >>"\$SDK_LOG"
@@ -572,11 +664,11 @@ EOF
         [ "$interactive" = yes ] && override='android_sdk_interactive() { return 0; }'
         if [ "$interactive" = yes ]; then
             printf '%s\n' "$answer" | env -i HOME="$home" PATH="$st/bin" SDK_LOG="$home/sdk.log" FIXTURE_ZIP="$st/fixture.zip" \
-                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} \
+                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} ${ANDROID_LICENSES:+ANDROID_LICENSES="$ANDROID_LICENSES"} \
                 "$bash_bin" -c 'set -euo pipefail; '"$fns"$'\n'"$override"$'\n''install_android_sdk "$1" || warn "install_android_sdk failed"; echo "rc=0"' _ "$mode" 2>&1
         else
             env -i HOME="$home" PATH="$st/bin" SDK_LOG="$home/sdk.log" FIXTURE_ZIP="$st/fixture.zip" \
-                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} \
+                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} ${ANDROID_LICENSES:+ANDROID_LICENSES="$ANDROID_LICENSES"} \
                 "$bash_bin" -c 'set -euo pipefail; '"$fns"$'\n''install_android_sdk "$1" || warn "install_android_sdk failed"; echo "rc=0"' _ "$mode" </dev/null 2>&1
         fi
     }
@@ -605,6 +697,13 @@ EOF
         || fail "SDK full/yes: expected the mobile_dev_pixel AVD on android-34/pixel_6"
     # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     grep -Fq "custom hardware profile question" "$h/sdk.log" && fail "SDK full/yes: avdmanager's hardware-profile question must be answered 'no'" || pass
+    # Google's "sdkmanager is deprecated, use Android CLI" banner prints on every
+    # sdkmanager call (twice per dot up, 2026-10-11); it is filtered, errors are not.
+    if printf '%s' "$got" | grep -q 'sdkmanager) is deprecated'; then
+        fail "SDK full/yes: sdkmanager's deprecation banner must be filtered from the terminal (output: $got)"
+    else
+        pass
+    fi
 
     # B. Idempotent: a second run downloads nothing and asks nothing.
     : >"$h/sdk.log"
@@ -660,6 +759,30 @@ EOF
     # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ -x "$h/mysdk/cmdline-tools/latest/bin/sdkmanager" ] && [ ! -e "$h/$own" ] && pass \
         || fail "SDK existing ANDROID_HOME: tools must go into that SDK, and ~/$own must not be created"
+
+    # J. The licenses were accepted up front (install_mobile_dev asks before any
+    #    download and hands the answer over in ANDROID_LICENSES): no second
+    #    prompt, and a non-interactive stdin is no obstacle any more.
+    h="$st/j"; mkdir -p "$h"
+    got="$(ANDROID_LICENSES=y run_sdk "$h" "$swapped_fns" adb '' no Linux x86_64)"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
+    log_has "$h" 'sdkmanager --licenses (fed 50 y)' && log_has "$h" 'sdkmanager platform-tools' && pass \
+        || fail "SDK ANDROID_LICENSES=y: must accept and download without asking again (log: $(/bin/cat "$h/sdk.log" 2>/dev/null))"
+    case "$got" in
+        *'Android SDK licenses accepted to download'*) fail "SDK ANDROID_LICENSES=y: must not prompt a second time (output: $got)" ;;
+        *) pass ;;
+    esac
+    # K. ... and a declined answer skips everything behind the licenses, with the re-run hint.
+    h="$st/k"; mkdir -p "$h"
+    got="$(ANDROID_LICENSES=n run_sdk "$h" "$swapped_fns" adb '' no Linux x86_64)"
+    if grep -Eq '^(sdkmanager|avdmanager)' "$h/sdk.log" 2>/dev/null; then fail "SDK ANDROID_LICENSES=n: nothing may run after a declined prompt"; else pass; fi
+    case "$got" in
+        *'Skipped the Android SDK licenses'*'chezmoi state delete-bucket --bucket=scriptState'*) pass ;;
+        *) fail "SDK ANDROID_LICENSES=n: must say the licenses were skipped and how to re-run (output: $got)" ;;
+    esac
+    # The package download budget: a multi-GB system image on a slow link
+    # (2026-10-11: 300 MB took the whole 300 s Maestro had) is not a 30-minute job.
+    require "$tmpl" 'net_timeout 7200 "$sdkmanager"'
 
     # H. macOS Apple Silicon: the mac_arm64 zip and an arm64-v8a image.
     h="$st/h"; mkdir -p "$h"
