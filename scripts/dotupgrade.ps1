@@ -181,12 +181,36 @@ Add-DotTimingMark -Name 'VS Code extensions'
 # this command's job. Skipped quietly when VS Code is absent; a failure never aborts.
 # Run in the background, alongside the AI tools below (nothing after it depends on it); waited
 # for, with a 5-minute limit, before the summary.
+# What `code --update-extensions` did, in one line: "up to date", "N updated" with the names,
+# or its output when neither can be read. It used to print nothing on success, so a run never
+# said whether anything moved.
+function Write-VSCodeExtensionsReport {
+    param([string[]]$Lines)
+    $text = @($Lines | Where-Object { $_ -and $_ -notmatch 'DeprecationWarning|trace-deprecation' })
+    if (@($text | Where-Object { $_ -match 'No extension to update' }).Count -gt 0) {
+        Write-Host "  VS Code extensions: up to date"
+        return
+    }
+    $updated = @()
+    foreach ($l in $text) { if ($l -match "Extension '([^']+)' (v\S+) was successfully (updated|installed)") { $updated += "$($Matches[1]) $($Matches[2])" } }
+    if ($updated.Count -gt 0) {
+        Write-Host "  VS Code extensions: $($updated.Count) updated - $($updated -join ', ')"
+    } else {
+        Write-Host "  VS Code extensions: updated"
+        $text | ForEach-Object { Write-Host "    $_" }
+    }
+}
+
 $vsCodeExtensionUpdate = $null
+$vsCodeExtOut = $null
+$vsCodeExtErr = $null
 $codeCommand = Get-Command code -ErrorAction SilentlyContinue
 if ($codeCommand) {
     Write-Host "  Updating VS Code extensions (in the background)..." -ForegroundColor Yellow
     try {
-        $vsCodeExtensionUpdate = Start-Process -FilePath $codeCommand.Source -ArgumentList '--update-extensions' -WindowStyle Hidden -PassThru
+        $vsCodeExtOut = [IO.Path]::GetTempFileName()
+        $vsCodeExtErr = [IO.Path]::GetTempFileName()
+        $vsCodeExtensionUpdate = Start-Process -FilePath $codeCommand.Source -ArgumentList '--update-extensions' -WindowStyle Hidden -PassThru -RedirectStandardOutput $vsCodeExtOut -RedirectStandardError $vsCodeExtErr
     } catch {
         Write-Host "  VS Code extension update did not start ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
     }
@@ -202,7 +226,13 @@ if ($vsCodeExtensionUpdate) {
         Write-Host "  VS Code extension update still running after 5 minutes - left to finish on its own" -ForegroundColor Yellow
     } elseif ($vsCodeExtensionUpdate.ExitCode -ne 0) {
         Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
+        if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
+    } else {
+        $vsCodeExtLines = @()
+        foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
+        Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
     }
+    foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
 }
 
 if ($dropDesktopShortcuts) {

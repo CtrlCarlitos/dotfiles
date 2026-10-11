@@ -27,6 +27,8 @@ done
 # Where the time goes (scripts/lib/timing.sh): marks at each section, a summary at the end.
 DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DOT_SCRIPT_DIR/lib/timing.sh"
+# net_timeout and github_latest_tag, for the outside-package-managers lag check at the end.
+. "$DOT_SCRIPT_DIR/lib/agent-skills.sh"
 . "$DOT_SCRIPT_DIR/lib/docker-vscode.sh"
 
 echo "dot upgrade - sweeping all tooling..."
@@ -245,10 +247,39 @@ dot_timing_mark 'VS Code extensions'
 # job. Skipped quietly when VS Code is absent; a failure never aborts.
 # Run in the background, alongside the AI tools below: on WSL it took a minute on its own, and
 # nothing after it depends on it. Waited for (and reported) before the summary.
+# vscode_extensions_report <output file> <exit status> - what `code --update-extensions` did, in
+# one line: "up to date", "N updated" with the names, or the failure (its output shown then).
+# The step ran in the background with its output in the file; it used to print nothing on
+# success, so a run never said whether anything moved.
+vscode_extensions_report() {
+    local out="$1" rc="$2" names n
+    if [ "$rc" -ne 0 ]; then
+        echo "  VS Code extension update did not finish cleanly (exit $rc) - continuing."
+        [ -s "$out" ] && grep -v -e DeprecationWarning -e trace-deprecation "$out" | sed 's/^/    /'
+        return 0
+    fi
+    if grep -q 'No extension to update' "$out" 2>/dev/null; then
+        echo "  VS Code extensions: up to date"
+        return 0
+    fi
+    names="$(grep -oE "Extension '[^']+' v[^ ]+ was successfully (updated|installed)" "$out" 2>/dev/null \
+        | sed -E "s/^Extension '([^']+)' (v[^ ]+).*/\1 \2/" | paste -sd ',' - | sed 's/,/, /g')"
+    n="$(printf '%s' "$names" | grep -o ', ' | wc -l | tr -d ' ')"
+    if [ -n "$names" ]; then
+        echo "  VS Code extensions: $((n + 1)) updated - $names"
+    else
+        echo "  VS Code extensions: updated"
+        grep -v -e DeprecationWarning -e trace-deprecation "$out" 2>/dev/null | sed 's/^/    /'
+    fi
+    return 0
+}
+
 vscode_ext_pid=""
+vscode_ext_out=""
 if command -v code &>/dev/null; then
     echo "  Updating VS Code extensions (in the background)..."
-    timeout 300 code --update-extensions >/dev/null 2>&1 &
+    vscode_ext_out="$(mktemp)"
+    timeout 300 code --update-extensions >"$vscode_ext_out" 2>&1 &
     vscode_ext_pid=$!
 fi
 
@@ -259,7 +290,10 @@ bash "$SCRIPT_DIR/update_ai_tools.sh"
 
 if [ -n "$vscode_ext_pid" ]; then
     dot_timing_mark 'VS Code extensions (waiting)'
-    if ! wait "$vscode_ext_pid"; then echo "  VS Code extension update did not finish cleanly - continuing."; fi
+    vscode_ext_rc=0
+    wait "$vscode_ext_pid" || vscode_ext_rc=$?
+    vscode_extensions_report "$vscode_ext_out" "$vscode_ext_rc"
+    rm -f "$vscode_ext_out"
 fi
 
 # --- Known outside-package-managers artifacts: no manager owns these, so
@@ -270,8 +304,48 @@ fi
 # by re-running the installer; named here so the gap stays visible.
 # Only what is actually installed here is named: WSL has none of the desktop apps (they live on
 # Windows), and listing Docker Desktop there read as if WSL had a copy to keep current.
+#
+# The five GitHub-release tools say when they lag: the installed version (first X.Y.Z in
+# --version) against the newest release tag (one `git ls-remote` per repo, all five at once,
+# ~1 s). "delta 0.19.2 (0.20.1 available)" is actionable; a bare name was a reminder to go and
+# look, which nobody did. lychee and vale are pinned in the installer, so a lag there is a pin
+# to bump in this repo, not a reinstall.
+unmanaged_tool_repo() {
+    case "$1" in
+        delta) echo dandavison/delta ;;
+        dust) echo bootandy/dust ;;
+        procs) echo dalance/procs ;;
+        lychee) echo lycheeverse/lychee ;;
+        vale) echo errata-ai/vale ;;
+    esac
+}
+unmanaged_tool_version() { "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1; }
+# unmanaged_prefetch_latest <dir> <name...> - one file per tool in <dir>, holding the newest tag
+# (empty: unreachable). Background jobs, waited for by pid (a bare `wait` would also wait for
+# the VS Code extension update above).
+unmanaged_prefetch_latest() {
+    local dir="$1" n pids=()
+    shift
+    for n in "$@"; do
+        ( github_latest_tag "$(unmanaged_tool_repo "$n")" >"$dir/$n" 2>/dev/null ) &
+        pids+=("$!")
+    done
+    [ "${#pids[@]}" -gt 0 ] && { wait "${pids[@]}" || true; }
+    return 0
+}
+# unmanaged_tool_status <name> <dir> - "<name>" when current or unknown, "<name> X (Y available)" when behind.
+unmanaged_tool_status() {
+    local n="$1" have latest
+    have="$(unmanaged_tool_version "$n")"
+    latest="$(cat "$2/$n" 2>/dev/null)"
+    if [ -n "$have" ] && [ -n "$latest" ] && [ "$have" != "$latest" ] && [ "$(printf '%s\n%s\n' "$have" "$latest" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$latest" ]; then
+        printf '%s %s (%s available)' "$n" "$have" "$latest"
+    else
+        printf '%s' "$n"
+    fi
+}
 unmanaged_present() {
-    local names=() n
+    local names=() n tools=() latest_dir
     # delta, dust, procs: GitHub .debs with no repo; lychee, vale: pinned release tarballs
     if command -v google-chrome &>/dev/null; then names+=("Chrome"); fi
     if dpkg -s docker-desktop &>/dev/null || command -v docker-desktop &>/dev/null; then names+=("Docker Desktop"); fi
@@ -279,8 +353,14 @@ unmanaged_present() {
     if dpkg -s handy &>/dev/null; then names+=("Handy"); fi
     if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then names+=("OpenCode Desktop"); fi
     for n in delta dust procs lychee vale; do
-        if command -v "$n" &>/dev/null; then names+=("$n"); fi
+        if command -v "$n" &>/dev/null; then tools+=("$n"); fi
     done
+    if [ "${#tools[@]}" -gt 0 ]; then
+        latest_dir="$(mktemp -d 2>/dev/null)" || latest_dir=""
+        [ -n "$latest_dir" ] && unmanaged_prefetch_latest "$latest_dir" "${tools[@]}"
+        for n in "${tools[@]}"; do names+=("$(unmanaged_tool_status "$n" "${latest_dir:-/nonexistent}")"); done
+        [ -n "$latest_dir" ] && rm -rf "$latest_dir"
+    fi
     if [ -d "$HOME/.local/share/antigravity-2.0" ]; then names+=("Antigravity 2.0"); fi
     local IFS=','
     printf '%s' "${names[*]}" | sed 's/,/, /g'
@@ -289,7 +369,7 @@ case "$(uname -s)" in
     Linux)
         unmanaged="$(unmanaged_present)"
         if [ -n "$unmanaged" ]; then
-            echo "  Note: outside package managers (no auto-upgrade): $unmanaged - re-run the installer or upgrade manually if any lags."
+            echo "  Note: outside package managers (no auto-upgrade): $unmanaged - re-run the installer (or bump its pin) for any that lags."
         fi
         ;;
     Darwin)

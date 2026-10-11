@@ -1103,12 +1103,11 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # automation. Deliberately here, not under dev_desktop: that's
     # gated host-only and never runs on WSL/containers, exactly where
     # coding agents most often run.
-    # Only when no complete Chromium is cached: `npx playwright install` costs ~20 s even when
-    # there is nothing to download, and a newer build is an upgrade, which `dot up` never does
-    # (`dot upgrade` refreshes it). Playwright marks a finished browser with INSTALLATION_COMPLETE.
-    $pwCache = if ($env:PLAYWRIGHT_BROWSERS_PATH -and $env:PLAYWRIGHT_BROWSERS_PATH -ne '0') { $env:PLAYWRIGHT_BROWSERS_PATH } else { Join-Path $env:LOCALAPPDATA 'ms-playwright' }
-    $pwHave = @(Get-ChildItem -LiteralPath $pwCache -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'INSTALLATION_COMPLETE') })
-    if ($pwHave.Count -gt 0) {
+    # Only when a complete Chromium is cached (Test-PlaywrightChromiumInstalled, scripts/lib/
+    # ps-skills.ps1 - Playwright marks a finished browser with INSTALLATION_COMPLETE): `npx playwright
+    # install` costs ~20 s even when there is nothing to download, and a newer build is an upgrade,
+    # which `dot up` never does (`dot upgrade` refreshes it).
+    if (Test-PlaywrightChromiumInstalled) {
         Write-Host "  Playwright Chromium is installed - skipping the download (dot upgrade updates it)." -ForegroundColor Yellow
     } else {
         Write-Host "  Installing Playwright Chromium (headless browser for agent automation)..." -ForegroundColor Yellow
@@ -1637,21 +1636,27 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
 # superpowers, and `codex plugin add` installs it scriptably (obra/superpowers
 # README, Codex CLI section - the third-party `codex-plugin` npm helper this
-# repo once rejected is not involved). Re-running add on an installed plugin is
-# a refresh, so this is idempotent like the Claude Code Superpowers step above.
+# repo once rejected is not involved). Only when missing: re-running add on an
+# installed plugin re-fetches it (an upgrade, ~15 s), and `dot up` never
+# upgrades - `dot upgrade` does. codex's own listing says whether it is there.
 # The marketplace name comes from codex itself - see
 # Get-CodexSuperpowersMarketplace in scripts/lib/ps-skills.ps1 for why
 # hardcoding it was wrong. Refresh PATH first: the codex shim may have arrived
 # in this same run (Install-Node above).
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 if (Get-Command codex -ErrorAction SilentlyContinue) {
-    Write-Host "  Installing Superpowers plugin for Codex..." -ForegroundColor Yellow
-    $cxMarket = Get-CodexSuperpowersMarketplace
-    if (-not $cxMarket) {
-        Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+    $cxInstalled = Get-CodexSuperpowersInstalledVersion
+    if ($cxInstalled) {
+        Write-Host "  Superpowers for Codex is installed ($cxInstalled) - skipping the plugin add (dot upgrade updates it)." -ForegroundColor Yellow
     } else {
-        # Silent on success ("Added plugin ... Installed plugin root: ..." on every run); a failure warns.
-        Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { $null = codex plugin add "superpowers@$cxMarket" 2>&1; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        Write-Host "  Installing Superpowers plugin for Codex..." -ForegroundColor Yellow
+        $cxMarket = Get-CodexSuperpowersMarketplace
+        if (-not $cxMarket) {
+            Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+        } else {
+            # Silent on success ("Added plugin ... Installed plugin root: ..." on every run); a failure warns.
+            Invoke-Quietly -Description "Failed to install Superpowers for Codex" -Action { $null = codex plugin add "superpowers@$cxMarket" 2>&1; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        }
     }
     # MCP registration for Codex lives HERE, not in the serena section above
     # (see that section's note): codex only exists from this point on a
@@ -1686,12 +1691,18 @@ Add-DotTimingMark -Name 'Antigravity'
 # (its shim may not be a package this session has seen yet, mirroring
 # Install-Node's same refresh above).
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+# Only when missing: `agy plugin install` re-clones the plugin on every run (an upgrade), and
+# `dot up` never upgrades - `dot upgrade` does. agy's own listing says whether it is there.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
-    Write-Host "  Installing Superpowers plugin for Antigravity..." -ForegroundColor Yellow
-    # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
-    Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action {
-        $agyOut = @(agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
-        if ($LASTEXITCODE -ne 0) { $agyOut | ForEach-Object { Write-Host "  $_" }; throw "agy exited $LASTEXITCODE" }
+    if (Test-AgySuperpowersInstalled) {
+        Write-Host "  Superpowers for Antigravity is installed - skipping the plugin install (dot upgrade updates it)." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Installing Superpowers plugin for Antigravity..." -ForegroundColor Yellow
+        # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
+        Invoke-Quietly -Description "Failed to install Superpowers for Antigravity" -Action {
+            $agyOut = @(agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) { $agyOut | ForEach-Object { Write-Host "  $_" }; throw "agy exited $LASTEXITCODE" }
+        }
     }
 }
 {{- end }}

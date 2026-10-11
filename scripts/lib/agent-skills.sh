@@ -377,6 +377,157 @@ codex_superpowers_marketplace() {
         | sed -n 's/^superpowers@\([^[:space:]]*\).*/\1/p' | head -n 1 || true
 }
 
+# codex_superpowers_installed_version - the version of the superpowers plugin codex reports as
+# installed; empty and exit 1 when the row says "not installed" or there is no row. Same source
+# as the marketplace name: `codex plugin list` prints one
+# `superpowers@<marketplace>  <status>  <version>  <source>` row, <status> being
+# "installed, enabled", "installed, disabled" or "not installed". `dot up` reads it before
+# `codex plugin add`: re-adding an installed plugin re-fetches it (an upgrade, ~15 s on WSL),
+# and `dot up` never upgrades.
+codex_superpowers_installed_version() {
+    command -v codex >/dev/null 2>&1 || return 1
+    local v
+    v="$(net_timeout 60 codex plugin list 2>/dev/null \
+        | sed -nE 's/^superpowers@[^[:space:]]+[[:space:]]+installed(,[[:space:]]*[a-z]+)?[[:space:]]+([^[:space:]]+).*/\2/p' | head -n 1 || true)"
+    [ -n "$v" ] || return 1
+    printf '%s\n' "$v"
+}
+
+# codex_superpowers_catalog_version - the version the marketplace offers, installed or not
+# (empty when no marketplace lists the plugin). The official catalog can lag obra/superpowers'
+# releases; when it does, `codex plugin add` has nothing newer to install and the report says so.
+codex_superpowers_catalog_version() {
+    command -v codex >/dev/null 2>&1 || return 1
+    net_timeout 60 codex plugin list 2>/dev/null \
+        | sed -nE 's/^superpowers@[^[:space:]]+[[:space:]]+(installed(,[[:space:]]*[a-z]+)?|not installed)[[:space:]]+([^[:space:]]+).*/\3/p' | head -n 1 || true
+}
+
+# agy_superpowers_installed - 0 when agy lists superpowers among its imported plugins (`agy plugin
+# list` prints a JSON document with an "imports" array of {"name": ...}). `dot up` reads it before
+# `agy plugin install`, which re-clones the plugin on every run (an upgrade).
+agy_superpowers_installed() {
+    command -v agy >/dev/null 2>&1 || return 1
+    net_timeout 30 agy plugin list 2>/dev/null | grep -Eq '"name":[[:space:]]*"superpowers"'
+}
+
+# antigravity_superpowers_version - the version of the plugin agy installed, read from the
+# plugin.json under agy's plugin store (best effort: the store moved once already, so every
+# `~/.gemini/*/plugins/superpowers` is tried; empty when none is found).
+antigravity_superpowers_version() {
+    local f
+    for f in "$HOME"/.gemini/*/plugins/superpowers/.claude-plugin/plugin.json "$HOME"/.gemini/plugins/superpowers/.claude-plugin/plugin.json; do
+        [ -f "$f" ] || continue
+        sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]+)".*/\1/p' "$f" | head -n 1
+        return 0
+    done
+    return 1
+}
+
+# github_latest_tag <owner/repo> - the newest release-looking tag (X.Y or X.Y.Z, after dropping a
+# "<name>-" and/or "v" prefix: v7.0.0, lychee-v0.24.2, 0.20.1), via one `git ls-remote` - no API
+# quota, and the same proxy git itself uses. Empty when unreachable. Sorted numerically field by
+# field: `sort -V` is GNU-only, and macOS and uutils hosts run this too.
+github_latest_tag() {
+    net_timeout 20 git ls-remote --tags --refs "https://github.com/$1.git" 2>/dev/null \
+        | sed -E 's#.*refs/tags/##; s#^[A-Za-z_-]*-?v?##' \
+        | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+        | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1
+}
+
+# superpowers_latest_version - obra/superpowers' newest release (empty: unreachable).
+superpowers_latest_version() { github_latest_tag obra/superpowers; }
+
+# opencode_superpowers_cache_dirs - where OpenCode keeps the superpowers plugin it actually loads.
+# For every `plugin` entry in opencode.json OpenCode installs the package into its OWN cache,
+# `<cache>/packages/<name>@<spec>/` (package.json + lockfile + node_modules), on the first start
+# that sees the entry, and reuses that directory for as long as it exists - a git spec without a
+# version is resolved once and pinned by the lockfile from then on. Nothing under
+# ~/.config/opencode is consulted for it: the `npm install --prefix ~/.config/opencode` the
+# updater ran until 2026-10-10 refreshed a tree OpenCode never read, while the loaded copy sat at
+# 6.3.0 for two months. One line per directory (normally one), none when OpenCode has not
+# installed it yet.
+opencode_superpowers_cache_dirs() {
+    local root="${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages"
+    [ -d "$root" ] || return 0
+    # The spec is part of the path, slashes included: `superpowers@git+https:/github.com/obra/
+    # superpowers.git/package.json` is four levels down, so this is a find, not a glob.
+    find "$root" -maxdepth 6 -path '*/superpowers@*' -name package.json -not -path '*/node_modules/*' 2>/dev/null \
+        | sed 's#/package.json$##' | sort
+    return 0
+}
+
+# opencode_superpowers_version - the version in the first cache directory (empty when none).
+opencode_superpowers_version() {
+    local d
+    d="$(opencode_superpowers_cache_dirs | head -n 1)"
+    [ -n "$d" ] || return 1
+    sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]+)".*/\1/p' "$d/node_modules/superpowers/package.json" 2>/dev/null | head -n 1
+}
+
+# opencode_superpowers_refresh <npm> - re-resolve the git dependency in every cache directory to
+# upstream HEAD, in place: npm rewrites the lockfile and node_modules there, and OpenCode's next
+# start loads the new copy (the directory it checks for is the same one). --ignore-scripts as
+# OpenCode's own installer (@npmcli/arborist, ignoreScripts: true) does. Exit 1 when any
+# directory failed; npm's own output is shown only then.
+opencode_superpowers_refresh() {
+    local npm="$1" d out rc=0
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        if ! out="$(net_timeout 300 "$npm" install --prefix "$d" "superpowers@github:obra/superpowers" --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>&1)"; then
+            printf '%s\n' "$out" >&2
+            rc=1
+        fi
+    done <<<"$(opencode_superpowers_cache_dirs)"
+    return "$rc"
+}
+
+# claude_superpowers_installs - one "<version>\t<scope>\t<projectPath>" line per superpowers
+# install Claude Code knows of (`claude plugin list --json`), the user-scope one included.
+# Project- and local-scope installs are per repository and `claude plugin update` run from
+# elsewhere never touches them, so they fall behind quietly; the report names them.
+claude_superpowers_installs() {
+    command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
+    net_timeout 60 claude plugin list --json 2>/dev/null \
+        | jq -b -r '.[]? | select((.id // "") | startswith("superpowers@")) | [(.version // ""), (.scope // ""), (.projectPath // "")] | @tsv' 2>/dev/null
+}
+
+# superpowers_version_line <harness> <version> <upstream> [note] - one report line. A version
+# equal to upstream is "current"; an older one says "behind upstream vX" plus the note (why, or
+# what to do); an empty version reads as "not installed"; an empty upstream cannot judge.
+superpowers_version_line() {
+    local harness="$1" ver="$2" upstream="$3" note="${4:-}"
+    if [ -z "$ver" ]; then
+        printf '   %s: not installed\n' "$harness"
+    elif [ -z "$upstream" ]; then
+        printf '   %s: %s (upstream unreachable)\n' "$harness" "$ver"
+    elif [ "$ver" = "$upstream" ]; then
+        printf '   %s: %s (current)\n' "$harness" "$ver"
+    else
+        printf '   %s: %s - behind upstream v%s%s\n' "$harness" "$ver" "$upstream" "${note:+ ($note)}"
+    fi
+}
+
+# playwright_chromium_installed - 0 when a COMPLETE Playwright Chromium build is in its browser
+# cache (PLAYWRIGHT_BROWSERS_PATH unless it is the literal "0", else ~/.cache/ms-playwright on
+# Linux, ~/Library/Caches/ms-playwright on macOS). Playwright marks a finished download with an
+# INSTALLATION_COMPLETE file; a chromium-* directory without it is an interrupted one and must
+# install again. `dot up` reads this before `npx playwright install-deps` + `install`: both re-ran
+# on every apply (~20 s on WSL: install-deps runs its own apt-get update) although `install` only
+# downloads when the build is missing, and `dot upgrade` re-runs `install` anyway.
+playwright_chromium_installed() {
+    local d="${PLAYWRIGHT_BROWSERS_PATH:-}" f
+    if [ -z "$d" ] || [ "$d" = 0 ]; then
+        case "$(uname -s 2>/dev/null)" in
+            Darwin) d="$HOME/Library/Caches/ms-playwright" ;;
+            *) d="$HOME/.cache/ms-playwright" ;;
+        esac
+    fi
+    for f in "$d"/chromium-*/; do
+        [ -f "$f/INSTALLATION_COMPLETE" ] && return 0
+    done
+    return 1
+}
+
 #-------------------------------------------------------------------------------
 # guardrail_console_filter - stdin: the agent-guardrails installer's output; stdout: the
 # same, minus the routine status lines.
