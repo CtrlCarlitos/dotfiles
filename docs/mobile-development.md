@@ -188,8 +188,9 @@ itself still needs a manual check on real hardware.
   deliberate scope boundary rather than an oversight. Authentication is a
   one-time step per machine: OpenCode prompts for it on first use, and in
   agy run `/mcp auth expo`.
-- agent-device's own MCP entrypoint, if it has one, is not registered for
-  any agent yet (a known gap).
+- **agent-device MCP** (`agent-device mcp`, a local server) is registered
+  for all four agents the same way Maestro is, wherever the `agent-device`
+  binary is installed.
 
 
 ## VS Code
