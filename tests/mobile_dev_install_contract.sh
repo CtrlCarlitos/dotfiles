@@ -113,11 +113,14 @@ require "$tmpl" 'codex mcp add agent-device -- agent-device mcp'
 require "$tmpl" 'claude mcp get agent-device'
 require "$tmpl" 'codex mcp get agent-device'
 # A failed registration is never retried by the next `dot up` (run_onchange), so
-# every one of the four warnings names the re-entry command (2026-10-11: a killed
-# `claude mcp add` left agent-device unregistered with nothing saying how to redo it).
-for who in Maestro agent-device; do
-    for agent in 'Claude Code' Codex; do
-        require "$tmpl" "$who MCP registration for $agent failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+# every one of the four registrations carries the re-entry command as its retry hint
+# (2026-10-11: a killed `claude mcp add` left agent-device unregistered with nothing
+# saying how to redo it). They go through mcp_add_quiet (scripts/lib/agent-skills.sh:
+# one dotfiles line on success, the CLI's output and the warn on failure -
+# tests/mcp_add_quiet_contract.sh executes it).
+for who in maestro agent-device; do
+    for agent in "'Claude Code'" "'Codex'"; do
+        require "$tmpl" "mcp_add_quiet $agent $who 'chezmoi state delete-bucket --bucket=scriptState && dot up'"
     done
 done
 

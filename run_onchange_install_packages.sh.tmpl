@@ -2144,20 +2144,21 @@ install_claude_cli() {
         # on a fresh machine. -s user: the default scope (local) is private to
         # the installer's own working directory, invisible from any project.
         if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
-            net_timeout_tty 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            mcp_add_quiet 'Claude Code' maestro 'chezmoi state delete-bucket --bucket=scriptState && dot up' claude mcp add -s user maestro -- maestro mcp
         fi
         # agent-device MCP registration for Claude Code lives HERE too, same
         # reason as Maestro's above: main() runs install_mobile_dev() (which
         # installs agent-device) before claude exists on a fresh machine.
+        # mcp_add_quiet (scripts/lib/agent-skills.sh) runs it under
         # net_timeout_tty, not net_timeout (2026-10-11 WSL incident): `claude
         # mcp add` touches the controlling terminal while probing the server
         # it's registering, and plain `timeout` puts it in a new process
         # group - the kernel stops it dead (SIGTTIN/SIGTTOU, state T) instead
-        # of ever letting the 60s timeout fire, hanging `dot up` forever.
-        # Same mechanism net_timeout_tty was already built for (see its
-        # definition above); it just hadn't been applied to this call site.
+        # of ever letting the 60s timeout fire, hanging `dot up` forever. It
+        # also keeps the CLI's own "Added ... / File modified" lines off the
+        # terminal: one dotfiles line on success, the raw output on failure.
         if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
-            net_timeout_tty 60 claude mcp add -s user agent-device -- agent-device mcp || warn "agent-device MCP registration for Claude Code failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            mcp_add_quiet 'Claude Code' agent-device 'chezmoi state delete-bucket --bucket=scriptState && dot up' claude mcp add -s user agent-device -- agent-device mcp
         fi
 {{- end }}
     fi
@@ -2676,14 +2677,14 @@ install_chatgpt_cli() {
         # install_mobile_dev() (which main() runs before codex exists on a
         # fresh machine). Codex has no scope flag: one global config.toml.
         if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
-            net_timeout_tty 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            mcp_add_quiet 'Codex' maestro 'chezmoi state delete-bucket --bucket=scriptState && dot up' codex mcp add maestro -- maestro mcp
         fi
         # agent-device's Codex registration lives HERE too, same reason as
         # Maestro's above. Codex has no scope flag: one global config.toml.
-        # net_timeout_tty, not net_timeout - same WSL tty-stop hang as the
+        # mcp_add_quiet: same WSL tty-stop hang and same quiet output as the
         # Claude Code registration above.
         if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
-            net_timeout_tty 60 codex mcp add agent-device -- agent-device mcp || warn "agent-device MCP registration for Codex failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            mcp_add_quiet 'Codex' agent-device 'chezmoi state delete-bucket --bucket=scriptState && dot up' codex mcp add agent-device -- agent-device mcp
         fi
 {{- end }}
     fi
