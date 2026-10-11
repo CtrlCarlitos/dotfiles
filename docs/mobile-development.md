@@ -113,7 +113,7 @@ machines without it, both blocks do nothing. The marker does not depend on
 Maestro specifically: a Maestro you installed yourself beforehand, or a
 failed Maestro download, still leaves the bridge and `JAVA_HOME` working.
 
-The bridge only has something to reach once Carlos starts the ADB server on
+The bridge only has something to reach once you start the ADB server on
 the Windows side each session. That manual step - the exact
 `adb -a -P 5037 nodaemon server` command and its Firewall rule - is
 documented authoritatively in "Windows setup" above; this section only
