@@ -70,7 +70,11 @@ set_tool delta -
 got="$(FAKE_LATEST=0.20.1 run delta sudo install)"
 case "$got" in *'Installing delta 0.20.1'*rc=0*) pass ;; *) fail "install: must announce and return 0 (got: $got)" ;; esac
 grep -Fq 'https://github.com/dandavison/delta/releases/download/0.20.1/git-delta_0.20.1_amd64.deb' "$tmp/curl.log" || fail "install: delta's asset URL (curl saw: $(/bin/cat "$tmp/curl.log"))"
-grep -Eq -- '--speed-limit [0-9]+' "$tmp/curl.log" && grep -Eq -- '--speed-time [0-9]+' "$tmp/curl.log" || fail "install: the download must be stall-guarded (curl saw: $(/bin/cat "$tmp/curl.log"))"
+if grep -Eq -- '--speed-limit [0-9]+' "$tmp/curl.log" && grep -Eq -- '--speed-time [0-9]+' "$tmp/curl.log"; then
+    pass
+else
+    fail "install: the download must be stall-guarded (curl saw: $(/bin/cat "$tmp/curl.log"))"
+fi
 grep -Eq '^sudo dpkg -i .*git-delta_0.20.1_amd64.deb$' "$tmp/tool.log" || fail "install: dpkg -i through the given sudo (log: $(/bin/cat "$tmp/tool.log"))"
 
 # B. install, delta present: nothing, silently
