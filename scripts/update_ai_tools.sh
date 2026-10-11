@@ -489,7 +489,7 @@ dot_timing_mark 'Superpowers report'
 # for two months, Codex at 6.4.2 behind a lagging catalog, project-scope Claude installs at
 # 6.2.0). Read-only; every lookup degrades to "unknown" offline.
 superpowers_report() {
-    local upstream claude_user claude_stale ver scope project codex_ver codex_cat note
+    local upstream claude_user claude_stale ver scope project codex_ver codex_cat
     upstream="$(superpowers_latest_version)" || upstream=""
     echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
     if command -v claude &>/dev/null; then

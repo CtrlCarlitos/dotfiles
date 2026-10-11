@@ -23,7 +23,7 @@ awk '/^function Invoke-MobileDevTool \{/ {on=1} on {print} on && /^\}/ {exit}' "
 [ -s "$tmp/fn.ps1" ] || { fail "could not extract Invoke-MobileDevTool from the template"; finish; exit 1; }
 
 if command -v cygpath >/dev/null 2>&1; then
-    ext=cmd
+    ext="cmd"
     cat >"$tmp/ok.$ext" <<'T'
 @echo off
 set /p L=
@@ -42,7 +42,7 @@ ping -n 4 127.0.0.1 >nul
 exit /b 0
 T
 else
-    ext=sh
+    ext="sh"
     printf '#!/bin/sh\nread L\necho "got:$L"\nexit 0\n' >"$tmp/ok.$ext"
     printf '#!/bin/sh\necho first line\necho the real reason it failed\nexit 3\n' >"$tmp/bad.$ext"
     printf '#!/bin/sh\nsleep 3\nexit 0\n' >"$tmp/slow.$ext"
