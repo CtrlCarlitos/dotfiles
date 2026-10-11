@@ -282,7 +282,15 @@ EOF
     ps_script="$repo_root/scripts/select-packages.ps1"
     ps_run_log="$ps_tmp/ps_run.log"
 
-    if HOME="$ps_home" USERPROFILE="$ps_home" PATH="$ps_bin:$PATH" \
+    # select-packages.ps1's own gate (line ~66) is `IsInputRedirected -or
+    # $env:CI -or -not $gum` - a belt-and-suspenders check added after a real
+    # incident (run 34730549901's full-install hung gum on redirected stdin
+    # for 2h). The PTY above only fools the TTY half; running this suite
+    # itself under GitHub Actions means $env:CI is already "true" in the
+    # parent shell, which would short-circuit the menu to "skip" every time
+    # regardless of the PTY - this test's whole point is to simulate a real
+    # interactive user, so CI must read empty for this one subprocess only.
+    if CI="" HOME="$ps_home" USERPROFILE="$ps_home" PATH="$ps_bin:$PATH" \
         FAKE_GUM_LOG="$ps_gum_log" FAKE_MULTI="mobile_dev" FAKE_PRESET="custom" \
         "$py" "$ptyrunner" 30 pwsh -NoProfile -File "$ps_script" >"$ps_run_log" 2>&1; then
         :
