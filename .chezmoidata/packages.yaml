@@ -46,24 +46,28 @@ catalog:
       apt: curl
       brew: curl
       winget: cURL.cURL
+      winget_args: "--scope machine"
       choco_was: curl
     - id: wget
       group: core
       apt: wget
       brew: wget
       winget: JernejSimoncic.Wget
+      winget_args: "--scope machine"
       choco_was: wget
     - id: jq
       group: core
       apt: jq
       brew: jq
       winget: jqlang.jq
+      winget_args: "--scope machine"
       choco_was: jq
     - id: fzf
       group: core
       apt: fzf
       brew: fzf
       winget: junegunn.fzf
+      winget_args: "--scope machine"
       choco_was: fzf
     - id: zsh
       group: core
@@ -84,6 +88,7 @@ catalog:
       apt: ripgrep
       brew: ripgrep
       winget: BurntSushi.ripgrep.MSVC
+      winget_args: "--scope machine"
       choco_was: ripgrep
     - id: htop
       group: core
@@ -118,6 +123,7 @@ catalog:
       apt: ffmpeg
       brew: ffmpeg
       winget: Gyan.FFmpeg
+      winget_args: "--scope machine"
       choco_was: ffmpeg
     - id: python
       group: core
@@ -174,6 +180,7 @@ catalog:
       group: core
       brew: hashicorp/tap/terraform
       winget: Hashicorp.Terraform
+      winget_args: "--scope machine"
       choco_was: terraform
       note: "apt: HashiCorp's apt repo by procedure; brew: HashiCorp's tap (Homebrew core froze terraform at 1.5.7 after the license change)"
     - id: mkcert
@@ -181,6 +188,7 @@ catalog:
       apt: mkcert
       brew: mkcert
       winget: FiloSottile.mkcert
+      winget_args: "--scope machine"
       choco_was: mkcert
       note: "locally trusted TLS certificates for local development; kept until caddy's own local CA replaces it"
     - id: gsudo
@@ -204,6 +212,7 @@ catalog:
     - id: psmux
       group: core
       winget: marlocarlo.psmux
+      winget_args: "--scope machine"
       choco_was: psmux
       note: >-
         The native Windows tmux (Rust, github.com/psmux/psmux) - official
@@ -235,6 +244,7 @@ catalog:
       apt: bat
       brew: bat
       winget: sharkdp.bat
+      winget_args: "--scope machine"
       choco_was: bat
       note: "apt: binary installs as batcat, aliased to bat; shares its apt install line with fd - a multi-package apt install fails wholesale if one name is unavailable on a release"
     - id: less
@@ -242,12 +252,14 @@ catalog:
       apt: less
       brew: less
       winget: jftuga.less
+      winget_args: "--scope machine"
       choco_was: less
       note: "bat's pager on Windows: Chocolatey's bat pulled it in as a dependency, winget's bat does not"
     - id: eza
       group: modern_cli
       brew: eza
       winget: eza-community.eza
+      winget_args: "--scope machine"
       choco_was: eza
       note: "apt: from the gierens repo with its signing key, by procedure"
     - id: fd
@@ -255,12 +267,14 @@ catalog:
       apt: fd-find
       brew: fd
       winget: sharkdp.fd
+      winget_args: "--scope machine"
       choco_was: fd
       note: "apt: package is fd-find, binary installs as fdfind (aliased to fd) - same naming conflict as batcat"
     - id: delta
       group: modern_cli
       brew: git-delta
       winget: dandavison.delta
+      winget_args: "--scope machine"
       choco_was: delta
       note: "apt: GitHub release .deb by procedure"
     - id: starship
@@ -273,6 +287,7 @@ catalog:
       group: modern_cli
       brew: zoxide
       winget: ajeetdsouza.zoxide
+      winget_args: "--scope machine"
       choco_was: zoxide
       note: "apt: package where the release has it, upstream script as fallback - by procedure"
     - id: direnv
@@ -280,12 +295,14 @@ catalog:
       apt: direnv
       brew: direnv
       winget: direnv.direnv
+      winget_args: "--scope machine"
       choco_was: direnv
       note: "hooked from .zshrc (direnv hook zsh); .envrc files are allowed per project, never by the installer"
     - id: lazygit
       group: modern_cli
       brew: lazygit
       winget: JesseDuffield.lazygit
+      winget_args: "--scope machine"
       choco_was: lazygit
       note: "apt: GitHub release tarball by procedure"
     - id: gum
@@ -298,12 +315,14 @@ catalog:
       group: modern_cli
       brew: tealdeer
       winget: dbrgn.tealdeer
+      winget_args: "--scope machine"
       choco_was: tealdeer
       note: "apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar)"
     - id: dust
       group: modern_cli
       brew: dust
       winget: bootandy.dust
+      winget_args: "--scope machine"
       choco_was: dust
       note: "apt: GitHub release .deb by procedure"
     - id: duf
@@ -311,12 +330,14 @@ catalog:
       apt: duf
       brew: duf
       winget: muesli.duf
+      winget_args: "--scope machine"
       choco_was: duf
       note: "aliased over df when present"
     - id: procs
       group: modern_cli
       brew: procs
       winget: dalance.procs
+      winget_args: "--scope machine"
       choco_was: procs
       note: "apt: GitHub release by procedure"
     - id: shellcheck
@@ -324,12 +345,14 @@ catalog:
       apt: shellcheck
       brew: shellcheck
       winget: koalaman.shellcheck
+      winget_args: "--scope machine"
       choco_was: shellcheck
       note: "CI and .pre-commit-config.yaml lint shell with it - a fresh machine needs it locally, not only in CI"
     - id: shfmt
       group: modern_cli
       brew: shfmt
       winget: mvdan.shfmt
+      winget_args: "--scope machine"
       choco_was: shfmt
       note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
     - id: markdownlint-cli2
@@ -340,6 +363,7 @@ catalog:
       group: modern_cli
       brew: lychee
       winget: lycheeverse.lychee
+      winget_args: "--scope machine"
       choco_was: lychee
       note: "broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
     - id: vale
@@ -350,6 +374,7 @@ catalog:
     - id: pstop
       group: modern_cli
       winget: marlocarlo.pstop
+      winget_args: "--scope machine"
       choco_was: pstop
 
     # Network diagnostics: the familiar ifconfig/dig/traceroute set (#177).
@@ -587,6 +612,7 @@ catalog:
     - id: act
       group: agent_toolkit
       winget: nektos.act
+      winget_args: "--scope machine"
       choco_was: act-cli
       note: "brew/apt: installed by procedure in the agent_toolkit block"
     - id: antigravity-cli
@@ -608,6 +634,7 @@ catalog:
     - id: opencode-cli
       group: opencode_cli
       winget: SST.opencode
+      winget_args: "--scope machine"
       choco_was: opencode
       note: "Windows only here: the Unix installers use OpenCode's own install script. Chocolatey's opencode package pulled fzf, ripgrep and unzip in as dependencies, which kept those on Chocolatey too"
       migrate_risk: "close every opencode session first - its binary is replaced (fzf and ripgrep can move after it)"

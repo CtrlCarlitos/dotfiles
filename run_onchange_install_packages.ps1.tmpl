@@ -735,7 +735,9 @@ function Install-MobileDev {
         # the installer (the script runs under $ErrorActionPreference = "Stop").
         try {
             if (Get-Command winget -ErrorAction SilentlyContinue) {
-                winget install --exact --id Genymobile.scrcpy --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+                # scrcpy's winget package is "portable" (user scope by default); this script's
+                # own hard elevation gate (top of file) already guarantees admin here.
+                winget install --exact --id Genymobile.scrcpy --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --scope machine | Out-Null
             } else {
                 choco install scrcpy -y --no-progress | Out-Null
             }

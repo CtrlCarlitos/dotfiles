@@ -39,6 +39,17 @@ grep -Fq 'wsl.exe --install --no-distribution' "$ps_t" || fail "installer: WSL m
 grep -Fq 'wsl.exe --update' "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: WSL must be updated with wsl --update"
 grep -Fq "\$wingetHold += 'Anthropic.Claude'" "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: Claude Desktop must be held while claude.exe runs"
 grep -Fq 'winget install --id twpayne.chezmoi' "$repo_root/install.ps1" || fail "install.ps1: chezmoi must come from winget"
+# install.ps1 must hard-require admin (same policy as run_onchange_install_packages.ps1.tmpl's
+# own gate, which chezmoi init --apply reaches moments later anyway - a non-admin bootstrap
+# used to "continue as standard user" into a message promising a degraded install that the
+# very next step already refused to do).
+if grep -Fq 'Continuing as standard user' "$repo_root/install.ps1"; then
+    fail "install.ps1: must not offer a degraded non-admin path - chezmoi init --apply refuses it anyway"
+fi
+grep -Fq 'This installer requires an elevated PowerShell' "$repo_root/install.ps1" ||
+    fail "install.ps1: a non-interactive, non-admin run must refuse with a clear message"
+awk '/if \(-not \$IsAdmin\) \{/{a=NR} /Invoke-ChocoBootstrap/{b=NR} END{exit !(a && b && a<b)}' "$repo_root/install.ps1" ||
+    fail "install.ps1: the elevation gate must run before Chocolatey bootstrap"
 grep -Fq 'winget install --id Git.Git' "$repo_root/install.ps1" || fail "install.ps1: Git must come from winget"
 # Node: the same major on every platform (versions.node_major), pinned in winget on Windows
 grep -Fq 'Set-NodeLtsPin -Major $nodeMajor' "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: Node must be pinned to node_major before the winget sweep"
