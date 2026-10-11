@@ -81,20 +81,27 @@ vscode:
 #                      scripts/update-versions.sh (package managers key JDK
 #                      packages by major version only; bump it by hand if
 #                      the floor ever needs to move).
-#   android_commandlinetools_* - mobile_dev's Android SDK command-line tools
-#                      zip, per platform/arch (win, linux, mac_x86_64,
-#                      mac_arm64 - design doc section 3.4; Studio is dropped
-#                      entirely). Confirmed live against
+#   android_commandlinetools_* - the mobile_dev group's Android SDK
+#                      command-line tools zip (sdkmanager/avdmanager), per
+#                      platform/arch (win, linux, mac_x86_64, mac_arm64 -
+#                      design doc section 3.4; Studio is dropped entirely),
+#                      one version shared by every OS, one SHA-256 per zip.
+#                      Confirmed live against
 #                      developer.android.com/studio#command-line-tools-only
-#                      2026-10-10 - a SHA-256 is published alongside the zip
-#                      on that same page, so this pins the digest, not a
-#                      bare "latest" URL.
+#                      on 2026-10-10, where Google publishes each digest next
+#                      to its zip - so this pins the digest, never a bare
+#                      "latest" URL. A deliberate hand pin like jdk_version,
+#                      NOT re-resolved by scripts/update-versions.sh: bump the
+#                      version and all four digests together from that page.
 versions:
   node_major: 24
   node_choco: "24.19.0"
   jdk_version: 17
   android_commandlinetools_version: "15859902"
   android_commandlinetools_sha256_win: "90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a"
+  android_commandlinetools_sha256_linux: "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
+  android_commandlinetools_sha256_mac_x86_64: "c5a6378ab5cf7e0d5701921405115befff13e9ff7417fb588389338f8bd050f3"
+  android_commandlinetools_sha256_mac_arm64: "835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e"
   antigravity_hub: "2.22.0-5446056071266304"
   gum: "2.0.1"
   powershell: "7.6.6"

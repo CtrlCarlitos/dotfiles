@@ -69,6 +69,26 @@ require "$version_script" 's|^  maestro_sha256: .*|  maestro_sha256: \"$MAESTRO_
 require "$version_script" 'jdk_version'
 forbid "$version_script" 'JDK_LATEST'
 
+# 5b. android_commandlinetools_* (Task 9): one exact build-number pin shared
+#     by every OS, plus one real 64-char digest per zip this branch's
+#     installer downloads (Linux, Mac Intel, Mac ARM). A hand pin like
+#     jdk_version - scripts/update-versions.sh must not start resolving it.
+ct_ver="$(sed -n 's/^  android_commandlinetools_version: "\([^"]*\)"$/\1/p' "$data_file")"
+if [[ "$ct_ver" =~ ^[0-9]+$ ]]; then
+    pass
+else
+    fail ".chezmoidata.yaml: android_commandlinetools_version='$ct_ver' is not an exact build-number pin"
+fi
+for ct_key in linux mac_x86_64 mac_arm64; do
+    ct_sha="$(sed -n "s/^  android_commandlinetools_sha256_${ct_key}: \"\\([^\"]*\\)\"\$/\\1/p" "$data_file")"
+    if [[ "$ct_sha" =~ ^[0-9a-f]{64}$ ]]; then
+        pass
+    else
+        fail ".chezmoidata.yaml: android_commandlinetools_sha256_${ct_key}='$ct_sha' is not 64 lowercase hex characters"
+    fi
+done
+forbid "$version_script" 'android_commandlinetools'
+
 # 6. Executable check: source the REAL scripts/update-versions.sh and call
 #    its real parse_maestro_version/parse_maestro_sha256 functions against a
 #    fixture of mobile-dev-inc/homebrew-tap's Formula/maestro.rb (captured
