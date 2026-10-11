@@ -363,7 +363,7 @@ pass
 sys="$tmp/sys"
 mkdir -p "$sys"
 for c in bash sh grep sed sort head tail cat tr wc paste mktemp rm mkdir uname awk cut timeout env printf dirname basename readlink; do
-    p="$(command -v "$c" 2>/dev/null)" && ln -s "$p" "$sys/$c" 2>/dev/null || true
+    if p="$(command -v "$c" 2>/dev/null)"; then ln -s "$p" "$sys/$c" 2>/dev/null || true; fi
 done
 printf '#!/bin/sh\nprintf "delta 0.19.2\\n"\n' >"$sys/delta"
 printf '#!/bin/sh\nprintf "Dust 1.2.6\\n"\n' >"$sys/dust"
