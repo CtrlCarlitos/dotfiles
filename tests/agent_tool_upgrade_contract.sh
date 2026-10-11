@@ -149,9 +149,13 @@ exec "$real_chezmoi" execute-template --source "$scratch" "\$@"
 EOF
 chmod +x "$bin/chezmoi"
 
+# The host's own Maestro (~/.local/bin, where `dot up` installed it) would make install_maestro
+# skip the download in section 5c ("a Maestro that is not ours"): drop every PATH entry that
+# carries one. chezmoi is stubbed above with its absolute path, so nothing else is lost.
+host_path="$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r d; do [ -n "$d" ] && [ ! -x "$d/maestro" ] && printf '%s\n' "$d"; done | paste -s -d: -)"
 run_updater() { # $1 = output file; extra env via caller's exported vars
     local out_file="$1"
-    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" \
+    HOME="$home" PATH="$bin:$host_path" NPM_LOG="$tmp/npm.log" \
         STUB_LOG="$tmp/agent-browser.log" NPM_FAKE_PREFIX="$prefix" \
         timeout 120 bash "$ai_sh" >"$out_file" 2>&1
 }

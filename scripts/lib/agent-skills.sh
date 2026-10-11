@@ -37,6 +37,29 @@ warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1" >&2; }
 error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 
 #-------------------------------------------------------------------------------
+# dot_sudo_keepalive - refresh sudo's cached credential in the background until the script
+# that called this is gone. A WSL `dot upgrade --yes` (2026-10-11) asked for the password
+# twice: for apt at the start, and 18 minutes later for the npm global upgrade, after
+# Maestro's 300 MB download had outlasted sudo's 15-minute timestamp. The installer has had
+# this loop since #114 (dot_sudo_prime); `dot upgrade` now starts the same one right after
+# its first sudo succeeded. Call it AFTER a sudo that prompted: it never prompts itself.
+#
+# Both streams closed: the loop inherits the caller's descriptors, and one started inside a
+# `$(...)` would hold that pipe open for the life of the run. $$ is the calling script (the
+# function runs in its shell), so `kill -0` ends the loop within one interval of its exit.
+# DOT_SUDO_KEEPALIVE_SECONDS (default 30) is for tests; DOT_SUDO_KEEPALIVE_PID names the loop.
+# tests/dotupgrade_sudo_keepalive_contract.sh executes this against a fake sudo.
+#-------------------------------------------------------------------------------
+DOT_SUDO_KEEPALIVE_PID=""
+dot_sudo_keepalive() {
+    [ -z "$DOT_SUDO_KEEPALIVE_PID" ] || return 0
+    local every="${DOT_SUDO_KEEPALIVE_SECONDS:-30}" parent=$$
+    while true; do sudo -n true; sleep "$every"; kill -0 "$parent" || exit; done >/dev/null 2>&1 &
+    DOT_SUDO_KEEPALIVE_PID=$!
+    return 0
+}
+
+#-------------------------------------------------------------------------------
 # net_timeout <seconds> <cmd...> - wall-clock guard for network install steps.
 #
 # A stalled download or `curl | sh` installer (no built-in timeout) otherwise

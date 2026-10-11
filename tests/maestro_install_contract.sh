@@ -16,8 +16,8 @@ set -euo pipefail
 #   - the install records the pinned version (~/.local/opt/maestro/.dotfiles-version),
 #     so a pin bump reinstalls and the same pin is a no-op
 #   - a Maestro that is not ours (on PATH, not under ~/.local/opt) is left alone
-#   - a failed download warns with the retry hint the caller passes, so a `dot up`
-#     says how to re-enter the run_onchange script
+#   - a failed download warns with the retry hint the caller passes (`dot upgrade`: it
+#     installs a missing Maestro by itself, so nothing needs the run_onchange script re-entered)
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 lib="$repo_root/scripts/lib/agent-skills.sh"
@@ -50,9 +50,12 @@ EOF
 chmod +x "$tmp/bin/curl"
 
 # run <home> [args...]: executes install_maestro under set -e like the installer; prints stdout+stderr.
+# PATH is controlled: the host's own Maestro (~/.local/bin on a box where `dot up` installed it)
+# would read as "a Maestro that is not ours" and skip every download below. RUN_EXTRA_PATH adds
+# a directory for the case that wants exactly that.
 run() {
     local home="$1"; shift
-    HOME="$home" PATH="$tmp/bin:$PATH" CURL_LOG="$tmp/curl.log" FIXTURE_ZIP="$tmp/maestro.zip" \
+    HOME="$home" PATH="$tmp/bin:${RUN_EXTRA_PATH:+$RUN_EXTRA_PATH:}/usr/bin:/bin" CURL_LOG="$tmp/curl.log" FIXTURE_ZIP="$tmp/maestro.zip" \
         bash -c 'set -euo pipefail; . "$1"; shift; install_maestro "$@"; echo rc=$?' _ "$lib" "$@" 2>&1
 }
 opt=".local/opt/maestro"
@@ -88,9 +91,9 @@ case "$got" in *'Maestro 2.12.0 installed'*) pass ;; *) fail "pin bump: must rep
 
 # D. A stalled download: warned with the caller's retry hint, nothing installed, exit 0.
 h="$tmp/d"; mkdir -p "$h"; : >"$tmp/curl.log"
-got="$(CURL_MODE=stall run "$h" 2.11.0 "$fixture_sha" 'chezmoi state delete-bucket --bucket=scriptState && dot up')"
+got="$(CURL_MODE=stall run "$h" 2.11.0 "$fixture_sha" 'dot upgrade')"
 case "$got" in
-    *'maestro download failed or stalled'*'chezmoi state delete-bucket --bucket=scriptState && dot up'*rc=0*) pass ;;
+    *'maestro download failed or stalled'*'dot upgrade'*rc=0*) pass ;;
     *) fail "stall: must warn, name the retry hint and continue (output: $got)" ;;
 esac
 if [ -e "$h/$opt" ] || [ -e "$h/.local/bin/maestro" ]; then fail "stall: nothing may be installed"; fi
@@ -104,7 +107,7 @@ case "$got" in *'maestro CHECKSUM MISMATCH'*rc=0*) pass ;; *) fail "mismatch: mu
 # F. A Maestro that is not ours on PATH: left alone, no download.
 h="$tmp/f"; mkdir -p "$h/elsewhere"; : >"$tmp/curl.log"
 printf '#!/bin/sh\nexit 0\n' >"$h/elsewhere/maestro"; chmod +x "$h/elsewhere/maestro"
-got="$(PATH="$h/elsewhere:$PATH" run "$h" 2.11.0 "$fixture_sha")"
+got="$(RUN_EXTRA_PATH="$h/elsewhere" run "$h" 2.11.0 "$fixture_sha")"
 [ ! -s "$tmp/curl.log" ] || fail "foreign maestro: must not download (curl saw: $(/bin/cat "$tmp/curl.log"))"
 [ ! -e "$h/$opt" ] || fail "foreign maestro: must not install alongside"
 case "$got" in *rc=0*) pass ;; *) fail "foreign maestro: did not complete (output: $got)" ;; esac

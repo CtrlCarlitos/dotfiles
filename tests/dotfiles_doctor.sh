@@ -261,6 +261,13 @@ if grep -Eq '^warn +mobile-dev .*(maestro|agent-device|adb)( |$)' <<<"$out9" | g
 touch "$TMP/mobile-mcp/claude.maestro" "$TMP/mobile-mcp/claude.agent-device" "$TMP/mobile-mcp/codex.maestro" "$TMP/mobile-mcp/codex.agent-device"
 out9="$(run9)"
 grep -Eq '^ok +mobile-dev ' <<<"$out9" || fail "[9c] with everything present mobile-dev must be ok: $out9"
+# e. only Maestro missing: `dot upgrade` installs it by itself (install_maestro is shared since
+#    #359), so that is the hint - not the whole-installer re-entry a missing adb or marker needs
+rm -f "$TMP/mobile-bin/maestro"
+out9="$(run9)"
+grep -Eq '^warn +mobile-dev +missing: maestro - .*dot upgrade' <<<"$out9" || fail "[9e] only maestro missing must point at dot upgrade: $out9"
+if grep -Fq 'delete-bucket' <<<"$out9"; then fail "[9e] only maestro missing must not demand the installer re-entry: $out9"; fi
+printf '#!/bin/sh\nexit 0\n' >"$TMP/mobile-bin/maestro"; chmod +x "$TMP/mobile-bin/maestro"
 # d. in-apply mode checks the files only (no agent CLI calls after every apply)
 rm -f "$TMP/mobile-mcp/claude.maestro"
 out9="$(DOTFILES_DOCTOR_IN_APPLY=1 run9)"

@@ -107,6 +107,7 @@ render() {
 #   on the host's config or cwd. PLATFORM picks the template and the chezmoi
 #   OS the template gates on:
 #       sh      run_onchange_install_packages.sh.tmpl   as linux
+#       wsl     run_onchange_install_packages.sh.tmpl   as linux under WSL (a microsoft kernel)
 #       darwin  run_onchange_install_packages.sh.tmpl   as darwin
 #       ps1     run_onchange_install_packages.ps1.tmpl  as windows
 #   OVERRIDE_JSON is the "packages" document (a JSON object of group flags);
@@ -135,6 +136,7 @@ render_to() { # $1 = outfile, $2 = platform, $3 = override JSON
     fi
     case "$platform" in
         sh) os_json='"os": "linux", "kernel": {"osrelease": "6.8.0-generic"}' ;;
+        wsl) os_json='"os": "linux", "kernel": {"osrelease": "5.15.153.1-microsoft-standard-WSL2"}' ;;
         darwin) os_json='"os": "darwin"' ;;
         ps1) os_json='"os": "windows"' ;;
         *)
