@@ -499,6 +499,37 @@ overrides the variable is even defined. An external command
 ordinary word expansions under the *current* shell's environment, evaluated
 before `env` itself reassigns anything for its child.
 
+## 21. `command -v` says a command exists, not what its first call costs
+
+On WSL the Windows `PATH` is appended to the Linux one, and an extensionless
+launcher script resolves there like any Linux command. `command -v code` succeeds
+on a WSL box that has no Linux VS Code at all: it finds the Windows client's
+`bin/code`, which hands every call to Remote-WSL, and Remote-WSL's first call after
+a VS Code update on Windows downloads the 200+ MB VS Code **server** for WSL before
+it answers anything.
+
+**The incident.** A WSL `dot up` took 25m56s, 22m07s of them booked as "VS Code"
+with nothing on screen (2026-10-11). The extension step ran
+`$(code --list-extensions 2>/dev/null)`: the whole server download happened inside
+the command substitution with its progress on a discarded stderr, on a link that
+was running at 170 KB/s that morning. The step itself was right (the extensions
+belong on the WSL side; all 24 curated ones were there), the probe that gated it
+was not: `command -v` had answered "yes" for a program that was about to do seven
+minutes of unannounced network work.
+
+**Obey it.** A gate that decides whether to run a tool must know *what* it found,
+not only *that* it found something. For `code` that is `vscode_wsl_server_fetch`
+(`scripts/lib/vscode-wsl.sh`): it recognises the Windows launcher by content
+(`COMMIT=`, `SERVERDATAFOLDER=`, the `WSL_DISTRO_NAME` branch), checks whether the
+server for that commit is present, and when it is not says so and runs one
+`code --version` in the foreground, so Remote-WSL's own progress reaches the
+terminal and the wait is its own timing section. The proof run read
+`VS Code server fetch 7m03s` on an 81 Mbit/s link - the same seven minutes, now
+with a name. The general rule follows: a network step that can take minutes runs
+in the foreground with a timing mark, never inside `$(...)` with stderr to
+`/dev/null`. `tests/vscode_wsl_server_fetch_contract.sh` executes the gate against
+fixture launchers.
+
 ---
 
 ## Checking yourself

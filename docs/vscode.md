@@ -19,6 +19,7 @@ vscode_settings = false
 | Settings (forced/upsert/merge/unset tiers) | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode.settings]`, seeded from `.chezmoitemplates/vscode-settings.toml` — both installer templates render from it |
 | Keybindings (agent keys, pane/tab parity chords) | `.chezmoitemplates/vscode-keybindings.json`, applied by per-OS `modify_keybindings.json` wrappers |
 | Machine overrides | `~/.config/chezmoi/chezmoi.toml` → `[data.vscode_overrides]` |
+| WSL | VS Code is the Windows client; `code` in WSL is its launcher through Remote-WSL. Settings are the Windows file (`%APPDATA%\Code\User\settings.json`, written by the Windows installer); extensions install on both sides, the WSL server holding the workspace ones. After a VS Code update on Windows the first `code` call downloads the WSL server: `dot up` and `dot upgrade` announce it and time it as "VS Code server fetch" (invariant 21) |
 
 **Why the extension drift has its own key (`vscode_overrides`)**: chezmoi merges
 the config's data with `.chezmoidata.yaml` table by table, key by key (the config

@@ -532,12 +532,13 @@ dot_timing_mark 'Superpowers report'
 # for two months, Codex at 6.4.2 behind a lagging catalog, project-scope Claude installs at
 # 6.2.0). Read-only; every lookup degrades to "unknown" offline.
 superpowers_report() {
-    local upstream claude_user claude_stale claude_installs ver scope project codex_ver codex_cat
+    local upstream claude_user claude_stale claude_gone claude_installs ver scope project codex_ver codex_cat
     upstream="$(superpowers_latest_version)" || upstream=""
     echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
     if command -v claude &>/dev/null; then
         claude_user=""
         claude_stale=""
+        claude_gone=""
         # A lookup that fails (`claude plugin list --json` hung for its whole 60 s budget on a
         # WSL box, 2026-10-11) is reported as that, never as "not installed".
         if ! claude_installs="$(claude_superpowers_installs)"; then
@@ -547,14 +548,23 @@ superpowers_report() {
                 [ -n "$ver" ] || continue
                 if [ "$scope" = user ]; then
                     claude_user="$ver"
+                elif [ -n "$project" ] && [ ! -d "$project" ]; then
+                    # a deleted worktree leaves its install behind (2026-10-11: two, at 6.2.0 and
+                    # 6.3.0); "update inside each" cannot be followed there
+                    claude_gone="$claude_gone, $ver ($scope) in ${project/#"$HOME"/\~}"
                 elif [ -n "$upstream" ] && [ "$ver" != "$upstream" ]; then
-                    claude_stale="$claude_stale, $ver in ${project/#"$HOME"/\~}"
+                    claude_stale="$claude_stale, $ver ($scope) in ${project/#"$HOME"/\~}"
                 fi
             done <<<"$claude_installs"
             superpowers_version_line "Claude Code" "$claude_user" "$upstream" "re-run dot upgrade"
-            # `claude plugin update` run here never touches another repository's project-scope install.
+            # `claude plugin update` run here never touches another repository's project/local-scope
+            # install; the scope is named as Claude reports it, and the user-scope install covers
+            # every project once the project's own is removed.
             if [ -n "$claude_stale" ]; then
-                echo "     project-scope installs behind: ${claude_stale#, } - run 'claude plugin update superpowers@superpowers-marketplace' inside each"
+                echo "     project/local-scope installs behind: ${claude_stale#, } - inside each: 'claude plugin update superpowers@superpowers-marketplace', or 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' so the user-scope install applies"
+            fi
+            if [ -n "$claude_gone" ]; then
+                echo "     stale installs (directory gone): ${claude_gone#, } - recreate the directory, run 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' inside it, then delete it"
             fi
         fi
     fi

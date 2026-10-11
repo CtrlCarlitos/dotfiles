@@ -660,6 +660,132 @@ github_latest_tag() {
         | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1
 }
 
+#-------------------------------------------------------------------------------
+# GitHub-release tools: delta, dust, procs. On Debian/Ubuntu none has an apt
+# repo (dust and procs reach the archive only in 25.04), so they come from
+# GitHub release assets. Shared by the installer (install when missing) and
+# `dot upgrade` (upgrade when behind); on macOS and Windows the same tools
+# come from brew and winget, which the upgrade sweep already covers.
+#
+# Until 2026-10-11 the installer had three near-identical blocks gated on
+# `command -v`, with no pin and no upgrade path: `dot upgrade` ended with
+# "delta 0.19.2 (0.20.1 available) ... re-run the installer", and re-running
+# did nothing because the binary existed. The newest tag comes from
+# github_latest_tag (git ls-remote), not the unauthenticated GitHub API the
+# blocks used (60 requests/hour, then "Could not determine latest version").
+# The download is stall-guarded like Maestro's. Assets are amd64 only.
+# tests/github_tools_contract.sh executes these against fake curl/dpkg/sudo.
+#
+#   github_tool_sync <name> <sudo-cmd> <install|upgrade>
+#     install  present: nothing (silent); missing: install the newest release
+#     upgrade  missing: nothing (silent); current or ahead: "is current";
+#              behind: download + install, "upgraded to"; newest unknown: say so
+#     <sudo-cmd> is "sudo", the installer's dot_sudo, or "" as root. Always 0.
+#   GITHUB_TOOL_BIN (default /usr/local/bin): where procs' binary lands.
+#-------------------------------------------------------------------------------
+github_tool_repo() {
+    case "$1" in
+        delta) echo dandavison/delta ;;
+        dust) echo bootandy/dust ;;
+        procs) echo dalance/procs ;;
+        *) return 1 ;;
+    esac
+}
+# github_tool_asset_url <name> <version> - the amd64 release asset (delta tags carry no "v")
+github_tool_asset_url() {
+    case "$1" in
+        delta) echo "https://github.com/dandavison/delta/releases/download/$2/git-delta_$2_amd64.deb" ;;
+        dust) echo "https://github.com/bootandy/dust/releases/download/v$2/du-dust_$2-1_amd64.deb" ;;
+        procs) echo "https://github.com/dalance/procs/releases/download/v$2/procs-v$2-x86_64-linux.zip" ;;
+        *) return 1 ;;
+    esac
+}
+# github_tool_installed_version <name> - the first X.Y.Z in `--version` (empty: unknown)
+github_tool_installed_version() {
+    command -v "$1" >/dev/null 2>&1 || return 1
+    "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+}
+# github_tool_install <name> <version> <sudo-cmd> - fetch and install one release; 1 on any
+# failure, quietly (the caller does the talking). dpkg's own chatter stays off the terminal.
+github_tool_install() {
+    local name="$1" ver="$2" run_as="$3" url tmp asset rc=0
+    url="$(github_tool_asset_url "$name" "$ver")" || return 1
+    tmp="$(mktemp -d)" || return 1
+    asset="$tmp/${url##*/}"
+    if ! curl -fsSL --connect-timeout 30 --speed-limit 10240 --speed-time 60 -o "$asset" "$url"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    # shellcheck disable=SC2086  # $run_as is "sudo", "dot_sudo" or empty (root): word-split on purpose
+    case "$asset" in
+        *.deb)
+            $run_as dpkg -i "$asset" >/dev/null || $run_as apt-get install -f -y >/dev/null || rc=1
+            ;;
+        *.zip)
+            if ! command -v unzip >/dev/null 2>&1; then
+                $run_as apt-get install -y unzip >/dev/null 2>&1 || rc=1
+            fi
+            if [ "$rc" -eq 0 ]; then
+                mkdir -p "$tmp/x" && unzip -qo "$asset" -d "$tmp/x" \
+                    && $run_as install "$tmp/x/$name" "${GITHUB_TOOL_BIN:-/usr/local/bin}/$name" || rc=1
+            fi
+            ;;
+        *) rc=1 ;;
+    esac
+    rm -rf "$tmp"
+    return "$rc"
+}
+github_tool_sync() {
+    local name="$1" run_as="$2" mode="$3" have latest newest arch
+    github_tool_repo "$name" >/dev/null || return 0
+    if [ "$mode" = install ]; then
+        command -v "$name" >/dev/null 2>&1 && return 0
+    else
+        command -v "$name" >/dev/null 2>&1 || return 0
+    fi
+    have="$(github_tool_installed_version "$name" 2>/dev/null || true)"
+    arch="$(uname -m)"
+    if [ "$arch" != x86_64 ]; then
+        if [ "$mode" = install ]; then
+            info "$name: only an amd64 asset is published - skipping on $arch"
+        else
+            echo "   $name: only an amd64 asset is published - left at ${have:-?} on $arch"
+        fi
+        return 0
+    fi
+    latest="$(github_latest_tag "$(github_tool_repo "$name")" 2>/dev/null || true)"
+    if [ -z "$latest" ]; then
+        if [ "$mode" = install ]; then
+            warn "Could not determine the latest $name release - skipping"
+        else
+            echo "   $name: newest release unknown (offline?) - left at ${have:-?}"
+        fi
+        return 0
+    fi
+    if [ "$mode" = upgrade ]; then
+        if [ -z "$have" ]; then
+            echo "   $name: installed version unknown - left as is (newest is $latest)"
+            return 0
+        fi
+        newest="$(printf '%s\n%s\n' "$have" "$latest" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+        if [ "$have" = "$latest" ] || [ "$newest" = "$have" ]; then
+            echo "   $name is current ($have)"
+            return 0
+        fi
+        echo "   Upgrading $name $have -> $latest..."
+        if github_tool_install "$name" "$latest" "$run_as"; then
+            echo "   $name upgraded to $latest"
+        else
+            echo "   Warning: $name upgrade failed (download stalled or install error) - still $have"
+        fi
+        return 0
+    fi
+    info "Installing $name $latest..."
+    github_tool_install "$name" "$latest" "$run_as" \
+        || warn "Failed to install $name $latest (download stalled or install error) - continuing"
+    return 0
+}
+
 # superpowers_latest_version - obra/superpowers' newest release (empty: unreachable).
 superpowers_latest_version() { github_latest_tag obra/superpowers; }
 

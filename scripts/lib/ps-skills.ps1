@@ -833,12 +833,16 @@ function Write-SuperpowersReport {
     if (Get-Command claude -ErrorAction SilentlyContinue) {
         $user = ''
         $stale = @()
+        $gone = @()
         foreach ($i in @(Get-ClaudeSuperpowersInstall)) {
             if ($i.Scope -eq 'user') { $user = $i.Version }
-            elseif ($upstream -and $i.Version -ne $upstream) { $stale += "$($i.Version) in $($i.ProjectPath)" }
+            # a deleted worktree leaves its install behind; "update inside each" cannot be followed there
+            elseif ($i.ProjectPath -and -not (Test-Path -LiteralPath $i.ProjectPath)) { $gone += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
+            elseif ($upstream -and $i.Version -ne $upstream) { $stale += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
         }
         Write-Host (Format-SuperpowersVersionLine -Harness 'Claude Code' -Version $user -Upstream $upstream -Note 're-run dot upgrade')
-        if ($stale.Count -gt 0) { Write-Host "     project-scope installs behind: $($stale -join ', ') - run 'claude plugin update superpowers@superpowers-marketplace' inside each" }
+        if ($stale.Count -gt 0) { Write-Host "     project/local-scope installs behind: $($stale -join ', ') - inside each: 'claude plugin update superpowers@superpowers-marketplace', or 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' so the user-scope install applies" }
+        if ($gone.Count -gt 0) { Write-Host "     stale installs (directory gone): $($gone -join ', ') - recreate the directory, run 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' inside it, then delete it" }
     }
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
         Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version (Get-OpenCodeSuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
