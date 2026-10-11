@@ -1759,6 +1759,12 @@ install_claude_cli() {
         if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
             net_timeout 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
         fi
+        # agent-device MCP registration for Claude Code lives HERE too, same
+        # reason as Maestro's above: main() runs install_mobile_dev() (which
+        # installs agent-device) before claude exists on a fresh machine.
+        if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
+            net_timeout 60 claude mcp add -s user agent-device -- agent-device mcp || warn "agent-device MCP registration for Claude Code failed - continuing"
+        fi
 {{- end }}
     fi
 }
@@ -2270,6 +2276,11 @@ install_chatgpt_cli() {
         # fresh machine). Codex has no scope flag: one global config.toml.
         if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
             net_timeout 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
+        fi
+        # agent-device's Codex registration lives HERE too, same reason as
+        # Maestro's above. Codex has no scope flag: one global config.toml.
+        if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
+            net_timeout 60 codex mcp add agent-device -- agent-device mcp || warn "agent-device MCP registration for Codex failed - continuing"
         fi
 {{- end }}
     fi

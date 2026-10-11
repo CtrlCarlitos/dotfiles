@@ -46,6 +46,9 @@ agents:
     maestro:
       command: maestro
       args: [mcp]
+    agent-device:
+      command: agent-device
+      args: [mcp]
     expo:
       type: remote
       url: https://mcp.expo.dev/mcp

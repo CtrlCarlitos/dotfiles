@@ -147,11 +147,14 @@ m = re.search(r"\$mcpCatalog = @\{(.*?)\n\}", ps1, re.S)
 if not m: err("ps1 render: $mcpCatalog not rendered")
 else:
     body = m.group(1)
+    # Keys are quoted ('name' = @{...}), not bare, so a hyphenated catalog
+    # name (agent-device) doesn't break PowerShell's hashtable-key parser
+    # (confirmed live 2026-10-10: a bare hyphenated key is a parse error).
     for name, srv in mcp_local.items():
-        want = "%s = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
+        want = "'%s' = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
         if want not in body: err("ps1 render: $mcpCatalog lacks %s as %s" % (name, want))
     for name in mcp:
-        if name not in mcp_local and ("%s = @{" % name) in body:
+        if name not in mcp_local and ("'%s' = @{" % name) in body:
             err("ps1 render: $mcpCatalog must not carry remote entry %s (out of scope for the ps1 twin)" % name)
     for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.serena.args"):
         if ref not in ps1: err("ps1 render: OpenCode/agy wiring does not consume %s" % ref)

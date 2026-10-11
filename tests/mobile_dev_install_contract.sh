@@ -71,6 +71,16 @@ require "$tmpl" 'codex mcp add maestro -- maestro mcp'
 require "$tmpl" 'claude mcp get maestro'
 require "$tmpl" 'codex mcp get maestro'
 
+# --- agent-device MCP registration for Claude Code and Codex, idempotent --
+# (Task 8, mirrors Maestro's own two call sites above exactly): same scope
+# rule (Claude Code at user scope, Codex with no scope flag) and same
+# gating (command -v agent-device, "mcp get" idempotency check).
+require "$tmpl" 'claude mcp add -s user agent-device -- agent-device mcp'
+forbid "$tmpl" 'claude mcp add agent-device -- agent-device mcp'
+require "$tmpl" 'codex mcp add agent-device -- agent-device mcp'
+require "$tmpl" 'claude mcp get agent-device'
+require "$tmpl" 'codex mcp get agent-device'
+
 # --- WSL: the ADB bridge to the Windows ADB server (Task 5) ---------------
 # install_mobile_dev() itself only prints a heads-up, gated on $isWsl like
 # everything else in this file - the actual export lives in dot_zshrc,
@@ -213,6 +223,28 @@ if command -v chezmoi >/dev/null 2>&1; then
         *'command -v maestro'*) pass ;;
         *) fail "render: install_chatgpt_cli's Maestro registration must be gated on the maestro binary" ;;
     esac
+
+    # --- agent-device MCP placement (Task 8, mirrors Maestro's above): same
+    # install_claude_cli/install_chatgpt_cli locations, same gating. ----------
+    body="$(fn_body "$out" install_claude_cli)"
+    case "$body" in
+        *'claude mcp add -s user agent-device -- agent-device mcp'*) pass ;;
+        *) fail "render (mobile_dev=true): install_claude_cli must register agent-device MCP at user scope" ;;
+    esac
+    case "$body" in
+        *'command -v agent-device'*) pass ;;
+        *) fail "render: install_claude_cli's agent-device registration must be gated on the agent-device binary" ;;
+    esac
+    body="$(fn_body "$out" install_chatgpt_cli)"
+    case "$body" in
+        *'codex mcp add agent-device -- agent-device mcp'*) pass ;;
+        *) fail "render (mobile_dev=true): install_chatgpt_cli must register agent-device MCP for Codex" ;;
+    esac
+    case "$body" in
+        *'command -v agent-device'*) pass ;;
+        *) fail "render: install_chatgpt_cli's agent-device registration must be gated on the agent-device binary" ;;
+    esac
+
     body="$(fn_body "$out" install_mobile_dev)"
     [ -n "$body" ] || fail "render: install_mobile_dev() body not found"
     case "$body" in
@@ -240,6 +272,11 @@ if command -v chezmoi >/dev/null 2>&1; then
     render_to "$out" sh "$(groups false true)"
     if grep -Fq 'maestro -- maestro mcp' "$out"; then
         fail "render (mobile_dev=false): no Maestro MCP registration may render for Claude Code/Codex"
+    else
+        pass
+    fi
+    if grep -Fq 'agent-device -- agent-device mcp' "$out"; then
+        fail "render (mobile_dev=false): no agent-device MCP registration may render for Claude Code/Codex"
     else
         pass
     fi

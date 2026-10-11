@@ -218,6 +218,46 @@ sync_check 'OpenCode must not get maestro without its binary' "$oc_json" '"maest
 sync_check 'agy must not get maestro without its binary' "$agy_json" '"maestro" not in d["mcpServers"]'
 rm -rf "$sync_tmp"
 
+# 7. agent-device MCP reaches OpenCode and agy through the catalog (Task 8,
+#    mirrors Maestro's section 6 exactly): a LOCAL entry `agent-device mcp`,
+#    gated on the binary like serena/maestro. Proves the brief's claim that
+#    OpenCode/agy need ZERO new code - adding the catalog entry alone is
+#    enough for the existing generic `.agents.mcp` iteration to pick it up.
+require "$repo_root/.chezmoidata/agents.yaml" '    agent-device:'
+require "$repo_root/.chezmoidata/agents.yaml" '      command: agent-device'
+require "$repo_root/.chezmoidata/agents.yaml" '      args: [mcp]'
+sync_tmp="$(mktemp -d)"
+sync_fn="$(sed -n '/^sync_agent_mcp_catalog() {$/,/^}$/p' "$agy_tmp/rendered.sh")"
+[ -n "$sync_fn" ] || fail "rendered installer: no top-level sync_agent_mcp_catalog() function"
+mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
+for tool in python3 mkdir dirname tr rm; do
+    real="$(command -v "$tool")" || skip "$tool not installed"
+    ln -s "$real" "$sync_tmp/bin/$tool"
+done
+for stub in opencode maestro serena agent-device; do
+    printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"
+    chmod +x "$sync_tmp/bin/$stub"
+done
+run_sync || fail "sync_agent_mcp_catalog() failed on a fresh HOME (agent-device fixture)"
+oc_json="$sync_tmp/home/.config/opencode/opencode.json"
+agy_json="$sync_tmp/home/.gemini/config/mcp_config.json"
+sync_check 'OpenCode must get agent-device as a local `agent-device mcp` server' "$oc_json" \
+    'd["mcp"]["agent-device"] == {"type":"local","command":["agent-device","mcp"],"enabled":True}'
+sync_check 'OpenCode must still get maestro and serena alongside agent-device' "$oc_json" \
+    '"maestro" in d["mcp"] and "serena" in d["mcp"]'
+sync_check 'agy must get agent-device as {command, args, forceAllToolsEager}' "$agy_json" \
+    'd["mcpServers"]["agent-device"] == {"command":"agent-device","args":["mcp"],"forceAllToolsEager":True}'
+sync_check 'agy must still get maestro and serena alongside agent-device' "$agy_json" \
+    '"maestro" in d["mcpServers"] and "serena" in d["mcpServers"]'
+# No agent-device binary: no agent-device entry for either agent (the local gate holds).
+rm -f "$sync_tmp/bin/agent-device"
+rm -rf "$sync_tmp/home"
+mkdir -p "$sync_tmp/home"
+run_sync || fail "sync_agent_mcp_catalog() failed without agent-device"
+sync_check 'OpenCode must not get agent-device without its binary' "$oc_json" '"agent-device" not in d["mcp"]'
+sync_check 'agy must not get agent-device without its binary' "$agy_json" '"agent-device" not in d["mcpServers"]'
+rm -rf "$sync_tmp"
+
 # Task 4 is OpenCode/agy only (Task 3 already handled Claude Code/Codex
 # Maestro registration directly) - Expo must not be wired into claude/codex
 # `mcp add`.

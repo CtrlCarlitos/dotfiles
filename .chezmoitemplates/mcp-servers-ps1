@@ -6,11 +6,16 @@
   renders
 
     $mcpCatalog = @{
-        serena = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+        'serena' = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
     }
 
   Keys come out in sorted order (Go template map iteration); nothing depends
   on their order. Consumers build their own shape from command + args.
+  Keys are quoted ('{{ $name }}') rather than bare - a bare PowerShell
+  hashtable key must be a valid identifier, and a catalog name containing a
+  hyphen (e.g. agent-device) is not one; PowerShell parses the hyphen as an
+  operator and the whole script fails to parse. Confirmed live 2026-10-10
+  while wiring agent-device's MCP entry.
 
   REMOTE entries (type: remote + url, e.g. Expo - no command/args to probe)
   are deliberately left OUT of $mcpCatalog: the Windows/OpenCode-ps1 and
@@ -23,7 +28,7 @@
 $mcpCatalog = @{
 {{- range $name, $srv := . }}
 {{- if not (hasKey $srv "type") }}
-    {{ $name }} = @{ command = '{{ $srv.command | replace "'" "''" }}'; args = @({{ includeTemplate "ps-list" $srv.args }}) }
+    '{{ $name }}' = @{ command = '{{ $srv.command | replace "'" "''" }}'; args = @({{ includeTemplate "ps-list" $srv.args }}) }
 {{- end }}
 {{- end }}
 }
