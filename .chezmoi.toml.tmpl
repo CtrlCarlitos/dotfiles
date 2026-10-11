@@ -117,13 +117,13 @@
   # ==========================================================================
   [data.packages]
     # core - terminal fundamentals (git, zsh, tmux, node, python, fzf, gh)
-    core = {{ if $interactive }}{{ promptBoolOnce . "packages.core" "Install core (terminal fundamentals: git, zsh, tmux)?" true }}{{ else }}false{{ end }}
+    core = {{ if $interactive }}{{ promptBoolOnce . "packages.core" "Install core (terminal fundamentals: git, zsh, tmux)" true }}{{ else }}false{{ end }}
 
     # modern_cli - modern CLI replacements (bat, eza, fd, starship, zoxide, gum)
-    modern_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.modern_cli" "Install modern_cli (modern CLI replacements: bat, eza, starship)?" true }}{{ else }}false{{ end }}
+    modern_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.modern_cli" "Install modern_cli (modern CLI replacements: bat, eza, starship)" true }}{{ else }}false{{ end }}
 
     # fonts - Nerd Fonts (MesloLGS NF), required for Starship
-    fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)?" true }}{{ else }}false{{ end }}
+    fonts = {{ if $interactive }}{{ promptBoolOnce . "packages.fonts" "Install fonts (Nerd Fonts)" true }}{{ else }}false{{ end }}
 
 {{/* mobile_dev must be resolved BEFORE agent_toolkit's line below, not just
      before agent_toolkit's own position in the file: agent_toolkit's forced
@@ -135,7 +135,7 @@
      this variable, so emission order in the rendered TOML is unchanged. */}}
 {{- $mobileDev := false -}}
 {{- if and $interactive (not $isDevcontainer) -}}
-{{-   $mobileDev = promptBoolOnce . "packages.mobile_dev" "Install mobile_dev (opt-in Expo/Android mobile development tooling)?" false -}}
+{{-   $mobileDev = promptBoolOnce . "packages.mobile_dev" "Install mobile_dev (opt-in Expo/Android mobile development tooling)" false -}}
 {{- end -}}
 
     # agent_toolkit - cross-vendor agent layer (Serena, act, Playwright).
@@ -148,44 +148,44 @@
     # non-interactive (CI/devcontainer) render at agent_toolkit = false even
     # when a prior mobile_dev = true is on record, since $mobileDev is false
     # there too.
-    agent_toolkit = {{ if $mobileDev }}true{{ else }}{{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)?" true }}{{ else }}false{{ end }}{{ end }}
+    agent_toolkit = {{ if $mobileDev }}true{{ else }}{{ if $interactive }}{{ promptBoolOnce . "packages.agent_toolkit" "Install agent_toolkit (cross-vendor agent layer: Serena, act)" true }}{{ else }}false{{ end }}{{ end }}
 
     # opencode_cli - OpenCode CLI + superpowers/skills/guardrail wiring
-    opencode_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.opencode_cli" "Install opencode_cli (OpenCode CLI)?" true }}{{ else }}false{{ end }}
+    opencode_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.opencode_cli" "Install opencode_cli (OpenCode CLI)" true }}{{ else }}false{{ end }}
 
     # opencode_desktop - OpenCode Desktop app (host only)
-    opencode_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.opencode_desktop" "Install opencode_desktop (OpenCode Desktop app)?" false }}{{ else }}false{{ end }}
+    opencode_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.opencode_desktop" "Install opencode_desktop (OpenCode Desktop app)" false }}{{ else }}false{{ end }}
 
     # claude_cli - Claude Code CLI + superpowers/skills/guardrail wiring
-    claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)?" true }}{{ else }}false{{ end }}
+    claude_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.claude_cli" "Install claude_cli (Claude Code)" true }}{{ else }}false{{ end }}
 
     # claude_desktop - Claude Desktop app (host only; Linux has no build)
-    claude_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.claude_desktop" "Install claude_desktop (Claude Desktop app)?" false }}{{ else }}false{{ end }}
+    claude_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.claude_desktop" "Install claude_desktop (Claude Desktop app)" false }}{{ else }}false{{ end }}
 
     # chatgpt_cli - Codex CLI (@openai/codex) + the curated-skills pass for Codex
-    chatgpt_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.chatgpt_cli" "Install chatgpt_cli (Codex CLI)?" false }}{{ else }}false{{ end }}
+    chatgpt_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.chatgpt_cli" "Install chatgpt_cli (Codex CLI)" false }}{{ else }}false{{ end }}
 
     # chatgpt_desktop - ChatGPT Desktop app (host only; Linux has no build)
-    chatgpt_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.chatgpt_desktop" "Install chatgpt_desktop (ChatGPT Desktop app)?" false }}{{ else }}false{{ end }}
+    chatgpt_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.chatgpt_desktop" "Install chatgpt_desktop (ChatGPT Desktop app)" false }}{{ else }}false{{ end }}
 
     # antigravity_cli - Antigravity CLI (agy) + superpowers/skills/guardrail wiring
-    antigravity_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.antigravity_cli" "Install antigravity_cli (Antigravity CLI, agy)?" false }}{{ else }}false{{ end }}
+    antigravity_cli = {{ if $interactive }}{{ promptBoolOnce . "packages.antigravity_cli" "Install antigravity_cli (Antigravity CLI, agy)" false }}{{ else }}false{{ end }}
 
     # antigravity_desktop - Antigravity 2.0 app (host only)
-    antigravity_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.antigravity_desktop" "Install antigravity_desktop (Antigravity 2.0 app)?" false }}{{ else }}false{{ end }}
+    antigravity_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.antigravity_desktop" "Install antigravity_desktop (Antigravity 2.0 app)" false }}{{ else }}false{{ end }}
 
     # remote_access - private mesh access and approved app tunneling; no login/config.
-    remote_access = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access" "Install remote_access (Tailscale, cloudflared; no login or tunnel setup)?" false }}{{ else }}false{{ end }}
+    remote_access = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access" "Install remote_access (Tailscale, cloudflared; no login or tunnel setup)" false }}{{ else }}false{{ end }}
 
     # remote_access_server - explicit SSH-server prerequisite opt-in; never preset.
-    remote_access_server = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access_server" "Install remote_access_server prerequisites (manual SSH setup required)?" false }}{{ else }}false{{ end }}
+    remote_access_server = {{ if $interactive }}{{ promptBoolOnce . "packages.remote_access_server" "Install remote_access_server prerequisites (manual SSH setup required)" false }}{{ else }}false{{ end }}
 
     # guardrail - agent guardrails, single desired-state flag handed to the
     # agent-guardrails installer: true = install/upgrade the binary and
     # register planes with your approval; false = disable planes if a binary
     # is already installed. The binary itself is never removed by the
     # dotfiles.
-    guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)?" true }}{{ else }}false{{ end }}
+    guardrail = {{ if $interactive }}{{ promptBoolOnce . "packages.guardrail" "Install guardrail (agent guardrails)" true }}{{ else }}false{{ end }}
 
     # mobile_dev - opt-in Expo/Android mobile development tooling (Maestro,
     # agent-device, Expo MCP, Android SDK/emulator on Windows; see
@@ -199,7 +199,7 @@
     # the package-install template gates the actual install on the same
     # $isHost check, not just this prompt, so hand-editing this to `true` on
     # WSL/in a container still won't install desktop apps there.
-    dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)?" false }}{{ else }}false{{ end }}
+    dev_desktop = {{ if and $interactive $isHost }}{{ promptBoolOnce . "packages.dev_desktop" "Install dev_desktop (human desktop apps: Chrome, VS Code)" false }}{{ else }}false{{ end }}
 
     # vscode_settings - settings defaults + global extension management.
     # No prompt; default true. Set false to opt out wholesale on this machine.

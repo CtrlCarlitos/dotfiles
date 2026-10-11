@@ -3185,6 +3185,8 @@ main() {
     # rather than silently assume agent_toolkit's tools exist.
 {{- if $mobile_dev }}
 {{- if $agent_toolkit }}
+    # its own timing section: it was 74 minutes hidden inside 'agent toolkit'
+    dot_timing_mark 'mobile_dev'
     install_mobile_dev
 {{- else }}
     warn "mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run"

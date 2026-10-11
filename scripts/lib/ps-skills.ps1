@@ -853,8 +853,12 @@ function Write-SuperpowersReport {
         if ($row) { $catalog = [string]$row.Version; if ($row.Installed) { $installed = [string]$row.Version } }
         # Codex installs only from a marketplace: when the catalog itself is behind upstream there
         # is nothing `codex plugin add` could fetch, and nothing for the dotfiles to do.
-        if ($catalog -and $installed -eq $catalog) { $note = "the marketplace catalog offers $catalog - nothing to do here" }
-        else { $offer = 'nothing'; if ($catalog) { $offer = $catalog }; $note = "the marketplace offers $offer; re-run dot upgrade" }
-        Write-Host (Format-SuperpowersVersionLine -Harness 'Codex' -Version $installed -Upstream $upstream -Note $note)
+        # That is not a problem to act on, so it prints as "latest there", not as "behind".
+        if ($catalog -and $installed -eq $catalog -and $upstream -and $installed -ne $upstream) {
+            Write-Host "   Codex: $installed (marketplace latest - upstream v$upstream is not published there yet)"
+        } else {
+            $offer = 'nothing'; if ($catalog) { $offer = $catalog }
+            Write-Host (Format-SuperpowersVersionLine -Harness 'Codex' -Version $installed -Upstream $upstream -Note "the marketplace offers $offer; re-run dot upgrade")
+        }
     }
 }
