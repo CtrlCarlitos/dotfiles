@@ -81,6 +81,16 @@ $dropDesktopShortcuts = Test-DesktopShortcutsDisabled
 $shortcutsBefore = @()
 if ($dropDesktopShortcuts) { $shortcutsBefore = @(Get-DesktopShortcutBaseline) }
 
+Add-DotTimingMark -Name 'network check'
+# A slow link (under DOT_SLOW_MBPS, default 50 Mbit/s) is said up front; the operator may leave the
+# big downloaders (choco, winget) out of this run or stop. --yes and an unanswered question continue.
+$networkChoice = Invoke-DotNetworkCheck
+if ($networkChoice -eq 'stop') {
+    Write-Host "  Stopped at your request - nothing was upgraded. Re-run when the connection is better." -ForegroundColor Yellow
+    exit 0
+}
+$skipPackageSweeps = ($networkChoice -eq 'skip')
+
 Add-DotTimingMark -Name 'Docker Desktop'
 # --- Docker Desktop: its installer cannot replace a running app, so an available upgrade used to
 # do nothing without a word. When one is pending and Docker Desktop is up, offer to stop it (same
@@ -93,14 +103,16 @@ $dockerOwner = Get-DockerDesktopOwner
 if ($dockerOwner -eq 'choco') {
     Write-Host "  Docker Desktop is still Chocolatey's (its package lags Docker's releases, and winget will not upgrade it). To move it to winget and keep your data, see docs/windows.md (Docker Desktop through winget)." -ForegroundColor Yellow
 }
-if (@(Get-DockerDesktopProcess).Count -gt 0) {
+if (-not $skipPackageSweeps -and @(Get-DockerDesktopProcess).Count -gt 0) {
     $dockerPendingVersion = Get-DockerDesktopUpgrade -Owner $dockerOwner
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
 }
 
 Add-DotTimingMark -Name 'choco'
 # --- 1. System packages: the choco upgrade all this command replaces. ---
-if (Get-Command choco -ErrorAction SilentlyContinue) {
+if ($skipPackageSweeps) {
+    Write-Host "  Skipping choco packages (slow network, your choice)." -ForegroundColor Yellow
+} elseif (Get-Command choco -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading choco packages (choco upgrade all)..." -ForegroundColor Yellow
     $chocoArguments = @(Get-ChocoUpgradeArgument -KeepDockerDesktop:$dockerKept)
     if (($chocoArguments -join ' ') -match '--except=\S*claude') {
@@ -121,7 +133,7 @@ Add-DotTimingMark -Name 'VS Code'
 # a held package with no upgrade pending costs nothing, a failed installer costs a re-run.
 $vsCodeKept = $false
 $vsCodePendingVersion = ''
-if (@(Get-Process -Name 'Code' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+if (-not $skipPackageSweeps -and @(Get-Process -Name 'Code' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Command winget -ErrorAction SilentlyContinue)) {
     $vsCodePendingVersion = Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'
     if ($vsCodePendingVersion) { $vsCodeKept = -not (Invoke-VsCodeUpgradeOffer -Version $vsCodePendingVersion -ExcludeId @(Get-AncestorProcessId)) }
     else { $vsCodeKept = $true }
@@ -132,7 +144,9 @@ Add-DotTimingMark -Name 'winget'
 # Win-CodexBar): same full-sweep premise as choco - upgrade everything
 # winget knows, not just what this repo installed. --include-unknown: apps
 # with undetermined installed versions are skipped without it.
-if (Get-Command winget -ErrorAction SilentlyContinue) {
+if ($skipPackageSweeps) {
+    Write-Host "  Skipping winget packages (slow network, your choice)." -ForegroundColor Yellow
+} elseif (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "  Upgrading winget packages (winget upgrade --all)..." -ForegroundColor Yellow
     # Node stays on versions.node_major, like Linux/WSL and macOS (read now, so a bump in the repo
     # moves Windows on the next run without waiting for the installer).

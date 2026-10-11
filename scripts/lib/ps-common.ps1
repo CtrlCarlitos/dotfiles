@@ -189,12 +189,15 @@ $script:NonSessionPathPattern = @{
 # language_server.exe, the IDE's language_server_windows_x64.exe, the Store app's
 # codex-command-runner) - never by name alone: several share a name with a CLI (claude, codex,
 # opencode). Service: a Windows service the app installs (stopped with it when running).
+# Ollama's systray offers its own "restart to update" - closed here instead, like every other
+# app in this list, so winget upgrades it the same way regardless of what the tray offers.
 $script:AgentDesktopApp = @(
     [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; UpgradeId = 'Anthropic.Claude' }
     [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
     [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; UpgradeId = 'Google.Antigravity' }
     [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; UpgradeId = '' }
     [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; UpgradeId = 'SST.OpenCodeDesktop' }
+    [pscustomobject]@{ Label = 'Ollama';           Path = '\\Programs\\Ollama\\';                              Service = ''; UpgradeId = 'Ollama.Ollama' }
 )
 
 # winget ids of the apps with an upgrade pending, or $null when winget cannot say. Closing a
@@ -991,12 +994,60 @@ function Invoke-WingetUpgradeAll {
         }
         $ErrorActionPreference = $previous
     }
+    # Per-package time, from winget's own lines (Found / hash verified / Successfully installed), and
+    # a heartbeat from a second runspace: the sweep prints nothing while a big installer downloads,
+    # and a 21-minute Ollama upgrade (2026-10-11, slow ISP) looked like a hang with no way to tell.
+    $packageTimes = New-Object System.Collections.Generic.List[object]
+    $currentPackage = $null
+    $beat = $null
+    $beatHandle = $null
+    $beatState = [hashtable]::Synchronized(@{ Stop = $false; Quiet = [System.Diagnostics.Stopwatch]::StartNew(); Total = [System.Diagnostics.Stopwatch]::StartNew(); Package = '' })
+    $beatEvery = 30
+    if ("$env:DOT_WINGET_HEARTBEAT_SECONDS" -match '^\d+$') { $beatEvery = [int]$env:DOT_WINGET_HEARTBEAT_SECONDS }
+    if ($beatEvery -gt 0) {
+        try {
+            $beat = [powershell]::Create()
+            $null = $beat.AddScript({
+                param($State, $Every)
+                while (-not $State.Stop) {
+                    Start-Sleep -Milliseconds 250
+                    if ($State.Stop) { break }
+                    if ($State.Quiet.Elapsed.TotalSeconds -ge $Every) {
+                        $total = [int]$State.Total.Elapsed.TotalSeconds
+                        $what = if ($State.Package) { "working on $($State.Package)" } else { 'still running' }
+                        [Console]::WriteLine(('  winget is {0} ({1}m{2:00}s so far)...' -f $what, [math]::Floor($total / 60), ($total % 60)))
+                        $State.Quiet.Restart()
+                    }
+                }
+            }).AddArgument($beatState).AddArgument($beatEvery)
+            $beatHandle = $beat.BeginInvoke()
+        }
+        catch { Write-Verbose "winget heartbeat unavailable: $($_.Exception.Message)"; $beat = $null }
+    }
     try {
         $ErrorActionPreference = 'Continue'
         & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object {
             $line = "$_"
             $allLines.Add($line)
-            if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
+            $now = Get-DotTimingNow
+            $stamped = $false
+            if ($line -match 'Found\s+(.+?)\s+\[[^\]]+\]\s+Version') {
+                if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = $now }
+                $currentPackage = [pscustomobject]@{ Name = $Matches[1]; Start = $now; DownloadEnd = $null; End = $null }
+                $packageTimes.Add($currentPackage)
+                $beatState.Package = $Matches[1]
+                $stamped = $true
+            }
+            elseif ($line -match 'Successfully verified installer hash|Starting package install') {
+                if ($currentPackage -and -not $currentPackage.DownloadEnd) { $currentPackage.DownloadEnd = $now }
+                $stamped = $true
+            }
+            elseif ($line -match '^\s*Downloading\s') { $stamped = $true }
+            elseif ($line -match 'Successfully installed') {
+                if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = $now }
+                $stamped = $true
+            }
+            if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $(if ($stamped) { '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $line } else { $line }) }
             if ($line -match 'Successfully installed') { $installed++ }
             # spinner frames, blank lines and download bars carry no information
             if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
@@ -1005,13 +1056,32 @@ function Invoke-WingetUpgradeAll {
             # winget's wording for "nothing to upgrade"; the summary below says it plainly
             if ($line -match '^\s*No installed package found matching input criteria') { return }
             Write-Host $line
+            $beatState.Quiet.Restart()
         }
         $code = [int]$LASTEXITCODE
     }
     catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
     finally {
+        $beatState.Stop = $true
+        if ($beat) {
+            try { $null = $beat.EndInvoke($beatHandle) } catch { Write-Verbose "winget heartbeat ended badly: $($_.Exception.Message)" }
+            $beat.Dispose()
+        }
         foreach ($id in $pinned) { & winget pin remove --id $id --exact *> $null }
         $ErrorActionPreference = $previous
+    }
+    if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
+    # Which package took the time, and whether it was the network (download) or the installer.
+    # Only the slow ones (30 s or more) are listed; also appended to upgrade.log.
+    $slowPackages = @($packageTimes | Where-Object { $_.End -and ($_.End - $_.Start).TotalSeconds -ge 30 } | ForEach-Object {
+            $text = '{0} {1}' -f $_.Name, (Format-DotDuration -Seconds ($_.End - $_.Start).TotalSeconds)
+            if ($_.DownloadEnd) { $text += ' (download {0}, install {1})' -f (Format-DotDuration -Seconds ($_.DownloadEnd - $_.Start).TotalSeconds), (Format-DotDuration -Seconds ($_.End - $_.DownloadEnd).TotalSeconds) }
+            $text
+        })
+    if ($slowPackages.Count -gt 0) {
+        $slowLine = 'winget packages: ' + ($slowPackages -join ', ')
+        Write-Host "  $slowLine"
+        if ($LogPath) { Add-Content -LiteralPath $LogPath -Value ("=== {0} {1}" -f (Get-Date -Format s), $slowLine) }
     }
     $sweepBlocked = ''
     foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
@@ -1548,4 +1618,47 @@ function Read-DotAnswer {
         return (Read-Host $Prompt)
     }
     finally { if ($resume) { Add-DotTimingMark -Name $resume } }
+}
+
+# A slow link turns `dot upgrade` into a wait with no explanation (2026-10-11: one winget package
+# took 21 minutes while the ISP was degraded). Before the package sweeps, time a 10 MB download and
+# say so when the link is under DOT_SLOW_MBPS (default 50) Mbit/s. Twin of net_speed_check in
+# scripts/lib/netspeed.sh. DOT_SPEED_CHECK=0 turns it off; DOT_SPEED_TEST_URL swaps the endpoint.
+# An unmeasurable link (no curl.exe, offline, blocked endpoint) never blocks anything.
+function Get-DotNetworkSpeed {
+    $url = 'https://speed.cloudflare.com/__down?bytes=10000000'
+    if ($env:DOT_SPEED_TEST_URL) { $url = $env:DOT_SPEED_TEST_URL }
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { return $null }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = ''
+    try { $raw = (& curl.exe -sL -o NUL -w '%{speed_download}|%{size_download}' --connect-timeout 5 --max-time 15 $url 2>$null | Out-String).Trim() }
+    catch { return $null }
+    finally { $ErrorActionPreference = $previous }
+    if ($raw -notmatch '^([\d.]+)\|(\d+)$') { return $null }
+    if ([long]$Matches[2] -le 0) { return $null }
+    return [math]::Round(([double]$Matches[1] * 8) / 1000000, 1)
+}
+
+# 'continue', 'skip' (leave the choco and winget sweeps out) or 'stop'. Only a slow link asks, and
+# only an operator at the keyboard: --yes continues, and so does an unanswered question
+# (DOTUPGRADE_PROMPT_TIMEOUT), so an unattended run is never stopped by a bad connection.
+function Invoke-DotNetworkCheck {
+    if ("$env:DOT_SPEED_CHECK" -eq '0') { return 'continue' }
+    $threshold = 50
+    if ("$env:DOT_SLOW_MBPS" -match '^\d+$') { $threshold = [int]$env:DOT_SLOW_MBPS }
+    $mbps = Get-DotNetworkSpeed
+    if ($null -eq $mbps) {
+        Write-Host '  Network speed: could not be measured (the check is skipped).' -ForegroundColor DarkGray
+        return 'continue'
+    }
+    if ($mbps -ge $threshold) {
+        Write-Host ('  Network speed: {0} Mbit/s.' -f $mbps) -ForegroundColor DarkGray
+        return 'continue'
+    }
+    Write-Host ('  Network is slow: {0} Mbit/s (under {1}). Large downloads (winget, choco) may take a long time.' -f $mbps, $threshold) -ForegroundColor Yellow
+    $answer = (Read-DotAnswer '  [c] continue with everything (default)  [s] skip the winget and choco sweeps  [q] stop').Trim()
+    if ($answer -match '^[sS]') { return 'skip' }
+    if ($answer -match '^[qQ]') { return 'stop' }
+    return 'continue'
 }

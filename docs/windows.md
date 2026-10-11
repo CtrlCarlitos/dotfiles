@@ -88,6 +88,25 @@ line (`Timings (dot up, ...)`, one mark per package group and agent tool, both t
 `scripts/lib/timing.sh`; PowerShell twin: `Add-DotTimingMark` / `Write-DotTimingSummary` in
 `scripts/lib/ps-common.ps1`; `tests/upgrade_timing_contract.sh` runs both against a fake clock.
 
+**A slow connection.** One winget package (Ollama) took 21 of a `dot upgrade`'s 23 minutes while the ISP
+was degraded (2026-10-11), and nothing printed while its installer downloaded. Three things now say so:
+
+- **Network check.** Before the choco and winget sweeps, `dot upgrade` times a 10 MB download. Under
+  50 Mbit/s (`DOT_SLOW_MBPS`) it says so and, at a terminal, asks: `c` continue (the default), `s` skip the
+  choco and winget sweeps (apt/brew on Linux and macOS), `q` stop. `--yes`, an unanswered question
+  (`DOTUPGRADE_PROMPT_TIMEOUT`) and a run with no terminal all continue, so a bad link never stops an
+  unattended upgrade. A link that cannot be measured is reported and never blocks.
+  `DOT_SPEED_CHECK=0` turns the check off; `DOT_SPEED_TEST_URL` points it at another file.
+- **Heartbeat.** While `winget upgrade --all` prints nothing for 30 seconds
+  (`DOT_WINGET_HEARTBEAT_SECONDS`, `0` = off) it prints `winget is working on <package> (4m10s so far)...`.
+- **Per-package time.** Packages that took 30 seconds or more are listed after the sweep with their
+  download and install halves, for example `winget packages: Ollama 21m01s (download 19m50s, install
+  1m11s)`, and the same line goes to `upgrade.log`, where the download, hash and install lines are also
+  stamped with the time.
+
+Shell twin: `scripts/lib/netspeed.sh`; PowerShell: `Invoke-DotNetworkCheck` and `Invoke-WingetUpgradeAll`
+in `scripts/lib/ps-common.ps1`; `tests/network_speed_contract.sh` runs both against a fake `curl`/`winget`.
+
 **winget** gets the same treatment: its output streams (minus spinner and progress-bar noise) and is
 kept in the same `upgrade.log`, and the sweep ends with what it upgraded (`winget upgraded 2 package(s).`)
 and, from a second listing, what is **still pending** (`Still pending in winget: Docker Desktop (4.93.0 -> 4.94.0), ...`).
@@ -105,7 +124,7 @@ copy from before that is reported by `dot up`; the one-time fix is `winget unins
 Two more holds in the sweep: a new **Python minor** (3.14 to 3.15) is left out of `choco upgrade all`
 because venvs and uv/pipx tools are bound to their minor (patch releases still upgrade); take it with
 `DOTUPGRADE_PYTHON_MINOR=1 dot upgrade`. And a desktop app (Claude Desktop, ChatGPT / Codex, Antigravity,
-OpenCode Desktop) is offered for closing only when winget lists an upgrade for it.
+OpenCode Desktop, Ollama) is offered for closing only when winget lists an upgrade for it.
 A Docker Desktop still installed by Chocolatey lands there: see
 [Docker Desktop through winget](#docker-desktop-through-winget) below.
 
@@ -251,14 +270,16 @@ These desktop apps are running - their updates wait until they are closed:
 Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer
 ```
 
-The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE
-and OpenCode Desktop, recognised by their install folder: every process running from it belongs
-to the app, its background helpers included (Antigravity's language servers, the Store app's
-command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
+The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE,
+OpenCode Desktop and Ollama, recognised by their install folder: every process running from it
+belongs to the app, its background helpers included (Antigravity's language servers, the Store
+app's command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
 Several share a process name with a CLI (claude, codex, opencode), so the name alone never
 decides. Their installers cannot replace a running app, and Claude Desktop's closes every
 `claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a session: it
-never defers a CLI upgrade, and closing it loses nothing.
+never defers a CLI upgrade, and closing it loses nothing. Ollama is closed the same way rather
+than left to its systray's own "restart to update" offer, so it upgrades consistently with every
+other desktop app in the sweep.
 
 Background work is covered too:
 
