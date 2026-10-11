@@ -35,6 +35,17 @@ $script:wingetLines = @(
 Write-Output ('probe-pending=' + (Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'))
 $script:wingetLines = @('No installed package found matching input criteria.')
 Write-Output ('probe-none=[' + (Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode') + ']')
+# 2026-10-10: the by-id listing showed nothing while the full listing had the row; the full one counts
+function winget { if ($args -contains '--id') { 'No installed package found matching input criteria.' } else { $script:fullLines | ForEach-Object { $_ } }; $global:LASTEXITCODE = 0 }
+$script:fullLines = @(
+    'Name                         Id                         Version Available Source',
+    '--------------------------------------------------------------------------------',
+    'Microsoft Visual Studio Code Microsoft.VisualStudioCode 1.140.0 1.141.0   winget',
+    '1 upgrades available.'
+)
+Write-Output ('probe-fallback=' + (Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'))
+$script:fullLines = @('No installed package found matching input criteria.')
+Write-Output ('probe-fallback-none=[' + (Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode') + ']')
 
 # ---- the offer ----------------------------------------------------------------------------------
 $script:vsProcs = @()
@@ -124,6 +135,8 @@ expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(
 
 expect 'probe-pending=1.141.0'
 expect 'probe-none=[]'
+expect 'probe-fallback=1.141.0'
+expect 'probe-fallback-none=[]'
 expect 'not-running=True|prompts=0'
 expect 'no-prompt=False|prompts=0|events=|says=True'
 expect 'non-interactive=False|prompts=0|events='
@@ -143,6 +156,11 @@ sweep_line="$(grep -n 'Invoke-WingetUpgradeAll -RunningNote' "$du" | head -1 | c
 if [ -z "$offer_line" ] || [ -z "$sweep_line" ] || [ "$offer_line" -ge "$sweep_line" ]; then
     fail "dotupgrade.ps1 must offer to close VS Code BEFORE the winget sweep"
 fi
+choco_line="$(grep -n 'Invoke-ChocoUpgradeAll -Arguments' "$du" | head -1 | cut -d: -f1)"
+if [ -z "$choco_line" ] || [ "$offer_line" -le "$choco_line" ]; then
+    fail "dotupgrade.ps1 must check VS Code AFTER the choco sweep (it takes minutes; VS Code may be opened meanwhile)"
+fi
+grep -Fq 'else { $vsCodeKept = $true }' "$du" || fail "dotupgrade.ps1 must hold VS Code out when it runs and the probe finds nothing"
 grep -Fq "wingetHold += 'Microsoft.VisualStudioCode'" "$du" || fail "dotupgrade.ps1 must hold VS Code out of the sweep when it stays running"
 grep -Fq 'close it and re-run, or run: winget upgrade Microsoft.VisualStudioCode' "$du" || fail "dotupgrade.ps1 must say why a held VS Code is still pending"
 pass

@@ -292,7 +292,8 @@ catalog:
       group: modern_cli
       brew: gum
       winget: charmbracelet.gum
-      note: "apt: Charm's repo by procedure"
+      winget_args: "--scope machine"
+      note: "apt: Charm's repo by procedure; winget: machine-wide, because dot upgrade runs elevated and winget cannot upgrade a user-scope package from an elevated shell"
     - id: tealdeer
       group: modern_cli
       brew: tealdeer

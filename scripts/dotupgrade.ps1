@@ -98,17 +98,6 @@ if (@(Get-DockerDesktopProcess).Count -gt 0) {
     if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
 }
 
-Add-DotTimingMark -Name 'VS Code'
-# --- VS Code: same story - its installer refuses to run while Code.exe is up (exit code 1, and a
-# bare "Still pending" afterwards). Probed only when VS Code is running; the offer closes it, or
-# the sweep holds VS Code out and says why.
-$vsCodeKept = $false
-$vsCodePendingVersion = ''
-if (@(Get-Process -Name 'Code' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Command winget -ErrorAction SilentlyContinue)) {
-    $vsCodePendingVersion = Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'
-    if ($vsCodePendingVersion) { $vsCodeKept = -not (Invoke-VsCodeUpgradeOffer -Version $vsCodePendingVersion -ExcludeId @(Get-AncestorProcessId)) }
-}
-
 Add-DotTimingMark -Name 'choco'
 # --- 1. System packages: the choco upgrade all this command replaces. ---
 if (Get-Command choco -ErrorAction SilentlyContinue) {
@@ -120,6 +109,22 @@ if (Get-Command choco -ErrorAction SilentlyContinue) {
     $null = Invoke-ChocoUpgradeAll -Arguments $chocoArguments   # it prints its own warning on a non-zero exit
 } else {
     Write-Host "  choco not found - skipping system packages." -ForegroundColor Yellow
+}
+
+Add-DotTimingMark -Name 'VS Code'
+# --- VS Code: same story as Docker Desktop - its installer refuses to run while Code.exe is up
+# (exit code 1, and a bare "Still pending" afterwards). Checked HERE, right before the winget sweep
+# and not at the start: the choco sweep above takes minutes, and VS Code can be opened meanwhile
+# (2026-10-10: the early check saw nothing and the installer then ran into a running VS Code).
+# Probed only when VS Code is running; the offer closes it (--yes answers it), or the sweep holds
+# VS Code out and says why. A probe that finds nothing while VS Code runs also holds it out:
+# a held package with no upgrade pending costs nothing, a failed installer costs a re-run.
+$vsCodeKept = $false
+$vsCodePendingVersion = ''
+if (@(Get-Process -Name 'Code' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    $vsCodePendingVersion = Get-WingetPackageUpgrade -Id 'Microsoft.VisualStudioCode'
+    if ($vsCodePendingVersion) { $vsCodeKept = -not (Invoke-VsCodeUpgradeOffer -Version $vsCodePendingVersion -ExcludeId @(Get-AncestorProcessId)) }
+    else { $vsCodeKept = $true }
 }
 
 Add-DotTimingMark -Name 'winget'
@@ -138,7 +143,7 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     }
     $wingetRunningNotes = @()
     if ($dockerKept) { $wingetRunningNotes += "Docker Desktop $dockerPendingVersion waits because Docker Desktop is running: close it and re-run, or run: winget upgrade Docker.DockerDesktop" }
-    if ($vsCodeKept) { $wingetRunningNotes += "VS Code $vsCodePendingVersion waits because VS Code is running: close it and re-run, or run: winget upgrade Microsoft.VisualStudioCode" }
+    if ($vsCodeKept) { $wingetRunningNotes += "VS Code$(if ($vsCodePendingVersion) { " $vsCodePendingVersion" }) waits because VS Code is running: close it and re-run, or run: winget upgrade Microsoft.VisualStudioCode" }
     $wingetRunningNote = $wingetRunningNotes -join ' '
     $wingetHold = @()
     if ($dockerKept) { $wingetHold += 'Docker.DockerDesktop' }   # running: its installer would fail mid-sweep
