@@ -146,6 +146,54 @@ $env:DOT_WINGET_HEARTBEAT_SECONDS = '1'
 $script:wingetSleep = 3
 $null = Invoke-WingetUpgradeAll -LogPath $log
 Write-Output 'heartbeat-done'
+
+# ---- the choco sweep: the same two things, from choco's own lines ----------------------------------------
+# (a dot upgrade spent 1m39s on one 15 MB chezmoi upgrade and nothing said where, 2026-10-11)
+$script:chocoSleep = 0
+function choco {
+    'Upgrading the following packages:'
+    'chezmoi v2.73.1 [Approved]'
+    'Downloading chezmoi 64 bit'
+    Tick 80
+    'Download of chezmoi_2.73.1_windows_amd64.zip (15.59 MB) completed.'
+    Tick 19
+    'The upgrade of chezmoi was successful.'
+    'quickpkg v1.0 [Approved]'
+    Tick 4
+    'The upgrade of quickpkg was successful.'
+    'chezmoi|2.73.0|2.73.1|false'
+    if ($script:chocoSleep -gt 0) { Start-Sleep -Seconds $script:chocoSleep }
+    $global:LASTEXITCODE = 0
+}
+$env:DOT_HEARTBEAT_SECONDS = '0'
+$text = Capture { $null = Invoke-ChocoUpgradeAll -Arguments @('upgrade', 'all', '-y') -LogPath $log }
+Write-Output ('choco-line=' + ($text -match 'choco packages: chezmoi 1m39s \(download 1m20s, install 19s\)'))
+Write-Output ('choco-quick-hidden=' + (-not ($text -match 'quickpkg \d')))
+Write-Output ('choco-log=' + ((Get-Content -Raw -LiteralPath $log) -match '(?m)^=== \S+ choco packages: chezmoi 1m39s'))
+$env:DOT_HEARTBEAT_SECONDS = '1'
+$script:chocoSleep = 3
+$null = Invoke-ChocoUpgradeAll -Arguments @('upgrade', 'all', '-y') -LogPath $log
+Write-Output 'choco-heartbeat-done'
+Remove-Item Env:DOT_HEARTBEAT_SECONDS
+
+# ---- the session scan names the winget listing when it is slow --------------------------------------------
+function Get-StoppableAgentProcess { return @() }
+function Get-AgentDesktopApp { return @([pscustomobject]@{ Label = 'Ollama'; Processes = @(); Service = ''; UpgradeId = 'Ollama.Ollama' }) }
+function Get-WingetPendingId { Start-Sleep -Milliseconds 3300; return , @() }
+function Get-OrphanAgentHelper { return @() }
+function Test-InteractiveConsole { return $false }
+$text = Capture { $null = Invoke-LiveSessionStop -Name @('claude') }
+Write-Output ('scan-names-listing=' + ($text -match 'desktop apps 3\.\ds \(winget listing 3\.\ds\)'))
+
+# ---- a session whose StartTime cannot be read still gets one, from the process table --------------------------
+function Get-ProcessTable { return @([pscustomobject]@{ Id = 4242; ParentId = 1; Name = 'agy.exe'; Path = ''; CommandLine = ''; Created = [datetime]'2026-10-11T13:09:00' }) }
+$noStart = New-Object psobject -Property @{ ProcessName = 'agy'; Id = 4242 }
+$noStart | Add-Member -MemberType ScriptProperty -Name StartTime -Value { throw 'access denied' }
+Write-Output ('start-fallback=' + (Format-LiveProcess $noStart))
+$unknown = New-Object psobject -Property @{ ProcessName = 'agy'; Id = 9999 }
+$unknown | Add-Member -MemberType ScriptProperty -Name StartTime -Value { throw 'access denied' }
+Write-Output ('start-unknown=' + (Format-LiveProcess $unknown))
+Write-Output 'scan-done'
 PSEOF
     out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" -LogDir "$(winpath "$tmp")" 2>&1 | tr -d '\r')"
     expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-600))"; }
@@ -164,6 +212,15 @@ PSEOF
     expect 'log-stamped=True'
     printf '%s\n' "$out" | grep -Eq '^  winget is working on Ollama \([0-9]+m[0-9]{2}s so far\)\.\.\.$' || fail "PowerShell: the heartbeat must name the package while winget is quiet (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-600))"
     expect 'heartbeat-done'
+    expect 'choco-line=True'
+    expect 'choco-quick-hidden=True'
+    expect 'choco-log=True'
+    printf '%s\n' "$out" | grep -Eq '^  choco is working on [a-z]+ \([0-9]+m[0-9]{2}s so far\)\.\.\.$' || fail "PowerShell: the choco heartbeat must name the package while choco is quiet (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700))"
+    expect 'choco-heartbeat-done'
+    expect 'scan-names-listing=True'
+    expect 'start-fallback=agy (pid 4242, started 13:09)'
+    expect 'start-unknown=agy (pid 9999)'
+    expect 'scan-done'
     pass
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'

@@ -97,12 +97,22 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   (`DOTUPGRADE_PROMPT_TIMEOUT`) and a run with no terminal all continue, so a bad link never stops an
   unattended upgrade. A link that cannot be measured is reported and never blocks.
   `DOT_SPEED_CHECK=0` turns the check off; `DOT_SPEED_TEST_URL` points it at another file.
-- **Heartbeat.** While `winget upgrade --all` prints nothing for 30 seconds
-  (`DOT_WINGET_HEARTBEAT_SECONDS`, `0` = off) it prints `winget is working on <package> (4m10s so far)...`.
+- **Heartbeat.** While the choco or winget sweep prints nothing for 30 seconds
+  (`DOT_HEARTBEAT_SECONDS`, `0` = off; `DOT_WINGET_HEARTBEAT_SECONDS` is the older name, still read) it
+  prints `winget is working on <package> (4m10s so far)...` (or `choco is ...`).
 - **Per-package time.** Packages that took 30 seconds or more are listed after the sweep with their
   download and install halves, for example `winget packages: Ollama 21m01s (download 19m50s, install
-  1m11s)`, and the same line goes to `upgrade.log`, where the download, hash and install lines are also
+  1m11s)` (`choco packages: ...` the same way, from chocos own lines: one 15 MB chezmoi upgrade took
+  1m39s of a run and nothing said where), and the same line goes to `upgrade.log`, where the download, hash and install lines are also
   stamped with the time.
+
+- **Where the session scan goes.** When the scan before the sweeps takes over 3 seconds its line names the
+  part: `desktop apps 14.9s (winget listing 14.2s)`. That part is one `winget upgrade` listing, which
+  refreshes wingets source over the network, so it moves with the link (4.7 s one run, 14.9 s the next).
+  A session whose start time Windows will not give is listed with the creation time from the process table.
+
+The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
+speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
 
 Shell twin: `scripts/lib/netspeed.sh`; PowerShell: `Invoke-DotNetworkCheck` and `Invoke-WingetUpgradeAll`
 in `scripts/lib/ps-common.ps1`; `tests/network_speed_contract.sh` runs both against a fake `curl`/`winget`.

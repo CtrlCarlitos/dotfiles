@@ -507,10 +507,22 @@ function Stop-AgentProcess {
     return $true
 }
 
+$script:ProcessCreated = $null
+
 function Format-LiveProcess {
     param($Process)
     $started = ''
     try { $started = ", started $($Process.StartTime.ToString('HH:mm'))" } catch { $started = '' }
+    if (-not $started) {
+        # StartTime is unreadable for some processes (two agy sessions listed without one,
+        # 2026-10-11): the process table's creation date, read once and only when needed.
+        if ($null -eq $script:ProcessCreated) {
+            $script:ProcessCreated = @{}
+            foreach ($row in @(Get-ProcessTable)) { if ($row.Created) { $script:ProcessCreated[[int]$row.Id] = $row.Created } }
+        }
+        $created = $script:ProcessCreated[[int]$Process.Id]
+        if ($created) { try { $started = ", started $(([datetime]$created).ToString('HH:mm'))" } catch { $started = '' } }
+    }
     return "$($Process.ProcessName) (pid $($Process.Id)$started)"
 }
 
@@ -526,8 +538,13 @@ function Invoke-LiveSessionStop {
     $sessionSeconds = $scanWatch.Elapsed.TotalSeconds
     $apps = @(Get-AgentDesktopApp -ExcludeId $ExcludeId)
     # Offer only the apps whose upgrade is waiting (unknown ids and an unreadable listing offer all).
+    # The listing is a winget call (it refreshes its source over the network): 4.7 s in one run and
+    # 14.9 s in the next (2026-10-11), almost all of the "desktop apps" part of the scan.
+    $listingSeconds = 0
     if (@($apps | Where-Object { $_.UpgradeId }).Count -gt 0) {
+        $listingWatch = [System.Diagnostics.Stopwatch]::StartNew()
         $pendingIds = Get-WingetPendingId
+        $listingSeconds = $listingWatch.Elapsed.TotalSeconds
         if ($null -ne $pendingIds) {
             $apps = @($apps | Where-Object { -not $_.UpgradeId -or @($pendingIds) -contains $_.UpgradeId })
         }
@@ -536,7 +553,8 @@ function Invoke-LiveSessionStop {
     $orphans = @(Get-OrphanAgentHelper -ExcludeId $ExcludeId)
     $helperSeconds = $scanWatch.Elapsed.TotalSeconds - $sessionSeconds - $appSeconds
     if ($scanWatch.Elapsed.TotalSeconds -gt 3) {
-        Write-Host ("    session scan took {0:N1}s: sessions {1:N1}s, desktop apps {2:N1}s, helpers {3:N1}s" -f $scanWatch.Elapsed.TotalSeconds, $sessionSeconds, $appSeconds, $helperSeconds) -ForegroundColor DarkGray
+        $listingNote = if ($listingSeconds -gt 1) { (' (winget listing {0:N1}s)' -f $listingSeconds) } else { '' }
+        Write-Host ("    session scan took {0:N1}s: sessions {1:N1}s, desktop apps {2:N1}s{4}, helpers {3:N1}s" -f $scanWatch.Elapsed.TotalSeconds, $sessionSeconds, $appSeconds, $helperSeconds, $listingNote) -ForegroundColor DarkGray
     }
     if ($procs.Count -eq 0 -and $apps.Count -eq 0 -and $orphans.Count -eq 0) { return @() }
     if (-not (Test-InteractiveConsole)) { return @() }
@@ -823,6 +841,78 @@ function Get-ChocoUpgradeArgument {
 # instead of echoed, everything a package's own installer says still streams live (a hung
 # or prompting installer stays visible), the FULL output goes to the log, and the sweep
 # ends with a summary. A non-zero exit prints the tail so the failing package is on screen.
+# --- Progress for a long package sweep (choco, winget) ------------------------------------------------
+# A sweep prints nothing while an installer downloads: a 21-minute Ollama upgrade (2026-10-11, slow
+# ISP) looked like a hang. Start-DotHeartbeat starts a second runspace that writes
+# "  <tool> is working on <package> (4m10s so far)..." straight to the console whenever the sweep has
+# printed nothing for DOT_HEARTBEAT_SECONDS (default 30; 0 = off; DOT_WINGET_HEARTBEAT_SECONDS is the
+# older name, still read). The sweep sets $beat.State.Package and calls $beat.State.Quiet.Restart()
+# after every line it shows; Stop-DotHeartbeat ends it.
+function Get-DotHeartbeatSeconds {
+    foreach ($value in @($env:DOT_HEARTBEAT_SECONDS, $env:DOT_WINGET_HEARTBEAT_SECONDS)) {
+        if ("$value" -match '^\d+$') { return [int]$value }
+    }
+    return 30
+}
+
+function Start-DotHeartbeat {
+    param([Parameter(Mandatory)][string]$Tool)
+    $state = [hashtable]::Synchronized(@{ Stop = $false; Quiet = [System.Diagnostics.Stopwatch]::StartNew(); Total = [System.Diagnostics.Stopwatch]::StartNew(); Package = '' })
+    $runspace = $null
+    $handle = $null
+    $every = Get-DotHeartbeatSeconds
+    if ($every -gt 0) {
+        try {
+            $runspace = [powershell]::Create()
+            $null = $runspace.AddScript({
+                param($State, $Every, $Tool)
+                while (-not $State.Stop) {
+                    Start-Sleep -Milliseconds 250
+                    if ($State.Stop) { break }
+                    if ($State.Quiet.Elapsed.TotalSeconds -ge $Every) {
+                        $total = [int]$State.Total.Elapsed.TotalSeconds
+                        $what = if ($State.Package) { "working on $($State.Package)" } else { 'still running' }
+                        [Console]::WriteLine(('  {0} is {1} ({2}m{3:00}s so far)...' -f $Tool, $what, [math]::Floor($total / 60), ($total % 60)))
+                        $State.Quiet.Restart()
+                    }
+                }
+            }).AddArgument($state).AddArgument($every).AddArgument($Tool)
+            $handle = $runspace.BeginInvoke()
+        }
+        catch { Write-Verbose "$Tool heartbeat unavailable: $($_.Exception.Message)"; $runspace = $null }
+    }
+    return [pscustomobject]@{ State = $state; Runspace = $runspace; Handle = $handle }
+}
+
+function Stop-DotHeartbeat {
+    param($Beat)
+    if ($null -eq $Beat) { return }
+    $Beat.State.Stop = $true
+    if ($Beat.Runspace) {
+        try { $null = $Beat.Runspace.EndInvoke($Beat.Handle) } catch { Write-Verbose "heartbeat ended badly: $($_.Exception.Message)" }
+        $Beat.Runspace.Dispose()
+    }
+}
+
+# Which package took the time, and whether it was the network (download) or the installer. Only the
+# packages of 30 s or more are listed, on one line, also appended to upgrade.log.
+# Package: objects with Name, Start, DownloadEnd, End (UTC DateTime or $null).
+function Write-DotPackageTimes {
+    param([Parameter(Mandatory)][string]$Tool, $Package, [string]$LogPath)
+    # a foreach, not @($Package | ...): PowerShell 7 fails to bind @() over a List of custom objects
+    $slow = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $Package) {
+        if (-not $entry -or -not $entry.End -or ($entry.End - $entry.Start).TotalSeconds -lt 30) { continue }
+        $text = '{0} {1}' -f $entry.Name, (Format-DotDuration -Seconds ($entry.End - $entry.Start).TotalSeconds)
+        if ($entry.DownloadEnd) { $text += ' (download {0}, install {1})' -f (Format-DotDuration -Seconds ($entry.DownloadEnd - $entry.Start).TotalSeconds), (Format-DotDuration -Seconds ($entry.End - $entry.DownloadEnd).TotalSeconds) }
+        $slow.Add($text)
+    }
+    if ($slow.Count -eq 0) { return }
+    $line = "$Tool packages: " + ($slow -join ', ')
+    Write-Host "  $line"
+    if ($LogPath) { Add-Content -LiteralPath $LogPath -Value ("=== {0} {1}" -f (Get-Date -Format s), $line) }
+}
+
 function Invoke-ChocoUpgradeAll {
     param([Parameter(Mandatory)][string[]]$Arguments, [string]$LogPath)
 
@@ -840,14 +930,44 @@ function Invoke-ChocoUpgradeAll {
     $packageLines = New-Object System.Collections.Generic.List[string]
     $footerLines = New-Object System.Collections.Generic.List[string]
     $allLines = New-Object System.Collections.Generic.List[string]
-    & choco @Arguments --limit-output 2>&1 | ForEach-Object {
-        $line = "$_"
-        $allLines.Add($line)
-        if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
-        if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) } else { Write-Host $line }
-        if ($line -match '^\s+-\s+\S+\s+v\S+\s*$') { $footerLines.Add($line) }
+    # Per-package time and a heartbeat, like the winget sweep: one chezmoi upgrade (a 15 MB zip) took
+    # 1m39s of a dot upgrade (2026-10-11) and nothing said where. choco's own lines mark the phases:
+    # "<name> v<ver> [Approved]" starts a package, "Download of ... completed." ends the download,
+    # "The upgrade of <name> was successful." ends it.
+    $packageTimes = New-Object System.Collections.Generic.List[object]
+    $currentPackage = $null
+    $beat = Start-DotHeartbeat -Tool choco
+    try {
+        & choco @Arguments --limit-output 2>&1 | ForEach-Object {
+            $line = "$_"
+            $allLines.Add($line)
+            $now = Get-DotTimingNow
+            $stamped = $false
+            if ($line -match '^(\S+) v\S+ \[(Approved|Not Approved)\]') {
+                if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = $now }
+                $currentPackage = [pscustomobject]@{ Name = $Matches[1]; Start = $now; DownloadEnd = $null; End = $null }
+                $packageTimes.Add($currentPackage)
+                $beat.State.Package = $Matches[1]
+                $stamped = $true
+            }
+            elseif ($line -match '^Download of .+ completed') {
+                if ($currentPackage -and -not $currentPackage.DownloadEnd) { $currentPackage.DownloadEnd = $now }
+                $stamped = $true
+            }
+            elseif ($line -match '^Downloading ') { $stamped = $true }
+            elseif ($line -match '^The (upgrade|install) of \S+ (was successful|failed)') {
+                if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = $now }
+                $stamped = $true
+            }
+            if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $(if ($stamped) { '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $line } else { $line }) }
+            if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) } else { Write-Host $line; $beat.State.Quiet.Restart() }
+            if ($line -match '^\s+-\s+\S+\s+v\S+\s*$') { $footerLines.Add($line) }
+        }
+        $code = [int]$LASTEXITCODE
     }
-    $code = [int]$LASTEXITCODE
+    finally { Stop-DotHeartbeat -Beat $beat }
+    if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
+    Write-DotPackageTimes -Tool choco -Package $packageTimes -LogPath $LogPath
 
     $summary = Get-ChocoUpgradeSummary -Lines $packageLines -FooterLines $footerLines
     if ($summary.Upgraded.Count -gt 0) {
@@ -999,31 +1119,8 @@ function Invoke-WingetUpgradeAll {
     # and a 21-minute Ollama upgrade (2026-10-11, slow ISP) looked like a hang with no way to tell.
     $packageTimes = New-Object System.Collections.Generic.List[object]
     $currentPackage = $null
-    $beat = $null
-    $beatHandle = $null
-    $beatState = [hashtable]::Synchronized(@{ Stop = $false; Quiet = [System.Diagnostics.Stopwatch]::StartNew(); Total = [System.Diagnostics.Stopwatch]::StartNew(); Package = '' })
-    $beatEvery = 30
-    if ("$env:DOT_WINGET_HEARTBEAT_SECONDS" -match '^\d+$') { $beatEvery = [int]$env:DOT_WINGET_HEARTBEAT_SECONDS }
-    if ($beatEvery -gt 0) {
-        try {
-            $beat = [powershell]::Create()
-            $null = $beat.AddScript({
-                param($State, $Every)
-                while (-not $State.Stop) {
-                    Start-Sleep -Milliseconds 250
-                    if ($State.Stop) { break }
-                    if ($State.Quiet.Elapsed.TotalSeconds -ge $Every) {
-                        $total = [int]$State.Total.Elapsed.TotalSeconds
-                        $what = if ($State.Package) { "working on $($State.Package)" } else { 'still running' }
-                        [Console]::WriteLine(('  winget is {0} ({1}m{2:00}s so far)...' -f $what, [math]::Floor($total / 60), ($total % 60)))
-                        $State.Quiet.Restart()
-                    }
-                }
-            }).AddArgument($beatState).AddArgument($beatEvery)
-            $beatHandle = $beat.BeginInvoke()
-        }
-        catch { Write-Verbose "winget heartbeat unavailable: $($_.Exception.Message)"; $beat = $null }
-    }
+    $beat = Start-DotHeartbeat -Tool winget
+    $beatState = $beat.State
     try {
         $ErrorActionPreference = 'Continue'
         & winget upgrade --all --include-unknown --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object {
@@ -1062,27 +1159,12 @@ function Invoke-WingetUpgradeAll {
     }
     catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
     finally {
-        $beatState.Stop = $true
-        if ($beat) {
-            try { $null = $beat.EndInvoke($beatHandle) } catch { Write-Verbose "winget heartbeat ended badly: $($_.Exception.Message)" }
-            $beat.Dispose()
-        }
+        Stop-DotHeartbeat -Beat $beat
         foreach ($id in $pinned) { & winget pin remove --id $id --exact *> $null }
         $ErrorActionPreference = $previous
     }
     if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
-    # Which package took the time, and whether it was the network (download) or the installer.
-    # Only the slow ones (30 s or more) are listed; also appended to upgrade.log.
-    $slowPackages = @($packageTimes | Where-Object { $_.End -and ($_.End - $_.Start).TotalSeconds -ge 30 } | ForEach-Object {
-            $text = '{0} {1}' -f $_.Name, (Format-DotDuration -Seconds ($_.End - $_.Start).TotalSeconds)
-            if ($_.DownloadEnd) { $text += ' (download {0}, install {1})' -f (Format-DotDuration -Seconds ($_.DownloadEnd - $_.Start).TotalSeconds), (Format-DotDuration -Seconds ($_.End - $_.DownloadEnd).TotalSeconds) }
-            $text
-        })
-    if ($slowPackages.Count -gt 0) {
-        $slowLine = 'winget packages: ' + ($slowPackages -join ', ')
-        Write-Host "  $slowLine"
-        if ($LogPath) { Add-Content -LiteralPath $LogPath -Value ("=== {0} {1}" -f (Get-Date -Format s), $slowLine) }
-    }
+    Write-DotPackageTimes -Tool winget -Package $packageTimes -LogPath $LogPath
     $sweepBlocked = ''
     foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
 
