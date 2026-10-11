@@ -2326,13 +2326,18 @@ PYEOF
     if command -v opencode &>/dev/null; then
         OC_GLOBAL="$HOME/.config/opencode/opencode.json"
         OC_PRESENT=()
+        # Catalog walk (.chezmoidata/agents.yaml's agents.mcp): an entry with
+        # a `group` is skipped outright when that package group is off; then
+        # a LOCAL entry needs its binary present, a REMOTE one is included.
 {{- range $name, $srv := .agents.mcp }}
+{{- $groupOn := true }}
+{{- if hasKey $srv "group" }}{{ $groupOn = false }}{{ if hasKey $ "packages" }}{{ if hasKey $.packages $srv.group }}{{ $groupOn = index $.packages $srv.group }}{{ end }}{{ end }}{{ end }}
+{{- if $groupOn }}
 {{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
-{{- if $mobile_dev }}
         OC_PRESENT+=({{ $name | quote }})
-{{- end }}
 {{- else }}
         command -v {{ $srv.command | quote }} &>/dev/null && OC_PRESENT+=({{ $name | quote }})
+{{- end }}
 {{- end }}
 {{- end }}
         if [ "${#OC_PRESENT[@]}" -gt 0 ]; then
@@ -2355,17 +2360,19 @@ PYEOF
     # and other keys survive. Idempotent: rewriting our keys is a refresh.
     AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
     AGY_WANT=""
-    # Same generic catalog walk as OC_PRESENT above: a LOCAL entry (serena,
-    # maestro) is wanted when its binary is present; a REMOTE entry (Expo) has
-    # no binary to probe, so it is gated on the owning package's install-time
-    # flag instead (mobile_dev).
+    # Same generic catalog walk as OC_PRESENT above: an entry whose `group`
+    # (maestro, agent-device, Expo: mobile_dev) is off is never wanted; an
+    # ungrouped one (serena) is never skipped on a flag. Then a LOCAL entry is
+    # wanted when its binary is present; a REMOTE entry has no binary to probe.
 {{- range $name, $srv := .agents.mcp }}
+{{- $groupOn := true }}
+{{- if hasKey $srv "group" }}{{ $groupOn = false }}{{ if hasKey $ "packages" }}{{ if hasKey $.packages $srv.group }}{{ $groupOn = index $.packages $srv.group }}{{ end }}{{ end }}{{ end }}
+{{- if $groupOn }}
 {{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
-{{- if $mobile_dev }}
     AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
-{{- end }}
 {{- else }}
     command -v {{ $srv.command | quote }} &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
+{{- end }}
 {{- end }}
 {{- end }}
     if [ -n "$AGY_WANT" ]; then

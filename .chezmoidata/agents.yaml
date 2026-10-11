@@ -34,11 +34,18 @@ agents:
   #   OpenCode remote  {type: remote, url: <url>, enabled: true}
   #   agy local        {command, args, forceAllToolsEager: true}
   #   agy remote       {httpUrl: <url>, oauth: {}, forceAllToolsEager: true}
-  # Registration is gated on the binary being present on the machine
-  # (`command -v <command>`) for a LOCAL entry. A REMOTE entry has no binary
-  # to probe, so it is instead gated on the owning package's install-time
-  # flag - Expo's is `mobile_dev` - see opencode_mcp_sync() and the agy merge
-  # block in sync_agent_mcp_catalog() (run_onchange_install_packages.sh.tmpl).
+  # `group: <packages key>` (optional) names the package group that owns the
+  # entry: when that group's install-time flag (.packages.<group>) is off,
+  # the entry is never registered, local or remote, even if a same-named
+  # binary happens to be on PATH from an unrelated install (a disabled group
+  # has no side effects). Absent `group` (serena's case) means the entry
+  # belongs to no optional group and is registered whenever it otherwise
+  # qualifies. Then, per kind: a LOCAL entry is registered only when its
+  # binary is present (`command -v <command>`); a REMOTE entry has no binary
+  # to probe, so its `group` flag is its whole gate. See
+  # sync_agent_mcp_catalog() (run_onchange_install_packages.sh.tmpl). The
+  # Windows twin's $mcpCatalog (.chezmoitemplates/mcp-servers-ps1) reads only
+  # command/args and ignores `group`.
   mcp:
     serena:
       command: serena
@@ -46,12 +53,15 @@ agents:
     maestro:
       command: maestro
       args: [mcp]
+      group: mobile_dev
     agent-device:
       command: agent-device
       args: [mcp]
+      group: mobile_dev
     expo:
       type: remote
       url: https://mcp.expo.dev/mcp
+      group: mobile_dev
 
   # Serena's web dashboard opens a browser tab every time a client starts the
   # MCP server (one per agent per session). false keeps the dashboard running

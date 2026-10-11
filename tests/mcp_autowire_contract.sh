@@ -87,10 +87,12 @@ require "$repo_root/.chezmoidata/agents.yaml" '      type: remote'
 require "$repo_root/.chezmoidata/agents.yaml" 'url: https://mcp.expo.dev/mcp'
 ! grep -Fq 'command: graft' "$repo_root/.chezmoidata/agents.yaml" ||
     fail ".chezmoidata/agents.yaml: graft must still not be registered as an MCP server"
-# The catalog comment documents the gating exception for remote entries,
-# naming the flag that substitutes for the absent binary.
-require "$repo_root/.chezmoidata/agents.yaml" 'A REMOTE entry has no binary'
-require "$repo_root/.chezmoidata/agents.yaml" 'mobile_dev'
+# The catalog comment documents the per-entry `group` gate (which is a
+# remote entry's whole gate, having no binary to probe) and what an absent
+# group means.
+require "$repo_root/.chezmoidata/agents.yaml" '`group: <packages key>` (optional)'
+require "$repo_root/.chezmoidata/agents.yaml" 'a REMOTE entry has no binary'
+require "$repo_root/.chezmoidata/agents.yaml" "Absent \`group\` (serena's case)"
 
 # opencode_mcp_sync(): a remote entry is written/repaired by `url`, not
 # `command` - the local-entry code path (serena) is untouched, asserted by
@@ -104,11 +106,21 @@ require "$sh_installer" 'srv.get("type") == "remote"'
 require "$sh_installer" '"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True'
 
 # Gating: a remote entry cannot be probed with `command -v` (it has no
-# .command key); the OC_PRESENT loop must branch on the entry's shape and
-# gate a remote entry on mobile_dev instead - asserted structurally here and
-# behaviorally by the mobile_dev=true/false renders below.
+# .command key); the OC_PRESENT loop must branch on the entry's shape. Every
+# entry - local or remote - is first gated on its catalog `group` (Expo,
+# maestro, agent-device: mobile_dev), read generically from .packages, never
+# a hardcoded $mobile_dev check (second final fix round, I-B / M1) -
+# asserted structurally here and behaviorally by the mobile_dev=true/false
+# renders below and section 8's executed mobile_dev=false sync.
 require "$sh_installer" 'hasKey $srv "type"'
 require "$sh_installer" 'eq $srv.type "remote"'
+require "$sh_installer" 'index $.packages $srv.group'
+for entry in maestro agent-device expo; do
+    sed -n "/^    $entry:\$/,/^    [a-z]/p" "$repo_root/.chezmoidata/agents.yaml" | grep -Fxq '      group: mobile_dev' ||
+        fail ".chezmoidata/agents.yaml: the $entry MCP entry must carry group: mobile_dev"
+done
+sed -n '/^    serena:$/,/^    [a-z]/p' "$repo_root/.chezmoidata/agents.yaml" | grep -Fq 'group:' &&
+    fail ".chezmoidata/agents.yaml: serena's MCP entry must stay ungrouped (registered whenever its binary is present)"
 
 groups() { # $1 = mobile_dev bool
     printf '{"core":true,"modern_cli":true,"fonts":true,"agent_toolkit":true,"opencode_cli":true,"opencode_desktop":false,"claude_cli":true,"claude_desktop":false,"chatgpt_cli":true,"chatgpt_desktop":false,"antigravity_cli":true,"antigravity_desktop":false,"remote_access":true,"remote_access_server":true,"guardrail":false,"dev_desktop":true,"vscode_settings":false,"mobile_dev":%s}' "$1"
@@ -257,6 +269,42 @@ run_sync || fail "sync_agent_mcp_catalog() failed without agent-device"
 sync_check 'OpenCode must not get agent-device without its binary' "$oc_json" '"agent-device" not in d["mcp"]'
 sync_check 'agy must not get agent-device without its binary' "$agy_json" '"agent-device" not in d["mcpServers"]'
 rm -rf "$sync_tmp"
+
+# 8. Disabled = no side effects for OpenCode/agy (second final fix round,
+#    I-B): with mobile_dev=false, a maestro or agent-device binary that is on
+#    PATH for unrelated reasons must NOT be registered - the catalog entries'
+#    `group: mobile_dev` gates them - while ungrouped serena still is.
+#    Executes the real sync_agent_mcp_catalog() rendered with mobile_dev off.
+if command -v chezmoi >/dev/null 2>&1; then
+    off_tmp="$(mktemp -d)"
+    render_to "$off_tmp/rendered.sh" sh "$(groups false)"
+    sync_fn="$(sed -n '/^sync_agent_mcp_catalog() {$/,/^}$/p' "$off_tmp/rendered.sh")"
+    [ -n "$sync_fn" ] || fail "render (mobile_dev=false): no top-level sync_agent_mcp_catalog() function"
+    sync_tmp="$off_tmp/fx"
+    mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
+    for tool in python3 mkdir dirname tr rm; do
+        real="$(command -v "$tool")" || skip "$tool not installed"
+        ln -s "$real" "$sync_tmp/bin/$tool"
+    done
+    for stub in opencode maestro serena agent-device; do
+        printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"
+        chmod +x "$sync_tmp/bin/$stub"
+    done
+    run_sync || fail "sync_agent_mcp_catalog() failed with mobile_dev=false"
+    oc_json="$sync_tmp/home/.config/opencode/opencode.json"
+    agy_json="$sync_tmp/home/.gemini/config/mcp_config.json"
+    sync_check 'mobile_dev=false: OpenCode must not get maestro/agent-device/expo even with the binaries on PATH' "$oc_json" \
+        '"maestro" not in d["mcp"] and "agent-device" not in d["mcp"] and "expo" not in d["mcp"]'
+    sync_check 'mobile_dev=false: agy must not get maestro/agent-device/expo even with the binaries on PATH' "$agy_json" \
+        '"maestro" not in d["mcpServers"] and "agent-device" not in d["mcpServers"] and "expo" not in d["mcpServers"]'
+    sync_check 'mobile_dev=false: OpenCode must still get serena (ungrouped)' "$oc_json" \
+        'd["mcp"]["serena"]["type"] == "local"'
+    sync_check 'mobile_dev=false: agy must still get serena (ungrouped)' "$agy_json" \
+        'd["mcpServers"]["serena"]["command"] == "serena"'
+    rm -rf "$off_tmp"
+else
+    skip "chezmoi not installed"
+fi
 
 # Task 4 is OpenCode/agy only (Task 3 already handled Claude Code/Codex
 # Maestro registration directly) - Expo must not be wired into claude/codex
