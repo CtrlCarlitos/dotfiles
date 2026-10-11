@@ -139,6 +139,33 @@ net_timeout_tty() {
 }
 
 #-------------------------------------------------------------------------------
+# mcp_add_quiet <agent label> <server> <retry-hint> <cmd...> - an agent CLI's
+# `mcp add`, quiet on success. The CLIs' own lines reached the terminal raw on
+# the 2026-10-11 WSL `dot up` - "Added stdio MCP server maestro with command:
+# maestro mcp to user config" and "File modified: ~/.claude.json" (Claude
+# Code), "Added global MCP server 'maestro'." (Codex) - while OpenCode's
+# registration says "Registered/updated MCP in opencode (maestro)". Output is
+# captured and shown only on failure, before the warn that names the retry
+# hint (the run_onchange re-entry command: a failed registration is never
+# retried by the next `dot up`). Always returns 0 - never aborts a `set -e`
+# run. net_timeout_tty, not net_timeout: `claude mcp add` touches the
+# controlling terminal while probing the server, and plain `timeout` stops it
+# dead on WSL (#355). tests/mcp_add_quiet_contract.sh executes this.
+#-------------------------------------------------------------------------------
+mcp_add_quiet() {
+    local label="$1" server="$2" hint="$3" out rc=0
+    shift 3
+    out="$(net_timeout_tty 60 "$@" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        [ -z "$out" ] || printf '%s\n' "$out" >&2
+        warn "$server MCP registration for $label failed - re-run: $hint"
+        return 0
+    fi
+    info "Registered MCP in $label ($server)"
+    return 0
+}
+
+#-------------------------------------------------------------------------------
 # sha256_cmd - print the available SHA-256 tool ("shasum -a 256" included
 # verbatim: stock macOS ships shasum, not sha256sum), empty when none.
 #-------------------------------------------------------------------------------
