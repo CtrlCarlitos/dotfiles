@@ -2154,9 +2154,12 @@ install_opencode_cli() {
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
     # installer + superpowers-for-OpenCode wiring; guardrail's opencode plane
-    # wiring is done by the agent-guardrails installer, and the Serena MCP
-    # registration into opencode.json stays with Serena in agent_toolkit
-    # (same precedent as `serena setup claude-code`).
+    # wiring is done by the agent-guardrails installer, and MCP registration
+    # into opencode.json (serena, maestro, expo) lives in the standalone
+    # sync_agent_mcp_catalog(), called from main() after every agent install
+    # - not here, and not inside install_agent_toolkit either (moved out
+    # during the mobile_dev final review, 2026-10-10: it used to run before
+    # any of Maestro/OpenCode/agy existed on a fresh machine).
     # The --version re-check matters: a legacy npm-global opencode-ai shim can
     # sit on PATH with a dead binary inside (its postinstall never fetched the
     # platform binary - confirmed live 2026-08-31: "opencode-ai's postinstall
