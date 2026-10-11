@@ -30,6 +30,7 @@ DOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # net_timeout and github_latest_tag, for the outside-package-managers lag check at the end.
 . "$DOT_SCRIPT_DIR/lib/agent-skills.sh"
 . "$DOT_SCRIPT_DIR/lib/docker-vscode.sh"
+. "$DOT_SCRIPT_DIR/lib/netspeed.sh"
 
 echo "dot upgrade - sweeping all tooling..."
 # Two marks, so the Timings line says which half is slow: the scan and the stop, then the
@@ -183,14 +184,26 @@ else
     echo "  No live agent sessions - full sweep."
 fi
 
+dot_timing_mark 'network check'
+# A slow link (under DOT_SLOW_MBPS, default 50 Mbit/s) is said up front; at a terminal the operator
+# may leave the system package sweep out of this run or stop. --yes and no terminal continue.
+net_speed_check
+if [ "$NET_CHOICE" = stop ]; then
+    echo "  Stopped at your request - nothing was upgraded. Re-run when the connection is better."
+    exit 0
+fi
+
 dot_timing_mark 'system packages'
 # --- 1. System packages: apt on Linux/WSL, brew on macOS. ---
 # Docker (lib/docker-vscode.sh): an upgrade restarts Docker and stops every container, and a VS
 # Code window attached to a dev container loses it. When a Docker upgrade is pending AND Docker
 # is running, the operator is asked first; on yes VS Code is closed, then Docker stopped. Nothing
 # below costs anything when Docker is not running (WSL: Docker Desktop and VS Code are Windows').
-case "$(uname -s)" in
-    Linux)
+case "$NET_CHOICE:$(uname -s)" in
+    skip:*)
+        echo "  Skipping system packages (slow network, your choice)."
+        ;;
+    *:Linux)
         if command -v apt-get &>/dev/null; then
             echo "  Upgrading apt packages..."
             # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
@@ -222,7 +235,7 @@ case "$(uname -s)" in
             echo "  apt-get not found - skipping system packages."
         fi
         ;;
-    Darwin)
+    *:Darwin)
         if command -v brew &>/dev/null; then
             echo "  Upgrading brew packages..."
             if brew update; then
