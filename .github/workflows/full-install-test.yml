@@ -10,6 +10,13 @@ name: Full Install Test
 # Cron only supports weekly, not biweekly, directly - `check-schedule` below runs
 # every Sunday but only lets the platform jobs actually proceed on even ISO weeks,
 # approximating "every other Sunday". workflow_dispatch always runs regardless.
+#
+# mobile_dev is intentionally excluded from this real-install fixture (compose.sh
+# minimal on -> packages-on.toml, mobile_dev = false): its SDK/emulator provisioning
+# needs multi-GB downloads and GUI virtualization that hosted runners can't carry.
+# Its installable logic is covered instead by the structural, render-based checks in
+# tests/mobile_dev_install_contract.sh, which run on every push via ci.yml's
+# `bash tests/run.sh`.
 
 on:
   schedule:
