@@ -163,6 +163,25 @@ fetch_and_verify() {
 }
 
 #-------------------------------------------------------------------------------
+# maestro_download_heartbeat <file> - one progress line every MAESTRO_HEARTBEAT_SECS
+# (default 30; a test shortens it) while FILE grows, so a slow-but-alive download
+# (its own stall guard already lets it run as long as it needs) is not silent for
+# its whole duration. A WSL `dot up` (2026-10-11) looked indistinguishable from
+# stuck for 20+ minutes while curl was downloading the whole time - the stall
+# guard protects against a dead connection, not against an operator's "is this
+# stuck?". Runs until the caller kills it; FILE not existing yet reads as 0 bytes,
+# never an error.
+#-------------------------------------------------------------------------------
+maestro_download_heartbeat() {
+    local file="$1" secs="${MAESTRO_HEARTBEAT_SECS:-30}" size
+    while :; do
+        sleep "$secs"
+        size="$(wc -c <"$file" 2>/dev/null || echo 0)"
+        info "   ...still downloading ($((size / 1048576)) MiB so far)"
+    done
+}
+
+#-------------------------------------------------------------------------------
 # install_maestro <version> <sha256> [retry-hint] - the mobile_dev group's Maestro
 # CLI, pinned and checksum-verified (.chezmoidata.yaml's maestro_version /
 # maestro_sha256), shared by the installer template (`dot up`) and
@@ -227,11 +246,18 @@ install_maestro() {
     else
         info "Installing Maestro $ver (CLI for mobile_dev, ~300 MB; a slow link is given the time it needs)..."
     fi
+    local hb_pid
+    maestro_download_heartbeat "$tmp/$asset" &
+    hb_pid=$!
     if ! curl -fsSL --connect-timeout 30 --speed-limit 10240 --speed-time 60 -o "$tmp/$asset" "$url"; then
+        kill "$hb_pid" 2>/dev/null || true
+        wait "$hb_pid" 2>/dev/null || true
         warn "maestro download failed or stalled - skipping ($hint)"
         rm -rf "$tmp"
         return 0
     fi
+    kill "$hb_pid" 2>/dev/null || true
+    wait "$hb_pid" 2>/dev/null || true
     # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
     got="$($sha_cmd "$tmp/$asset" 2>/dev/null | cut -d' ' -f1)"
     if [ "$want" != "$got" ]; then
