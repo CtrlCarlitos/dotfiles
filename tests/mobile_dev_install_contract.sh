@@ -56,11 +56,17 @@ require "$tmpl" 'openjdk@{{ .versions.jdk_version }}'
 require "$tmpl" 'JAVA_HOME'
 
 # --- Maestro MCP registration for Claude Code and Codex, idempotent -------
-# (Task 3): mirrors the serena precedent's own gating shape (command -v
-# <agent> guard, "mcp get" idempotency check, warn-and-continue on failure -
+# (Task 3, moved by the final fix round): mirrors the serena precedent's own
+# gating shape ("mcp get" idempotency check, warn-and-continue on failure -
 # never abort under `set -e`). Maestro has no vendor setup helper, unlike
-# serena, so the raw "mcp add" call is used directly.
-require "$tmpl" 'claude mcp add maestro -- maestro mcp'
+# serena, so the raw "mcp add" call is used directly. Claude Code's call is
+# USER scope: the default (local) scope is private to the installer's own
+# working directory, invisible from every real project. Codex has no scope
+# concept (one global config.toml), so its call carries no flag. Where the
+# calls live (install_claude_cli/install_chatgpt_cli, not install_mobile_dev)
+# is asserted on the render below.
+require "$tmpl" 'claude mcp add -s user maestro -- maestro mcp'
+forbid "$tmpl" 'claude mcp add maestro -- maestro mcp'
 require "$tmpl" 'codex mcp add maestro -- maestro mcp'
 require "$tmpl" 'claude mcp get maestro'
 require "$tmpl" 'codex mcp get maestro'
@@ -129,7 +135,62 @@ if command -v chezmoi >/dev/null 2>&1; then
     fi
     pass
 
+    # --- Maestro MCP placement (final fix round, C1/I1/C3): main() calls
+    # install_mobile_dev BEFORE install_claude_cli/install_chatgpt_cli, so a
+    # registration inside install_mobile_dev() no-ops for good on a fresh
+    # machine (claude/codex do not exist yet). Each agent's registration lives
+    # in that agent's own install function, after its binary exists.
+    fn_body() { # $1 = rendered file, $2 = function name: the top-level body
+        sed -n "/^$2() {\$/,/^}\$/p" "$1"
+    }
+    body="$(fn_body "$out" install_claude_cli)"
+    case "$body" in
+        *'claude mcp add -s user maestro -- maestro mcp'*) pass ;;
+        *) fail "render (mobile_dev=true): install_claude_cli must register Maestro MCP at user scope" ;;
+    esac
+    case "$body" in
+        *'command -v maestro'*) pass ;;
+        *) fail "render: install_claude_cli's Maestro registration must be gated on the maestro binary" ;;
+    esac
+    body="$(fn_body "$out" install_chatgpt_cli)"
+    case "$body" in
+        *'codex mcp add maestro -- maestro mcp'*) pass ;;
+        *) fail "render (mobile_dev=true): install_chatgpt_cli must register Maestro MCP for Codex" ;;
+    esac
+    case "$body" in
+        *'command -v maestro'*) pass ;;
+        *) fail "render: install_chatgpt_cli's Maestro registration must be gated on the maestro binary" ;;
+    esac
+    body="$(fn_body "$out" install_mobile_dev)"
+    [ -n "$body" ] || fail "render: install_mobile_dev() body not found"
+    case "$body" in
+        *'mcp add'*) fail "render: install_mobile_dev() must not register MCP itself (it runs before claude/codex exist)" ;;
+        *) pass ;;
+    esac
+    # main() order: the catalog sync (OpenCode/agy) runs after install_mobile_dev
+    # and after the OpenCode/agy CLI installs, never inside install_agent_toolkit.
+    call_line() { grep -n "^    $2\$" "$1" | head -n1 | cut -d: -f1; }
+    l_mobile="$(call_line "$out" install_mobile_dev)"
+    l_sync="$(call_line "$out" sync_agent_mcp_catalog)"
+    l_oc="$(call_line "$out" install_opencode_cli)"
+    l_agy="$(call_line "$out" install_antigravity_cli)"
+    if [ -n "$l_mobile" ] && [ -n "$l_sync" ] && [ -n "$l_oc" ] && [ -n "$l_agy" ] \
+        && [ "$l_sync" -gt "$l_mobile" ] && [ "$l_sync" -gt "$l_oc" ] && [ "$l_sync" -gt "$l_agy" ]; then
+        pass
+    else
+        fail "render: main() must call sync_agent_mcp_catalog after install_mobile_dev and the OpenCode/agy installs (lines: mobile=$l_mobile sync=$l_sync opencode=$l_oc agy=$l_agy)"
+    fi
+    case "$(fn_body "$out" install_agent_toolkit)" in
+        *'opencode_mcp_sync'*|*'AGY_WANT'*) fail "render: the OpenCode/agy catalog sync must not live inside install_agent_toolkit()" ;;
+        *) pass ;;
+    esac
+
     render_to "$out" sh "$(groups false true)"
+    if grep -Fq 'maestro -- maestro mcp' "$out"; then
+        fail "render (mobile_dev=false): no Maestro MCP registration may render for Claude Code/Codex"
+    else
+        pass
+    fi
     if grep -Fq 'install_mobile_dev$' "$out" || grep -Eq '^\s*install_mobile_dev\s*$' "$out"; then
         fail "render (mobile_dev=false): install_mobile_dev must not be CALLED"
     else

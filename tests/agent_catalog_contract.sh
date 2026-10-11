@@ -156,7 +156,7 @@ else:
     for ref in ("$mcpCatalog.serena.command", "$mcpCatalog.serena.args"):
         if ref not in ps1: err("ps1 render: OpenCode/agy wiring does not consume %s" % ref)
 # the sh embeds the table as JSON inside its python heredocs. #124: the two
-# registration blocks live in the shared install_agent_toolkit now, so the
+# registration blocks live in the shared sync_agent_mcp_catalog now, so the
 # table renders twice (opencode + agy), not four times (was 2 blocks x
 # apt/brew). Count by CONTENT, not by the shape of the consuming code (#230:
 # the OpenCode registration assigns the table to `catalog` now, where it used

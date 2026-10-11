@@ -592,18 +592,11 @@ install_mobile_dev() {
         fi
     fi
 
-    # --- Maestro MCP registration for Claude Code and Codex ----------------
-    # Same idempotent check-then-register shape as the serena precedent
-    # above (`command -v <agent>` guard, `mcp get` as the "already
-    # registered" check, warn-and-continue - never abort under `set -e`).
-    # Maestro has no vendor `setup <agent>` helper, unlike serena, so the raw
-    # `mcp add` call is used directly.
-    if command -v claude &>/dev/null && ! claude mcp get maestro &>/dev/null; then
-        net_timeout 60 claude mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
-    fi
-    if command -v codex &>/dev/null && ! codex mcp get maestro &>/dev/null; then
-        net_timeout 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
-    fi
+    # Maestro's MCP server is NOT registered here: main() runs this before
+    # install_claude_cli/install_chatgpt_cli, so on a fresh machine neither
+    # agent exists yet. Claude Code's and Codex's registrations live in their
+    # own install functions (after the binary exists); OpenCode's and agy's
+    # come from the agents.mcp catalog via sync_agent_mcp_catalog().
 
     # --- agent-device: npm global, reusing core's Node (no duplicate Node
     # stack) --------------------------------------------------------------
@@ -1758,6 +1751,15 @@ install_claude_cli() {
         info "Installing Superpowers plugin for Claude Code..."
         claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
         claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+{{- if $mobile_dev }}
+        # Maestro MCP registration for Claude Code lives HERE, not in
+        # install_mobile_dev(): main() runs that first, before claude exists
+        # on a fresh machine. -s user: the default scope (local) is private to
+        # the installer's own working directory, invisible from any project.
+        if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
+            net_timeout 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
+        fi
+{{- end }}
     fi
 }
 
@@ -1941,6 +1943,51 @@ install_agent_toolkit() {
         fi
     fi
 
+    # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
+    # No apt package exists; uses the official install script. Note: act runs
+    # every job inside a real Docker container, and this repo's isDevcontainer
+    # check treats any container as one (see .chezmoi.toml.tmpl) - so
+    # $interactive can never be true under act, meaning it can validate
+    # template/script syntax and the devcontainer code path, but can't
+    # exercise the core/agent_toolkit/etc section content. Confirmed this
+    # session testing a Superpowers install fix - had to fall back to
+    # isolated `docker run` tests for that instead.
+    # On WSL specifically: installing the binary here is harmless either way,
+    # but it only actually works if Docker Desktop's WSL integration is
+    # enabled for this distro (Settings > Resources > WSL Integration on the
+    # Windows host) - the same existing assumption this repo already relies
+    # on for Docker generally on WSL (see docs/tool-parity.md's Container row).
+    case "$PKG_MANAGER" in
+        apt)
+            if ! command -v act &>/dev/null; then
+                info "Installing act (local GitHub Actions runner)..."
+                # Compose the fetched script in a variable instead of splicing
+                # $SUDO in through quote-juggling (SC2027): same result - the
+                # script is single-quoted shell, with $SUDO expanded once, and
+                # an empty SUDO just leaves a harmless extra space for bash -c.
+                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${SUDO} bash -s -- -b /usr/local/bin"
+                net_timeout 180 bash -c "$act_script" || warn "act install failed or timed out"
+            fi
+            ;;
+        brew)
+            # Confirmed current on Homebrew (formula, not cask).
+            command -v act &>/dev/null || brew install act || warn "act install failed"
+            ;;
+    esac
+}
+
+# sync_agent_mcp_catalog() - registers .chezmoidata/agents.yaml's agents.mcp
+# catalog for OpenCode (global opencode.json) and agy (global mcp_config.json).
+# A top-level function called from main() AFTER every installer that can put a
+# catalog binary or agent CLI on the machine (agent_toolkit's serena,
+# mobile_dev's maestro, the OpenCode/agy CLIs themselves) - never from inside
+# one of them. It used to live inside install_agent_toolkit(), which main()
+# runs before install_mobile_dev() and install_opencode_cli(): on a fresh
+# machine `command -v maestro`/`command -v opencode` were still false there,
+# so the run_onchange script (which only re-runs when its rendered content
+# changes) skipped those registrations for good. Every entry self-gates
+# (`command -v` for a local entry, the mobile_dev flag for a remote one).
+sync_agent_mcp_catalog() {
     # opencode: global config mcp keys (merge, never clobber the plugin
     # key). opencode loads MCP ONLY from this global block - a server missing
     # here is missing from every session (surveyed live 2026-09-20).
@@ -2022,12 +2069,17 @@ PYEOF
     # and other keys survive. Idempotent: rewriting our keys is a refresh.
     AGY_GLOBAL_MCP="$HOME/.gemini/config/mcp_config.json"
     AGY_WANT=""
-    command -v serena &>/dev/null && AGY_WANT="serena"
-    # Remote entries (Expo) have no binary to probe; gate on the owning
-    # package's install-time flag instead (mobile_dev).
+    # Same generic catalog walk as OC_PRESENT above: a LOCAL entry (serena,
+    # maestro) is wanted when its binary is present; a REMOTE entry (Expo) has
+    # no binary to probe, so it is gated on the owning package's install-time
+    # flag instead (mobile_dev).
 {{- range $name, $srv := .agents.mcp }}
-{{- if and (hasKey $srv "type") (eq $srv.type "remote") $mobile_dev }}
+{{- if and (hasKey $srv "type") (eq $srv.type "remote") }}
+{{- if $mobile_dev }}
     AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
+{{- end }}
+{{- else }}
+    command -v {{ $srv.command | quote }} &>/dev/null && AGY_WANT="${AGY_WANT:+$AGY_WANT,}{{ $name }}"
 {{- end }}
 {{- end }}
     if [ -n "$AGY_WANT" ]; then
@@ -2096,38 +2148,6 @@ PYEOF
             warn "could not repair agy global mcp_config.json - continuing"
         fi
     fi
-
-    # act (nektosact.com) - runs GitHub Actions workflows locally via Docker.
-    # No apt package exists; uses the official install script. Note: act runs
-    # every job inside a real Docker container, and this repo's isDevcontainer
-    # check treats any container as one (see .chezmoi.toml.tmpl) - so
-    # $interactive can never be true under act, meaning it can validate
-    # template/script syntax and the devcontainer code path, but can't
-    # exercise the core/agent_toolkit/etc section content. Confirmed this
-    # session testing a Superpowers install fix - had to fall back to
-    # isolated `docker run` tests for that instead.
-    # On WSL specifically: installing the binary here is harmless either way,
-    # but it only actually works if Docker Desktop's WSL integration is
-    # enabled for this distro (Settings > Resources > WSL Integration on the
-    # Windows host) - the same existing assumption this repo already relies
-    # on for Docker generally on WSL (see docs/tool-parity.md's Container row).
-    case "$PKG_MANAGER" in
-        apt)
-            if ! command -v act &>/dev/null; then
-                info "Installing act (local GitHub Actions runner)..."
-                # Compose the fetched script in a variable instead of splicing
-                # $SUDO in through quote-juggling (SC2027): same result - the
-                # script is single-quoted shell, with $SUDO expanded once, and
-                # an empty SUDO just leaves a harmless extra space for bash -c.
-                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${SUDO} bash -s -- -b /usr/local/bin"
-                net_timeout 180 bash -c "$act_script" || warn "act install failed or timed out"
-            fi
-            ;;
-        brew)
-            # Confirmed current on Homebrew (formula, not cask).
-            command -v act &>/dev/null || brew install act || warn "act install failed"
-            ;;
-    esac
 }
 
 install_opencode_cli() {
@@ -2241,6 +2261,14 @@ install_chatgpt_cli() {
         # rewrites its entry.
         serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
             || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
+{{- if $mobile_dev }}
+        # Maestro's Codex registration lives HERE too, not in
+        # install_mobile_dev() (which main() runs before codex exists on a
+        # fresh machine). Codex has no scope flag: one global config.toml.
+        if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
+            net_timeout 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
+        fi
+{{- end }}
     fi
 }
 
@@ -2836,6 +2864,18 @@ main() {
     install_antigravity_cli
 {{- else }}
     info "Antigravity CLI disabled in config"
+{{- end }}
+
+    # OpenCode/agy MCP registration from the agents.mcp catalog. Called HERE,
+    # after install_mobile_dev (maestro) AND the OpenCode/agy installs - not
+    # from inside install_agent_toolkit, where it used to run before any of
+    # them existed on a fresh machine (see sync_agent_mcp_catalog()). Gated on
+    # agent_toolkit exactly as before the move (it also repairs agy's
+    # mcp_config.json, a write that must not happen with the toolkit off;
+    # mobile_dev itself requires agent_toolkit, see the safety net above).
+{{- if $agent_toolkit }}
+    dot_timing_mark 'agent MCP catalog'
+    sync_agent_mcp_catalog
 {{- end }}
 
 {{- if or $claude_cli $antigravity_cli $agent_toolkit $opencode_cli $chatgpt_cli }}

@@ -25,8 +25,10 @@ agents:
   # is either LOCAL (bare command + args - a binary the installer runs, e.g.
   # serena) or REMOTE (type: remote + url - a hosted, OAuth-authenticated MCP
   # server OpenCode/agy dial out to directly, e.g. Expo's mcp.expo.dev/mcp,
-  # design doc #3.8. Maestro's own MCP server is local - `maestro mcp` - and
-  # is registered for Claude Code/Codex directly, not through this catalog).
+  # design doc #3.8). Maestro's MCP server (`maestro mcp`, installed by
+  # mobile_dev) is a LOCAL entry here, so OpenCode/agy get it from this
+  # catalog like serena; Claude Code/Codex get it from their own install
+  # functions (`claude mcp add -s user` / `codex mcp add`), not from here.
   # Each consumer builds its own shape:
   #   OpenCode local   {type: local, command: [command, ...args], enabled: true}
   #   OpenCode remote  {type: remote, url: <url>, enabled: true}
@@ -36,11 +38,14 @@ agents:
   # (`command -v <command>`) for a LOCAL entry. A REMOTE entry has no binary
   # to probe, so it is instead gated on the owning package's install-time
   # flag - Expo's is `mobile_dev` - see opencode_mcp_sync() and the agy merge
-  # block in run_onchange_install_packages.sh.tmpl.
+  # block in sync_agent_mcp_catalog() (run_onchange_install_packages.sh.tmpl).
   mcp:
     serena:
       command: serena
       args: [start-mcp-server, --context, ide-assistant]
+    maestro:
+      command: maestro
+      args: [mcp]
     expo:
       type: remote
       url: https://mcp.expo.dev/mcp

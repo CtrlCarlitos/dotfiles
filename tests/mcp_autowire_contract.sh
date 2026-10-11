@@ -166,6 +166,58 @@ agy_run || fail "agy merge failed with no config"
 agy_check 'a new Expo entry must be created as {httpUrl, oauth: {}, forceAllToolsEager: true}' \
     'd["mcpServers"]["expo"] == {"httpUrl":"https://mcp.expo.dev/mcp","oauth":{},"forceAllToolsEager":True}'
 
+# 6. Maestro MCP reaches OpenCode and agy through the catalog (final fix
+#    round, C1): a LOCAL entry `maestro mcp`, gated on the binary like serena.
+#    Executes the real rendered sync_agent_mcp_catalog() against a scratch
+#    HOME with a PATH holding only stubs, so `command -v` sees exactly the
+#    binaries the fixture says are installed.
+require "$repo_root/.chezmoidata/agents.yaml" '    maestro:'
+require "$repo_root/.chezmoidata/agents.yaml" '      command: maestro'
+require "$repo_root/.chezmoidata/agents.yaml" '      args: [mcp]'
+# agy's want-list walks the catalog generically (no serena special case).
+forbid "$sh_installer" 'command -v serena &>/dev/null && AGY_WANT="serena"'
+sync_tmp="$(mktemp -d)"
+sync_fn="$(sed -n '/^sync_agent_mcp_catalog() {$/,/^}$/p' "$agy_tmp/rendered.sh")"
+[ -n "$sync_fn" ] || fail "rendered installer: no top-level sync_agent_mcp_catalog() function"
+mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
+bash_bin="$(command -v bash)"
+for tool in python3 mkdir dirname tr rm; do
+    real="$(command -v "$tool")" || skip "$tool not installed"
+    ln -s "$real" "$sync_tmp/bin/$tool"
+done
+for stub in opencode maestro serena; do
+    printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"
+    chmod +x "$sync_tmp/bin/$stub"
+done
+run_sync() { # runs the rendered function with HOME/PATH pointed at the fixture
+    HOME="$sync_tmp/home" PATH="$sync_tmp/bin" "$bash_bin" -c \
+        'info() { :; }; warn() { printf "WARN: %s\n" "$*" >&2; }; '"$sync_fn"$'\n''sync_agent_mcp_catalog'
+}
+run_sync || fail "sync_agent_mcp_catalog() failed on a fresh HOME"
+sync_check() { # $1 = label, $2 = file, $3 = python expression over d
+    local got
+    got="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8-sig")); print(json.dumps(bool(eval(sys.argv[2]))))' "$2" "$3" 2>/dev/null)" || got=false
+    if [ "$got" = 'true' ]; then pass; else fail "sync: $1 (expression: $3)"; fi
+}
+oc_json="$sync_tmp/home/.config/opencode/opencode.json"
+agy_json="$sync_tmp/home/.gemini/config/mcp_config.json"
+sync_check 'OpenCode must get maestro as a local `maestro mcp` server' "$oc_json" \
+    'd["mcp"]["maestro"] == {"type":"local","command":["maestro","mcp"],"enabled":True}'
+sync_check 'OpenCode must still get serena' "$oc_json" '"serena" in d["mcp"]'
+sync_check 'OpenCode must get Expo (render has mobile_dev=true)' "$oc_json" 'd["mcp"]["expo"]["type"] == "remote"'
+sync_check 'agy must get maestro as {command, args, forceAllToolsEager}' "$agy_json" \
+    'd["mcpServers"]["maestro"] == {"command":"maestro","args":["mcp"],"forceAllToolsEager":True}'
+sync_check 'agy must still get serena' "$agy_json" '"serena" in d["mcpServers"]'
+sync_check 'agy must get Expo (render has mobile_dev=true)' "$agy_json" '"expo" in d["mcpServers"]'
+# No maestro binary: no maestro entry for either agent (the local gate holds).
+rm -f "$sync_tmp/bin/maestro"
+rm -rf "$sync_tmp/home"
+mkdir -p "$sync_tmp/home"
+run_sync || fail "sync_agent_mcp_catalog() failed without maestro"
+sync_check 'OpenCode must not get maestro without its binary' "$oc_json" '"maestro" not in d["mcp"]'
+sync_check 'agy must not get maestro without its binary' "$agy_json" '"maestro" not in d["mcpServers"]'
+rm -rf "$sync_tmp"
+
 # Task 4 is OpenCode/agy only (Task 3 already handled Claude Code/Codex
 # Maestro registration directly) - Expo must not be wired into claude/codex
 # `mcp add`.
