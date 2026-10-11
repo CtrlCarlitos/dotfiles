@@ -105,9 +105,9 @@ out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" PATH="$tmp/bin:$PATH" bash "$t
 [ "$out" = "rc=0" ] || fail "a successful install must print nothing of dpkg's on stdout (got: $(printf '%s' "$out" | tr '\n' '|'))"
 grep -Fxq 'E: on stderr' "$tmp/stderr" || fail "stderr must pass through live even when stdout is captured (got: $(tr '\n' '|' <"$tmp/stderr"))"
 grep -Fq 'Selecting previously unselected package libxt-dev.' "$state/dotfiles/apt.log" 2>/dev/null \
-    || fail "the captured dpkg output must land in \$XDG_STATE_HOME/dotfiles/apt.log (got: $(/bin/cat "$state/dotfiles/apt.log" 2>/dev/null | tr '\n' '|'))"
+    || fail "the captured dpkg output must land in \$XDG_STATE_HOME/dotfiles/apt.log (got: $(tr '\n' '|' <"$state/dotfiles/apt.log" 2>/dev/null))"
 grep -Eq '^=== [0-9T:-]+ .*apt-get -qq install -y libxt-dev' "$state/dotfiles/apt.log" 2>/dev/null \
-    || fail "every captured call must start with a dated header naming the command (got: $(/bin/cat "$state/dotfiles/apt.log" 2>/dev/null | tr '\n' '|'))"
+    || fail "every captured call must start with a dated header naming the command (got: $(tr '\n' '|' <"$state/dotfiles/apt.log" 2>/dev/null))"
 pass
 out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" FAKE_EXIT=100 PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" 2>/dev/null)"
 case "$out" in

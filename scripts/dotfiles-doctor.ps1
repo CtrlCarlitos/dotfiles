@@ -243,6 +243,44 @@ if (-not $guardrailPin) {
 
 } # end not-in-apply (guardrail-pin)
 
+# --- 6b. mobile_dev completeness (twin of the sh doctor's check 10) -------------
+# Placed before 7: tests/dot_doctor_windows.ps1 executes everything from section 8
+# to the summary as a fragment without $config, so a check that reads it lives above
+# (and nothing here may spell out that section marker, which the test searches for).
+# The Windows installer is run_onchange too: an SDK piece whose download or
+# license step failed is never retried by the next `dot up`. With mobile_dev on,
+# name what Install-MobileDev should have left behind (the command-line tools'
+# sdkmanager and the adb client, at ANDROID_HOME or the installer's own
+# %LOCALAPPDATA%\Android\Sdk) and the re-entry command. Maestro and agent-device
+# are not installed on Windows (docs/mobile-development.md), so they are not asked for.
+if (Test-Path -LiteralPath $config) {
+    $mdContent = [IO.File]::ReadAllText($config)
+    $mdSection = [regex]::Match($mdContent, '(?ms)^[ \t]*\[data\.packages\][ \t]*\r?\n(.*?)(?=^[ \t]*\[|\z)')
+    $mdBody = if ($mdSection.Success) { $mdSection.Groups[1].Value } else { '' }
+    if ([regex]::IsMatch($mdBody, '^\s*mobile_dev\s*=\s*true\s*$', [System.Text.RegularExpressions.RegexOptions]::Multiline)) {
+        $mdSdk = ''
+        foreach ($cand in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)) {
+            if ($cand -and (Test-Path -LiteralPath $cand)) { $mdSdk = $cand; break }
+        }
+        if (-not $mdSdk) {
+            $mdLocal = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $homeDir 'AppData/Local' }
+            $mdSdk = Join-Path $mdLocal 'Android/Sdk'
+        }
+        $mdMissing = @()
+        $mdSdkManager = @('cmdline-tools/latest/bin/sdkmanager.bat', 'cmdline-tools/latest/bin/sdkmanager') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $mdSdkManager) { $mdMissing += 'sdkmanager' }
+        $mdAdb = @('platform-tools/adb.exe', 'platform-tools/adb') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $mdAdb -and -not (Get-Command adb -ErrorAction SilentlyContinue)) { $mdMissing += 'adb' }
+        if ($mdMissing.Count -gt 0) {
+            Result 'warn' 'mobile-dev' ("missing: " + ($mdMissing -join ' ') + " (SDK: $mdSdk) - re-run the installer: chezmoi state delete-bucket --bucket=scriptState; dot up")
+        } else {
+            Result 'ok' 'mobile-dev' "sdkmanager and adb present ($mdSdk)"
+        }
+    } else {
+        Result 'skip' 'mobile-dev' 'mobile_dev off (opt-in via packages.mobile_dev)'
+    }
+}
+
 # --- 7. ~/.ssh key files readable by broad principals -------------------------
 # OpenSSH for Windows refuses identity files whose ACL grants read to broad
 # principals (Everyone / Users / Authenticated Users). Live observation: the
@@ -333,41 +371,6 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
         }
     }
     if ($crlfCount -eq 0) { Result 'ok' 'ssh-crlf' 'SSH text files are LF' }
-}
-
-# --- 10. mobile_dev completeness (twin of the sh doctor's check 10) -------------
-# The Windows installer is run_onchange too: an SDK piece whose download or
-# license step failed is never retried by the next `dot up`. With mobile_dev on,
-# name what Install-MobileDev should have left behind (the command-line tools'
-# sdkmanager and the adb client, at ANDROID_HOME or the installer's own
-# %LOCALAPPDATA%\Android\Sdk) and the re-entry command. Maestro and agent-device
-# are not installed on Windows (docs/mobile-development.md), so they are not asked for.
-if (Test-Path -LiteralPath $config) {
-    $mdContent = [IO.File]::ReadAllText($config)
-    $mdSection = [regex]::Match($mdContent, '(?ms)^[ \t]*\[data\.packages\][ \t]*\r?\n(.*?)(?=^[ \t]*\[|\z)')
-    $mdBody = if ($mdSection.Success) { $mdSection.Groups[1].Value } else { '' }
-    if ([regex]::IsMatch($mdBody, '^\s*mobile_dev\s*=\s*true\s*$', [System.Text.RegularExpressions.RegexOptions]::Multiline)) {
-        $mdSdk = ''
-        foreach ($cand in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)) {
-            if ($cand -and (Test-Path -LiteralPath $cand)) { $mdSdk = $cand; break }
-        }
-        if (-not $mdSdk) {
-            $mdLocal = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $homeDir 'AppData/Local' }
-            $mdSdk = Join-Path $mdLocal 'Android/Sdk'
-        }
-        $mdMissing = @()
-        $mdSdkManager = @('cmdline-tools/latest/bin/sdkmanager.bat', 'cmdline-tools/latest/bin/sdkmanager') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if (-not $mdSdkManager) { $mdMissing += 'sdkmanager' }
-        $mdAdb = @('platform-tools/adb.exe', 'platform-tools/adb') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if (-not $mdAdb -and -not (Get-Command adb -ErrorAction SilentlyContinue)) { $mdMissing += 'adb' }
-        if ($mdMissing.Count -gt 0) {
-            Result 'warn' 'mobile-dev' ("missing: " + ($mdMissing -join ' ') + " (SDK: $mdSdk) - re-run the installer: chezmoi state delete-bucket --bucket=scriptState; dot up")
-        } else {
-            Result 'ok' 'mobile-dev' "sdkmanager and adb present ($mdSdk)"
-        }
-    } else {
-        Result 'skip' 'mobile-dev' 'mobile_dev off (opt-in via packages.mobile_dev)'
-    }
 }
 
 # --- 9. python3 resolves to a real interpreter (Windows) ------------------------

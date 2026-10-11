@@ -63,9 +63,11 @@ got="$(run "$h" 2.11.0 "$fixture_sha")"
 case "$got" in *rc=0*) pass ;; *) fail "fresh: did not complete (output: $got)" ;; esac
 grep -Fq 'https://github.com/mobile-dev-inc/maestro/releases/download/cli-2.11.0/maestro.zip' "$tmp/curl.log" \
     || fail "fresh: must download the pinned release asset (curl saw: $(/bin/cat "$tmp/curl.log"))"
-grep -Eq -- '--speed-limit [0-9]+' "$tmp/curl.log" && grep -Eq -- '--speed-time [0-9]+' "$tmp/curl.log" \
-    || fail "fresh: the download must be stall-guarded with --speed-limit/--speed-time (curl saw: $(/bin/cat "$tmp/curl.log"))"
-pass
+if grep -Eq -- '--speed-limit [0-9]+' "$tmp/curl.log" && grep -Eq -- '--speed-time [0-9]+' "$tmp/curl.log"; then
+    pass
+else
+    fail "fresh: the download must be stall-guarded with --speed-limit/--speed-time (curl saw: $(/bin/cat "$tmp/curl.log"))"
+fi
 [ -x "$h/$opt/bin/maestro" ] || fail "fresh: ~/$opt/bin/maestro must be executable"
 [ "$(readlink "$h/.local/bin/maestro")" = "$h/$opt/bin/maestro" ] || fail "fresh: ~/.local/bin/maestro must link to the install (got '$(readlink "$h/.local/bin/maestro" || true)')"
 [ "$(/bin/cat "$h/$opt/.dotfiles-version" 2>/dev/null)" = 2.11.0 ] || fail "fresh: the installed pin must be recorded in ~/$opt/.dotfiles-version"
@@ -91,7 +93,7 @@ case "$got" in
     *'maestro download failed or stalled'*'chezmoi state delete-bucket --bucket=scriptState && dot up'*rc=0*) pass ;;
     *) fail "stall: must warn, name the retry hint and continue (output: $got)" ;;
 esac
-[ ! -e "$h/$opt" ] && [ ! -e "$h/.local/bin/maestro" ] || fail "stall: nothing may be installed"
+if [ -e "$h/$opt" ] || [ -e "$h/.local/bin/maestro" ]; then fail "stall: nothing may be installed"; fi
 
 # E. Checksum mismatch: nothing installed, exit 0.
 h="$tmp/e"; mkdir -p "$h"; : >"$tmp/curl.log"
