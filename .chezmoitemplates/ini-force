@@ -1,0 +1,47 @@
+{{- /*
+  Force one key in one section of an INI file, leaving every other byte alone.
+  Shared body of the Geany and GTK modify_ templates (includeTemplate, not
+  template: docs/invariants.md #4).
+
+  Context (a dict): stdin (the current file), section, key, sep (the text between
+  key and value: "=" for Geany, " = " for GTK), value.
+
+  An existing line for the key inside the section is dropped and ours is emitted
+  right after the section header; a missing section is appended. Keys elsewhere,
+  comments, other sections and the file's own line ending (LF or CRLF) survive.
+*/ -}}
+{{- $raw := .stdin | trimPrefix "﻿" -}}
+{{- $eol := "\n" -}}
+{{- if contains "\r\n" $raw }}{{ $eol = "\r\n" }}{{ end -}}
+{{- $lines := splitList "\n" (replace "\r\n" "\n" $raw) -}}
+{{- $forced := printf "%s%s%s" .key .sep .value -}}
+{{- $st := dict "in" false "seen" false "out" (list) -}}
+
+{{- range $lines -}}
+{{-   $line := . -}}
+{{-   $t := trim $line -}}
+{{-   if and (hasPrefix "[" $t) (hasSuffix "]" $t) -}}
+{{-     $h := trim (trimSuffix "]" (trimPrefix "[" $t)) -}}
+{{-     $_ := set $st "in" (eq $h $.section) -}}
+{{-     $_ := set $st "out" (append $st.out $line) -}}
+{{-     if and $st.in (not $st.seen) -}}
+{{-       $_ := set $st "out" (append $st.out $forced) -}}
+{{-       $_ := set $st "seen" true -}}
+{{-     end -}}
+{{-   else if and $st.in (contains "=" $t) (not (hasPrefix "#" $t)) (not (hasPrefix ";" $t)) -}}
+{{-     if ne (trim (first (splitList "=" $t))) $.key }}{{ $_ := set $st "out" (append $st.out $line) }}{{ end -}}
+{{-   else -}}
+{{-     $_ := set $st "out" (append $st.out $line) -}}
+{{-   end -}}
+{{- end -}}
+
+{{- if not $st.seen -}}
+{{-   $_ := set $st "out" (concat $st.out (list "" (printf "[%s]" .section) $forced)) -}}
+{{- end -}}
+
+{{- /* join on LF, collapse blank runs, then restore the file's own line ending */ -}}
+{{- $body := join "\n" $st.out -}}
+{{- $body = regexReplaceAll `\n{3,}` $body "\n\n" -}}
+{{- $body = regexReplaceAll `(?s)^\s+|\s+$` $body "" -}}
+{{- if eq $eol "\r\n" }}{{ $body = replace "\n" "\r\n" $body }}{{ end -}}
+{{- $body }}{{ $eol -}}
