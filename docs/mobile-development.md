@@ -128,10 +128,7 @@ the Maestro CLI (pinned and checksum-verified, under
 global), and a standalone JDK 17 (apt's `openjdk-17-jdk` or brew's
 `openjdk@17`), plus the same MCP registrations described under "MCP
 servers" below - and the full Android SDK, because here everything runs on
-a single host, with no Windows/WSL split. It also installs **scrcpy**
-(`command -v`-guarded, apt's `scrcpy` package or brew's `scrcpy` formula)
-for mirroring and controlling a real device or emulator's screen from the
-desktop:
+a single host, with no Windows/WSL split:
 
 - **SDK command-line tools** (`sdkmanager`, `avdmanager`): Google's zip for
   this OS (Linux, Mac Intel or Mac ARM), pinned in `.chezmoidata.yaml` and
@@ -140,6 +137,10 @@ desktop:
 - **A default AVD**, `mobile_dev_pixel`: the `pixel_6` device profile on the
   `android-34` default system image (`x86_64`, or `arm64-v8a` on Apple
   Silicon and ARM Linux).
+
+It also installs **scrcpy** (`command -v`-guarded, apt's `scrcpy` package
+or brew's `scrcpy` formula) for mirroring and controlling a real device or
+emulator's screen from the desktop.
 
 `dot_zshrc` exports `ANDROID_HOME` and appends `platform-tools`, `emulator`
 and `cmdline-tools/latest/bin` to `PATH` in every new shell. It appends

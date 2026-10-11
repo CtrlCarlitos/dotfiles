@@ -888,11 +888,14 @@ install_mobile_dev() {
     # confirmed live via `apt-cache madison scrcpy` while implementing this
     # task - the design doc's "apt might not have it" contingency never
     # materialized), so both branches install it here, matching the
-    # standalone JDK's own command -v guarded, warn-and-continue style above
-    # (including the quoted literal, which is what keeps this install_mobile_dev()
-    # package name - not a group-wide catalog install - out of
-    # tests/package_catalog_contract.sh's "no literal apt install bypasses
-    # the catalog" scan, exactly like the JDK package name right above it).
+    # Maestro/agent-device command -v guarded, warn-and-continue style used
+    # elsewhere in this function (NOT the JDK block above, which deliberately
+    # avoids command -v - brew's openjdk@17 is keg-only and would never be
+    # found that way; scrcpy's own brew formula isn't keg-only, so the
+    # simpler guard is correct here). The quoted literal is what keeps this
+    # install_mobile_dev() package name - not a group-wide catalog install -
+    # out of tests/package_catalog_contract.sh's "no literal apt install
+    # bypasses the catalog" scan, exactly like the JDK package name above.
 {{- if $isHost }}
     if ! command -v scrcpy &>/dev/null; then
         info "Installing scrcpy (screen mirroring/control for mobile_dev)..."
