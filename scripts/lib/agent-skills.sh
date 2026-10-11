@@ -507,21 +507,23 @@ superpowers_version_line() {
     fi
 }
 
-# playwright_chromium_installed - 0 when a Playwright Chromium build is already in its browser
-# cache (PLAYWRIGHT_BROWSERS_PATH, else ~/.cache/ms-playwright on Linux, ~/Library/Caches/
-# ms-playwright on macOS). `dot up` reads it before `npx playwright install-deps` + `install`:
-# both re-run on every apply (~20 s on WSL: install-deps runs its own apt-get update) although
-# `install` only downloads when the build is missing, and `dot upgrade` re-runs `install` anyway.
+# playwright_chromium_installed - 0 when a COMPLETE Playwright Chromium build is in its browser
+# cache (PLAYWRIGHT_BROWSERS_PATH unless it is the literal "0", else ~/.cache/ms-playwright on
+# Linux, ~/Library/Caches/ms-playwright on macOS). Playwright marks a finished download with an
+# INSTALLATION_COMPLETE file; a chromium-* directory without it is an interrupted one and must
+# install again. `dot up` reads this before `npx playwright install-deps` + `install`: both re-ran
+# on every apply (~20 s on WSL: install-deps runs its own apt-get update) although `install` only
+# downloads when the build is missing, and `dot upgrade` re-runs `install` anyway.
 playwright_chromium_installed() {
     local d="${PLAYWRIGHT_BROWSERS_PATH:-}" f
-    if [ -z "$d" ]; then
+    if [ -z "$d" ] || [ "$d" = 0 ]; then
         case "$(uname -s 2>/dev/null)" in
             Darwin) d="$HOME/Library/Caches/ms-playwright" ;;
             *) d="$HOME/.cache/ms-playwright" ;;
         esac
     fi
     for f in "$d"/chromium-*/; do
-        [ -d "$f" ] && return 0
+        [ -f "$f/INSTALLATION_COMPLETE" ] && return 0
     done
     return 1
 }

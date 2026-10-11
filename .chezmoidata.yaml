@@ -65,7 +65,7 @@ vscode:
 versions:
   node_major: 24
   node_choco: "24.19.0"
-  antigravity_hub: "2.19.1-6046815158665216"
+  antigravity_hub: "2.22.0-5446056071266304"
   gum: "2.0.1"
   powershell: "7.6.6"
   # Pinned rather than read from the release's own hashes.sha256: that file is

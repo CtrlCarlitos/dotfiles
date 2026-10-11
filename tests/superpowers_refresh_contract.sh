@@ -202,9 +202,13 @@ pass
 
 if helper -- playwright_chromium_installed; then fail "playwright_chromium_installed: no browser cache must fail"; fi
 mkdir -p "$home/.cache/ms-playwright/chromium-1248"
-helper -- playwright_chromium_installed || fail "playwright_chromium_installed: a chromium-* build in ~/.cache/ms-playwright must be found"
+if helper -- playwright_chromium_installed; then fail "playwright_chromium_installed: a chromium-* directory without INSTALLATION_COMPLETE is an interrupted download, not an install"; fi
+: >"$home/.cache/ms-playwright/chromium-1248/INSTALLATION_COMPLETE"
+helper -- playwright_chromium_installed || fail "playwright_chromium_installed: a complete chromium-* build in ~/.cache/ms-playwright must be found"
+helper PLAYWRIGHT_BROWSERS_PATH=0 -- playwright_chromium_installed || fail "playwright_chromium_installed: PLAYWRIGHT_BROWSERS_PATH=0 means the default cache"
 rm -rf "$home/.cache/ms-playwright"
 mkdir -p "$tmp/pw-elsewhere/chromium-9"
+: >"$tmp/pw-elsewhere/chromium-9/INSTALLATION_COMPLETE"
 helper PLAYWRIGHT_BROWSERS_PATH="$tmp/pw-elsewhere" -- playwright_chromium_installed || fail "playwright_chromium_installed must honour PLAYWRIGHT_BROWSERS_PATH"
 pass
 
@@ -257,6 +261,7 @@ grep -Fq 'agy plugin install https://github.com/obra/superpowers' "$tmp/stub.log
 pass
 
 mkdir -p "$home/.cache/ms-playwright/chromium-1248"
+: >"$home/.cache/ms-playwright/chromium-1248/INSTALLATION_COMPLETE"
 run_fn install_playwright_chromium
 grep -Fq 'Playwright Chromium is installed - skipping the download (dot upgrade updates it).' "$tmp/fn.log" ||
     fail "dot up: a cached Chromium build must be skipped with a line that says so (got: $(cat "$tmp/fn.log"))"
@@ -409,6 +414,7 @@ if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') { if ($env:CLAUDE_PLUGINS_JS
 PSSTUB
     seed_opencode_cache 6.3.0
     mkdir -p "$home/.cache/ms-playwright/chromium-1248"
+    : >"$home/.cache/ms-playwright/chromium-1248/INSTALLATION_COMPLETE"
     cat >"$tmp/ps-harness.ps1" <<'PSEOF'
 param([string]$Lib, [string]$UserDir, [string]$CacheDir, [string]$NpmLog)
 Set-StrictMode -Version Latest

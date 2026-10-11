@@ -95,6 +95,17 @@ winget lists some packages it cannot upgrade at all (`A newer version was found,
 technology is different`: Docker Desktop installed by Chocolatey, Microsoft Edge). When it reports blocked
 upgrades, each pending package is asked about by id, and the ones it refuses move out of "still pending"
 into `Not upgradeable through winget (installed another way; its own updater handles it): ...`.
+
+`dot upgrade` runs elevated, and winget cannot upgrade a **per-user** package from an elevated shell
+(`The package installed for user scope cannot be uninstalled when running with administrator privileges`),
+so the catalog installs such tools machine-wide (`winget_args: "--scope machine"`; gum today). A per-user
+copy from before that is reported by `dot up`; the one-time fix is `winget uninstall --id charmbracelet.gum
+--exact` from a non-elevated terminal, then `dot up`.
+
+Two more holds in the sweep: a new **Python minor** (3.14 to 3.15) is left out of `choco upgrade all`
+because venvs and uv/pipx tools are bound to their minor (patch releases still upgrade); take it with
+`DOTUPGRADE_PYTHON_MINOR=1 dot upgrade`. And a desktop app (Claude Desktop, ChatGPT / Codex, Antigravity,
+OpenCode Desktop) is offered for closing only when winget lists an upgrade for it.
 A Docker Desktop still installed by Chocolatey lands there: see
 [Docker Desktop through winget](#docker-desktop-through-winget) below.
 

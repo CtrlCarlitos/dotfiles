@@ -163,7 +163,8 @@ says so in its `note` and carries no name for that manager.
 ### Windows: winget first, Chocolatey as the fallback
 
 On Windows a record names **winget** (`winget:`, with optional `winget_args` such as
-`--scope machine` for VS Code and PowerShell, which Chocolatey had installed machine-wide)
+`--scope machine` for VS Code and PowerShell, which Chocolatey had installed machine-wide, and for gum:
+`dot upgrade` runs elevated, and winget cannot upgrade a user-scope package from an elevated shell)
 and only falls back to **Chocolatey** (`choco:`) where winget has no package or carries an older
 one: today the Antigravity CLI, the Meslo Nerd Font, npiperelay, Python and Vale. Node.js comes from
 winget's LTS package (`OpenJS.NodeJS.LTS`, the `versions.node_major` line): Chocolatey's `nodejs`

@@ -647,13 +647,27 @@ if ($wingetPackages.Count -gt 0) {
         $chocoHave = $null
         if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoHave = $chocoInstalled }
         foreach ($wingetEntry in $wingetPackages) {
-            $wingetId, $null, $wingetChocoWas = $wingetEntry -split '\|', 3
+            $wingetId, $wingetScopeArgs, $wingetChocoWas = $wingetEntry -split '\|', 3
             # Still Chocolatey's on this machine: installing winget's copy too would leave two.
             # scripts/migrate-to-winget.ps1 moves it.
             if ($wingetChocoWas -and $chocoHave -and $chocoHave.Contains($wingetChocoWas)) { $wingetStillChoco += $wingetChocoWas; continue }
-            if ($wingetInventory -match "(?m)\s$([regex]::Escape($wingetId))\s") { continue }
-            $wingetOne = (winget list --id $wingetId --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
-            if ($wingetOne -match [regex]::Escape($wingetId)) { continue }
+            $wingetHave = ($wingetInventory -match "(?m)\s$([regex]::Escape($wingetId))\s")
+            if (-not $wingetHave) {
+                $wingetOne = (winget list --id $wingetId --exact --accept-source-agreements --disable-interactivity 2>$null | Out-String)
+                $wingetHave = ($wingetOne -match [regex]::Escape($wingetId))
+            }
+            if ($wingetHave) {
+                # A package the catalog keeps machine-wide, found in the per-user winget folder: an
+                # elevated `winget upgrade` cannot touch it ("installed for user scope cannot be
+                # uninstalled when running with administrator privileges"), so every dot upgrade
+                # left it pending. Only portable packages leave that folder; others are not detected.
+                if ("$wingetScopeArgs" -match '--scope\s+machine' -and $env:LOCALAPPDATA -and
+                    @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') -Directory -Filter "$wingetId`_*" -ErrorAction SilentlyContinue).Count -gt 0) {
+                    Write-Host "  $wingetId is installed per-user but the catalog keeps it machine-wide (dot upgrade cannot upgrade a per-user copy)." -ForegroundColor Yellow
+                    Write-Host "    One-time fix, from a NON-elevated terminal: winget uninstall --id $wingetId --exact   then re-run dot up (it reinstalls machine-wide)" -ForegroundColor Yellow
+                }
+                continue
+            }
             $wingetMissing += $wingetEntry
         }
         if ($wingetStillChoco.Count -gt 0) {
@@ -1089,8 +1103,10 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     # automation. Deliberately here, not under dev_desktop: that's
     # gated host-only and never runs on WSL/containers, exactly where
     # coding agents most often run.
-    # Only when missing: the install re-ran on every apply with the build already in
-    # %LOCALAPPDATA%\ms-playwright, and `dot up` never upgrades (`dot upgrade` re-runs it).
+    # Only when a complete Chromium is cached (Test-PlaywrightChromiumInstalled, scripts/lib/
+    # ps-skills.ps1 - Playwright marks a finished browser with INSTALLATION_COMPLETE): `npx playwright
+    # install` costs ~20 s even when there is nothing to download, and a newer build is an upgrade,
+    # which `dot up` never does (`dot upgrade` refreshes it).
     if (Test-PlaywrightChromiumInstalled) {
         Write-Host "  Playwright Chromium is installed - skipping the download (dot upgrade updates it)." -ForegroundColor Yellow
     } else {

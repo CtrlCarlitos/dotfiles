@@ -769,19 +769,23 @@ function Invoke-OpenCodeSuperpowersRefresh {
     return $ok
 }
 
-# $true when a Playwright Chromium build is already in its browser cache (PLAYWRIGHT_BROWSERS_PATH,
-# else %LOCALAPPDATA%\ms-playwright - ~\.cache\ms-playwright where LOCALAPPDATA is unset). `dot up`
-# reads it before `npx playwright install`, which re-ran on every apply.
+# $true when a COMPLETE Playwright Chromium build is in its browser cache (PLAYWRIGHT_BROWSERS_PATH
+# unless it is the literal "0", else %LOCALAPPDATA%\ms-playwright - ~\.cache\ms-playwright where
+# LOCALAPPDATA is unset). Playwright marks a finished download with an INSTALLATION_COMPLETE file;
+# a chromium-* directory without it is an interrupted one and must install again. `dot up` reads
+# this before `npx playwright install`, which re-ran on every apply.
 function Test-PlaywrightChromiumInstalled {
     $roots = @()
-    if ($env:PLAYWRIGHT_BROWSERS_PATH) {
+    if ($env:PLAYWRIGHT_BROWSERS_PATH -and $env:PLAYWRIGHT_BROWSERS_PATH -ne '0') {
         $roots += $env:PLAYWRIGHT_BROWSERS_PATH
     } else {
         if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'ms-playwright' }
         $roots += Join-Path (Join-Path (Get-SkillsHome) '.cache') 'ms-playwright'
     }
     foreach ($root in $roots) {
-        if (@(Get-ChildItem -LiteralPath $root -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+        $complete = @(Get-ChildItem -LiteralPath $root -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'INSTALLATION_COMPLETE') })
+        if ($complete.Count -gt 0) { return $true }
     }
     return $false
 }
