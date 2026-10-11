@@ -105,7 +105,7 @@ copy from before that is reported by `dot up`; the one-time fix is `winget unins
 Two more holds in the sweep: a new **Python minor** (3.14 to 3.15) is left out of `choco upgrade all`
 because venvs and uv/pipx tools are bound to their minor (patch releases still upgrade); take it with
 `DOTUPGRADE_PYTHON_MINOR=1 dot upgrade`. And a desktop app (Claude Desktop, ChatGPT / Codex, Antigravity,
-OpenCode Desktop) is offered for closing only when winget lists an upgrade for it.
+OpenCode Desktop, Ollama) is offered for closing only when winget lists an upgrade for it.
 A Docker Desktop still installed by Chocolatey lands there: see
 [Docker Desktop through winget](#docker-desktop-through-winget) below.
 
@@ -251,14 +251,16 @@ These desktop apps are running - their updates wait until they are closed:
 Stop them so everything upgrades now? [y] all  [s] choose each  [N] keep and defer
 ```
 
-The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE
-and OpenCode Desktop, recognised by their install folder: every process running from it belongs
-to the app, its background helpers included (Antigravity's language servers, the Store app's
-command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
+The desktop apps are Claude Desktop, ChatGPT / Codex (the Store app), Antigravity, Antigravity IDE,
+OpenCode Desktop and Ollama, recognised by their install folder: every process running from it
+belongs to the app, its background helpers included (Antigravity's language servers, the Store
+app's command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
 Several share a process name with a CLI (claude, codex, opencode), so the name alone never
 decides. Their installers cannot replace a running app, and Claude Desktop's closes every
 `claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a session: it
-never defers a CLI upgrade, and closing it loses nothing.
+never defers a CLI upgrade, and closing it loses nothing. Ollama is closed the same way rather
+than left to its systray's own "restart to update" offer, so it upgrades consistently with every
+other desktop app in the sweep.
 
 Background work is covered too:
 

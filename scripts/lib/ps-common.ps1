@@ -189,12 +189,15 @@ $script:NonSessionPathPattern = @{
 # language_server.exe, the IDE's language_server_windows_x64.exe, the Store app's
 # codex-command-runner) - never by name alone: several share a name with a CLI (claude, codex,
 # opencode). Service: a Windows service the app installs (stopped with it when running).
+# Ollama's systray offers its own "restart to update" - closed here instead, like every other
+# app in this list, so winget upgrades it the same way regardless of what the tray offers.
 $script:AgentDesktopApp = @(
     [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; UpgradeId = 'Anthropic.Claude' }
     [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
     [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; UpgradeId = 'Google.Antigravity' }
     [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; UpgradeId = '' }
     [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; UpgradeId = 'SST.OpenCodeDesktop' }
+    [pscustomobject]@{ Label = 'Ollama';           Path = '\\Programs\\Ollama\\';                              Service = ''; UpgradeId = 'Ollama.Ollama' }
 )
 
 # winget ids of the apps with an upgrade pending, or $null when winget cannot say. Closing a

@@ -180,6 +180,7 @@ $ocDesk = P 'OpenCode' 701 'C:\Users\u\AppData\Local\Programs\@opencode-aideskto
 $ocCli = P 'opencode' 702 'C:\Users\u\AppData\Local\Microsoft\WinGet\Links\opencode.exe'
 $agDesk = P 'Antigravity' 801 'C:\Users\u\AppData\Local\Programs\antigravity\Antigravity.exe'
 $noPath = P 'Antigravity' 802 $null
+$ollamaApp = P 'ollama app' 811 'C:\Users\u\AppData\Local\Programs\Ollama\ollama app.exe'
 # Claude Code + Claude Desktop: "y" stops both, so no claude.exe is left to hold Claude Desktop
 $script:resets = 0
 Case 'desk-all' @($code, $deskA, $deskB) @('y')
@@ -191,7 +192,7 @@ Case 'desk-keep' @($deskA, $deskB) @('n')
 Case 'desk-ancestor' @($deskA, $deskB) @('y') @(501)
 Case 'desk-nopath' @($noPath) @('y')
 # grouping, and desktop processes never count as CLI sessions (they would defer CLI upgrades)
-$script:table = @($code, $deskA, $codexApp, $codexAppCli, $ocDesk, $ocCli, $agDesk)
+$script:table = @($code, $deskA, $codexApp, $codexAppCli, $ocDesk, $ocCli, $agDesk, $ollamaApp)
 Write-Output ('desk-apps=' + ((@(Get-AgentDesktopApp) | ForEach-Object { "$($_.Label):$(@($_.Processes).Count)" }) -join ','))
 Write-Output ('desk-sessions=' + ((@(Get-LiveAgentProcess -Name @('opencode', 'claude', 'codex', 'agy', 'serena')) | ForEach-Object { $_.Id }) -join ','))
 $script:table = @($codexApp, $codexAppCli, $ocDesk)
@@ -229,6 +230,14 @@ $script:wingetPending = @()
 Case 'pend-none' @($deskA, $deskB) @('y')
 $noId = P 'Antigravity IDE' 810 'C:\Users\u\AppData\Local\Programs\Antigravity IDE\Antigravity.exe'
 Case 'pend-no-id' @($noId) @('y')
+$script:wingetPending = $null
+
+# Ollama: closed like every other desktop app, never left to its systray's own "restart to
+# update" - and only offered when winget actually has Ollama.Ollama pending.
+$script:wingetPending = @('Ollama.Ollama')
+Case 'ollama-pend-own' @($ollamaApp) @('y')
+$script:wingetPending = @('Anthropic.Claude')
+Case 'ollama-pend-other' @($ollamaApp) @('y')
 $script:wingetPending = $null
 
 # Background work an ENDED session left: offered; the same work under a live session is not.
@@ -282,7 +291,7 @@ PSEOF
     expect 'desk-keep=0||prompts=1'
     expect 'desk-ancestor=1|502|prompts=1'
     expect 'desk-nopath=0||prompts=0'
-    expect 'desk-apps=Claude Desktop:1,ChatGPT / Codex:2,Antigravity:1,OpenCode Desktop:1'
+    expect 'desk-apps=Claude Desktop:1,ChatGPT / Codex:2,Antigravity:1,OpenCode Desktop:1,Ollama:1'
     expect 'desk-sessions=702,200'
     expect 'desk-defers-nothing=False'
     expect 'desk-helpers=Antigravity:801+803'
@@ -294,6 +303,8 @@ PSEOF
     expect 'pend-own=2|501,502|prompts=1'
     expect 'pend-none=0||prompts=0'
     expect 'pend-no-id=1|810|prompts=1'
+    expect 'ollama-pend-own=1|811|prompts=1'
+    expect 'ollama-pend-other=0||prompts=0'
     # top of each orphaned chain only; owned by a live session (or by Claude DESKTOP, not a session) differs
     expect 'orphans=Claude Code background task@900,Claude Code background task@930'
     expect 'orphans-stopped=900|prompts=1'
