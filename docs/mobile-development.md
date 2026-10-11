@@ -190,9 +190,12 @@ still need a manual check on real hardware.
 ## MCP servers
 
 - **Maestro MCP** (`maestro mcp`, a local server) is registered for all four
-  agents wherever the Maestro binary is installed: Claude Code at user scope
-  (`claude mcp add -s user`), Codex (`codex mcp add`), and OpenCode and agy
-  from the `agents.mcp` catalog in `.chezmoidata/agents.yaml`.
+  agents whenever the Maestro binary is installed AND `mobile_dev` is on:
+  Claude Code at user scope (`claude mcp add -s user`), Codex
+  (`codex mcp add`), and OpenCode and agy from the `agents.mcp` catalog in
+  `.chezmoidata/agents.yaml` (gated there via that catalog entry's own
+  `group: mobile_dev` key, so an unrelated Maestro install elsewhere on
+  `PATH` is never auto-registered with the group off).
 - **Expo MCP** (`https://mcp.expo.dev/mcp`) is a hosted, remote server
   authenticated with OAuth. It is registered for **OpenCode and agy only**
   when `mobile_dev` is on - not for Claude Code or Codex, which is a
@@ -200,8 +203,8 @@ still need a manual check on real hardware.
   one-time step per machine: OpenCode prompts for it on first use, and in
   agy run `/mcp auth expo`.
 - **agent-device MCP** (`agent-device mcp`, a local server) is registered
-  for all four agents the same way Maestro is, wherever the `agent-device`
-  binary is installed.
+  for all four agents the same way Maestro is - binary present AND
+  `mobile_dev` on, same `group: mobile_dev` catalog gate for OpenCode/agy.
 
 
 ## VS Code
