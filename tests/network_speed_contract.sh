@@ -100,6 +100,13 @@ Write-Output ('slow-skip=' + $script:r + '|' + ($text -match 'Network is slow: 1
 $script:answer = 'q'; $null = Capture { $script:r = Invoke-DotNetworkCheck }; Write-Output ('slow-stop=' + $script:r)
 $script:answer = ''; $null = Capture { $script:r = Invoke-DotNetworkCheck }; Write-Output ('slow-default=' + $script:r)
 $script:answer = 'y'; $null = Capture { $script:r = Invoke-DotNetworkCheck }; Write-Output ('slow-yes=' + $script:r)
+# --yes (DotAnswerYes): continues without asking, and says so in words that match THIS prompt's
+# own c/s/q vocabulary - not Read-DotAnswer's generic "y" (right for y/N prompts, wrong here).
+$script:DotAnswerYes = $true
+$script:asked = 0
+$text = Capture { $script:r = Invoke-DotNetworkCheck }
+Write-Output ('slow-unattended=' + $script:r + '|asked=' + $script:asked + '|' + ($text -match 'Continuing \(unattended\)'))
+Remove-Variable -Name DotAnswerYes -Scope Script
 $env:DOT_SLOW_MBPS = '5'
 $script:asked = 0; $null = Capture { $script:r = Invoke-DotNetworkCheck }; Write-Output ('threshold=' + $script:r + '|asked=' + $script:asked)
 Remove-Item Env:DOT_SLOW_MBPS
@@ -155,6 +162,7 @@ PSEOF
     expect 'slow-stop=stop'
     expect 'slow-default=continue'
     expect 'slow-yes=continue'
+    expect 'slow-unattended=continue|asked=0|True'
     expect 'threshold=continue|asked=0'
     expect 'unmeasurable=True|continue'
     expect 'off=continue|asked=0'
