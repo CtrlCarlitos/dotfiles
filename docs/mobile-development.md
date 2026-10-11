@@ -2,8 +2,9 @@
 
 The opt-in `mobile_dev` package group installs the Expo and Android tooling
 for building and testing mobile apps: the Android SDK, ADB, the emulator,
-scrcpy, a standalone JDK, and the Maestro CLI and MCP server. It is the 17th
-package group and defaults to off. Selecting it also forces `agent_toolkit`
+scrcpy, a standalone JDK, and the Maestro CLI and MCP server (which of these
+each platform actually gets today differs - see the per-platform sections
+below). It is the 17th package group and defaults to off. Selecting it also forces `agent_toolkit`
 on, because the mobile flows rely on Serena and Playwright already being
 present. The design, the decisions behind it, and the parity requirements
 are in [the mobile-dev design doc](superpowers/specs/2026-10-10-mobile-dev-design.md),
@@ -65,10 +66,16 @@ on whichever `adb.exe` resolves first tells you which build is active.
 
 The `mobile_dev` group installs Maestro, agent-device, and a standalone JDK
 inside WSL the same way it does on native Linux, and registers the Maestro
-MCP server for Claude Code and Codex. What WSL cannot do is run an Android
+MCP server for all four agents: Claude Code (user scope), Codex, OpenCode,
+and agy (see "MCP servers" below). What WSL cannot do is run an Android
 device or emulator itself - that only exists on the Windows side (see
-"Windows setup" above) - so WSL's `adb`, Maestro, and agent-device need a
-bridge to the ADB server running on Windows.
+"Windows setup" above) - so Maestro and agent-device need a bridge to the
+ADB server running on Windows.
+
+**Known gap:** this plan does not install an `adb` client inside WSL. The
+bridge below only exports `ADB_SERVER_SOCKET`, which is honored by whatever
+`adb` client the tooling (Maestro, agent-device) already has access to; no
+WSL-side `adb` binary is provisioned for you.
 
 `dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
 templating involved - it is a plain file applied identically everywhere) and
@@ -78,14 +85,20 @@ How it resolves that address depends on which WSL networking mode is active:
 - **Mirrored networking** (`wslinfo --networking-mode` prints `mirrored`):
   the loopback interface is shared with Windows, so `ADB_SERVER_SOCKET` is
   set to `tcp:127.0.0.1:5037`.
-- **NAT networking** (the default on older WSL builds, or whenever
-  `wslinfo` is unavailable or inconclusive): the Windows host is reached at
-  the nameserver address in `/etc/resolv.conf`, so `ADB_SERVER_SOCKET` is
-  set to `tcp:<that address>:5037`.
+- **NAT networking** (the default, or whenever `wslinfo` is unavailable or
+  inconclusive): the Windows host is the default route's gateway
+  (`ip route show default`), so `ADB_SERVER_SOCKET` is set to
+  `tcp:<gateway>:5037`. It is deliberately *not* the nameserver in
+  `/etc/resolv.conf`: with DNS tunneling, on by default on current WSL
+  builds, that nameserver is `10.255.255.254`, a WSL-side DNS proxy, not the
+  Windows host. `/etc/resolv.conf` is used only as a last resort when `ip`
+  is missing.
 
 This is recomputed fresh every time a new shell starts (the resolved address
 can change across Windows reboots or network reconnects) and never clobbers
-an `ADB_SERVER_SOCKET` you have exported yourself.
+an `ADB_SERVER_SOCKET` you have exported yourself. It (and the `JAVA_HOME`
+detection) only runs where `mobile_dev` actually installed Maestro
+(`~/.local/bin/maestro`); on machines without it, both blocks do nothing.
 
 The bridge only has something to reach once Carlos starts the ADB server on
 the Windows side each session. That manual step - the exact
@@ -96,16 +109,23 @@ covers the WSL side of the handshake.
 
 ## Linux and macOS
 
-Both platforms get full native parity with WSL for everything this plan
-installs: the Android SDK command-line tools, platform-tools, the emulator,
-a standalone JDK, Maestro, and agent-device all run on a single host
-natively, with no Windows/WSL split needed on either platform. macOS has a
-clean brew path for all of it; native Linux uses the SDK command-line-tools
-zip rather than an apt Android Studio package.
+On native Linux and macOS, `mobile_dev` installs exactly what it installs in
+WSL: the Maestro CLI (pinned and checksum-verified, under
+`~/.local/opt/maestro`, linked from `~/.local/bin`), agent-device (npm
+global), and a standalone JDK 17 (apt's `openjdk-17-jdk` or brew's
+`openjdk@17`), plus the same MCP registrations described under "MCP
+servers" below. Everything runs on a single host, with no Windows/WSL split.
+
+**Known gap:** the Android SDK command-line tools, platform-tools (`adb`),
+and the emulator are **not** installed on native Linux or macOS by this
+plan. The design doc's parity goal calls for them, but no installer step
+provisions them yet; until that is scoped and added, install them yourself
+(Android Studio, or the SDK command-line-tools zip) if you need a local
+device or emulator.
 
 **Caveat:** only the installable half of the acceptance loop is covered by
 this repo's hosted CI. GitHub Actions' `ubuntu-latest` and `macos-latest`
-runners can verify that the SDK tools, Maestro, and agent-device install and
+runners can verify that Maestro, agent-device, and the JDK install and
 register correctly, but they do not boot an Android emulator or exercise a
 Maestro flow against it - that would require multi-GB emulator images and
 GUI virtualization that hosted CI doesn't provide. The
@@ -113,6 +133,22 @@ emulator-boot-and-Maestro-flow half of acceptance is therefore untested by
 this repo's CI on both platforms. That's a real, stated gap, not a silent
 one - anyone relying on CI green here should know the device-automation path
 itself still needs a manual check on real hardware.
+
+
+## MCP servers
+
+- **Maestro MCP** (`maestro mcp`, a local server) is registered for all four
+  agents wherever the Maestro binary is installed: Claude Code at user scope
+  (`claude mcp add -s user`), Codex (`codex mcp add`), and OpenCode and agy
+  from the `agents.mcp` catalog in `.chezmoidata/agents.yaml`.
+- **Expo MCP** (`https://mcp.expo.dev/mcp`) is a hosted, remote server
+  authenticated with OAuth. It is registered for **OpenCode and agy only**
+  when `mobile_dev` is on - not for Claude Code or Codex, which is a
+  deliberate scope boundary rather than an oversight. Authentication is a
+  one-time step per machine: OpenCode prompts for it on first use, and in
+  agy run `/mcp auth expo`.
+- agent-device's own MCP entrypoint, if it has one, is not registered for
+  any agent yet (a known gap).
 
 
 ## VS Code
