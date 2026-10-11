@@ -875,6 +875,19 @@ install_mobile_dev() {
     info "Android SDK/emulator skipped (no GUI/emulator in a devcontainer) - Maestro, agent-device, and the JDK above are still installed"
 {{- end }}
 
+    # --- Runtime marker: "mobile_dev's installer ran on this machine" ------
+    # dot_zshrc's JAVA_HOME and ADB_SERVER_SOCKET blocks gate on this file,
+    # not on Maestro's ~/.local/bin/maestro symlink: that symlink only exists
+    # when THIS function downloaded Maestro, so a Maestro already on PATH
+    # from a manual install (skipped above) or a failed Maestro download
+    # would leave both blocks dark even though the JDK/Android SDK installed.
+    # Written unconditionally - this function is only ever CALLED when
+    # mobile_dev is selected. ~/.local/state is not chezmoi-managed (nothing
+    # in the source tree targets it), so this is not a run_onchange write to
+    # a chezmoi-owned file (docs/invariants.md #3).
+    mkdir -p "$HOME/.local/state/dotfiles" && touch "$HOME/.local/state/dotfiles/mobile_dev" \
+        || warn "could not write the mobile_dev marker (~/.local/state/dotfiles/mobile_dev) - new shells won't export JAVA_HOME/ADB_SERVER_SOCKET"
+
     # --- WSL: heads-up about the ADB bridge to the Windows host -----------
     # adb/Maestro/agent-device need a real device or emulator, which under
     # WSL only exists on the Windows side (design doc §3.3/§3.10) - this is

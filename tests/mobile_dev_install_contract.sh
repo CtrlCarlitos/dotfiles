@@ -145,11 +145,17 @@ else
 fi
 
 # Disabled = no side effects (final fix round, I3): dot_zshrc is applied on
-# every machine, so the JDK and ADB blocks are inert unless mobile_dev
-# installed Maestro here ($HOME/.local/bin/maestro, install_mobile_dev's
-# symlink), alongside their existing no-clobber guards.
-require "$zshrc" 'if [[ -x "$HOME/.local/bin/maestro" ]]; then'
-require "$zshrc" 'if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -x "$HOME/.local/bin/maestro" ]]'
+# every machine, so the JDK and ADB blocks are inert unless mobile_dev's
+# installer ran here. The signal is install_mobile_dev()'s own marker
+# (~/.local/state/dotfiles/mobile_dev), NOT Maestro's ~/.local/bin/maestro
+# symlink (second final fix round, I-A): that symlink is missing whenever
+# Maestro was pre-installed elsewhere or its download failed, while the
+# JDK/Android SDK still installed and the WSL heads-up still promised the
+# bridge.
+require "$zshrc" 'if [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]]; then'
+require "$zshrc" 'if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]]'
+forbid "$zshrc" '[[ -x "$HOME/.local/bin/maestro" ]]'
+require "$tmpl" 'touch "$HOME/.local/state/dotfiles/mobile_dev"'
 if command -v zsh >/dev/null 2>&1; then
     # Execute both blocks under zsh with a HOME that has no Maestro: neither
     # JAVA_HOME, ADB_SERVER_SOCKET nor PATH may change.
@@ -160,6 +166,30 @@ if command -v zsh >/dev/null 2>&1; then
         ztmp="$(mktemp -d)"
         got="$(HOME="$ztmp" zsh -fc 'unset JAVA_HOME ADB_SERVER_SOCKET ANDROID_HOME; before="$PATH"; '"$blocks"$'\n''print -r -- "${JAVA_HOME:-}|${ADB_SERVER_SOCKET:-}|${ANDROID_HOME:-}|$([[ "$PATH" == "$before" ]] && print same)"' 2>/dev/null)"
         if [ "$got" = '|||same' ]; then pass; else fail "dot_zshrc JDK/ADB/Android SDK blocks must be inert without mobile_dev installed (got '$got')"; fi
+        # I-A: the marker present but NO Maestro symlink (Maestro pre-installed
+        # elsewhere, or its download failed) - both blocks must still activate.
+        # /proc/version is swapped for a WSL fixture and wslinfo/ip are stubs,
+        # so the ADB block's WSL path runs deterministically on any host.
+        mtmp="$(mktemp -d)"
+        mkdir -p "$mtmp/home/.local/state/dotfiles" "$mtmp/stubs" "$mtmp/jdk/bin"
+        touch "$mtmp/home/.local/state/dotfiles/mobile_dev"
+        printf 'Linux version 5.15.0-microsoft-standard-WSL2\n' >"$mtmp/version"
+        printf '#!/bin/sh\necho nat\n' >"$mtmp/stubs/wslinfo"
+        printf '#!/bin/sh\necho "default via 172.21.144.1 dev eth0 proto kernel"\n' >"$mtmp/stubs/ip"
+        chmod +x "$mtmp/stubs/wslinfo" "$mtmp/stubs/ip"
+        wsl_blocks="${blocks//\/proc\/version/$mtmp/version}"
+        got="$(HOME="$mtmp/home" PATH="$mtmp/stubs:$PATH" zsh -fc 'unset ADB_SERVER_SOCKET ANDROID_HOME; export JAVA_HOME="$1"; before="$PATH"; '"$wsl_blocks"$'\n''print -r -- "${ADB_SERVER_SOCKET:-}|${PATH%%:*}"' _ "$mtmp/jdk" 2>/dev/null)"
+        [ -e "$mtmp/home/.local/bin/maestro" ] && fail "test setup: the marker-only HOME must have no Maestro symlink"
+        if [ "$got" = "tcp:172.21.144.1:5037|$mtmp/jdk/bin" ]; then
+            pass
+        else
+            fail "dot_zshrc: with the mobile_dev marker but no Maestro symlink, ADB_SERVER_SOCKET must be exported and \$JAVA_HOME/bin put on PATH (got '$got')"
+        fi
+        # ... and the same HOME without the marker stays inert even on WSL.
+        rm -f "$mtmp/home/.local/state/dotfiles/mobile_dev"
+        got="$(HOME="$mtmp/home" PATH="$mtmp/stubs:$PATH" zsh -fc 'unset ADB_SERVER_SOCKET; export JAVA_HOME="$1"; '"$wsl_blocks"$'\n''print -r -- "${ADB_SERVER_SOCKET:-}|${PATH%%:*}"' _ "$mtmp/jdk" 2>/dev/null)"
+        if [ "$got" = "|$mtmp/stubs" ]; then pass; else fail "dot_zshrc: without the mobile_dev marker the JDK/ADB blocks must stay inert on WSL (got '$got')"; fi
+        rm -rf "$mtmp"
         # Android SDK block (Task 9): with the installer's SDK present it
         # exports ANDROID_HOME and APPENDS the tool dirs that exist (an adb
         # already on PATH keeps precedence) ...
@@ -398,6 +428,28 @@ if command -v chezmoi >/dev/null 2>&1; then
     else
         fail "render (devcontainer): install_android_sdk must not be called (full or adb) - only the skip message"
     fi
+    # I-A (second final fix round): execute the REAL rendered
+    # install_mobile_dev() with Maestro and agent-device already on PATH
+    # (a prior manual install - the installer skips both, so its own
+    # ~/.local/bin/maestro symlink is never created). It must still write
+    # the ~/.local/state/dotfiles/mobile_dev marker dot_zshrc gates on.
+    mk="$(mktemp -d)"
+    mkdir -p "$mk/home" "$mk/stubs"
+    for stub in maestro agent-device npm; do
+        printf '#!/bin/sh\nexit 0\n' >"$mk/stubs/$stub"
+        chmod +x "$mk/stubs/$stub"
+    done
+    mk_fns='info() { :; }; success() { :; }; warn() { printf "warn: %s\n" "$1" >&2; }; install_android_sdk() { return 0; }'$'\n'
+    mk_fns+="$(fn_body "$sdk_render" install_mobile_dev)"
+    got="$(HOME="$mk/home" PATH="$mk/stubs:$PATH" PKG_MANAGER=none \
+        bash -c 'set -euo pipefail; '"$mk_fns"$'\n''install_mobile_dev; echo rc=0' 2>&1)"
+    case "$got" in *rc=0*) pass ;; *) fail "install_mobile_dev (Maestro pre-installed): did not complete (output: $got)" ;; esac
+    if [ -f "$mk/home/.local/state/dotfiles/mobile_dev" ] && [ ! -e "$mk/home/.local/bin/maestro" ]; then
+        pass
+    else
+        fail "install_mobile_dev (Maestro pre-installed): must write ~/.local/state/dotfiles/mobile_dev even though it lays down no Maestro symlink"
+    fi
+    rm -rf "$mk"
     for pin in sha256_linux sha256_mac_x86_64 sha256_mac_arm64; do
         want_pin="$(sed -n "s/^  android_commandlinetools_${pin}: \"\\([^\"]*\\)\"\$/\\1/p" "$repo_root/.chezmoidata.yaml")"
         if [ -n "$want_pin" ] && grep -Fq "want='$want_pin'" "$sdk_render"; then

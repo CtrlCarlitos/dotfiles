@@ -135,11 +135,13 @@ composer_home="${COMPOSER_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/composer}"
 # (not linked into brew's shared bin), so its prefix has to be found
 # explicitly. First existing candidate wins; an already-exported JAVA_HOME
 # (another JDK manager, a devcontainer image) is left alone.
-# Inert unless mobile_dev actually installed something here: dot_zshrc is
-# applied on every machine, and a disabled group must have no side effects.
-# Maestro's symlink ($HOME/.local/bin/maestro, laid down by the installer's
-# install_mobile_dev) is the runtime proxy for "mobile_dev ran on this machine".
-if [[ -x "$HOME/.local/bin/maestro" ]]; then
+# Inert unless mobile_dev ran here: dot_zshrc is applied on every machine,
+# and a disabled group must have no side effects. The runtime signal is the
+# marker install_mobile_dev() touches at ~/.local/state/dotfiles/mobile_dev
+# (not chezmoi-managed) - NOT Maestro's ~/.local/bin/maestro symlink, which
+# is missing whenever Maestro was already on PATH from a manual install or
+# its own download failed, while the JDK/Android SDK still installed.
+if [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]]; then
   if [[ -z "${JAVA_HOME:-}" ]]; then
     for _jdk17 in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk-arm64 \
         /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 \
@@ -185,14 +187,14 @@ _adb_resolve_host() {
 # WSL only): unlike JAVA_HOME above, this is recomputed on EVERY new shell,
 # never cached - the resolved Windows host IP can change across Windows
 # reboots/network reconnects. Guarded so a user's own override is never
-# clobbered, and inert unless mobile_dev installed Maestro here (same proxy
-# as the JDK block above). dot_zshrc is applied byte-for-byte on every
+# clobbered, and inert unless mobile_dev ran here (the same
+# ~/.local/state/dotfiles/mobile_dev marker as the JDK block above). dot_zshrc is applied byte-for-byte on every
 # machine (WSL, native Linux, macOS, devcontainer) - it carries no chezmoi
 # template variables, so WSL is detected here the portable way
 # (/proc/version), the shell-native equivalent of .chezmoi.toml.tmpl's
 # $isWsl check. Best effort throughout: nothing here aborts the shell, and an
 # inconclusive detection just leaves ADB_SERVER_SOCKET unset.
-if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -x "$HOME/.local/bin/maestro" ]] \
+if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -f "$HOME/.local/state/dotfiles/mobile_dev" ]] \
     && grep -qi microsoft /proc/version 2>/dev/null; then
   _adb_mode="" _adb_route=""
   command -v wslinfo &>/dev/null && _adb_mode="$(wslinfo --networking-mode 2>/dev/null)"
