@@ -7,9 +7,11 @@ each platform actually gets today differs - see the per-platform sections
 below). It is the 17th package group and defaults to off. Selecting it also forces `agent_toolkit`
 on, because the mobile flows rely on Serena and Playwright already being
 present. The design, the decisions behind it, and the parity requirements
-are tracked in #336 (the design doc itself lived under the repo's
+are tracked in #336 (the design doc itself lived at
+`superpowers/specs/2026-10-10-mobile-dev-design.md`, under the repo's
 gitignored `docs/superpowers/` planning scratch, per that directory's own
-convention of never being committed).
+convention of never being committed - so it's a real path, not a
+clickable link, here).
 
 ## Windows setup
 
