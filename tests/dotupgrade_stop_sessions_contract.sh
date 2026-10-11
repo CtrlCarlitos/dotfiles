@@ -132,6 +132,9 @@ function Get-Service { param([string]$Name) if ($script:services.ContainsKey($Na
 function Stop-Service { param([string]$Name, [switch]$Force) $script:serviceStops += $Name }
 function Test-InteractiveConsole { return $script:interactive }
 function Read-Host { param($Prompt) $script:prompts++; return [string]$script:answers.Dequeue() }
+# What winget says is pending: $null = it cannot say (every running desktop app is offered).
+$script:wingetPending = $null
+function Get-WingetPendingId { if ($null -eq $script:wingetPending) { return $null }; return , @($script:wingetPending) }
 function Stop-AgentProcess { param($Process, [switch]$ResetTerminal) if ($ResetTerminal) { $script:resets++ }; $script:stopped += $Process.Id; return $true }
 $script:resets = 0
 function P($name, $id, $path) { [pscustomobject]@{ ProcessName = $name; Id = $id; Path = $path; StartTime = [datetime]'2026-10-04 10:00' } }
@@ -218,6 +221,16 @@ $script:services = @{ 'CodexSandboxService.OpenAI.Codex' = 'Stopped' }
 Case 'desk-service-idle' @() @('y')
 $script:services = @{}
 
+# A desktop app is offered only when its upgrade is pending (Codex was closed with nothing to install).
+$script:wingetPending = @('Anthropic.Claude')
+Case 'pend-other' @($codexApp) @('y')
+Case 'pend-own' @($deskA, $deskB) @('y')
+$script:wingetPending = @()
+Case 'pend-none' @($deskA, $deskB) @('y')
+$noId = P 'Antigravity IDE' 810 'C:\Users\u\AppData\Local\Programs\Antigravity IDE\Antigravity.exe'
+Case 'pend-no-id' @($noId) @('y')
+$script:wingetPending = $null
+
 # Background work an ENDED session left: offered; the same work under a live session is not.
 # not R: that is a built-in alias (Invoke-History), and aliases win over functions
 function Row($id, $parent, $name, $cmd, $path = '') { [pscustomobject]@{ Id = $id; ParentId = $parent; Name = $name; Path = $path; CommandLine = $cmd } }
@@ -277,6 +290,10 @@ PSEOF
     expect 'desk-service=0||prompts=1'
     expect 'desk-service-stopped=CodexSandboxService.OpenAI.Codex'
     expect 'desk-service-idle=0||prompts=0'
+    expect 'pend-other=0||prompts=0'
+    expect 'pend-own=2|501,502|prompts=1'
+    expect 'pend-none=0||prompts=0'
+    expect 'pend-no-id=1|810|prompts=1'
     # top of each orphaned chain only; owned by a live session (or by Claude DESKTOP, not a session) differs
     expect 'orphans=Claude Code background task@900,Claude Code background task@930'
     expect 'orphans-stopped=900|prompts=1'

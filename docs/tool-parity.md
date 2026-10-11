@@ -137,7 +137,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `zoxide` | modern_cli | procedure | `zoxide` | — | `ajeetdsouza.zoxide` | — | apt: package where the release has it, upstream script as fallback - by procedure |
 | `direnv` | modern_cli | `direnv` | `direnv` | — | `direnv.direnv` | — | hooked from .zshrc (direnv hook zsh); .envrc files are allowed per project, never by the installer |
 | `lazygit` | modern_cli | procedure | `lazygit` | — | `JesseDuffield.lazygit` | — | apt: GitHub release tarball by procedure |
-| `gum` | modern_cli | procedure | `gum` | — | `charmbracelet.gum` | — | apt: Charm's repo by procedure |
+| `gum` | modern_cli | procedure | `gum` | — | `charmbracelet.gum` | — | apt: Charm's repo by procedure; winget: machine-wide, because dot upgrade runs elevated and winget cannot upgrade a user-scope package from an elevated shell |
 | `tealdeer` | modern_cli | procedure | `tealdeer` | — | `dbrgn.tealdeer` | — | apt: official static binary by procedure (not in the archive before Ubuntu 23.04/lunar) |
 | `dust` | modern_cli | procedure | `dust` | — | `bootandy.dust` | — | apt: GitHub release .deb by procedure |
 | `duf` | modern_cli | `duf` | `duf` | — | `muesli.duf` | — | aliased over df when present |

@@ -190,12 +190,30 @@ $script:NonSessionPathPattern = @{
 # codex-command-runner) - never by name alone: several share a name with a CLI (claude, codex,
 # opencode). Service: a Windows service the app installs (stopped with it when running).
 $script:AgentDesktopApp = @(
-    [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = '' }
-    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex' }
-    [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = '' }
-    [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = '' }
-    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = '' }
+    [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; UpgradeId = 'Anthropic.Claude' }
+    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
+    [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; UpgradeId = 'Google.Antigravity' }
+    [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; UpgradeId = '' }
+    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; UpgradeId = 'SST.OpenCodeDesktop' }
 )
+
+# winget ids of the apps with an upgrade pending, or $null when winget cannot say. Closing a
+# desktop app is only worth it when its upgrade is waiting: dot upgrade closed ChatGPT / Codex
+# with nothing to install (2026-10-10). $null (and an app with no UpgradeId) keeps the old
+# behaviour - offer to close it.
+function Get-WingetPendingId {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $null }
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& winget upgrade --include-unknown --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0 -and -not ($lines -match '(?i)upgrades? available|No installed package')) { return $null }
+        # the comma keeps an EMPTY list an empty list: bare, it unrolls to $null, which means "unknown"
+        return , @(ConvertFrom-WingetUpgradeTable -Lines $lines | ForEach-Object { $_.Id })
+    }
+    catch { return $null }
+    finally { $ErrorActionPreference = $previous }
+}
 
 # One entry per RUNNING desktop app: its label, all its processes, and its service when that
 # runs. A process whose path cannot be read is not claimed by any app.
@@ -224,7 +242,7 @@ function Get-AgentDesktopApp {
             $svc = Get-Service -Name $app.Service -ErrorAction SilentlyContinue
             if ($svc -and "$($svc.Status)" -eq 'Running') { $service = $app.Service }
         }
-        if ($procs.Count -gt 0 -or $service) { [pscustomobject]@{ Label = $app.Label; Processes = $procs; Service = $service } }
+        if ($procs.Count -gt 0 -or $service) { [pscustomobject]@{ Label = $app.Label; Processes = $procs; Service = $service; UpgradeId = $app.UpgradeId } }
     }
 }
 
@@ -504,6 +522,13 @@ function Invoke-LiveSessionStop {
     $procs = @(Get-StoppableAgentProcess -Name $Name -ExcludeId $ExcludeId)
     $sessionSeconds = $scanWatch.Elapsed.TotalSeconds
     $apps = @(Get-AgentDesktopApp -ExcludeId $ExcludeId)
+    # Offer only the apps whose upgrade is waiting (unknown ids and an unreadable listing offer all).
+    if (@($apps | Where-Object { $_.UpgradeId }).Count -gt 0) {
+        $pendingIds = Get-WingetPendingId
+        if ($null -ne $pendingIds) {
+            $apps = @($apps | Where-Object { -not $_.UpgradeId -or @($pendingIds) -contains $_.UpgradeId })
+        }
+    }
     $appSeconds = $scanWatch.Elapsed.TotalSeconds - $sessionSeconds
     $orphans = @(Get-OrphanAgentHelper -ExcludeId $ExcludeId)
     $helperSeconds = $scanWatch.Elapsed.TotalSeconds - $sessionSeconds - $appSeconds
@@ -733,6 +758,32 @@ function Test-NpmGlobalCurrent {
     finally { $ErrorActionPreference = $previous }
 }
 
+# The Chocolatey Python packages (python, python3, python3NN) whose available version is a new
+# minor of the installed one, from `choco outdated --limit-output` lines (name|installed|available|pinned).
+# DOTUPGRADE_PYTHON_MINOR=1 takes the jump. Asked only when a Python package is installed under
+# $ChocoLib; a failed probe holds nothing.
+function Get-ChocoPythonMinorHold {
+    param([string]$ChocoLib, [string[]]$OutdatedLine)
+    if ($env:DOTUPGRADE_PYTHON_MINOR -eq '1') { return @() }
+    if ($null -eq $OutdatedLine -or $OutdatedLine.Count -eq 0) {
+        if (-not $ChocoLib -or @(Get-ChildItem -LiteralPath $ChocoLib -Directory -Filter 'python*' -ErrorAction SilentlyContinue).Count -eq 0) { return @() }
+        if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { return @() }
+        $previous = $ErrorActionPreference
+        try { $ErrorActionPreference = 'Continue'; $OutdatedLine = @(& choco outdated --limit-output 2>$null | ForEach-Object { "$_" }) }
+        catch { $OutdatedLine = @() }
+        finally { $ErrorActionPreference = $previous }
+    }
+    $held = @()
+    foreach ($line in @($OutdatedLine)) {
+        $parts = "$line" -split '\|'
+        if ($parts.Count -lt 3 -or $parts[0] -notmatch '^python3?\d*$') { continue }
+        if ($parts[1] -match '^(\d+)\.(\d+)' ) { $have = "$($Matches[1]).$($Matches[2])" } else { continue }
+        if ($parts[2] -match '^(\d+)\.(\d+)' ) { $want = "$($Matches[1]).$($Matches[2])" } else { continue }
+        if ($have -ne $want) { $held += $parts[0] }
+    }
+    return @($held)
+}
+
 # The `choco upgrade all` argument list. Chocolatey's `claude` package (Claude Desktop) ends
 # its installer with `taskkill /F /IM claude.exe /T`, which kills EVERY claude.exe - and
 # Claude Code's CLI has the same image name, so a live Claude Code session dies with it
@@ -742,10 +793,18 @@ function Test-NpmGlobalCurrent {
 # Desktop or Docker Desktop moved to winget, the --except made Chocolatey warn "Some packages
 # specified in the 'except' list were not found" on every run.
 function Get-ChocoUpgradeArgument {
-    param([switch]$KeepDockerDesktop, [string]$ChocoLib)
+    param([switch]$KeepDockerDesktop, [string]$ChocoLib, [string[]]$OutdatedLine)
     if (-not $ChocoLib) { $ChocoLib = Join-Path $(if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }) 'lib' }
     $chocoArguments = @('upgrade', 'all', '-y', '--no-progress')
     $except = @()
+    # A new Python minor (3.14 -> 3.15) is not a routine upgrade: venvs, uv tools and pipx
+    # environments are bound to the minor they were made with (2026-10-10: python, python3 and
+    # python315 moved to 3.15.0 under `choco upgrade all`). Patch releases still flow.
+    $pythonHeld = @(Get-ChocoPythonMinorHold -ChocoLib $ChocoLib -OutdatedLine $OutdatedLine)
+    if ($pythonHeld.Count -gt 0) {
+        $except += $pythonHeld
+        Write-Host ("  Python minor upgrade held ({0}): venvs and uv/pipx tools are bound to the minor they were made with. Take it with DOTUPGRADE_PYTHON_MINOR=1 dot upgrade (then rebuild them)." -f ($pythonHeld -join ', ')) -ForegroundColor Yellow
+    }
     if ((Test-Path -LiteralPath (Join-Path $ChocoLib 'claude')) -and @(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) { $except += 'claude' }
     # Docker Desktop's installer cannot replace a running app: when the operator kept it running,
     # leave its package out instead of letting the installer fail or hang.
@@ -919,6 +978,7 @@ function Invoke-WingetUpgradeAll {
     catch { $LogPath = $null; Write-Verbose "upgrade log unavailable: $($_.Exception.Message)" }
 
     $installed = 0
+    $userScopeBlocked = $false
     $allLines = New-Object System.Collections.Generic.List[string]
     $previous = $ErrorActionPreference
     $pinned = @()
@@ -939,6 +999,7 @@ function Invoke-WingetUpgradeAll {
             $allLines.Add($line)
             if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $line }
             if ($line -match 'Successfully installed') { $installed++ }
+            if ($line -match 'installed for user scope cannot be uninstalled when running with administrator') { $userScopeBlocked = $true }
             # spinner frames, blank lines and download bars carry no information
             if ($line -match '^\s*[-\\|/]?\s*$' -or $line -match '[\u2588\u2592]' -or $line -match '^\s*[\d.]+\s*[KMG]B\s*/\s*[\d.]+\s*[KMG]B') { return }
             # the blocked note is explained (or repeated) by the summary below
@@ -963,6 +1024,9 @@ function Invoke-WingetUpgradeAll {
         $names = @($pending.Rows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
         Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
         if ($RunningNote) { Write-Host "  $RunningNote" -ForegroundColor Yellow }
+    }
+    if ($userScopeBlocked) {
+        Write-Host "  A per-user winget package cannot be upgraded from this elevated shell. Upgrade it from a NON-elevated terminal (winget upgrade <id>), or reinstall it machine-wide: winget uninstall <id> there, then winget install --scope machine <id> here." -ForegroundColor Yellow
     }
     elseif ($installed -eq 0 -and @($pending.Other).Count -eq 0) {
         Write-Host "  Nothing to upgrade in winget."
@@ -1109,6 +1173,12 @@ function Get-WingetPackageUpgrade {
     try {
         $ErrorActionPreference = 'Continue'
         $lines = @(& winget upgrade --id $Id --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+        $row = @(ConvertFrom-WingetUpgradeTable -Lines $lines | Where-Object { $_.Id -eq $Id }) | Select-Object -First 1
+        if ($row) { return [string]$row.Available }
+        # The by-id listing came back without the row (2026-10-10: VS Code was running, 1.141.0 was
+        # pending, and the probe saw nothing, so the installer ran into the running app). The full
+        # listing is what the sweep summary parses and it did show the row: ask it as a second opinion.
+        $lines = @(& winget upgrade --include-unknown --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
         $row = @(ConvertFrom-WingetUpgradeTable -Lines $lines | Where-Object { $_.Id -eq $Id }) | Select-Object -First 1
         if ($row) { return [string]$row.Available }
     }
