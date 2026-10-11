@@ -45,6 +45,14 @@ require "$ai_ps1" 'Get-OpenCodeSuperpowersPathInstall'
 require "$ai_ps1" 'Invoke-OpenCodeSuperpowersRefresh'
 require "$ai_sh" 'superpowers_report'
 require "$ai_ps1" 'Write-SuperpowersReport'
+# claude_superpowers_installs's `claude plugin list --json` must run under net_timeout_tty, not
+# plain net_timeout: a WSL `dot upgrade` (2026-10-11) sat with it stopped in state T (SIGTTIN) for
+# 17+ minutes - plain net_timeout's `timeout` runs the command in a NEW process group, so a
+# tty-touching claude outside the terminal's foreground group gets stopped by the kernel, and the
+# stopped `timeout` process can't even act on its own alarm to kill it. Same bug class as #355's
+# `claude mcp add`, fixed there with --foreground; this call site was missed.
+require "$lib" 'net_timeout_tty 60 claude plugin list --json'
+forbid "$lib" 'net_timeout 60 claude plugin list --json'
 # dot up asks before it fetches
 for pair in "$sh_installer:codex_superpowers_installed_version" "$sh_installer:agy_superpowers_installed" \
     "$sh_installer:install_playwright_chromium" "$ps1_installer:Get-CodexSuperpowersInstalledVersion" \

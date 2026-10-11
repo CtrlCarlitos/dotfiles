@@ -641,7 +641,11 @@ claude_superpowers_installs() {
     # Exit 1 when the lookup itself fails (timed out, errored): the caller must not
     # read an empty answer as "not installed" (2026-10-11: a 60 s hang did exactly that
     # on a box with a user-scope 7.0.0 install).
-    list="$(net_timeout 60 claude plugin list --json 2>/dev/null)" || return 1
+    # net_timeout_tty, not net_timeout (2026-10-11 WSL incident, same class as #355's `claude mcp
+    # add`): plain `timeout` runs claude in a new process group, and a tty-touching claude outside
+    # the terminal's foreground group gets stopped by the kernel (SIGTTIN) - and once stopped, the
+    # stopped `timeout` process can't act on its own alarm to kill it either.
+    list="$(net_timeout_tty 60 claude plugin list --json 2>/dev/null)" || return 1
     printf '%s\n' "$list" \
         | jq -b -r '.[]? | select((.id // "") | startswith("superpowers@")) | [(.version // ""), (.scope // ""), (.projectPath // "")] | @tsv' 2>/dev/null
 }
