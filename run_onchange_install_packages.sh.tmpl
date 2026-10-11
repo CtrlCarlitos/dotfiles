@@ -563,6 +563,100 @@ android_cmdline_tools_install() {
     return 1
 }
 
+# android_sdk_abi - the system-image ABI for this machine.
+android_sdk_abi() {
+    case "$(uname -m)" in
+        arm64|aarch64) printf 'arm64-v8a\n' ;;
+        *) printf 'x86_64\n' ;;
+    esac
+}
+
+# android_sdk_root - the SDK directory every mobile_dev step agrees on: an SDK
+# the user already has (ANDROID_HOME, ANDROID_SDK_ROOT, Android Studio's
+# default location) or this installer's own $HOME/.local/opt/android-sdk.
+# Prints the path and nothing else; install_android_sdk does the talking.
+android_sdk_root() {
+    local candidate
+    for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk" "$HOME/Library/Android/sdk"; do
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s\n' "$HOME/.local/opt/android-sdk"
+}
+
+# android_sdk_wanted MODE SDK_ROOT - the sdkmanager packages still missing for
+# MODE (adb: platform-tools; full: platform-tools, the emulator, the android-34
+# system image), space-separated, nothing when there is nothing to download.
+# These are exactly the packages that need Google's licenses accepted, so the
+# answer is what both the up-front question (android_sdk_ask_licenses) and
+# install_android_sdk itself act on. An adb already on PATH that is not the
+# SDK's own means "no platform-tools" in adb mode (the WSL bridge only needs
+# one client).
+android_sdk_wanted() {
+    local mode="$1" sdk="$2" existing_adb
+    local -a pkgs=()
+    if [[ "$mode" = adb ]]; then
+        existing_adb="$(command -v adb || true)"
+        if [[ -n "$existing_adb" && "$existing_adb" != "$sdk/platform-tools/adb" ]]; then
+            return 0
+        fi
+    fi
+    [[ -x "$sdk/platform-tools/adb" ]] || pkgs+=(platform-tools)
+    if [[ "$mode" = full ]]; then
+        [[ -x "$sdk/emulator/emulator" ]] || pkgs+=(emulator)
+        [[ -d "$sdk/system-images/android-34/default/$(android_sdk_abi)" ]] || pkgs+=("system-images;android-34;default;$(android_sdk_abi)")
+    fi
+    [[ ${#pkgs[@]} -eq 0 ]] || printf '%s\n' "${pkgs[*]}"
+}
+
+# android_sdkmanager <cmd...> - run an sdkmanager command (net_timeout and all)
+# with Google's "The SDK Manager CLI tool (sdkmanager) is deprecated. Use
+# Android CLI instead." banner kept off the terminal: command-line tools
+# 15859902 print its three lines plus a blank one on EVERY call, so a WSL
+# `dot up` showed it twice (2026-10-11). stderr is buffered to a file and
+# replayed without the banner; real errors still show, the exit code is the
+# command's own, stdout (sdkmanager's progress bar) is untouched.
+android_sdkmanager() {
+    local err rc=0
+    if ! err="$(mktemp)"; then
+        "$@"
+        return
+    fi
+    "$@" 2>"$err" || rc=$?
+    grep -Ev "sdkmanager\) is deprecated|The 'android' binary can also be found|To learn more about the Android CLI|^[[:space:]]*\$" "$err" >&2 || true
+    rm -f "$err"
+    return "$rc"
+}
+
+# android_sdk_ask_licenses MODE - the one question mobile_dev has, asked FIRST.
+# Only a person may accept Google's Android SDK licenses, and the question used
+# to sit behind the JDK, Maestro, agent-device and command-line-tools
+# downloads: a WSL `dot up` (2026-10-11) waited 41 minutes at it for an
+# operator who had walked away, and the timing summary booked that as "agent
+# toolkit 54m03s". Asked before any download, the rest of the group runs
+# unattended; the wait is its own timing section ("Android licenses", like the
+# sudo prompt's "sudo password"). The answer travels to install_android_sdk in
+# ANDROID_LICENSES (y / n / empty = not asked: nothing missing, or no terminal,
+# in which case install_android_sdk says what was skipped and how to re-run).
+ANDROID_LICENSES=""
+android_sdk_ask_licenses() {
+    local mode="$1" sdk wanted answer=""
+    ANDROID_LICENSES=""
+    sdk="$(android_sdk_root)"
+    wanted="$(android_sdk_wanted "$mode" "$sdk")"
+    [[ -n "$wanted" ]] || return 0
+    android_sdk_interactive || return 0
+    info "mobile_dev needs Google's Android SDK licenses accepted to download: $wanted$([[ "$mode" = full ]] && printf ' (the system image is several GB)'). Asked now so everything below can run unattended."
+    info "  Review them first with: $sdk/cmdline-tools/latest/bin/sdkmanager --licenses"
+    dot_timing_wait 'Android licenses' 2>/dev/null || true
+    read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " answer || answer=""
+    dot_timing_resume 2>/dev/null || true
+    if [[ "$answer" =~ ^[Yy]$ ]]; then ANDROID_LICENSES=y; else ANDROID_LICENSES=n; fi
+    return 0
+}
+
 # install_android_sdk MODE - mobile_dev's Android SDK (design doc §3.10):
 #   full  native Linux/macOS: command-line tools, platform-tools (adb), the
 #         emulator, the android-34 system image and a default AVD
@@ -589,19 +683,12 @@ android_cmdline_tools_install() {
 # here, and every failure warns and returns 0.
 install_android_sdk() {
     local mode="$1"
-    local own_sdk="$HOME/.local/opt/android-sdk" sdk="" candidate
-    for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk" "$HOME/Library/Android/sdk"; do
-        if [[ -n "$candidate" && -d "$candidate" ]]; then
-            sdk="$candidate"
-            break
-        fi
-    done
+    local own_sdk="$HOME/.local/opt/android-sdk" sdk
+    sdk="$(android_sdk_root)"
     if [[ -n "${ANDROID_HOME:-}" && -n "${ANDROID_SDK_ROOT:-}" && "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ]]; then
         warn "ANDROID_HOME ($ANDROID_HOME) and ANDROID_SDK_ROOT ($ANDROID_SDK_ROOT) disagree - using $sdk; reconcile them yourself if that is wrong."
     fi
-    if [[ -z "$sdk" ]]; then
-        sdk="$own_sdk"
-    elif [[ "$sdk" != "$own_sdk" ]]; then
+    if [[ "$sdk" != "$own_sdk" ]]; then
         info "Android SDK: using your existing SDK at $sdk (only missing pieces are added; its ANDROID_HOME/PATH stay yours to manage)"
     fi
 
@@ -639,46 +726,56 @@ install_android_sdk() {
         android_cmdline_tools_install "$sdk" || return 0
     fi
 
-    local abi image avd_name=mobile_dev_pixel avd_home need_avd=false
+    local abi image avd_name=mobile_dev_pixel avd_home need_avd=false wanted
     local -a want_pkgs=()
-    case "$(uname -m)" in
-        arm64|aarch64) abi=arm64-v8a ;;
-        *) abi=x86_64 ;;
-    esac
+    abi="$(android_sdk_abi)"
     image="system-images;android-34;default;$abi"
     avd_home="${ANDROID_AVD_HOME:-${ANDROID_USER_HOME:-$HOME/.android}/avd}"
-    [[ -x "$sdk/platform-tools/adb" ]] || want_pkgs+=(platform-tools)
+    wanted="$(android_sdk_wanted "$mode" "$sdk")"
+    [[ -z "$wanted" ]] || read -r -a want_pkgs <<<"$wanted"
     if [[ "$mode" = full ]]; then
-        [[ -x "$sdk/emulator/emulator" ]] || want_pkgs+=(emulator)
-        [[ -d "$sdk/system-images/android-34/default/$abi" ]] || want_pkgs+=("$image")
         [[ -d "$avd_home/$avd_name.avd" ]] || need_avd=true
     fi
 
     if [[ ${#want_pkgs[@]} -gt 0 ]]; then
+        # The question was normally asked up front (android_sdk_ask_licenses,
+        # ANDROID_LICENSES); this path asks it only when that did not happen
+        # (a direct call, or a terminal that appeared since).
         # run_onchange re-runs only when this script's rendered content
         # changes, so "just run dot up again" would not re-enter here; the
         # real re-entry point is clearing chezmoi's recorded script state.
-        if ! android_sdk_interactive; then
-            warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
-            warn "  To accept them, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
-            return 0
-        fi
-        info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
-        info "  Review them first with: $sdkmanager --licenses"
-        local android_accept=""
-        read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
-        if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
+        if [[ "${ANDROID_LICENSES:-}" = n ]]; then
             warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
             return 0
         fi
+        if [[ "${ANDROID_LICENSES:-}" != y ]]; then
+            if ! android_sdk_interactive; then
+                warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
+                warn "  To accept them, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+                return 0
+            fi
+            info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
+            info "  Review them first with: $sdkmanager --licenses"
+            local android_accept=""
+            dot_timing_wait 'Android licenses' 2>/dev/null || true
+            read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
+            dot_timing_resume 2>/dev/null || true
+            if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
+                warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+                return 0
+            fi
+        fi
         # sdkmanager asks once per license; a generous "y" feed answers
         # every one the person just agreed to (the Windows twin's approach).
-        if ! printf 'y\n%.0s' {1..50} | net_timeout 300 "$sdkmanager" --licenses >/dev/null; then
+        if ! printf 'y\n%.0s' {1..50} | android_sdkmanager net_timeout 300 "$sdkmanager" --licenses >/dev/null; then
             warn "sdkmanager --licenses failed or timed out - not downloading ${want_pkgs[*]}"
             return 0
         fi
+        # Two hours: the system image is several GB and a link that moved 300 MB
+        # in over five minutes (2026-10-11) is not a 30-minute job. The guard is
+        # for a hung sdkmanager, not a slow one.
         info "Downloading ${want_pkgs[*]} with sdkmanager (this can take a while)..."
-        net_timeout 1800 "$sdkmanager" "${want_pkgs[@]}" </dev/null \
+        android_sdkmanager net_timeout 7200 "$sdkmanager" "${want_pkgs[@]}" </dev/null \
             || warn "sdkmanager ${want_pkgs[*]} failed or timed out - continuing"
     fi
 
@@ -726,31 +823,24 @@ install_android_sdk() {
 # above: the full SDK with emulator and AVD on native Linux/macOS, only the
 # adb client under WSL).
 #
-# Maestro is NOT installed via the vendor's own curl-piped-to-bash installer
-# one-liner (see .chezmoidata.yaml's versions comment for its exact URL):
-# that installer only runs `unzip -qt` on what it downloads - a corruption check,
-# not an authenticity one (see .chezmoidata.yaml's maestro_version/
-# maestro_sha256 comment) - which would make this repo's own pin meaningless
-# ("latest" fetched with no checksum enforced at all). Instead this downloads
-# the EXACT pinned release asset and verifies its sha256 itself, the same
-# shape install_powershell() already uses for its own pinned download
-# (net_timeout-wrapped curl, sha256_cmd, warn-and-continue on a mismatch -
-# never abort under `set -e`). The release tag is "cli-$maestro_ver" - the
-# "cli-" prefix is part of the URL only, never part of the stored version
-# string - confirmed directly against the real
-# mobile-dev-inc/maestro release (`gh release download`, sha256sum): the zip
-# extracts into its own maestro/ directory (maestro/bin/maestro, a standard
-# Gradle POSIX launcher that resolves JAVA_HOME or falls back to `java` on
-# PATH, plus maestro/lib/*.jar) - a plain -d destination is enough, unlike
-# install_powershell()'s FLAT tarball which needs a directory of our own
-# making.
-#
-# Maestro is single-user (unlike install_powershell()'s system-wide
-# /opt/microsoft install): no $SUDO, lands under $HOME/.local/opt, symlinked
-# from $HOME/.local/bin - already on PATH per dot_zshrc's "Local binaries"
-# block and docs/agent-context-tools.md (uv's own tool shims land there the
-# same way).
+# Maestro comes from install_maestro (scripts/lib/agent-skills.sh): the exact
+# pinned release asset, sha256-verified, stall-guarded, single-user under
+# $HOME/.local/opt with a symlink in $HOME/.local/bin, and a recorded pin so
+# `dot upgrade` and a pin bump both know what is installed. The vendor's own
+# curl-piped-to-bash one-liner (its URL is in .chezmoidata.yaml's versions
+# comment) is deliberately not used: it verifies nothing but zip integrity.
 install_mobile_dev() {
+    # --- Google's Android SDK licenses: the one question, asked FIRST -------
+    # (android_sdk_ask_licenses above) so the JDK, Maestro, agent-device and
+    # SDK downloads below all run unattended. Same platform split as the
+    # install_android_sdk call further down: adb client only under WSL, the
+    # full SDK on a native host, nothing in a devcontainer.
+{{- if $isWsl }}
+    android_sdk_ask_licenses adb
+{{- else if $isHost }}
+    android_sdk_ask_licenses full
+{{- end }}
+
     # --- Standalone JDK 17+ ------------------------------------------------
     # jdk_home is computed BEFORE deciding whether to install: brew's
     # openjdk@{{ .versions.jdk_version }} is keg-only (deliberately not
@@ -771,7 +861,10 @@ install_mobile_dev() {
         info "Installing JDK {{ .versions.jdk_version }} (Maestro + agent-device need Java 17+)..."
         case "$PKG_MANAGER" in
             apt)
-                if $SUDO apt install -y "openjdk-{{ .versions.jdk_version }}-jdk"; then
+                # -headless: Maestro, agent-device and sdkmanager need javac/java
+                # only; the full package dragged libxt-dev and the X11 runtime into
+                # a WSL box (2026-10-11). Same /usr/lib/jvm path for JAVA_HOME.
+                if $SUDO apt install -y "openjdk-{{ .versions.jdk_version }}-jdk-headless"; then
                     jdk_home="/usr/lib/jvm/java-{{ .versions.jdk_version }}-openjdk-$(dpkg --print-architecture 2>/dev/null)" || jdk_home=""
                 else
                     warn "JDK install failed - continuing"
@@ -799,44 +892,11 @@ install_mobile_dev() {
         export JAVA_HOME="$jdk_home"
     fi
 
-    # --- Maestro CLI: manual pinned+verified install -----------------------
-    if ! command -v maestro &>/dev/null; then
-        local maestro_ver maestro_want maestro_got maestro_sha_cmd maestro_tmp maestro_asset maestro_url
-        maestro_ver='{{ .versions.maestro_version }}'
-        maestro_want='{{ .versions.maestro_sha256 }}'
-        maestro_asset="maestro.zip"
-        maestro_url="https://github.com/mobile-dev-inc/maestro/releases/download/cli-$maestro_ver/$maestro_asset"
-        maestro_sha_cmd="$(sha256_cmd)"
-        if [[ -z "$maestro_sha_cmd" ]]; then
-            warn "maestro: no SHA-256 tool found - cannot verify the download, skipping"
-        elif ! command -v unzip &>/dev/null; then
-            warn "maestro: unzip not found - cannot extract the download, skipping"
-        elif ! maestro_tmp="$(mktemp -d)"; then
-            warn "maestro: could not create a temporary directory - skipping"
-        else
-            info "Installing Maestro $maestro_ver (CLI for mobile_dev)..."
-            if ! net_timeout 300 curl -fsSLo "$maestro_tmp/$maestro_asset" "$maestro_url"; then
-                warn "maestro download failed or timed out - skipping"
-            else
-                # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
-                maestro_got="$($maestro_sha_cmd "$maestro_tmp/$maestro_asset" 2>/dev/null | cut -d' ' -f1)"
-                if [ "$maestro_want" != "$maestro_got" ]; then
-                    warn "maestro CHECKSUM MISMATCH for $maestro_asset - not installing (pin stale? re-run scripts/update-versions.sh)"
-                else
-                    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-                    rm -rf "$HOME/.local/opt/maestro"
-                    if unzip -q "$maestro_tmp/$maestro_asset" -d "$HOME/.local/opt" \
-                        && chmod +x "$HOME/.local/opt/maestro/bin/maestro" \
-                        && ln -sf "$HOME/.local/opt/maestro/bin/maestro" "$HOME/.local/bin/maestro"; then
-                        success "Maestro $maestro_ver installed (maestro)"
-                    else
-                        warn "maestro install failed - continuing"
-                    fi
-                fi
-            fi
-            rm -rf "$maestro_tmp"
-        fi
-    fi
+    # --- Maestro CLI: pinned+verified install (install_maestro, scripts/lib/
+    # agent-skills.sh - shared with `dot upgrade`, which follows the same pin).
+    # The retry hint is the run_onchange re-entry command: a failed download
+    # is otherwise never retried by the next `dot up` (2026-10-11).
+    install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket --bucket=scriptState && dot up'
 
     # Maestro's MCP server is NOT registered here: main() runs this before
     # install_claude_cli/install_chatgpt_cli, so on a fresh machine neither
@@ -2076,7 +2136,7 @@ install_claude_cli() {
         # on a fresh machine. -s user: the default scope (local) is private to
         # the installer's own working directory, invisible from any project.
         if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
-            net_timeout_tty 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - continuing"
+            net_timeout_tty 60 claude mcp add -s user maestro -- maestro mcp || warn "Maestro MCP registration for Claude Code failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
         fi
         # agent-device MCP registration for Claude Code lives HERE too, same
         # reason as Maestro's above: main() runs install_mobile_dev() (which
@@ -2089,7 +2149,7 @@ install_claude_cli() {
         # Same mechanism net_timeout_tty was already built for (see its
         # definition above); it just hadn't been applied to this call site.
         if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
-            net_timeout_tty 60 claude mcp add -s user agent-device -- agent-device mcp || warn "agent-device MCP registration for Claude Code failed - continuing"
+            net_timeout_tty 60 claude mcp add -s user agent-device -- agent-device mcp || warn "agent-device MCP registration for Claude Code failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
         fi
 {{- end }}
     fi
@@ -2608,14 +2668,14 @@ install_chatgpt_cli() {
         # install_mobile_dev() (which main() runs before codex exists on a
         # fresh machine). Codex has no scope flag: one global config.toml.
         if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
-            net_timeout_tty 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - continuing"
+            net_timeout_tty 60 codex mcp add maestro -- maestro mcp || warn "Maestro MCP registration for Codex failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
         fi
         # agent-device's Codex registration lives HERE too, same reason as
         # Maestro's above. Codex has no scope flag: one global config.toml.
         # net_timeout_tty, not net_timeout - same WSL tty-stop hang as the
         # Claude Code registration above.
         if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
-            net_timeout_tty 60 codex mcp add agent-device -- agent-device mcp || warn "agent-device MCP registration for Codex failed - continuing"
+            net_timeout_tty 60 codex mcp add agent-device -- agent-device mcp || warn "agent-device MCP registration for Codex failed - re-run: chezmoi state delete-bucket --bucket=scriptState && dot up"
         fi
 {{- end }}
     fi
@@ -3184,9 +3244,9 @@ main() {
     # agent_toolkit=false - this is the last-resort catch: warn loudly and skip
     # rather than silently assume agent_toolkit's tools exist.
 {{- if $mobile_dev }}
-{{- if $agent_toolkit }}
     # its own timing section: it was 74 minutes hidden inside 'agent toolkit'
     dot_timing_mark 'mobile_dev'
+{{- if $agent_toolkit }}
     install_mobile_dev
 {{- else }}
     warn "mobile_dev requires agent_toolkit (Serena/Playwright) - not installed; enable agent_toolkit and re-run"
