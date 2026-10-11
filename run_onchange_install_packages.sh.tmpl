@@ -476,9 +476,255 @@ install_fonts() {
     fi
 }
 
-# install_mobile_dev() - mobile_dev group: Maestro CLI, agent-device, and a
+# android_sdk_interactive - true only when a person can answer a prompt: the
+# same `[[ -t 0 ]] && [[ -z "${CI:-}" ]]` check main()'s Docker
+# WSL-Integration prompt uses. A function of its own so
+# tests/mobile_dev_install_contract.sh can drive both answers without a real
+# terminal.
+android_sdk_interactive() {
+    [[ -t 0 ]] && [[ -z "${CI:-}" ]]
+}
+
+# android_cmdline_tools_install SDK_ROOT - download the pinned Android SDK
+# command-line tools zip for this OS/arch, verify its sha256 against
+# .chezmoidata.yaml's android_commandlinetools_* pins, and lay it out as
+# SDK_ROOT/cmdline-tools/latest. Picked by `uname`, not $PKG_MANAGER: the zip
+# is a plain download, not a package, and brew can drive a Linux host too.
+# Returns 1 (after warning) on any failure; the caller skips everything that
+# needs sdkmanager.
+android_cmdline_tools_install() {
+    local sdk="$1" ver want zip url tmp got sha_cmd
+    ver='{{ .versions.android_commandlinetools_version }}'
+    case "$(uname -s)" in
+        Linux)
+            zip="commandlinetools-linux-${ver}_latest.zip"
+            want='{{ .versions.android_commandlinetools_sha256_linux }}'
+            ;;
+        Darwin)
+            case "$(uname -m)" in
+                arm64)
+                    zip="commandlinetools-mac_arm64-${ver}_latest.zip"
+                    want='{{ .versions.android_commandlinetools_sha256_mac_arm64 }}'
+                    ;;
+                *)
+                    zip="commandlinetools-mac_x86_64-${ver}_latest.zip"
+                    want='{{ .versions.android_commandlinetools_sha256_mac_x86_64 }}'
+                    ;;
+            esac
+            ;;
+        *)
+            warn "Android SDK: no command-line tools pin for $(uname -s) - skipping"
+            return 1
+            ;;
+    esac
+    url="https://dl.google.com/android/repository/$zip"
+    sha_cmd="$(sha256_cmd)"
+    if [[ -z "$sha_cmd" ]]; then
+        warn "Android SDK: no SHA-256 tool found - cannot verify the command-line tools download, skipping"
+        return 1
+    fi
+    if ! command -v unzip &>/dev/null; then
+        warn "Android SDK: unzip not found - cannot extract the command-line tools, skipping"
+        return 1
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        warn "Android SDK: could not create a temporary directory - skipping"
+        return 1
+    fi
+    info "Installing the Android SDK command-line tools $ver (sdkmanager, avdmanager) into $sdk..."
+    if ! net_timeout 600 curl -fsSLo "$tmp/$zip" "$url"; then
+        warn "Android SDK command-line tools download failed or timed out - skipping"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
+    got="$($sha_cmd "$tmp/$zip" 2>/dev/null | cut -d' ' -f1)"
+    if [[ "$want" != "$got" ]]; then
+        warn "Android SDK command-line tools CHECKSUM MISMATCH for $zip - not installing (pin stale? re-check developer.android.com/studio)"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # The zip's own root is "cmdline-tools" with no "latest" level, but
+    # sdkmanager resolves the SDK root from its own location and needs
+    # <sdk>/cmdline-tools/latest/bin/sdkmanager (Google's documented layout,
+    # the same gotcha the Windows twin documents). The caller only reaches
+    # here when cmdline-tools/latest is absent or this installer's own.
+    rm -rf "$sdk/cmdline-tools/latest" "$sdk/cmdline-tools/.incoming"
+    if mkdir -p "$sdk/cmdline-tools" \
+        && unzip -q "$tmp/$zip" -d "$sdk/cmdline-tools/.incoming" \
+        && mv "$sdk/cmdline-tools/.incoming/cmdline-tools" "$sdk/cmdline-tools/latest" \
+        && [[ -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]]; then
+        rm -rf "$sdk/cmdline-tools/.incoming" "$tmp"
+        success "Android SDK command-line tools $ver installed ($sdk/cmdline-tools/latest)"
+        return 0
+    fi
+    warn "Android SDK command-line tools install failed - skipping"
+    rm -rf "$sdk/cmdline-tools/.incoming" "$tmp"
+    return 1
+}
+
+# install_android_sdk MODE - mobile_dev's Android SDK (design doc §3.10):
+#   full  native Linux/macOS: command-line tools, platform-tools (adb), the
+#         emulator, the android-34 system image and a default AVD
+#         (mobile_dev_pixel, pixel_6 profile - the Windows twin's choices).
+#   adb   WSL: command-line tools + platform-tools only, so `adb` exists for
+#         dot_zshrc's ADB_SERVER_SOCKET bridge. No emulator or AVD: under WSL
+#         the device only ever runs on the Windows side (design doc §3.3).
+#
+# Single-user like Maestro: $HOME/.local/opt/android-sdk, no $SUDO. Android
+# SDK components are not system packages on any platform this repo targets.
+# An SDK the user already has (ANDROID_HOME, ANDROID_SDK_ROOT, or Android
+# Studio's default location) is used in place and only ever added to, never
+# replaced or re-pointed; dot_zshrc's ANDROID_HOME/PATH block covers only
+# this installer's own location.
+#
+# No confirmation before the downloads themselves (the Ollama precedent: a
+# long net_timeout and warn-and-continue). What IS gated is accepting
+# Google's Android SDK licenses, which sdkmanager requires before
+# platform-tools/emulator/the system image: only a person may agree to them,
+# so a non-interactive run (android_sdk_interactive) skips the licenses and
+# everything that depends on them, with a warning saying how to re-run.
+#
+# Called as `install_android_sdk <mode> || warn ...`: errexit is suspended in
+# here, and every failure warns and returns 0.
+install_android_sdk() {
+    local mode="$1"
+    local own_sdk="$HOME/.local/opt/android-sdk" sdk="" candidate
+    for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk" "$HOME/Library/Android/sdk"; do
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            sdk="$candidate"
+            break
+        fi
+    done
+    if [[ -n "${ANDROID_HOME:-}" && -n "${ANDROID_SDK_ROOT:-}" && "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ]]; then
+        warn "ANDROID_HOME ($ANDROID_HOME) and ANDROID_SDK_ROOT ($ANDROID_SDK_ROOT) disagree - using $sdk; reconcile them yourself if that is wrong."
+    fi
+    if [[ -z "$sdk" ]]; then
+        sdk="$own_sdk"
+    elif [[ "$sdk" != "$own_sdk" ]]; then
+        info "Android SDK: using your existing SDK at $sdk (only missing pieces are added; its ANDROID_HOME/PATH stay yours to manage)"
+    fi
+
+    if [[ "$mode" = adb ]]; then
+        local existing_adb
+        existing_adb="$(command -v adb || true)"
+        if [[ -n "$existing_adb" && "$existing_adb" != "$sdk/platform-tools/adb" ]]; then
+            info "adb already on PATH ($existing_adb) - not installing Android platform-tools"
+            return 0
+        fi
+    fi
+
+    # The emulator's hardware acceleration on Linux is KVM (the counterpart
+    # of the Windows twin's WHPX check). Reported whatever happens below:
+    # even if the SDK steps fail, whether the emulator can ever be
+    # accelerated here is worth knowing. Never fixed for the user - a group
+    # membership or firmware change is theirs to make. macOS has no
+    # counterpart here: the emulator uses Apple's Hypervisor.framework, part
+    # of the OS rather than an optional feature; if acceleration is
+    # unavailable anyway, the emulator reports it when it launches.
+    if [[ "$mode" = full && "$(uname -s)" = Linux ]]; then
+        if [[ ! -e /dev/kvm ]]; then
+            warn "No /dev/kvm - the Android emulator has no hardware acceleration here. Enable virtualization (VT-x/AMD-V) in the firmware and load the kvm module."
+        elif [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            warn "/dev/kvm is not accessible to $(id -un) - the Android emulator needs it for hardware acceleration. Run: sudo usermod -aG kvm \"\$USER\", then log out and back in."
+        fi
+    fi
+
+    local sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+    if [[ ! -x "$sdkmanager" ]]; then
+        if [[ "$sdk" != "$own_sdk" && -e "$sdk/cmdline-tools/latest" ]]; then
+            warn "Android SDK: $sdk/cmdline-tools/latest exists but has no sdkmanager - not replacing a directory this installer did not create; repair or remove it, then re-run"
+            return 0
+        fi
+        android_cmdline_tools_install "$sdk" || return 0
+    fi
+
+    local abi image avd_name=mobile_dev_pixel avd_home need_avd=false
+    local -a want_pkgs=()
+    case "$(uname -m)" in
+        arm64|aarch64) abi=arm64-v8a ;;
+        *) abi=x86_64 ;;
+    esac
+    image="system-images;android-34;default;$abi"
+    avd_home="${ANDROID_AVD_HOME:-${ANDROID_USER_HOME:-$HOME/.android}/avd}"
+    [[ -x "$sdk/platform-tools/adb" ]] || want_pkgs+=(platform-tools)
+    if [[ "$mode" = full ]]; then
+        [[ -x "$sdk/emulator/emulator" ]] || want_pkgs+=(emulator)
+        [[ -d "$sdk/system-images/android-34/default/$abi" ]] || want_pkgs+=("$image")
+        [[ -d "$avd_home/$avd_name.avd" ]] || need_avd=true
+    fi
+
+    if [[ ${#want_pkgs[@]} -gt 0 ]]; then
+        # run_onchange re-runs only when this script's rendered content
+        # changes, so "just run dot up again" would not re-enter here; the
+        # real re-entry point is clearing chezmoi's recorded script state.
+        if ! android_sdk_interactive; then
+            warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
+            warn "  To accept them, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            return 0
+        fi
+        info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
+        info "  Review them first with: $sdkmanager --licenses"
+        local android_accept=""
+        read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
+        if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
+            warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            return 0
+        fi
+        # sdkmanager asks once per license; a generous "y" feed answers
+        # every one the person just agreed to (the Windows twin's approach).
+        if ! printf 'y\n%.0s' {1..50} | net_timeout 300 "$sdkmanager" --licenses >/dev/null; then
+            warn "sdkmanager --licenses failed or timed out - not downloading ${want_pkgs[*]}"
+            return 0
+        fi
+        info "Downloading ${want_pkgs[*]} with sdkmanager (this can take a while)..."
+        net_timeout 1800 "$sdkmanager" "${want_pkgs[@]}" </dev/null \
+            || warn "sdkmanager ${want_pkgs[*]} failed or timed out - continuing"
+    fi
+
+    if [[ "$need_avd" = true ]]; then
+        if [[ -d "$sdk/system-images/android-34/default/$abi" ]]; then
+            # avdmanager asks whether to create a custom hardware profile;
+            # "no" keeps the pixel_6 device profile's own defaults.
+            if echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd -n "$avd_name" -k "$image" -d pixel_6 >/dev/null; then
+                success "Default AVD created ($avd_name: $image, pixel_6)"
+            else
+                warn "avdmanager create avd failed - continuing (create one yourself with avdmanager)"
+            fi
+        else
+            warn "Android system image $image is not installed - default AVD not created"
+        fi
+    fi
+
+    local sdk_adb="$sdk/platform-tools/adb" path_adb
+    if [[ -x "$sdk_adb" ]]; then
+        # Google's platform-tools ship native binaries; on a host they were
+        # not built for, adb exists but cannot run - say so instead of
+        # leaving a broken adb behind silently.
+        if ! "$sdk_adb" version >/dev/null 2>&1; then
+            warn "$sdk_adb does not run on this machine ($(uname -s) $(uname -m)) - install your OS's own adb package instead"
+            return 0
+        fi
+        # Two different adb builds kill each other's server ("adb server
+        # version (X) doesn't match this client (Y); killing..."), which
+        # would also defeat the WSL ADB bridge. dot_zshrc APPENDS the SDK's
+        # dirs, so an adb already on PATH keeps precedence; flag the pair.
+        path_adb="$(command -v adb || true)"
+        if [[ -n "$path_adb" && "$path_adb" != "$sdk_adb" ]]; then
+            warn "Two adb builds are present: $path_adb (first on PATH) and $sdk_adb. Mismatched adb versions kill each other's server - keep only one if adb misbehaves."
+        fi
+        if [[ "$sdk" = "$own_sdk" ]]; then
+            success "Android SDK ready at $sdk - open a new shell for ANDROID_HOME and adb/sdkmanager$([[ "$mode" = full ]] && printf '/emulator') on PATH (dot_zshrc)"
+        fi
+    fi
+    return 0
+}
+
+# install_mobile_dev() - mobile_dev group: Maestro CLI, agent-device, a
 # standalone JDK 17+ (Maestro's own "Java 17 or higher" requirement,
-# .chezmoidata.yaml's jdk_version).
+# .chezmoidata.yaml's jdk_version), and the Android SDK (install_android_sdk
+# above: the full SDK with emulator and AVD on native Linux/macOS, only the
+# adb client under WSL).
 #
 # Maestro is NOT installed via the vendor's own curl-piped-to-bash installer
 # one-liner (see .chezmoidata.yaml's versions comment for its exact URL):
@@ -607,6 +853,17 @@ install_mobile_dev() {
         sudo_net_timeout "$npm_sudo" 300 npm install -g agent-device@latest --loglevel=error --no-progress --fund=false \
             || warn "agent-device install failed - continuing"
     fi
+
+    # --- Android SDK (after the JDK: sdkmanager/avdmanager run on Java) ---
+    # Native Linux/macOS get the full SDK with the emulator and a default
+    # AVD; WSL gets only platform-tools, because the emulator only ever runs
+    # on the Windows side (design doc §3.3) and WSL just needs an adb client
+    # for the ADB_SERVER_SOCKET bridge.
+{{- if $isWsl }}
+    install_android_sdk adb || warn "Android platform-tools (adb) install failed - continuing"
+{{- else }}
+    install_android_sdk full || warn "Android SDK install failed - continuing"
+{{- end }}
 
     # --- WSL: heads-up about the ADB bridge to the Windows host -----------
     # adb/Maestro/agent-device need a real device or emulator, which under

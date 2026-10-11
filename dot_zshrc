@@ -210,6 +210,24 @@ if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -x "$HOME/.local/bin/maestro" ]] \
 fi
 unset -f _adb_resolve_host
 
+# Android SDK (mobile_dev): ANDROID_HOME and the SDK's tool dirs, for the SDK
+# the installer's install_android_sdk lays down at ~/.local/opt/android-sdk
+# (the full SDK with the emulator on native Linux/macOS, platform-tools only
+# under WSL). Inert unless that directory exists - its presence is the
+# runtime proxy for "mobile_dev installed an SDK here" - and it never
+# re-points an ANDROID_HOME you exported for an SDK of your own. The dirs are
+# APPENDED, so an adb already on PATH (a distro package, your own SDK) keeps
+# precedence over the SDK's copy.
+_android_sdk="$HOME/.local/opt/android-sdk"
+if [[ -d "$_android_sdk" ]] && [[ -z "${ANDROID_HOME:-}" || "$ANDROID_HOME" == "$_android_sdk" ]]; then
+  export ANDROID_HOME="$_android_sdk"
+  for _android_dir in platform-tools emulator cmdline-tools/latest/bin; do
+    [[ -d "$_android_sdk/$_android_dir" ]] && path+=("$_android_sdk/$_android_dir")
+  done
+  unset _android_dir
+fi
+unset _android_sdk
+
 # ZSH completions
 [[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
 

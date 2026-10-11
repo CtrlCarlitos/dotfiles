@@ -26,6 +26,11 @@ set -euo pipefail
 # /opt/microsoft/... system install) with its binary symlinked into
 # $HOME/.local/bin, which docs/agent-context-tools.md already documents as
 # on PATH (uv's own tool shims land there the same way).
+#
+# Task 9 added the Android SDK (install_android_sdk): the full SDK with the
+# emulator and a default AVD on native Linux/macOS, platform-tools only under
+# WSL, with Google's licenses accepted only after an interactive yes. Those
+# checks execute the real rendered functions against stub tools, below.
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
@@ -153,8 +158,22 @@ if command -v zsh >/dev/null 2>&1; then
         fail "$zshrc: JDK/ADB blocks not found"
     else
         ztmp="$(mktemp -d)"
-        got="$(HOME="$ztmp" zsh -fc 'unset JAVA_HOME ADB_SERVER_SOCKET; before="$PATH"; '"$blocks"$'\n''print -r -- "${JAVA_HOME:-}|${ADB_SERVER_SOCKET:-}|$([[ "$PATH" == "$before" ]] && print same)"' 2>/dev/null)"
-        if [ "$got" = '||same' ]; then pass; else fail "dot_zshrc JDK/ADB blocks must be inert without Maestro installed (got '$got')"; fi
+        got="$(HOME="$ztmp" zsh -fc 'unset JAVA_HOME ADB_SERVER_SOCKET ANDROID_HOME; before="$PATH"; '"$blocks"$'\n''print -r -- "${JAVA_HOME:-}|${ADB_SERVER_SOCKET:-}|${ANDROID_HOME:-}|$([[ "$PATH" == "$before" ]] && print same)"' 2>/dev/null)"
+        if [ "$got" = '|||same' ]; then pass; else fail "dot_zshrc JDK/ADB/Android SDK blocks must be inert without mobile_dev installed (got '$got')"; fi
+        # Android SDK block (Task 9): with the installer's SDK present it
+        # exports ANDROID_HOME and APPENDS the tool dirs that exist (an adb
+        # already on PATH keeps precedence) ...
+        sdk_dir="$ztmp/.local/opt/android-sdk"
+        mkdir -p "$sdk_dir/platform-tools" "$sdk_dir/cmdline-tools/latest/bin"
+        got="$(HOME="$ztmp" zsh -fc 'unset ANDROID_HOME; before="$PATH"; '"$blocks"$'\n''print -r -- "$ANDROID_HOME|${PATH#"$before"}"' 2>/dev/null)"
+        if [ "$got" = "$sdk_dir|:$sdk_dir/platform-tools:$sdk_dir/cmdline-tools/latest/bin" ]; then
+            pass
+        else
+            fail "dot_zshrc Android SDK block: expected ANDROID_HOME=$sdk_dir and platform-tools + cmdline-tools appended to PATH (got '$got')"
+        fi
+        # ... and never re-points an ANDROID_HOME the user set for their own SDK.
+        got="$(HOME="$ztmp" zsh -fc 'export ANDROID_HOME=/opt/my-sdk; before="$PATH"; '"$blocks"$'\n''print -r -- "$ANDROID_HOME|$([[ "$PATH" == "$before" ]] && print same)"' 2>/dev/null)"
+        if [ "$got" = '/opt/my-sdk|same' ]; then pass; else fail "dot_zshrc Android SDK block must leave a user's own ANDROID_HOME and PATH alone (got '$got')"; fi
         rm -rf "$ztmp"
     fi
 fi
@@ -339,6 +358,198 @@ if command -v chezmoi >/dev/null 2>&1; then
     if command -v bash >/dev/null 2>&1; then
         bash -n "$out" || fail "WSL render has invalid bash syntax"
     fi
+
+    # --- Android SDK (Task 9): WSL gets the adb client only, native gets
+    # the full SDK. Asserted on the call site each render emits. -----------
+    if grep -Eq '^    install_android_sdk adb \|\| warn' "$out" && ! grep -Eq '^    install_android_sdk full' "$out"; then
+        pass
+    else
+        fail "render (WSL): install_mobile_dev must call 'install_android_sdk adb' (platform-tools only), never 'full'"
+    fi
+    sdk_render="$(mktemp -d)/linux.sh"
+    render_to "$sdk_render" sh "$(groups true true)"
+    if grep -Eq '^    install_android_sdk full \|\| warn' "$sdk_render" && ! grep -Eq '^    install_android_sdk adb' "$sdk_render"; then
+        pass
+    else
+        fail "render (native Linux): install_mobile_dev must call 'install_android_sdk full', never 'adb'"
+    fi
+    for pin in sha256_linux sha256_mac_x86_64 sha256_mac_arm64; do
+        want_pin="$(sed -n "s/^  android_commandlinetools_${pin}: \"\\([^\"]*\\)\"\$/\\1/p" "$repo_root/.chezmoidata.yaml")"
+        if [ -n "$want_pin" ] && grep -Fq "want='$want_pin'" "$sdk_render"; then
+            pass
+        else
+            fail "render: the android_commandlinetools_${pin} pin must render into the installer"
+        fi
+    done
+
+    # Executes the REAL rendered functions (install_android_sdk and its
+    # helpers) against stub curl/uname and a fixture command-line-tools zip
+    # whose sdkmanager/avdmanager log what they are asked to do. PATH holds
+    # only the stubs plus symlinks to the few real tools the code needs, so
+    # a host's own adb/sdkmanager (GitHub runners ship an Android SDK) never
+    # leaks in. The pins are swapped for the fixture zip's digest; the
+    # mismatch scenario keeps the real pins.
+    # The logging helpers are one-liners over color variables, so they are
+    # stubbed; everything the SDK logic itself runs is the rendered code.
+    sdk_fns='info() { printf "info: %s\n" "$1"; }; success() { printf "ok: %s\n" "$1"; }; warn() { printf "warn: %s\n" "$1" >&2; }; error() { printf "error: %s\n" "$1" >&2; }'$'\n'
+    for fn in net_timeout sha256_cmd android_sdk_interactive android_cmdline_tools_install install_android_sdk; do
+        body="$(fn_body "$sdk_render" "$fn")"
+        if [ -z "$body" ]; then fail "render: $fn() not found"; fi
+        sdk_fns+="$body"$'\n'
+    done
+    st="$(mktemp -d)"
+    mkdir -p "$st/bin" "$st/fixture/cmdline-tools/bin"
+    bash_bin="$(command -v bash)"
+    for tool in mkdir rm mv cut mktemp unzip sha256sum shasum timeout gtimeout id perl cat; do
+        tp="$(command -v "$tool" 2>/dev/null || true)"
+        [ -n "$tp" ] && ln -s "$tp" "$st/bin/$tool"
+    done
+    cat >"$st/bin/uname" <<EOF
+#!$bash_bin
+case "\$1" in -s) echo "\$FAKE_OS" ;; -m) echo "\$FAKE_ARCH" ;; *) echo "\$FAKE_OS" ;; esac
+EOF
+    cat >"$st/bin/curl" <<EOF
+#!$bash_bin
+out=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in -fsSLo|-o) out="\$2"; shift 2 ;; -*) shift ;; *) echo "curl \$1" >>"\$SDK_LOG"; shift ;; esac
+done
+exec cat "\$FIXTURE_ZIP" >"\$out"
+EOF
+    # sdkmanager: logs its arguments; --licenses counts the y answers it
+    # was fed; a package list lays down what that package would.
+    cat >"$st/fixture/cmdline-tools/bin/sdkmanager" <<EOF
+#!$bash_bin
+sdk="\${0%/cmdline-tools/latest/bin/sdkmanager}"
+if [ "\$1" = --licenses ]; then
+    n=0; while IFS= read -r line; do [ "\$line" = y ] && n=\$((n + 1)); done
+    echo "sdkmanager --licenses (fed \$n y)" >>"\$SDK_LOG"
+    exit 0
+fi
+echo "sdkmanager \$*" >>"\$SDK_LOG"
+for p in "\$@"; do
+    case "\$p" in
+        platform-tools) /bin/mkdir -p "\$sdk/platform-tools"; printf '#!$bash_bin\necho "Android Debug Bridge version 1.0.41"\n' >"\$sdk/platform-tools/adb"; /bin/chmod +x "\$sdk/platform-tools/adb" ;;
+        emulator) /bin/mkdir -p "\$sdk/emulator"; printf '#!$bash_bin\n' >"\$sdk/emulator/emulator"; /bin/chmod +x "\$sdk/emulator/emulator" ;;
+        "system-images;"*) IFS=';' read -r _ api tag abi <<<"\$p"; /bin/mkdir -p "\$sdk/system-images/\$api/\$tag/\$abi" ;;
+    esac
+done
+EOF
+    cat >"$st/fixture/cmdline-tools/bin/avdmanager" <<EOF
+#!$bash_bin
+echo "avdmanager \$*" >>"\$SDK_LOG"
+read -r answer || true
+[ "\$answer" = no ] || echo "avdmanager: custom hardware profile question not answered 'no'" >>"\$SDK_LOG"
+name=""; while [ \$# -gt 0 ]; do [ "\$1" = -n ] && name="\$2"; shift; done
+/bin/mkdir -p "\$HOME/.android/avd/\$name.avd"
+EOF
+    chmod +x "$st/bin/uname" "$st/bin/curl" "$st/fixture/cmdline-tools/bin/sdkmanager" "$st/fixture/cmdline-tools/bin/avdmanager"
+    (cd "$st/fixture" && zip -qr "$st/fixture.zip" cmdline-tools) || fail "could not build the command-line tools fixture zip"
+    fixture_sha="$(sha256sum "$st/fixture.zip" 2>/dev/null || shasum -a 256 "$st/fixture.zip")"
+    fixture_sha="${fixture_sha%% *}"
+    swapped_fns="$(printf '%s' "$sdk_fns" | sed -E "s/^( *want=')[0-9a-f]{64}'\$/\\1$fixture_sha'/")"
+
+    # run_sdk HOME FNS MODE ANSWER INTERACTIVE OS ARCH [ANDROID_HOME]
+    #   Runs `install_android_sdk MODE || warn ...` under set -euo pipefail,
+    #   as main() does. INTERACTIVE=yes overrides android_sdk_interactive
+    #   (no real terminal in a test) and feeds ANSWER on stdin; =no keeps the
+    #   real check with stdin from /dev/null. Prints the run's combined output.
+    run_sdk() {
+        local home="$1" fns="$2" mode="$3" answer="$4" interactive="$5" os="$6" arch="$7" ahome="${8:-}"
+        local override=""
+        [ "$interactive" = yes ] && override='android_sdk_interactive() { return 0; }'
+        if [ "$interactive" = yes ]; then
+            printf '%s\n' "$answer" | env -i HOME="$home" PATH="$st/bin" SDK_LOG="$home/sdk.log" FIXTURE_ZIP="$st/fixture.zip" \
+                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} \
+                "$bash_bin" -c 'set -euo pipefail; '"$fns"$'\n'"$override"$'\n''install_android_sdk "$1" || warn "install_android_sdk failed"; echo "rc=0"' _ "$mode" 2>&1
+        else
+            env -i HOME="$home" PATH="$st/bin" SDK_LOG="$home/sdk.log" FIXTURE_ZIP="$st/fixture.zip" \
+                FAKE_OS="$os" FAKE_ARCH="$arch" ${ahome:+ANDROID_HOME="$ahome"} \
+                "$bash_bin" -c 'set -euo pipefail; '"$fns"$'\n''install_android_sdk "$1" || warn "install_android_sdk failed"; echo "rc=0"' _ "$mode" </dev/null 2>&1
+        fi
+    }
+    log_has() { grep -Fxq -- "$2" "$1/sdk.log" 2>/dev/null; }
+    own=".local/opt/android-sdk"
+
+    # A. Native Linux, a person answers y: pinned zip, the cmdline-tools/latest
+    #    layout, licenses fed, platform-tools + emulator + the android-34
+    #    image in ONE sdkmanager call, then the pixel_6 AVD.
+    h="$st/a"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" full y yes Linux x86_64)"
+    case "$got" in *rc=0*) pass ;; *) fail "SDK full/yes: did not complete (output: $got)" ;; esac
+    log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip' && pass \
+        || fail "SDK full/yes: must download the pinned Linux command-line tools zip"
+    [ -x "$h/$own/cmdline-tools/latest/bin/sdkmanager" ] && [ ! -e "$h/$own/cmdline-tools/.incoming" ] && pass \
+        || fail "SDK full/yes: sdkmanager must land at ~/$own/cmdline-tools/latest/bin with no staging dir left"
+    log_has "$h" 'sdkmanager --licenses (fed 50 y)' && pass || fail "SDK full/yes: licenses not accepted after the person's y"
+    log_has "$h" 'sdkmanager platform-tools emulator system-images;android-34;default;x86_64' && pass \
+        || fail "SDK full/yes: expected 'sdkmanager platform-tools emulator system-images;android-34;default;x86_64'"
+    log_has "$h" 'avdmanager create avd -n mobile_dev_pixel -k system-images;android-34;default;x86_64 -d pixel_6' && pass \
+        || fail "SDK full/yes: expected the mobile_dev_pixel AVD on android-34/pixel_6"
+    grep -Fq "custom hardware profile question" "$h/sdk.log" && fail "SDK full/yes: avdmanager's hardware-profile question must be answered 'no'" || pass
+
+    # B. Idempotent: a second run downloads nothing and asks nothing.
+    : >"$h/sdk.log"
+    got="$(run_sdk "$h" "$swapped_fns" full n yes Linux x86_64)"
+    if [ ! -s "$h/sdk.log" ]; then pass; else fail "SDK full rerun: must be a no-op once everything is present (log: $(cat "$h/sdk.log"))"; fi
+
+    # C. Non-interactive: the command-line tools still install (no license
+    #    needed), but licenses and everything behind them are skipped with a
+    #    warning naming the re-run - never accepted, never a hang.
+    h="$st/c"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" full '' no Linux x86_64)"
+    case "$got" in *rc=0*) pass ;; *) fail "SDK non-interactive: did not complete (output: $got)" ;; esac
+    [ -x "$h/$own/cmdline-tools/latest/bin/sdkmanager" ] && pass || fail "SDK non-interactive: command-line tools must still install"
+    if grep -Eq '^(sdkmanager|avdmanager)' "$h/sdk.log"; then
+        fail "SDK non-interactive: sdkmanager/avdmanager must not run (log: $(cat "$h/sdk.log"))"
+    else
+        pass
+    fi
+    case "$got" in
+        *"not accepting Google's Android SDK licenses on your behalf"*'chezmoi state delete-bucket --bucket=scriptState'*) pass ;;
+        *) fail "SDK non-interactive: must warn that the licenses were skipped and how to re-run (output: $got)" ;;
+    esac
+
+    # D. A person answers n: same as C - nothing behind the licenses runs.
+    h="$st/d"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" full n yes Linux x86_64)"
+    if grep -Eq '^(sdkmanager|avdmanager)' "$h/sdk.log"; then fail "SDK full/n: nothing may run after a declined prompt"; else pass; fi
+
+    # E. WSL (adb mode): platform-tools only - no emulator, image or AVD.
+    h="$st/e"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" adb y yes Linux x86_64)"
+    log_has "$h" 'sdkmanager platform-tools' && pass || fail "SDK adb/yes: expected exactly 'sdkmanager platform-tools'"
+    if grep -Eq 'emulator|system-images|^avdmanager' "$h/sdk.log"; then
+        fail "SDK adb/yes: the WSL path must never fetch the emulator, a system image, or create an AVD (log: $(cat "$h/sdk.log"))"
+    else
+        pass
+    fi
+    [ -x "$h/$own/platform-tools/adb" ] && pass || fail "SDK adb/yes: adb must land under ~/$own/platform-tools"
+
+    # F. Checksum mismatch (the real pins vs the fixture): nothing installed.
+    h="$st/f"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$sdk_fns" full y yes Linux x86_64)"
+    case "$got" in *'CHECKSUM MISMATCH'*rc=0*) pass ;; *) fail "SDK mismatch: must warn CHECKSUM MISMATCH and continue (output: $got)" ;; esac
+    [ ! -e "$h/$own/cmdline-tools/latest" ] && pass || fail "SDK mismatch: nothing may be extracted from an unverified zip"
+
+    # G. An existing ANDROID_HOME is used in place, never replaced by ours.
+    h="$st/g"; mkdir -p "$h/mysdk"
+    got="$(run_sdk "$h" "$swapped_fns" full n yes Linux x86_64 "$h/mysdk")"
+    [ -x "$h/mysdk/cmdline-tools/latest/bin/sdkmanager" ] && [ ! -e "$h/$own" ] && pass \
+        || fail "SDK existing ANDROID_HOME: tools must go into that SDK, and ~/$own must not be created"
+
+    # H. macOS Apple Silicon: the mac_arm64 zip and an arm64-v8a image.
+    h="$st/h"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" full y yes Darwin arm64)"
+    log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-mac_arm64-15859902_latest.zip' && pass \
+        || fail "SDK Darwin arm64: must download the mac_arm64 zip"
+    log_has "$h" 'sdkmanager platform-tools emulator system-images;android-34;default;arm64-v8a' && pass \
+        || fail "SDK Darwin arm64: must request the arm64-v8a android-34 image"
+    h="$st/i"; mkdir -p "$h"
+    got="$(run_sdk "$h" "$swapped_fns" full n yes Darwin x86_64)"
+    log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-mac_x86_64-15859902_latest.zip' && pass \
+        || fail "SDK Darwin x86_64: must download the mac_x86_64 zip"
+    rm -rf "$st"
 else
     skip "chezmoi not installed"
 fi
