@@ -72,10 +72,20 @@ device or emulator itself - that only exists on the Windows side (see
 "Windows setup" above) - so Maestro and agent-device need a bridge to the
 ADB server running on Windows.
 
-**Known gap:** this plan does not install an `adb` client inside WSL. The
-bridge below only exports `ADB_SERVER_SOCKET`, which is honored by whatever
-`adb` client the tooling (Maestro, agent-device) already has access to; no
-WSL-side `adb` binary is provisioned for you.
+WSL also gets a bare `adb` client: the Android SDK command-line tools
+(pinned and checksum-verified) and `platform-tools` only, under
+`~/.local/opt/android-sdk` - no emulator, system image or AVD, since the
+device lives on Windows. `dot_zshrc` exports `ANDROID_HOME` and appends
+`platform-tools` to `PATH` in every new shell, so `adb` talks to the
+Windows-side ADB server through the bridge below. Two cases change that:
+
+- If an `adb` is already on `PATH` (a distro package, say), the installer
+  leaves it alone and installs nothing.
+- Downloading `platform-tools` means accepting Google's Android SDK
+  licenses. The installer asks first, and only in an interactive run. A
+  non-interactive `dot up` skips the licenses and the download, and its
+  warning tells you how to re-run from a terminal
+  (`chezmoi state delete-bucket --bucket=scriptState && dot up`).
 
 `dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
 templating involved - it is a plain file applied identically everywhere) and
@@ -109,19 +119,47 @@ covers the WSL side of the handshake.
 
 ## Linux and macOS
 
-On native Linux and macOS, `mobile_dev` installs exactly what it installs in
-WSL: the Maestro CLI (pinned and checksum-verified, under
+On native Linux and macOS, `mobile_dev` installs what it installs in WSL -
+the Maestro CLI (pinned and checksum-verified, under
 `~/.local/opt/maestro`, linked from `~/.local/bin`), agent-device (npm
 global), and a standalone JDK 17 (apt's `openjdk-17-jdk` or brew's
 `openjdk@17`), plus the same MCP registrations described under "MCP
-servers" below. Everything runs on a single host, with no Windows/WSL split.
+servers" below - and the full Android SDK, because here everything runs on
+a single host, with no Windows/WSL split:
 
-**Known gap:** the Android SDK command-line tools, platform-tools (`adb`),
-and the emulator are **not** installed on native Linux or macOS by this
-plan. The design doc's parity goal calls for them, but no installer step
-provisions them yet; until that is scoped and added, install them yourself
-(Android Studio, or the SDK command-line-tools zip) if you need a local
-device or emulator.
+- **SDK command-line tools** (`sdkmanager`, `avdmanager`): Google's zip for
+  this OS (Linux, Mac Intel or Mac ARM), pinned in `.chezmoidata.yaml` and
+  checksum-verified, installed to `~/.local/opt/android-sdk`.
+- **platform-tools** (`adb`) and **the emulator**, through `sdkmanager`.
+- **A default AVD**, `mobile_dev_pixel`: the `pixel_6` device profile on the
+  `android-34` default system image (`x86_64`, or `arm64-v8a` on Apple
+  Silicon and ARM Linux).
+
+`dot_zshrc` exports `ANDROID_HOME` and appends `platform-tools`, `emulator`
+and `cmdline-tools/latest/bin` to `PATH` in every new shell. It appends
+rather than prepends, so an `adb` already on your `PATH` keeps precedence.
+The installer warns when it finds two different `adb` builds, because
+mismatched versions kill each other's server.
+
+The system image is several GB. Downloading it, `platform-tools` and the
+emulator means accepting Google's Android SDK licenses, so the installer
+asks first, and only in an interactive run. A non-interactive `dot up`
+still installs the command-line tools, then skips the licenses and
+everything behind them with a warning. To finish from a terminal, run
+`chezmoi state delete-bucket --bucket=scriptState && dot up`.
+
+If you already have an SDK (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or Android
+Studio's default `~/Android/Sdk` or `~/Library/Android/sdk`), the installer
+uses it in place. It only adds what is missing, and never replaces it or
+re-points `ANDROID_HOME`. `PATH` for that SDK stays yours to manage.
+
+The emulator needs hardware acceleration. On Linux that is KVM: the
+installer warns when `/dev/kvm` is missing (virtualization is off in the
+firmware) or not accessible to you (fix with
+`sudo usermod -aG kvm "$USER"`, then log out and back in). On macOS the
+emulator uses Apple's built-in Hypervisor.framework. There is nothing to
+enable there; if acceleration is unavailable anyway, the emulator says so
+when it launches.
 
 **Caveat:** only the installable half of the acceptance loop is covered by
 this repo's hosted CI. GitHub Actions' `ubuntu-latest` and `macos-latest`
@@ -130,7 +168,10 @@ register correctly, but they do not boot an Android emulator or exercise a
 Maestro flow against it - that would require multi-GB emulator images and
 GUI virtualization that hosted CI doesn't provide. The
 emulator-boot-and-Maestro-flow half of acceptance is therefore untested by
-this repo's CI on both platforms. That's a real, stated gap, not a silent
+this repo's CI on both platforms. So is the license-gated half of the
+Android SDK install (platform-tools, the emulator, the system image and the
+AVD): a CI run is non-interactive, so it skips the licenses by design and
+never downloads those. That's a real, stated gap, not a silent
 one - anyone relying on CI green here should know the device-automation path
 itself still needs a manual check on real hardware.
 

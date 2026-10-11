@@ -188,6 +188,13 @@ require "$docs_file" 'mirrored'
 # generations of placeholder comment are gone now.
 forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2-5'
 forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6'
+# Task 9 closed both "Known gap" notes (no WSL adb client; no SDK/emulator on
+# native Linux/macOS); the docs now describe what is installed instead.
+forbid "$docs_file" '**Known gap:** this plan does not install an `adb` client inside WSL'
+forbid "$docs_file" '**Known gap:** the Android SDK command-line tools'
+require "$docs_file" '`mobile_dev_pixel`'
+require "$docs_file" '~/.local/opt/android-sdk'
+require "$docs_file" 'chezmoi state delete-bucket --bucket=scriptState && dot up'
 
 # tests/zshrc_startup_contract.sh already runs `zsh -n` + shellcheck on the
 # whole file; a quick syntax check here just pins this task's own addition.
