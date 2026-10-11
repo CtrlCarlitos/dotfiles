@@ -236,6 +236,7 @@ forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6'
 forbid "$docs_file" '**Known gap:** this plan does not install an `adb` client inside WSL'
 forbid "$docs_file" '**Known gap:** the Android SDK command-line tools'
 require "$docs_file" '`mobile_dev_pixel`'
+# shellcheck disable=SC2088  # literal ~ assertion: docs must reference the tilde form
 require "$docs_file" '~/.local/opt/android-sdk'
 require "$docs_file" 'chezmoi state delete-bucket --bucket=scriptState && dot up'
 
@@ -588,15 +589,21 @@ EOF
     h="$st/a"; mkdir -p "$h"
     got="$(run_sdk "$h" "$swapped_fns" full y yes Linux x86_64)"
     case "$got" in *rc=0*) pass ;; *) fail "SDK full/yes: did not complete (output: $got)" ;; esac
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip' && pass \
         || fail "SDK full/yes: must download the pinned Linux command-line tools zip"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ -x "$h/$own/cmdline-tools/latest/bin/sdkmanager" ] && [ ! -e "$h/$own/cmdline-tools/.incoming" ] && pass \
         || fail "SDK full/yes: sdkmanager must land at ~/$own/cmdline-tools/latest/bin with no staging dir left"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'sdkmanager --licenses (fed 50 y)' && pass || fail "SDK full/yes: licenses not accepted after the person's y"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'sdkmanager platform-tools emulator system-images;android-34;default;x86_64' && pass \
         || fail "SDK full/yes: expected 'sdkmanager platform-tools emulator system-images;android-34;default;x86_64'"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'avdmanager create avd -n mobile_dev_pixel -k system-images;android-34;default;x86_64 -d pixel_6' && pass \
         || fail "SDK full/yes: expected the mobile_dev_pixel AVD on android-34/pixel_6"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     grep -Fq "custom hardware profile question" "$h/sdk.log" && fail "SDK full/yes: avdmanager's hardware-profile question must be answered 'no'" || pass
 
     # B. Idempotent: a second run downloads nothing and asks nothing.
@@ -610,6 +617,7 @@ EOF
     h="$st/c"; mkdir -p "$h"
     got="$(run_sdk "$h" "$swapped_fns" full '' no Linux x86_64)"
     case "$got" in *rc=0*) pass ;; *) fail "SDK non-interactive: did not complete (output: $got)" ;; esac
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ -x "$h/$own/cmdline-tools/latest/bin/sdkmanager" ] && pass || fail "SDK non-interactive: command-line tools must still install"
     if grep -Eq '^(sdkmanager|avdmanager)' "$h/sdk.log"; then
         fail "SDK non-interactive: sdkmanager/avdmanager must not run (log: $(cat "$h/sdk.log"))"
@@ -629,35 +637,42 @@ EOF
     # E. WSL (adb mode): platform-tools only - no emulator, image or AVD.
     h="$st/e"; mkdir -p "$h"
     got="$(run_sdk "$h" "$swapped_fns" adb y yes Linux x86_64)"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'sdkmanager platform-tools' && pass || fail "SDK adb/yes: expected exactly 'sdkmanager platform-tools'"
     if grep -Eq 'emulator|system-images|^avdmanager' "$h/sdk.log"; then
         fail "SDK adb/yes: the WSL path must never fetch the emulator, a system image, or create an AVD (log: $(cat "$h/sdk.log"))"
     else
         pass
     fi
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ -x "$h/$own/platform-tools/adb" ] && pass || fail "SDK adb/yes: adb must land under ~/$own/platform-tools"
 
     # F. Checksum mismatch (the real pins vs the fixture): nothing installed.
     h="$st/f"; mkdir -p "$h"
     got="$(run_sdk "$h" "$sdk_fns" full y yes Linux x86_64)"
     case "$got" in *'CHECKSUM MISMATCH'*rc=0*) pass ;; *) fail "SDK mismatch: must warn CHECKSUM MISMATCH and continue (output: $got)" ;; esac
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ ! -e "$h/$own/cmdline-tools/latest" ] && pass || fail "SDK mismatch: nothing may be extracted from an unverified zip"
 
     # G. An existing ANDROID_HOME is used in place, never replaced by ours.
     h="$st/g"; mkdir -p "$h/mysdk"
     got="$(run_sdk "$h" "$swapped_fns" full n yes Linux x86_64 "$h/mysdk")"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     [ -x "$h/mysdk/cmdline-tools/latest/bin/sdkmanager" ] && [ ! -e "$h/$own" ] && pass \
         || fail "SDK existing ANDROID_HOME: tools must go into that SDK, and ~/$own must not be created"
 
     # H. macOS Apple Silicon: the mac_arm64 zip and an arm64-v8a image.
     h="$st/h"; mkdir -p "$h"
     got="$(run_sdk "$h" "$swapped_fns" full y yes Darwin arm64)"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-mac_arm64-15859902_latest.zip' && pass \
         || fail "SDK Darwin arm64: must download the mac_arm64 zip"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'sdkmanager platform-tools emulator system-images;android-34;default;arm64-v8a' && pass \
         || fail "SDK Darwin arm64: must request the arm64-v8a android-34 image"
     h="$st/i"; mkdir -p "$h"
     got="$(run_sdk "$h" "$swapped_fns" full n yes Darwin x86_64)"
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     log_has "$h" 'curl https://dl.google.com/android/repository/commandlinetools-mac_x86_64-15859902_latest.zip' && pass \
         || fail "SDK Darwin x86_64: must download the mac_x86_64 zip"
     rm -rf "$st"

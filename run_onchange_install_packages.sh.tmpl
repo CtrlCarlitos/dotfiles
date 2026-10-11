@@ -923,6 +923,7 @@ install_mobile_dev() {
     # mobile_dev is selected. ~/.local/state is not chezmoi-managed (nothing
     # in the source tree targets it), so this is not a run_onchange write to
     # a chezmoi-owned file (docs/invariants.md #3).
+    # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
     mkdir -p "$HOME/.local/state/dotfiles" && touch "$HOME/.local/state/dotfiles/mobile_dev" \
         || warn "could not write the mobile_dev marker (~/.local/state/dotfiles/mobile_dev) - new shells won't export JAVA_HOME/ADB_SERVER_SOCKET"
 

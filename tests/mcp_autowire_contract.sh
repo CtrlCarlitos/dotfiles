@@ -223,7 +223,7 @@ sync_check 'agy must still get serena' "$agy_json" '"serena" in d["mcpServers"]'
 sync_check 'agy must get Expo (render has mobile_dev=true)' "$agy_json" '"expo" in d["mcpServers"]'
 # No maestro binary: no maestro entry for either agent (the local gate holds).
 rm -f "$sync_tmp/bin/maestro"
-rm -rf "$sync_tmp/home"
+rm -rf "${sync_tmp:?}/home"
 mkdir -p "$sync_tmp/home"
 run_sync || fail "sync_agent_mcp_catalog() failed without maestro"
 sync_check 'OpenCode must not get maestro without its binary' "$oc_json" '"maestro" not in d["mcp"]'
@@ -263,7 +263,7 @@ sync_check 'agy must still get maestro and serena alongside agent-device' "$agy_
     '"maestro" in d["mcpServers"] and "serena" in d["mcpServers"]'
 # No agent-device binary: no agent-device entry for either agent (the local gate holds).
 rm -f "$sync_tmp/bin/agent-device"
-rm -rf "$sync_tmp/home"
+rm -rf "${sync_tmp:?}/home"
 mkdir -p "$sync_tmp/home"
 run_sync || fail "sync_agent_mcp_catalog() failed without agent-device"
 sync_check 'OpenCode must not get agent-device without its binary' "$oc_json" '"agent-device" not in d["mcp"]'
