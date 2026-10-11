@@ -135,54 +135,80 @@ composer_home="${COMPOSER_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/composer}"
 # (not linked into brew's shared bin), so its prefix has to be found
 # explicitly. First existing candidate wins; an already-exported JAVA_HOME
 # (another JDK manager, a devcontainer image) is left alone.
-if [[ -z "${JAVA_HOME:-}" ]]; then
-  for _jdk17 in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk-arm64 \
-      /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 \
-      /home/linuxbrew/.linuxbrew/opt/openjdk@17 "$HOME/.linuxbrew/opt/openjdk@17"; do
-    if [[ -x "$_jdk17/bin/java" ]]; then
-      export JAVA_HOME="$_jdk17"
-      break
-    fi
-  done
-  unset _jdk17
+# Inert unless mobile_dev actually installed something here: dot_zshrc is
+# applied on every machine, and a disabled group must have no side effects.
+# Maestro's symlink ($HOME/.local/bin/maestro, laid down by the installer's
+# install_mobile_dev) is the runtime proxy for "mobile_dev ran on this machine".
+if [[ -x "$HOME/.local/bin/maestro" ]]; then
+  if [[ -z "${JAVA_HOME:-}" ]]; then
+    for _jdk17 in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-17-openjdk-arm64 \
+        /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 \
+        /home/linuxbrew/.linuxbrew/opt/openjdk@17 "$HOME/.linuxbrew/opt/openjdk@17"; do
+      if [[ -x "$_jdk17/bin/java" ]]; then
+        export JAVA_HOME="$_jdk17"
+        break
+      fi
+    done
+    unset _jdk17
+  fi
+  [[ -n "${JAVA_HOME:-}" ]] && path=("$JAVA_HOME/bin" "${path[@]}")
 fi
-[[ -n "${JAVA_HOME:-}" ]] && path=("$JAVA_HOME/bin" "${path[@]}")
+
+# _adb_resolve_host MODE ROUTE RESOLV_FILE - prints the host the Windows ADB
+# server is reachable at from WSL, or nothing. MODE is `wslinfo
+# --networking-mode`'s answer, ROUTE is `ip route show default`'s output,
+# RESOLV_FILE is a resolv.conf path. Pure (arguments in, host out) so
+# tests/mobile_dev_install_contract.sh can execute it against fixtures.
+#   mirrored: WSL2 mirrored networking shares the loopback interface
+#     bidirectionally, so 127.0.0.1 reaches the Windows host directly.
+#   anything else (nat, empty, no wslinfo on an older build): the default
+#     route's gateway IS the Windows host's vEthernet (WSL) address. NOT
+#     resolv.conf's nameserver: with DNS tunneling (on by default on current
+#     WSL builds) that is 10.255.255.254, a WSL-side DNS proxy nothing else
+#     listens on - observed live on a NAT-mode WSL2 machine (nameserver
+#     10.255.255.254, default via 172.21.144.1). resolv.conf is only the last
+#     resort for a minimal distro with no `ip` (older builds, or DNS
+#     tunneling off, still point it at the host).
+_adb_resolve_host() {
+  local _host=""
+  if [[ "$1" == mirrored ]]; then
+    printf '%s\n' 127.0.0.1
+    return 0
+  fi
+  _host="$(printf '%s\n' "$2" | awk '/^default/ { print $3; exit }')"
+  [[ -z "$_host" ]] && _host="$(awk '/^nameserver/ { print $2; exit }' "$3" 2>/dev/null)"
+  [[ -n "$_host" ]] && printf '%s\n' "$_host"
+  return 0
+}
 
 # ADB bridge to the Windows host (mobile_dev's adb/Maestro/agent-device,
 # WSL only): unlike JAVA_HOME above, this is recomputed on EVERY new shell,
 # never cached - the resolved Windows host IP can change across Windows
 # reboots/network reconnects. Guarded so a user's own override is never
-# clobbered. dot_zshrc is applied byte-for-byte on every machine (WSL,
-# native Linux, macOS, devcontainer) - it carries no chezmoi template
-# variables, so WSL is detected here the portable way (/proc/version),
-# the shell-native equivalent of .chezmoi.toml.tmpl's $isWsl check. Best
-# effort throughout: nothing here aborts the shell, and an inconclusive
-# detection just leaves ADB_SERVER_SOCKET unset.
-if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && grep -qi microsoft /proc/version 2>/dev/null; then
-  _adb_host=""
-  # WSL2 mirrored networking shares the loopback interface bidirectionally,
-  # so 127.0.0.1 reaches the Windows host directly; `wslinfo` is the
-  # supported way to ask which networking mode is active. Any other
-  # answer (including "nat", an empty answer, or wslinfo not existing on
-  # an older WSL build) falls through to the NAT-mode method below.
-  if command -v wslinfo &>/dev/null; then
-    case "$(wslinfo --networking-mode 2>/dev/null)" in
-      mirrored) _adb_host="127.0.0.1" ;;
-    esac
+# clobbered, and inert unless mobile_dev installed Maestro here (same proxy
+# as the JDK block above). dot_zshrc is applied byte-for-byte on every
+# machine (WSL, native Linux, macOS, devcontainer) - it carries no chezmoi
+# template variables, so WSL is detected here the portable way
+# (/proc/version), the shell-native equivalent of .chezmoi.toml.tmpl's
+# $isWsl check. Best effort throughout: nothing here aborts the shell, and an
+# inconclusive detection just leaves ADB_SERVER_SOCKET unset.
+if [[ -z "${ADB_SERVER_SOCKET:-}" ]] && [[ -x "$HOME/.local/bin/maestro" ]] \
+    && grep -qi microsoft /proc/version 2>/dev/null; then
+  _adb_mode="" _adb_route=""
+  command -v wslinfo &>/dev/null && _adb_mode="$(wslinfo --networking-mode 2>/dev/null)"
+  if [[ "$_adb_mode" != mirrored ]] && command -v ip &>/dev/null; then
+    _adb_route="$(ip route show default 2>/dev/null)"
   fi
-  if [[ -z "$_adb_host" ]]; then
-    # NAT mode (docs/windows.md's Networking table): the Windows host is
-    # reachable at /etc/resolv.conf's nameserver.
-    _adb_host="$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf 2>/dev/null)"
-  fi
+  _adb_host="$(_adb_resolve_host "$_adb_mode" "$_adb_route" /etc/resolv.conf)"
   if [[ -n "$_adb_host" ]]; then
     export ADB_SERVER_SOCKET="tcp:$_adb_host:5037"
   else
     # Warn, never abort: an inconclusive detection must not break shell startup.
-    print -u2 "zshrc: could not resolve the Windows host for ADB_SERVER_SOCKET (checked wslinfo and /etc/resolv.conf) - adb/Maestro/agent-device won't reach the Windows ADB server until this is set manually"
+    print -u2 "zshrc: could not resolve the Windows host for ADB_SERVER_SOCKET (checked wslinfo, ip route show default and /etc/resolv.conf) - adb/Maestro/agent-device won't reach the Windows ADB server until this is set manually"
   fi
-  unset _adb_host
+  unset _adb_mode _adb_route _adb_host
 fi
+unset -f _adb_resolve_host
 
 # ZSH completions
 [[ -d "$HOME/.zfunc" ]] && fpath=("$HOME/.zfunc" "${fpath[@]}")
