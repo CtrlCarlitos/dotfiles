@@ -176,11 +176,11 @@ grep -Fq 'Invoke-DotNetworkCheck' "$du" || fail "dotupgrade.ps1 must run the net
 grep -Fq 'lib/netspeed.sh' "$ds" || fail "dotupgrade.sh must source lib/netspeed.sh"
 check_line="$(grep -n '^[$]networkChoice = Invoke-DotNetworkCheck' "$du" | head -1 | cut -d: -f1)"
 sweep_line="$(grep -n 'Invoke-ChocoUpgradeAll' "$du" | head -1 | cut -d: -f1)"
-[ -n "$check_line" ] && [ -n "$sweep_line" ] && [ "$check_line" -lt "$sweep_line" ] || fail "dotupgrade.ps1: the network check must come before the choco sweep"
+if [ -z "$check_line" ] || [ -z "$sweep_line" ] || [ "$check_line" -ge "$sweep_line" ]; then fail "dotupgrade.ps1: the network check must come before the choco sweep"; fi
 [ "$(grep -c 'skipPackageSweeps' "$du")" -ge 5 ] || fail "dotupgrade.ps1: skip must gate choco, winget and both running-app offers"
 check_line="$(grep -n '^net_speed_check' "$ds" | head -1 | cut -d: -f1)"
 sweep_line="$(grep -n 'apt-get' "$ds" | head -1 | cut -d: -f1)"
-[ -n "$check_line" ] && [ -n "$sweep_line" ] && [ "$check_line" -lt "$sweep_line" ] || fail "dotupgrade.sh: the network check must come before the apt sweep"
+if [ -z "$check_line" ] || [ -z "$sweep_line" ] || [ "$check_line" -ge "$sweep_line" ]; then fail "dotupgrade.sh: the network check must come before the apt sweep"; fi
 pass
 
 finish
