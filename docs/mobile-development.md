@@ -107,8 +107,11 @@ How it resolves that address depends on which WSL networking mode is active:
 This is recomputed fresh every time a new shell starts (the resolved address
 can change across Windows reboots or network reconnects) and never clobbers
 an `ADB_SERVER_SOCKET` you have exported yourself. It (and the `JAVA_HOME`
-detection) only runs where `mobile_dev` actually installed Maestro
-(`~/.local/bin/maestro`); on machines without it, both blocks do nothing.
+detection) only runs where `mobile_dev`'s installer has actually run, which
+it records in the marker file `~/.local/state/dotfiles/mobile_dev`; on
+machines without it, both blocks do nothing. The marker does not depend on
+Maestro specifically: a Maestro you installed yourself beforehand, or a
+failed Maestro download, still leaves the bridge and `JAVA_HOME` working.
 
 The bridge only has something to reach once Carlos starts the ADB server on
 the Windows side each session. That manual step - the exact
@@ -161,19 +164,27 @@ emulator uses Apple's built-in Hypervisor.framework. There is nothing to
 enable there; if acceleration is unavailable anyway, the emulator says so
 when it launches.
 
-**Caveat:** only the installable half of the acceptance loop is covered by
-this repo's hosted CI. GitHub Actions' `ubuntu-latest` and `macos-latest`
-runners can verify that Maestro, agent-device, and the JDK install and
-register correctly, but they do not boot an Android emulator or exercise a
+**Caveat:** no CI job ever performs a live `mobile_dev` install. The
+real-install fixture (`tests/fixtures/chezmoi/packages-on.toml`, used by
+`.github/workflows/full-install-test.yml`) sets `mobile_dev = false`, so
+Maestro, agent-device, the JDK and the Android SDK are never actually
+downloaded or installed on GitHub Actions' `ubuntu-latest` or
+`macos-latest` runners. CI coverage for `mobile_dev` comes only from
+`tests/mobile_dev_install_contract.sh` (and the MCP catalog checks in
+`tests/mcp_autowire_contract.sh`), which `ci.yml` runs on every push via
+`bash tests/run.sh`: they render the real installer template and execute
+its functions against stub binaries, proving the install logic, gating and
+MCP registration wiring - not that the real downloads, checksums or
+installs succeed. Nor does CI boot an Android emulator or exercise a
 Maestro flow against it - that would require multi-GB emulator images and
 GUI virtualization that hosted CI doesn't provide. The
 emulator-boot-and-Maestro-flow half of acceptance is therefore untested by
 this repo's CI on both platforms. So is the license-gated half of the
 Android SDK install (platform-tools, the emulator, the system image and the
-AVD): a CI run is non-interactive, so it skips the licenses by design and
-never downloads those. That's a real, stated gap, not a silent
-one - anyone relying on CI green here should know the device-automation path
-itself still needs a manual check on real hardware.
+AVD), which a non-interactive run skips by design and never downloads.
+That's a real, stated gap, not a silent one - anyone relying on CI green
+here should know both the live install and the device-automation path
+still need a manual check on real hardware.
 
 
 ## MCP servers
