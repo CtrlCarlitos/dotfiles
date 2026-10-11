@@ -91,7 +91,7 @@ function Read-DotAnswer { param([string]$Prompt) $script:asked++; return $script
 function Capture([scriptblock]$Run) { (& $Run *>&1 | Out-String).Trim() }
 
 $script:curlOut = '12500000|10000000'
-Write-Output ('mbps=' + (Get-DotNetworkMbps))
+Write-Output ('mbps=' + (Get-DotNetworkSpeed))
 Write-Output ('fast=' + (Invoke-DotNetworkCheck) + '|asked=' + $script:asked)
 $script:curlOut = '1250000|10000000'
 $script:answer = 's'

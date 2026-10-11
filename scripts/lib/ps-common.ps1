@@ -1622,7 +1622,7 @@ function Read-DotAnswer {
 # say so when the link is under DOT_SLOW_MBPS (default 50) Mbit/s. Twin of net_speed_check in
 # scripts/lib/netspeed.sh. DOT_SPEED_CHECK=0 turns it off; DOT_SPEED_TEST_URL swaps the endpoint.
 # An unmeasurable link (no curl.exe, offline, blocked endpoint) never blocks anything.
-function Get-DotNetworkMbps {
+function Get-DotNetworkSpeed {
     $url = 'https://speed.cloudflare.com/__down?bytes=10000000'
     if ($env:DOT_SPEED_TEST_URL) { $url = $env:DOT_SPEED_TEST_URL }
     if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { return $null }
@@ -1644,7 +1644,7 @@ function Invoke-DotNetworkCheck {
     if ("$env:DOT_SPEED_CHECK" -eq '0') { return 'continue' }
     $threshold = 50
     if ("$env:DOT_SLOW_MBPS" -match '^\d+$') { $threshold = [int]$env:DOT_SLOW_MBPS }
-    $mbps = Get-DotNetworkMbps
+    $mbps = Get-DotNetworkSpeed
     if ($null -eq $mbps) {
         Write-Host '  Network speed: could not be measured (the check is skipped).' -ForegroundColor DarkGray
         return 'continue'
