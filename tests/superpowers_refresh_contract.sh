@@ -294,7 +294,11 @@ cat >"$bin/chezmoi" <<STUB
 exec "$real_chezmoi" execute-template --source "$scratch" "\$@"
 STUB
 chmod +x "$bin/chezmoi"
-claude_json='[{"id":"superpowers@superpowers-marketplace","version":"7.0.0","scope":"user","enabled":true},{"id":"superpowers@superpowers-marketplace","version":"6.2.0","scope":"project","enabled":true,"projectPath":"'"$home"'/projects/takumi"},{"id":"other@m","version":"1.0.0","scope":"user"}]'
+# Two non-user installs: a project-scope one whose directory exists (behind), and a local-scope one
+# whose directory is gone - a deleted worktree (2026-10-11: two such entries lingered at 6.2.0 and
+# 6.3.0, and "run claude plugin update inside each" could not be followed).
+mkdir -p "$home/projects/takumi"
+claude_json='[{"id":"superpowers@superpowers-marketplace","version":"7.0.0","scope":"user","enabled":true},{"id":"superpowers@superpowers-marketplace","version":"6.2.0","scope":"project","enabled":true,"projectPath":"'"$home"'/projects/takumi"},{"id":"superpowers@superpowers-marketplace","version":"6.3.0","scope":"local","enabled":true,"projectPath":"'"$home"'/projects/gone/.worktrees/old"},{"id":"other@m","version":"1.0.0","scope":"user"}]'
 run_updater() { # $1 = output file; extra env from the caller
     : >"$tmp/npm.log"
     HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" NPM_FAKE_PREFIX="$tmp/prefix" \
@@ -319,7 +323,11 @@ expect() { grep -Fq -- "$1" "$out" || fail "report: expected '$1' (got: $(grep -
 expect 'Superpowers versions (upstream: v7.0.0):'
 expect '   Claude Code: 7.0.0 (current)'
 if command -v jq >/dev/null 2>&1; then
-    expect "project-scope installs behind: 6.2.0 in ~/projects/takumi - run 'claude plugin update superpowers@superpowers-marketplace' inside each"
+    # the scope is named as Claude reports it; a behind install can be updated or removed in place,
+    # and one whose directory is gone can only be removed - each line says how
+    expect "project/local-scope installs behind: 6.2.0 (project) in ~/projects/takumi - inside each: 'claude plugin update superpowers@superpowers-marketplace', or 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' so the user-scope install applies"
+    expect "stale installs (directory gone): 6.3.0 (local) in ~/projects/gone/.worktrees/old - recreate the directory, run 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' inside it, then delete it"
+    if grep -Fq 'installs behind: 6.2.0 (project) in ~/projects/takumi, 6.3.0' "$out"; then fail "report: a gone directory must not be listed as merely behind"; else pass; fi
 else
     printf 'note: jq not installed - the project-scope line is not checked\n'
 fi

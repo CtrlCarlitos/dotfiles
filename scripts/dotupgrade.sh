@@ -239,6 +239,10 @@ case "$NET_CHOICE:$(uname -s)" in
                 fi
                 sudo apt-get "${apt_q[@]}" upgrade -y
                 dock_unhold
+                # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
+                # them only when missing: this is where they get upgraded (github_tool_sync,
+                # lib/agent-skills.sh). The closing note then names only what still lags.
+                for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
             fi
         else
             echo "  apt-get not found - skipping system packages."
@@ -395,7 +399,7 @@ case "$(uname -s)" in
     Linux)
         unmanaged="$(unmanaged_present)"
         if [ -n "$unmanaged" ]; then
-            echo "  Note: outside package managers (no auto-upgrade): $unmanaged - re-run the installer (or bump its pin) for any that lags."
+            echo "  Note: outside package managers: $unmanaged - delta, dust and procs are upgraded above when behind; lychee and vale follow a pin in this repo (bump it to move them)."
         fi
         ;;
     Darwin)

@@ -1754,27 +1754,10 @@ install_apt() {
             eza || warn "eza install failed - continuing"
     fi
 
-    # git-delta (not in apt repos, download from GitHub)
-    if ! command -v delta &>/dev/null; then
-        info "Installing git-delta..."
-        local delta_version
-        delta_version=$(curl -s --max-time 30 "https://api.github.com/repos/dandavison/delta/releases/latest" | grep -Po '"tag_name": "\K[^"]*' || true)
-        if [[ -n "$delta_version" ]]; then
-            local delta_deb="$WORK/git-delta_${delta_version}_amd64.deb"
-            # Ensure wget
-            command -v wget &>/dev/null || $SUDO apt install -y wget
-            net_timeout 180 wget -q --show-progress -O "$delta_deb" \
-                "https://github.com/dandavison/delta/releases/download/${delta_version}/git-delta_${delta_version}_amd64.deb" || {
-                warn "Failed to download git-delta v${delta_version} (or timed out)"
-            }
-            if [[ -f "$delta_deb" ]]; then
-                $SUDO dpkg -i "$delta_deb" || $SUDO apt install -f -y
-                rm -f "$delta_deb"
-            fi
-        else
-            warn "Could not determine latest git-delta version - skipping"
-        fi
-    fi
+    # git-delta, dust, procs: GitHub releases, no apt repo (github_tool_sync,
+    # scripts/lib/agent-skills.sh - shared with `dot upgrade`, which upgrades
+    # them; `dot up` only installs what is missing, like everything else).
+    github_tool_sync delta "$SUDO" install
 
     # duf (df replacement) - in the apt archive since Ubuntu 22.04 (jammy)
     $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "duf" true) "catalog" .catalog.packages) }} || true
@@ -1791,43 +1774,12 @@ install_apt() {
             || warn "Failed to install tealdeer (or timed out)"
     fi
 
-    # dust (du replacement) - not in apt until Ubuntu 25.04 (plucky), so
-    # download the GitHub-published .deb directly, same pattern as git-delta.
-    if ! command -v dust &>/dev/null; then
-        info "Installing dust..."
-        local dust_version
-        dust_version=$(curl -s --max-time 30 "https://api.github.com/repos/bootandy/dust/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
-        if [[ -n "$dust_version" ]]; then
-            local dust_deb="$WORK/du-dust_${dust_version}-1_amd64.deb"
-            net_timeout 180 wget -q -O "$dust_deb" \
-                "https://github.com/bootandy/dust/releases/download/v${dust_version}/du-dust_${dust_version}-1_amd64.deb" || {
-                warn "Failed to download dust v${dust_version} (or timed out)"
-            }
-            if [[ -f "$dust_deb" ]]; then
-                $SUDO dpkg -i "$dust_deb" || $SUDO apt install -f -y
-                rm -f "$dust_deb"
-            fi
-        else
-            warn "Could not determine latest dust version - skipping"
-        fi
-    fi
+    # dust (du replacement) - not in apt until Ubuntu 25.04 (plucky): GitHub release (see delta)
+    github_tool_sync dust "$SUDO" install
 
-    # procs (ps replacement) - not in apt until Ubuntu 25.04 (plucky) either,
-    # and only ships as a .zip (no .deb), so extract the binary directly.
-    if ! command -v procs &>/dev/null; then
-        info "Installing procs..."
-        local procs_version
-        procs_version=$(curl -s --max-time 30 "https://api.github.com/repos/dalance/procs/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
-        # shellcheck disable=SC2015  # A && B || { fallback } is the intended shape here
-        [[ -n "$procs_version" ]] \
-            && net_timeout 180 curl -fLo "$WORK/procs.zip" \
-                "https://github.com/dalance/procs/releases/download/v${procs_version}/procs-v${procs_version}-x86_64-linux.zip" \
-            && $SUDO apt install -y unzip \
-            && unzip -o "$WORK/procs.zip" -d "$WORK/procs-extract" \
-            && $SUDO install "$WORK/procs-extract/procs" /usr/local/bin/procs \
-            || warn "Failed to install procs (or version lookup failed)"
-        rm -rf "$WORK/procs.zip" "$WORK/procs-extract"
-    fi
+    # procs (ps replacement) - not in apt until Ubuntu 25.04 (plucky) either, and only
+    # ships as a .zip: GitHub release into /usr/local/bin (see delta)
+    github_tool_sync procs "$SUDO" install
 {{- else }}
     info "Modern CLI tools disabled in config"
 {{- end }}
