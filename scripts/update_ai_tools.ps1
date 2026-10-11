@@ -518,15 +518,43 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 }
 
 Add-DotTimingMark -Name 'Superpowers (OpenCode)'
-# 3. Superpowers (OpenCode) - separate from Claude Code's plugin above.
-# Not a version-pinned npm dep, so re-running the install pulls the latest
-# commit. Uses the same Windows-specific --prefix workaround as the installer.
+# 3. Superpowers (OpenCode) - separate from Claude Code's plugin above. Two copies can exist:
+#   - the Windows installer's PATH install under ~\.config\opencode\node_modules (its workaround
+#     for the git spec's OpenCode/Windows issues), which opencode.json points at - refreshed by
+#     the same `npm install --prefix` (no version pinned, so it pulls the latest commit);
+#   - OpenCode's OWN cache (Get-OpenCodeSuperpowersCacheDir, scripts/lib/ps-skills.ps1), where
+#     OpenCode installs a git `plugin` spec on first start and never re-resolves it. That is the
+#     copy OpenCode loads for a git spec, and until 2026-10-10 nothing refreshed it (6.3.0 for two
+#     months on WSL while the config-dir copy was at 7.0.0).
+# Defer-aware: a live opencode session resolves from these directories.
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
     Write-Host "$($G.sparkles) Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
-    # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-    # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
-    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "  Superpowers not installed for OpenCode - skipping" -ForegroundColor Yellow }
+    if (-not (Get-Command Invoke-OpenCodeSuperpowersRefresh -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+    if (Test-Deferred 'opencode') {
+        Write-Host "  opencode deferred - Superpowers (OpenCode) update skipped with it." -ForegroundColor Yellow
+    } else {
+        $ocBefore = Get-OpenCodeSuperpowersVersion
+        $ocRefreshed = $false
+        $ocFailed = $false
+        if (Get-OpenCodeSuperpowersPathInstall) {
+            # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
+            # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
+            npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { $ocFailed = $true } else { $ocRefreshed = $true }
+        }
+        if (@(Get-OpenCodeSuperpowersCacheDir).Count -gt 0) {
+            if (Invoke-OpenCodeSuperpowersRefresh) { $ocRefreshed = $true } else { $ocFailed = $true }
+        }
+        if ($ocFailed) {
+            Write-Host "   Superpowers (OpenCode) refresh failed - skipping" -ForegroundColor Yellow
+        } elseif (-not $ocRefreshed) {
+            Write-Host "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
+        } else {
+            $ocAfter = Get-OpenCodeSuperpowersVersion
+            if ($ocAfter -and $ocAfter -ne $ocBefore) { Write-Host "   Superpowers (OpenCode) upgraded to $ocAfter" }
+            else { $shown = 'installed'; if ($ocAfter) { $shown = $ocAfter }; Write-Host "   Superpowers (OpenCode) is current ($shown)" }
+        }
+    }
 }
 
 Add-DotTimingMark -Name 'Playwright Chromium'
@@ -608,6 +636,14 @@ Add-DotTimingMark -Name 'Graft retirement'
 # nothing to do).
 if (-not (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
 if (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) { Invoke-GraftRetirement }
+
+Add-DotTimingMark -Name 'Superpowers report'
+# 8. Superpowers per harness, against upstream's latest release (Write-SuperpowersReport,
+# scripts/lib/ps-skills.ps1). Four install mechanisms are four ways to fall behind while every
+# step above reports success (2026-10-10: OpenCode at 6.3.0 for two months, Codex at 6.4.2
+# behind a lagging catalog, project-scope Claude installs at 6.2.0). Read-only.
+if (-not (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+if (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) { Write-SuperpowersReport -Glyph $G.sparkles }
 
 Write-DotTimingSummary -Title 'AI tools'
 Write-Host "$($G.check) AI Tools Update Complete!" -ForegroundColor Green

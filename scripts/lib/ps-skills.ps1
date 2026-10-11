@@ -606,3 +606,251 @@ function Invoke-GraftRetirement {
     }
     if ($done.Count -gt 0) { Write-Host "  Retired Graft (dropped from the dotfiles): $($done -join ' ')" -ForegroundColor Green }
 }
+
+#-------------------------------------------------------------------------------
+# Superpowers per harness - the PowerShell twins of codex_superpowers_installed_version,
+# opencode_superpowers_refresh and friends in scripts/lib/agent-skills.sh.
+# tests/superpowers_refresh_contract.sh executes both sets against the same stubs.
+#-------------------------------------------------------------------------------
+
+# A native command's lines under $ErrorActionPreference = 'Stop' (Windows PowerShell 5.1 turns
+# its stderr into a terminating error): preference relaxed for the call, stderr dropped, strings
+# out, nothing when the command is absent or fails.
+function Invoke-NativeCommand {
+    param([string]$Command, [string[]]$Arguments)
+    if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) { return @() }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { return @(& $Command @Arguments 2>$null | ForEach-Object { "$_" }) } catch { return @() } finally { $ErrorActionPreference = $previous }
+}
+
+# The superpowers row of `codex plugin list`: `superpowers@<marketplace>  <status>  <version>
+# <source>`, <status> being "installed, enabled", "installed, disabled" or "not installed".
+# $null when no marketplace lists the plugin.
+function Get-CodexSuperpowersRow {
+    foreach ($row in (Invoke-NativeCommand -Command codex -Arguments @('plugin', 'list'))) {
+        $m = [regex]::Match($row, '^superpowers@(\S+)\s+(installed(,\s*[a-z]+)?|not installed)\s+(\S+)')
+        if ($m.Success) {
+            return [pscustomobject]@{
+                Marketplace = $m.Groups[1].Value
+                Installed   = ($m.Groups[2].Value -notlike 'not *')
+                Version     = $m.Groups[4].Value
+            }
+        }
+    }
+    return $null
+}
+
+# The installed version ('' when codex says "not installed" or lists no row). `dot up` reads it
+# before `codex plugin add`: re-adding an installed plugin re-fetches it (an upgrade).
+function Get-CodexSuperpowersInstalledVersion {
+    $row = Get-CodexSuperpowersRow
+    if ($row -and $row.Installed) { return [string]$row.Version }
+    return ''
+}
+
+# The version the marketplace offers, installed or not ('' when none lists it).
+function Get-CodexSuperpowersCatalogVersion {
+    $row = Get-CodexSuperpowersRow
+    if ($row) { return [string]$row.Version }
+    return ''
+}
+
+# $true when agy lists superpowers among its imported plugins (`agy plugin list` prints a JSON
+# document with an "imports" array of {"name": ...}).
+function Test-AgySuperpowersInstalled {
+    $text = (Invoke-NativeCommand -Command agy -Arguments @('plugin', 'list')) -join "`n"
+    return [bool]($text -match '"name":\s*"superpowers"')
+}
+
+# The version of the plugin agy installed, from the plugin.json under its plugin store (best
+# effort: the store moved once already, so every ~\.gemini\*\plugins\superpowers is tried).
+function Get-AntigravitySuperpowersVersion {
+    $gemini = Join-Path (Get-SkillsHome) '.gemini'
+    $candidates = @()
+    foreach ($d in @(Get-ChildItem -LiteralPath $gemini -Directory -ErrorAction SilentlyContinue)) {
+        $candidates += Join-Path (Join-Path (Join-Path (Join-Path $d.FullName 'plugins') 'superpowers') '.claude-plugin') 'plugin.json'
+    }
+    $candidates += Join-Path (Join-Path (Join-Path (Join-Path $gemini 'plugins') 'superpowers') '.claude-plugin') 'plugin.json'
+    foreach ($f in $candidates) {
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        try {
+            $json = Get-Content -LiteralPath $f -Raw | ConvertFrom-Json
+            if ($json.PSObject.Properties['version']) { return [string]$json.version }
+        } catch { Write-Verbose "unreadable plugin.json: $f" }
+    }
+    return ''
+}
+
+# The newest release-looking tag of a GitHub repo (X.Y or X.Y.Z after dropping a "<name>-"
+# and/or "v" prefix: v7.0.0, lychee-v0.24.2, 0.20.1), via one `git ls-remote` - no API quota,
+# the same proxy git itself uses. '' when unreachable.
+function Get-GitHubLatestTag {
+    param([string]$Repo)
+    $versions = @()
+    foreach ($line in (Invoke-NativeCommand -Command git -Arguments @('ls-remote', '--tags', '--refs', "https://github.com/$Repo.git"))) {
+        $tag = ($line -replace '^.*refs/tags/', '') -replace '^[A-Za-z_-]*-?v?', ''
+        if ($tag -match '^\d+\.\d+(\.\d+)?$') { $versions += $tag }
+    }
+    if ($versions.Count -eq 0) { return '' }
+    return [string](@($versions | Sort-Object { [version]$_ }) | Select-Object -Last 1)
+}
+
+function Get-SuperpowersLatestVersion { return (Get-GitHubLatestTag -Repo 'obra/superpowers') }
+
+# Where OpenCode keeps the superpowers plugin it actually loads. For every `plugin` entry in
+# opencode.json OpenCode installs the package into its OWN cache, <cache>\packages\<name>@<spec>\
+# (package.json + lockfile + node_modules), on the first start that sees the entry, and reuses
+# that directory for as long as it exists - a git spec is resolved once and pinned by the
+# lockfile from then on. Nothing under ~\.config\opencode is consulted for it: the
+# `npm install --prefix ~\.config\opencode` the updaters ran until 2026-10-10 refreshed a tree
+# OpenCode never read. The spec is part of the path, separators included, so this is a search
+# a few levels deep, not a glob. One path per directory (normally one); none before OpenCode's
+# first start.
+function Get-OpenCodeSuperpowersCacheDir {
+    $roots = @()
+    if ($env:XDG_CACHE_HOME) { $roots += Join-Path $env:XDG_CACHE_HOME 'opencode' }
+    $roots += Join-Path (Join-Path (Get-SkillsHome) '.cache') 'opencode'
+    if ($env:LOCALAPPDATA) { $roots += Join-Path (Join-Path $env:LOCALAPPDATA 'opencode') 'cache' }
+    $dirs = @()
+    foreach ($root in $roots) {
+        $packages = Join-Path $root 'packages'
+        if (-not (Test-Path -LiteralPath $packages)) { continue }
+        $files = @(Get-ChildItem -LiteralPath $packages -Recurse -Depth 5 -File -Filter 'package.json' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like '*superpowers@*' -and $_.FullName -notlike '*node_modules*' })
+        foreach ($f in $files) { if ($dirs -notcontains $f.DirectoryName) { $dirs += $f.DirectoryName } }
+    }
+    return @($dirs | Sort-Object)
+}
+
+# The Windows installer points opencode.json at a PATH install instead of a git spec (the git
+# spec has documented OpenCode/Windows issues: Bun not finding git.exe, cache-path bugs), kept
+# current with `npm install --prefix ~\.config\opencode`. That is the copy OpenCode loads there.
+function Get-OpenCodeSuperpowersPathInstall {
+    $dir = Join-Path (Join-Path (Join-Path (Join-Path (Get-SkillsHome) '.config') 'opencode') 'node_modules') 'superpowers'
+    if (Test-Path -LiteralPath (Join-Path $dir 'package.json')) { return $dir }
+    return ''
+}
+
+# The version OpenCode loads: the first cache directory, else the Windows path install ('' when
+# neither exists).
+function Get-OpenCodeSuperpowersVersion {
+    $dir = @(Get-OpenCodeSuperpowersCacheDir) | Select-Object -First 1
+    $f = ''
+    if ($dir) { $f = Join-Path (Join-Path (Join-Path $dir 'node_modules') 'superpowers') 'package.json' }
+    elseif (Get-OpenCodeSuperpowersPathInstall) { $f = Join-Path (Get-OpenCodeSuperpowersPathInstall) 'package.json' }
+    if (-not $f -or -not (Test-Path -LiteralPath $f)) { return '' }
+    try {
+        $json = Get-Content -LiteralPath $f -Raw | ConvertFrom-Json
+        if ($json.PSObject.Properties['version']) { return [string]$json.version }
+    } catch { Write-Verbose "unreadable plugin.json: $f" }
+    return ''
+}
+
+# Re-resolve the git dependency in every cache directory to upstream HEAD, in place: npm rewrites
+# the lockfile and node_modules there, and OpenCode's next start loads the new copy.
+# --ignore-scripts as OpenCode's own installer (@npmcli/arborist, ignoreScripts: true) does.
+# $false when any directory failed; npm's own output is shown only then.
+function Invoke-OpenCodeSuperpowersRefresh {
+    $ok = $true
+    foreach ($dir in @(Get-OpenCodeSuperpowersCacheDir)) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $out = @(& npm install --prefix $dir 'superpowers@github:obra/superpowers' --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { Write-Host "    $_" }; $ok = $false }
+        } catch {
+            Write-Host "    $($_.Exception.Message)"
+            $ok = $false
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+    }
+    return $ok
+}
+
+# $true when a Playwright Chromium build is already in its browser cache (PLAYWRIGHT_BROWSERS_PATH,
+# else %LOCALAPPDATA%\ms-playwright - ~\.cache\ms-playwright where LOCALAPPDATA is unset). `dot up`
+# reads it before `npx playwright install`, which re-ran on every apply.
+function Test-PlaywrightChromiumInstalled {
+    $roots = @()
+    if ($env:PLAYWRIGHT_BROWSERS_PATH) {
+        $roots += $env:PLAYWRIGHT_BROWSERS_PATH
+    } else {
+        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'ms-playwright' }
+        $roots += Join-Path (Join-Path (Get-SkillsHome) '.cache') 'ms-playwright'
+    }
+    foreach ($root in $roots) {
+        if (@(Get-ChildItem -LiteralPath $root -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+    }
+    return $false
+}
+
+# One object per superpowers install Claude Code knows of (`claude plugin list --json`), the
+# user-scope one included: Version, Scope, ProjectPath. Project- and local-scope installs are per
+# repository and `claude plugin update` run elsewhere never touches them.
+function Get-ClaudeSuperpowersInstall {
+    $text = (Invoke-NativeCommand -Command claude -Arguments @('plugin', 'list', '--json')) -join "`n"
+    if (-not $text.Trim()) { return @() }
+    try { $items = @($text | ConvertFrom-Json) } catch { return @() }
+    $out = @()
+    foreach ($item in $items) {
+        if (-not $item.PSObject.Properties['id'] -or ([string]$item.id) -notlike 'superpowers@*') { continue }
+        $version = ''; if ($item.PSObject.Properties['version']) { $version = [string]$item.version }
+        $scope = ''; if ($item.PSObject.Properties['scope']) { $scope = [string]$item.scope }
+        $project = ''; if ($item.PSObject.Properties['projectPath']) { $project = [string]$item.projectPath }
+        $out += [pscustomobject]@{ Version = $version; Scope = $scope; ProjectPath = $project }
+    }
+    return $out
+}
+
+# One report line (twin of superpowers_version_line): a version equal to upstream is "current";
+# an older one says "behind upstream vX" plus the note; '' reads as "not installed"; no upstream
+# cannot judge.
+function Format-SuperpowersVersionLine {
+    param([string]$Harness, [string]$Version, [string]$Upstream, [string]$Note = '')
+    if (-not $Version) { return "   ${Harness}: not installed" }
+    if (-not $Upstream) { return "   ${Harness}: $Version (upstream unreachable)" }
+    if ($Version -eq $Upstream) { return "   ${Harness}: $Version (current)" }
+    $suffix = ''
+    if ($Note) { $suffix = " ($Note)" }
+    return "   ${Harness}: $Version - behind upstream v$Upstream$suffix"
+}
+
+# Superpowers per harness against upstream's latest release (twin of superpowers_report). Four
+# install mechanisms are four ways to fall behind while every update step reports success.
+# Read-only; every lookup degrades to "unknown" offline.
+function Write-SuperpowersReport {
+    param([string]$Glyph = '*')
+    $upstream = Get-SuperpowersLatestVersion
+    $label = 'unreachable'
+    if ($upstream) { $label = "v$upstream" }
+    Write-Host "$Glyph Superpowers versions (upstream: ${label}):" -ForegroundColor Yellow
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        $user = ''
+        $stale = @()
+        foreach ($i in @(Get-ClaudeSuperpowersInstall)) {
+            if ($i.Scope -eq 'user') { $user = $i.Version }
+            elseif ($upstream -and $i.Version -ne $upstream) { $stale += "$($i.Version) in $($i.ProjectPath)" }
+        }
+        Write-Host (Format-SuperpowersVersionLine -Harness 'Claude Code' -Version $user -Upstream $upstream -Note 're-run dot upgrade')
+        if ($stale.Count -gt 0) { Write-Host "     project-scope installs behind: $($stale -join ', ') - run 'claude plugin update superpowers@superpowers-marketplace' inside each" }
+    }
+    if (Get-Command opencode -ErrorAction SilentlyContinue) {
+        Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version (Get-OpenCodeSuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
+    }
+    if (Get-Command agy -ErrorAction SilentlyContinue) {
+        Write-Host (Format-SuperpowersVersionLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
+    }
+    if (Get-Command codex -ErrorAction SilentlyContinue) {
+        $row = Get-CodexSuperpowersRow
+        $installed = ''
+        $catalog = ''
+        if ($row) { $catalog = [string]$row.Version; if ($row.Installed) { $installed = [string]$row.Version } }
+        # Codex installs only from a marketplace: when the catalog itself is behind upstream there
+        # is nothing `codex plugin add` could fetch, and nothing for the dotfiles to do.
+        if ($catalog -and $installed -eq $catalog) { $note = "the marketplace catalog offers $catalog - nothing to do here" }
+        else { $offer = 'nothing'; if ($catalog) { $offer = $catalog }; $note = "the marketplace offers $offer; re-run dot upgrade" }
+        Write-Host (Format-SuperpowersVersionLine -Harness 'Codex' -Version $installed -Upstream $upstream -Note $note)
+    }
+}

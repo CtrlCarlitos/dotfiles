@@ -403,12 +403,31 @@ if command -v opencode &>/dev/null; then
     # it if present. Harmless when npm or the package is absent.
     npm rm -g opencode-ai &>/dev/null || true
 
-    # Superpowers skills - not a `claude plugin`, it's a git-backed npm
-    # package under OpenCode's own config dir; re-running the install pulls
-    # the latest commit since no version/tag is pinned.
+    # Superpowers skills - not a `claude plugin`: OpenCode installs the `plugin` entry from
+    # opencode.json into its OWN cache (opencode_superpowers_cache_dirs, scripts/lib/
+    # agent-skills.sh) on the first start that sees it, pinned there by a lockfile for good.
+    # Until 2026-10-10 this step ran `npm install --prefix ~/.config/opencode` - a tree OpenCode
+    # never reads: that copy reached 7.0.0 while the loaded one sat at 6.3.0 for two months. The
+    # refresh re-resolves the git dependency inside the directory OpenCode loads. Defer-aware: a
+    # live opencode session resolves from that directory.
     echo "✨ Updating Superpowers (OpenCode)..."
-    # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-    npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$HOME/.config/opencode" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false >/dev/null 2>&1 || echo "   Superpowers not installed for OpenCode - skipping"
+    if deferred opencode; then
+        echo "  opencode deferred - Superpowers (OpenCode) update skipped with it."
+    elif [ -z "$(opencode_superpowers_cache_dirs)" ]; then
+        echo "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
+    else
+        oc_sp_before="$(opencode_superpowers_version)" || oc_sp_before=""
+        if opencode_superpowers_refresh "$(command -v npm)"; then
+            oc_sp_after="$(opencode_superpowers_version)" || oc_sp_after=""
+            if [ -n "$oc_sp_after" ] && [ "$oc_sp_after" != "$oc_sp_before" ]; then
+                echo "   Superpowers (OpenCode) upgraded to $oc_sp_after"
+            else
+                echo "   Superpowers (OpenCode) is current (${oc_sp_after:-installed})"
+            fi
+        else
+            echo "   Superpowers (OpenCode) refresh failed - skipping"
+        fi
+    fi
 fi
 
 dot_timing_mark 'Playwright Chromium'
@@ -463,6 +482,53 @@ dot_timing_mark 'Graft retirement'
 # run installed it (graft_retire, scripts/lib/agent-skills.sh; quiet when there
 # is nothing to do). Same npm sudo decision as the npm steps above.
 graft_retire "$npm_sudo"
+
+dot_timing_mark 'Superpowers report'
+# 8. Superpowers per harness, against upstream's latest release. Four install mechanisms are
+# four ways to fall behind while every step above reports success (2026-10-10: OpenCode at 6.3.0
+# for two months, Codex at 6.4.2 behind a lagging catalog, project-scope Claude installs at
+# 6.2.0). Read-only; every lookup degrades to "unknown" offline.
+superpowers_report() {
+    local upstream claude_user claude_stale ver scope project codex_ver codex_cat note
+    upstream="$(superpowers_latest_version)" || upstream=""
+    echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
+    if command -v claude &>/dev/null; then
+        claude_user=""
+        claude_stale=""
+        while IFS=$'\t' read -r ver scope project; do
+            [ -n "$ver" ] || continue
+            if [ "$scope" = user ]; then
+                claude_user="$ver"
+            elif [ -n "$upstream" ] && [ "$ver" != "$upstream" ]; then
+                claude_stale="$claude_stale, $ver in ${project/#"$HOME"/\~}"
+            fi
+        done <<<"$(claude_superpowers_installs || true)"
+        superpowers_version_line "Claude Code" "$claude_user" "$upstream" "re-run dot upgrade"
+        # `claude plugin update` run here never touches another repository's project-scope install.
+        if [ -n "$claude_stale" ]; then
+            echo "     project-scope installs behind: ${claude_stale#, } - run 'claude plugin update superpowers@superpowers-marketplace' inside each"
+        fi
+    fi
+    if command -v opencode &>/dev/null; then
+        superpowers_version_line OpenCode "$(opencode_superpowers_version || true)" "$upstream" "re-run dot upgrade"
+    fi
+    if command -v agy &>/dev/null; then
+        superpowers_version_line Antigravity "$(antigravity_superpowers_version || true)" "$upstream" "re-run dot upgrade"
+    fi
+    if command -v codex &>/dev/null; then
+        codex_ver="$(codex_superpowers_installed_version || true)"
+        codex_cat="$(codex_superpowers_catalog_version || true)"
+        # Codex installs only from a marketplace: when the catalog itself is behind upstream there
+        # is nothing `codex plugin add` could fetch, and nothing for the dotfiles to do.
+        if [ -n "$codex_cat" ] && [ "$codex_ver" = "$codex_cat" ]; then
+            note="the marketplace catalog offers $codex_cat - nothing to do here"
+        else
+            note="the marketplace offers ${codex_cat:-nothing}; re-run dot upgrade"
+        fi
+        superpowers_version_line Codex "$codex_ver" "$upstream" "$note"
+    fi
+}
+superpowers_report
 
 dot_timing_summary 'AI tools'
 echo "✅ AI Tools Update Complete!"

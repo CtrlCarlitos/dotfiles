@@ -445,6 +445,32 @@ with `ssh -G`, so a regression here fails loudly instead of silently.
 
 ---
 
+## 19. Refresh the copy the program loads, then say what version it is
+
+An updater that re-fetches a package proves only that the fetch worked. If the program
+reads a different directory, every run "succeeds" and nothing changes.
+
+**The incident.** `dot upgrade` refreshed Superpowers for OpenCode with
+`npm install --prefix ~/.config/opencode` for months. OpenCode installs the `plugin`
+entry from `opencode.json` into its own cache, `~/.cache/opencode/packages/<spec>/`,
+on first start and never re-resolves an unpinned git spec; it does not read the
+config-dir tree for it. The config-dir copy reached 7.0.0 while the loaded one sat at
+6.3.0 for two months. Two more harnesses were behind at the same time (Codex, behind a
+lagging marketplace catalog; three project-scope Claude installs) with every step
+reporting success. Found only because someone compared the installed version with the
+upstream release by hand.
+
+**Obey it.** Before writing a refresh step, find the directory the program actually
+loads from (its source or its logs, not its docs: OpenCode's still described the
+pre-v1.3 layout) and refresh *that*. Then print the version afterwards, next to
+upstream's: `dot upgrade` ends with one line per harness
+(`superpowers_report` / `Write-SuperpowersReport`), and a step that cannot say what
+version it left behind is a step that cannot be checked.
+`tests/superpowers_refresh_contract.sh` executes the refresh against a fake cache
+directory and the report against stub tools.
+
+---
+
 ## Checking yourself
 
 ```sh

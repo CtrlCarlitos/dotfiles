@@ -1464,7 +1464,7 @@ for k in UNSET:
         del data[k]; changed.append(k + " (unset)")
 
 if not changed:
-    print("  VS Code settings already at defaults (%s)" % path)
+    print("\033[0;34m\u25b8\033[0m VS Code settings already at defaults (%s)" % path)
 else:
     if os.path.exists(path):
         import shutil; shutil.copy2(path, path + ".bak")
@@ -1476,7 +1476,7 @@ else:
         json.dump(data, fh, indent=2, ensure_ascii=False, sort_keys=True)
         fh.write("\n")
     os.replace(tmp, path)
-    print("  VS Code settings: %d change(s), backup at .bak (%s)" % (len(changed), path))
+    print("\033[0;34m\u25b8\033[0m VS Code settings: %d change(s), backup at .bak (%s)" % (len(changed), path))
 PYEOF
     }
     if [ "$VSCODE_SETTINGS" = "true" ]; then
@@ -1602,6 +1602,60 @@ install_claude_cli() {
     fi
 }
 
+install_playwright_chromium() {
+    # Playwright Chromium - headless browser for coding-agent browser
+    # automation. Deliberately here, not under dev_desktop: that's
+    # gated host-only ($isHost) and never runs on WSL/containers, exactly
+    # where coding agents most often run. install-deps needs root for
+    # system packages; the actual browser binary download must NOT run as
+    # root (playwright warns/refuses, and the cache would end up owned by
+    # the wrong user) - kept as two separate steps for that reason.
+    # Only when missing: both steps re-ran on every apply (~20 s on WSL - install-deps runs its
+    # own apt-get update + install) with the build already in ~/.cache/ms-playwright, and `dot up`
+    # never upgrades (`dot upgrade` re-runs the download, which only fetches a build that is missing).
+    if playwright_chromium_installed; then
+        info "Playwright Chromium is installed - skipping the download (dot upgrade updates it)."
+    else
+        info "Installing Playwright Chromium (headless browser for agent automation)..."
+        # timeout-wrapped: confirmed live on WSL that `sudo ... npx playwright
+        # install-deps` can hang indefinitely (state T, no further output) well
+        # after apt-get's actual work is done - dpkg --audit showed everything
+        # fully configured (ii) at the time, so this isn't a debconf prompt, it's
+        # something in the sudo(use_pty)/npx/node wrapper chain never releasing
+        # the pty. net_timeout wraps coreutils `timeout` (always on Linux) /
+        # `gtimeout` (macOS only with coreutils brewed), running unguarded if
+        # neither is present - so it's safe to reuse in the brew/macOS block too.
+        # install-deps is apt-specific: the concept does not exist on macOS.
+        # Quiet like the installer's own apt calls (DOT_APT_VERBOSE=1 shows it): install-deps runs
+        # `apt-get update` and `apt-get install` itself and printed ~40 "already the newest version"
+        # lines on every run. Only stdout/stderr go to the file - stdin stays the terminal and the
+        # --foreground timeout above is unchanged. The output is shown on failure; apt's summary
+        # line only when something was installed.
+        if [ "$PKG_MANAGER" = apt ]; then
+            if [ "${DOT_APT_VERBOSE:-0}" = 1 ]; then
+                sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
+            else
+                local pw_deps; pw_deps="$(mktemp)"
+                if sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium >"$pw_deps" 2>&1; then
+                    grep -E '^[0-9]+ upgraded, [0-9]+ newly installed' "$pw_deps" | grep -vE '^0 upgraded, 0 newly installed' | sed 's/^/  Playwright system deps: /' || true
+                else
+                    cat "$pw_deps" >&2
+                    warn "Playwright system deps install failed or timed out - continuing"
+                fi
+                rm -f "$pw_deps"
+            fi
+        fi
+        # Output shown only on failure: outside a project `npx playwright install` prints a 13-line
+        # "install your project's dependencies first" box on EVERY run, which is not about this install.
+        local pw_out; pw_out="$(mktemp)"
+        if ! net_timeout 600 "$NPX_BIN" --yes playwright install chromium >"$pw_out" 2>&1; then
+            cat "$pw_out" >&2
+            warn "Playwright Chromium download failed or timed out - continuing"
+        fi
+        rm -f "$pw_out"
+    fi
+}
+
 install_agent_toolkit() {
     # Agent toolkit (spec §2: the cross-vendor agent layer - Serena,
     # act, Playwright Chromium. Codex moved to chatgpt_cli, Claude Code to
@@ -1649,51 +1703,8 @@ install_agent_toolkit() {
         # the system-owned /usr prefix; a user-managed npm (nvm, homebrew) is
         # never sudo'd, and brew's user-writable prefix computes to no sudo.
 
-        # Playwright Chromium - headless browser for coding-agent browser
-        # automation. Deliberately here, not under dev_desktop: that's
-        # gated host-only ($isHost) and never runs on WSL/containers, exactly
-        # where coding agents most often run. install-deps needs root for
-        # system packages; the actual browser binary download must NOT run as
-        # root (playwright warns/refuses, and the cache would end up owned by
-        # the wrong user) - kept as two separate steps for that reason.
         NPX_BIN="$(which npx)"
-        info "Installing Playwright Chromium (headless browser for agent automation)..."
-        # timeout-wrapped: confirmed live on WSL that `sudo ... npx playwright
-        # install-deps` can hang indefinitely (state T, no further output) well
-        # after apt-get's actual work is done - dpkg --audit showed everything
-        # fully configured (ii) at the time, so this isn't a debconf prompt, it's
-        # something in the sudo(use_pty)/npx/node wrapper chain never releasing
-        # the pty. net_timeout wraps coreutils `timeout` (always on Linux) /
-        # `gtimeout` (macOS only with coreutils brewed), running unguarded if
-        # neither is present - so it's safe to reuse in the brew/macOS block too.
-        # install-deps is apt-specific: the concept does not exist on macOS.
-        # Quiet like the installer's own apt calls (DOT_APT_VERBOSE=1 shows it): install-deps runs
-        # `apt-get update` and `apt-get install` itself and printed ~40 "already the newest version"
-        # lines on every run. Only stdout/stderr go to the file - stdin stays the terminal and the
-        # --foreground timeout above is unchanged. The output is shown on failure; apt's summary
-        # line only when something was installed.
-        if [ "$PKG_MANAGER" = apt ]; then
-            if [ "${DOT_APT_VERBOSE:-0}" = 1 ]; then
-                sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
-            else
-                local pw_deps; pw_deps="$(mktemp)"
-                if sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium >"$pw_deps" 2>&1; then
-                    grep -E '^[0-9]+ upgraded, [0-9]+ newly installed' "$pw_deps" | grep -vE '^0 upgraded, 0 newly installed' | sed 's/^/  Playwright system deps: /' || true
-                else
-                    cat "$pw_deps" >&2
-                    warn "Playwright system deps install failed or timed out - continuing"
-                fi
-                rm -f "$pw_deps"
-            fi
-        fi
-        # Output shown only on failure: outside a project `npx playwright install` prints a 13-line
-        # "install your project's dependencies first" box on EVERY run, which is not about this install.
-        local pw_out; pw_out="$(mktemp)"
-        if ! net_timeout 600 "$NPX_BIN" --yes playwright install chromium >"$pw_out" 2>&1; then
-            cat "$pw_out" >&2
-            warn "Playwright Chromium download failed or timed out - continuing"
-        fi
-        rm -f "$pw_out"
+        install_playwright_chromium
 
         # Only when missing: reinstalling `agent-browser@latest` every run is an upgrade (`dot up` never
         # upgrades; `dot upgrade` does it, and skips it when already current).
@@ -2001,8 +2012,10 @@ install_chatgpt_cli() {
     # carries superpowers, and `codex plugin add` installs it scriptably
     # (obra/superpowers README, Codex CLI section - the third-party
     # `codex-plugin` npm helper this repo once rejected is not involved).
-    # Re-running add on an installed plugin is a refresh, so this is
-    # idempotent like the Claude/Antigravity Superpowers steps.
+    # Only when missing: re-running add on an installed plugin re-fetches it
+    # (an upgrade, ~15 s on WSL), and `dot up` never upgrades - `dot upgrade`
+    # does. codex's own listing says whether it is installed, from the same
+    # `codex plugin list` the marketplace name comes from.
     #
     # The marketplace NAME is resolved at runtime, never hardcoded: codex
     # 0.147.0 ships it as `openai-curated`, and the hardcoded
@@ -2012,16 +2025,20 @@ install_chatgpt_cli() {
     # `<plugin>@<marketplace>` row per available plugin, so the name codex
     # itself uses is right there - and a future rename cannot break us again.
     if command -v codex &>/dev/null; then
-        info "Installing Superpowers plugin for Codex..."
-        # Resolved by the shared helper (scripts/lib/agent-skills.sh) so this
-        # and the updater cannot drift apart again.
-        codex_market="$(codex_superpowers_marketplace)"
-        if [ -z "$codex_market" ]; then
-            warn "no Codex marketplace lists a superpowers plugin - skipping"
+        if codex_installed="$(codex_superpowers_installed_version)"; then
+            info "Superpowers for Codex is installed ($codex_installed) - skipping the plugin add (dot upgrade updates it)."
         else
-            # Output shown only on failure ("Added plugin ... Installed plugin root: ..." on every run).
-            codex_out="$(net_timeout 300 codex plugin add "superpowers@$codex_market" 2>&1)" \
-                || { printf '%s\n' "$codex_out" >&2; warn "Superpowers plugin install for Codex failed - continuing"; }
+            info "Installing Superpowers plugin for Codex..."
+            # Resolved by the shared helper (scripts/lib/agent-skills.sh) so this
+            # and the updater cannot drift apart again.
+            codex_market="$(codex_superpowers_marketplace)"
+            if [ -z "$codex_market" ]; then
+                warn "no Codex marketplace lists a superpowers plugin - skipping"
+            else
+                # Output shown only on failure ("Added plugin ... Installed plugin root: ..." on every run).
+                codex_out="$(net_timeout 300 codex plugin add "superpowers@$codex_market" 2>&1)" \
+                    || { printf '%s\n' "$codex_out" >&2; warn "Superpowers plugin install for Codex failed - continuing"; }
+            fi
         fi
         # MCP registration for Codex lives HERE, not in the serena section
         # above (see that section's note): codex only exists from this point
@@ -2068,11 +2085,17 @@ install_antigravity_cli() {
     # docs claim `~/.gemini/antigravity-cli/plugins/<name>/` instead,
     # which is simply wrong as of agy 1.1.22) - agy itself resolves this,
     # not us, so it stays correct even if/when that path changes again.
+    # Only when missing: `agy plugin install` re-clones the plugin on every run (an upgrade), and
+    # `dot up` never upgrades - `dot upgrade` does. agy's own listing says whether it is there.
     if command -v agy &>/dev/null; then
-        info "Installing Superpowers plugin for Antigravity..."
-        # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
-        agy_out="$(agy plugin install https://github.com/obra/superpowers 2>&1)" \
-            || { printf '%s\n' "$agy_out" >&2; warn "Superpowers plugin install for Antigravity failed - continuing"; }
+        if agy_superpowers_installed; then
+            info "Superpowers for Antigravity is installed - skipping the plugin install (dot upgrade updates it)."
+        else
+            info "Installing Superpowers plugin for Antigravity..."
+            # Its seven-line "Cloning plugin... [ok] superpowers" block is shown only on failure.
+            agy_out="$(agy plugin install https://github.com/obra/superpowers 2>&1)" \
+                || { printf '%s\n' "$agy_out" >&2; warn "Superpowers plugin install for Antigravity failed - continuing"; }
+        fi
     fi
 }
 
@@ -2627,7 +2650,8 @@ main() {
     # is a second runtime check for genuine headless Linux hosts, not the
     # primary WSL/devcontainer guard anymore)
     dot_timing_mark 'desktop apps'
-{{- if and $dev_desktop $isHost }}
+{{- if $isHost }}
+{{- if $dev_desktop }}
     case "$(uname -s)" in
         Darwin)
             install_mac_desktop
@@ -2639,30 +2663,35 @@ main() {
             ;;
     esac
 {{- else }}
-    info "Desktop apps disabled (WSL/Devcontainer/config)"
+    info "Desktop apps disabled in config"
 {{- end }}
     # AI desktop apps (hosts only - the config template host-gates the
     # desktop groups too, spec §3; dispatched here, after install_apt/
     # install_brew, so brew is guaranteed present for the macOS casks)
-{{- if and $claude_desktop $isHost }}
+{{- if $claude_desktop }}
     install_claude_desktop
 {{- else }}
-    info "Claude Desktop disabled (WSL/Devcontainer/config)"
+    info "Claude Desktop disabled in config"
 {{- end }}
-{{- if and $chatgpt_desktop $isHost }}
+{{- if $chatgpt_desktop }}
     install_chatgpt_desktop
 {{- else }}
-    info "ChatGPT Desktop disabled (WSL/Devcontainer/config)"
+    info "ChatGPT Desktop disabled in config"
 {{- end }}
-{{- if and $antigravity_desktop $isHost }}
+{{- if $antigravity_desktop }}
     install_antigravity_desktop
 {{- else }}
-    info "Antigravity Desktop disabled (WSL/Devcontainer/config)"
+    info "Antigravity Desktop disabled in config"
 {{- end }}
-{{- if and $opencode_desktop $isHost }}
+{{- if $opencode_desktop }}
     install_opencode_desktop
 {{- else }}
-    info "OpenCode Desktop disabled (WSL/Devcontainer/config)"
+    info "OpenCode Desktop disabled in config"
+{{- end }}
+{{- else }}
+    # One line for all five: nothing desktop runs in WSL or a container (the apps live on the
+    # host), and five "disabled" lines on every apply read as five problems.
+    info "Desktop apps (dev desktop, Claude, ChatGPT, Antigravity, OpenCode Desktop) are the host's - not installed in WSL/Devcontainer"
 {{- end }}
 
     dot_timing_mark 'shell'
