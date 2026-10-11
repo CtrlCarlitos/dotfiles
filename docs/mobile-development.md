@@ -96,12 +96,51 @@ covers the WSL side of the handshake.
 
 ## Linux and macOS
 
-<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6 (docs/superpowers/plans/2026-10-10-mobile-dev-wsl-linux-macos.md) fill this in: the native install path and its parity notes. -->
+Both platforms get full native parity with WSL for everything this plan
+installs: the Android SDK command-line tools, platform-tools, the emulator,
+a standalone JDK, Maestro, and agent-device all run on a single host
+natively, with no Windows/WSL split needed on either platform. macOS has a
+clean brew path for all of it; native Linux uses the SDK command-line-tools
+zip rather than an apt Android Studio package.
+
+**Caveat:** only the installable half of the acceptance loop is covered by
+this repo's hosted CI. GitHub Actions' `ubuntu-latest` and `macos-latest`
+runners can verify that the SDK tools, Maestro, and agent-device install and
+register correctly, but they do not boot an Android emulator or exercise a
+Maestro flow against it - that would require multi-GB emulator images and
+GUI virtualization that hosted CI doesn't provide. The
+emulator-boot-and-Maestro-flow half of acceptance is therefore untested by
+this repo's CI on both platforms. That's a real, stated gap, not a silent
+one - anyone relying on CI green here should know the device-automation path
+itself still needs a manual check on real hardware.
 
 
 ## VS Code
 
-<!-- TODO: WSL/Linux/macOS plan Task 6 (docs/superpowers/plans/2026-10-10-mobile-dev-wsl-linux-macos.md) fills this in: the React Native Tools extension recommendation and the vscode_overrides / extra_extensions wiring. -->
+For React Native/Expo development, add Microsoft's `msjsdiag.vscode-react-native`
+("React Native Tools") extension to your own `chezmoi.toml` via
+`[data.vscode_overrides] extra_extensions`, the same machine-local override
+mechanism documented in `.chezmoi.toml.tmpl`:
+
+```toml
+# [data.vscode_overrides]  (machine-local drift from the repo baseline;
+#   extensions; settings are edited in [data.vscode.settings] above)
+#   extra_extensions   = ["msjsdiag.vscode-react-native"]     # add to baseline
+```
+
+This extension is not part of the repo's own VS Code baseline, so machines
+that never opt into `mobile_dev` never get it installed for free - add it
+yourself, once, after selecting the `mobile_dev` package group.
+
+
+## Stitch MCP
+
+Stitch MCP stays optional, Antigravity-only, and manually authenticated - it
+is not a hard prerequisite, and this plan's installer does not install or
+wire it at all. #336 already scoped it that way; this section is a
+documentation-only acknowledgment that the requirement exists and is
+intentionally out of this plan's installer scope, not a silently dropped
+feature.
 
 
 ## Troubleshooting

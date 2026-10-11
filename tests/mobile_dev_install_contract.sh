@@ -97,9 +97,10 @@ docs_file="$repo_root/docs/mobile-development.md"
 require "$docs_file" 'adb -a -P 5037 nodaemon server'
 require "$docs_file" 'ADB_SERVER_SOCKET'
 require "$docs_file" 'mirrored'
-# Task 6 territory is untouched.
+# Task 6 has since landed and filled in the Linux/macOS section; both
+# generations of placeholder comment are gone now.
 forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2-5'
-require "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6'
+forbid "$docs_file" '<!-- TODO: WSL/Linux/macOS plan Tasks 2 and 6'
 
 # tests/zshrc_startup_contract.sh already runs `zsh -n` + shellcheck on the
 # whole file; a quick syntax check here just pins this task's own addition.

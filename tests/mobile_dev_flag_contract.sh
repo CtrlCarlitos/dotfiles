@@ -34,6 +34,13 @@ done
 require "$repo_root/docs/mobile-development.md" 'superpowers/specs/2026-10-10-mobile-dev-design.md'
 require "$repo_root/docs/mobile-development.md" '#336'
 
+# Task 6: VS Code extension recommendation, its vscode_overrides wiring, and the
+# Stitch MCP out-of-scope acknowledgment.
+require "$repo_root/docs/mobile-development.md" 'msjsdiag.vscode-react-native'
+require "$repo_root/docs/mobile-development.md" 'vscode_overrides'
+require "$repo_root/docs/mobile-development.md" 'extra_extensions'
+require "$repo_root/docs/mobile-development.md" 'Stitch'
+
 # The 17-group count: every stale "16" spelling is gone and the 17 spelling is in place.
 require "$repo_root/README.md" 'preset → 17 groups'
 require "$repo_root/README.md" '17 package groups across 5 platforms'
