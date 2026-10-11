@@ -21,8 +21,14 @@ render_fixture() { # $1 = fixture JSON, $2 = output filename (lib.sh's render is
 }
 
 render_windows() { # $1 = fixture JSON, $2 = output filename
+    # .gitattributes checks *.ps1.tmpl out with CRLF on every host, so every
+    # rendered line carries a trailing CR - which silently breaks the
+    # Install-MobileDev sed deletion below (its /^}$/ end-anchor can never
+    # match a line that's really `}\r`, so the whole range address never
+    # activates and nothing gets stripped at all). Normalize once, here,
+    # matching tests/lib.sh's own render_to for the same CRLF reason.
     chezmoi execute-template --config "$config" --source "$repo_root" --override-data "$1" \
-        <"$windows_template" >"$tmp/$2"
+        <"$windows_template" | tr -d '\r' >"$tmp/$2"
 }
 
 contains() { # $1 = output filename, $2 = fixed text, $3 = assertion label
