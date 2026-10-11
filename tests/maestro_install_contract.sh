@@ -45,6 +45,10 @@ for a in "$@"; do
     prev="$a"
 done
 [ -n "$out" ] || exit 2
+if [ "${CURL_MODE:-ok}" = slow ]; then
+    head -c 1024 "${FIXTURE_ZIP:?}" >"$out"
+    sleep "${CURL_SLOW_SECS:-2}"
+fi
 /bin/cat "${FIXTURE_ZIP:?}" >"$out"
 EOF
 chmod +x "$tmp/bin/curl"
@@ -108,5 +112,14 @@ got="$(PATH="$h/elsewhere:$PATH" run "$h" 2.11.0 "$fixture_sha")"
 [ ! -s "$tmp/curl.log" ] || fail "foreign maestro: must not download (curl saw: $(/bin/cat "$tmp/curl.log"))"
 [ ! -e "$h/$opt" ] || fail "foreign maestro: must not install alongside"
 case "$got" in *rc=0*) pass ;; *) fail "foreign maestro: did not complete (output: $got)" ;; esac
+
+# G. A slow-but-alive download gets periodic progress feedback, not total silence
+#    for its whole duration (2026-10-11: a ~300 MB Maestro download on a slow WSL
+#    link looked indistinguishable from stuck for 20+ minutes).
+h="$tmp/g"; mkdir -p "$h"; : >"$tmp/curl.log"
+got="$(CURL_MODE=slow CURL_SLOW_SECS=2 MAESTRO_HEARTBEAT_SECS=1 run "$h" 2.11.0 "$fixture_sha")"
+case "$got" in *rc=0*) pass ;; *) fail "slow: did not complete (output: $got)" ;; esac
+case "$got" in *'still downloading'*) pass ;; *) fail "slow: must print at least one heartbeat line while the download runs (output: $got)" ;; esac
+case "$got" in *'Maestro 2.11.0 installed'*) pass ;; *) fail "slow: must still report the install once the download finishes (output: $got)" ;; esac
 
 finish
