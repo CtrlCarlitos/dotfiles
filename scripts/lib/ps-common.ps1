@@ -843,24 +843,24 @@ function Get-ChocoUpgradeArgument {
 # ends with a summary. A non-zero exit prints the tail so the failing package is on screen.
 # --- Progress for a long package sweep (choco, winget) ------------------------------------------------
 # A sweep prints nothing while an installer downloads: a 21-minute Ollama upgrade (2026-10-11, slow
-# ISP) looked like a hang. Start-DotHeartbeat starts a second runspace that writes
+# ISP) looked like a hang. Open-DotHeartbeat starts a second runspace that writes
 # "  <tool> is working on <package> (4m10s so far)..." straight to the console whenever the sweep has
 # printed nothing for DOT_HEARTBEAT_SECONDS (default 30; 0 = off; DOT_WINGET_HEARTBEAT_SECONDS is the
 # older name, still read). The sweep sets $beat.State.Package and calls $beat.State.Quiet.Restart()
-# after every line it shows; Stop-DotHeartbeat ends it.
-function Get-DotHeartbeatSeconds {
+# after every line it shows; Close-DotHeartbeat ends it.
+function Get-DotHeartbeatInterval {
     foreach ($value in @($env:DOT_HEARTBEAT_SECONDS, $env:DOT_WINGET_HEARTBEAT_SECONDS)) {
         if ("$value" -match '^\d+$') { return [int]$value }
     }
     return 30
 }
 
-function Start-DotHeartbeat {
+function Open-DotHeartbeat {
     param([Parameter(Mandatory)][string]$Tool)
     $state = [hashtable]::Synchronized(@{ Stop = $false; Quiet = [System.Diagnostics.Stopwatch]::StartNew(); Total = [System.Diagnostics.Stopwatch]::StartNew(); Package = '' })
     $runspace = $null
     $handle = $null
-    $every = Get-DotHeartbeatSeconds
+    $every = Get-DotHeartbeatInterval
     if ($every -gt 0) {
         try {
             $runspace = [powershell]::Create()
@@ -884,7 +884,7 @@ function Start-DotHeartbeat {
     return [pscustomobject]@{ State = $state; Runspace = $runspace; Handle = $handle }
 }
 
-function Stop-DotHeartbeat {
+function Close-DotHeartbeat {
     param($Beat)
     if ($null -eq $Beat) { return }
     $Beat.State.Stop = $true
@@ -897,7 +897,7 @@ function Stop-DotHeartbeat {
 # Which package took the time, and whether it was the network (download) or the installer. Only the
 # packages of 30 s or more are listed, on one line, also appended to upgrade.log.
 # Package: objects with Name, Start, DownloadEnd, End (UTC DateTime or $null).
-function Write-DotPackageTimes {
+function Write-DotPackageTiming {
     param([Parameter(Mandatory)][string]$Tool, $Package, [string]$LogPath)
     # a foreach, not @($Package | ...): PowerShell 7 fails to bind @() over a List of custom objects
     $slow = New-Object System.Collections.Generic.List[string]
@@ -936,7 +936,7 @@ function Invoke-ChocoUpgradeAll {
     # "The upgrade of <name> was successful." ends it.
     $packageTimes = New-Object System.Collections.Generic.List[object]
     $currentPackage = $null
-    $beat = Start-DotHeartbeat -Tool choco
+    $beat = Open-DotHeartbeat -Tool choco
     try {
         & choco @Arguments --limit-output 2>&1 | ForEach-Object {
             $line = "$_"
@@ -965,9 +965,9 @@ function Invoke-ChocoUpgradeAll {
         }
         $code = [int]$LASTEXITCODE
     }
-    finally { Stop-DotHeartbeat -Beat $beat }
+    finally { Close-DotHeartbeat -Beat $beat }
     if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
-    Write-DotPackageTimes -Tool choco -Package $packageTimes -LogPath $LogPath
+    Write-DotPackageTiming -Tool choco -Package $packageTimes -LogPath $LogPath
 
     $summary = Get-ChocoUpgradeSummary -Lines $packageLines -FooterLines $footerLines
     if ($summary.Upgraded.Count -gt 0) {
@@ -1119,7 +1119,7 @@ function Invoke-WingetUpgradeAll {
     # and a 21-minute Ollama upgrade (2026-10-11, slow ISP) looked like a hang with no way to tell.
     $packageTimes = New-Object System.Collections.Generic.List[object]
     $currentPackage = $null
-    $beat = Start-DotHeartbeat -Tool winget
+    $beat = Open-DotHeartbeat -Tool winget
     $beatState = $beat.State
     try {
         $ErrorActionPreference = 'Continue'
@@ -1159,12 +1159,12 @@ function Invoke-WingetUpgradeAll {
     }
     catch { $code = 1; Write-Host "  Warning: winget upgrade failed - continuing" -ForegroundColor Red }
     finally {
-        Stop-DotHeartbeat -Beat $beat
+        Close-DotHeartbeat -Beat $beat
         foreach ($id in $pinned) { & winget pin remove --id $id --exact *> $null }
         $ErrorActionPreference = $previous
     }
     if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
-    Write-DotPackageTimes -Tool winget -Package $packageTimes -LogPath $LogPath
+    Write-DotPackageTiming -Tool winget -Package $packageTimes -LogPath $LogPath
     $sweepBlocked = ''
     foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
 
