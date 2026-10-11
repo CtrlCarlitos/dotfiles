@@ -531,7 +531,7 @@ if command -v chezmoi >/dev/null 2>&1; then
         lf_fns+="$body"$'\n'
     done
     run_lf() { # $1 = answer on stdin, $2 = interactive (0 yes / 1 no)
-        printf '%s\n' "$1" | env -u ANDROID_HOME -u ANDROID_SDK_ROOT LF_INTERACTIVE="$2" HOME="$lf/home" PATH="$lf/stubs:$PATH" PKG_MANAGER=none \
+        printf '%s\n' "$1" | env -u ANDROID_HOME -u ANDROID_SDK_ROOT LF_INTERACTIVE="$2" HOME="$lf/home" PATH="$lf/stubs:$(safe_path)" PKG_MANAGER=none \
             bash -c 'set -euo pipefail; '"$lf_fns"$'\n''install_mobile_dev; echo rc=0' 2>&1
     }
     # `read -p` shows its prompt only on a terminal, so the question is located by the

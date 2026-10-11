@@ -150,8 +150,12 @@ EOF
 chmod +x "$bin/chezmoi"
 
 run_updater() { # $1 = output file; extra env via caller's exported vars
-    local out_file="$1"
-    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" \
+    local out_file="$1" safe
+    # safe_path reads $HOME: computed BEFORE the HOME= prefix below, which a
+    # single assignment list would otherwise apply first (bash evaluates prefix
+    # assignments left-to-right, each one visible to the next on the same line).
+    safe="$(safe_path)"
+    HOME="$home" PATH="$bin:$safe" NPM_LOG="$tmp/npm.log" \
         STUB_LOG="$tmp/agent-browser.log" NPM_FAKE_PREFIX="$prefix" \
         timeout 120 bash "$ai_sh" >"$out_file" 2>&1
 }

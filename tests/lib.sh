@@ -79,6 +79,33 @@ forbid() { # $1 = file, $2 = literal
     fi
 }
 
+# safe_path - $PATH with $HOME/.local/bin and every $HOME/.local/opt/*/bin (the
+# directories this repo's own installers manage a tool in) filtered out, nothing
+# else touched. $HOME is read at call time - call it BEFORE overriding HOME for
+# the subprocess under test. A test that wants "no <tool> on PATH" to exercise a
+# real install path (install_maestro's download, the licenses-first ordering in
+# mobile_dev_install_contract.sh, the mobile_dev sweep in
+# agent_tool_upgrade_contract.sh) used to just prepend a stub bin dir onto the
+# inherited $PATH - true on a clean CI runner, false on a dev machine that has run
+# `dot up`/`dot upgrade` for real: this machine's genuine ~/.local/bin/maestro fell
+# through the untouched tail of $PATH and broke every one of those scenarios
+# (2026-10-11).
+safe_path() {
+    local IFS=: dir keep s out=()
+    local -a strip=("$HOME/.local/bin")
+    for dir in "$HOME"/.local/opt/*/bin; do
+        [ -d "$dir" ] && strip+=("$dir")
+    done
+    for dir in $PATH; do
+        keep=1
+        for s in "${strip[@]}"; do
+            [ "$dir" = "$s" ] && keep=0 && break
+        done
+        [ "$keep" = 1 ] && out+=("$dir")
+    done
+    printf '%s' "${out[*]}"
+}
+
 # seed_vscode_config FILE - write the VS Code settings a fresh machine's `chezmoi init` writes
 #   ([data.vscode.settings] from .chezmoitemplates/vscode-settings.toml) into FILE. The settings
 #   live in chezmoi.toml, not in .chezmoidata, so a render without them has empty tiers.

@@ -55,8 +55,12 @@ chmod +x "$tmp/bin/curl"
 
 # run <home> [args...]: executes install_maestro under set -e like the installer; prints stdout+stderr.
 run() {
-    local home="$1"; shift
-    HOME="$home" PATH="$tmp/bin:$PATH" CURL_LOG="$tmp/curl.log" FIXTURE_ZIP="$tmp/maestro.zip" \
+    local home="$1" safe; shift
+    # safe_path reads $HOME: computed BEFORE the HOME= prefix below, which a
+    # single assignment list would otherwise apply first (bash evaluates prefix
+    # assignments left-to-right, each one visible to the next on the same line).
+    safe="$(safe_path)"
+    HOME="$home" PATH="$tmp/bin:$safe" CURL_LOG="$tmp/curl.log" FIXTURE_ZIP="$tmp/maestro.zip" \
         bash -c 'set -euo pipefail; . "$1"; shift; install_maestro "$@"; echo rc=$?' _ "$lib" "$@" 2>&1
 }
 opt=".local/opt/maestro"
