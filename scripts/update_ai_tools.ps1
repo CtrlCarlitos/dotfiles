@@ -26,6 +26,7 @@ $G = @{
     globe    = [char]::ConvertFromUtf32(0x1F310)
     puzzle   = [char]::ConvertFromUtf32(0x1F9E9)
     seedling = [char]::ConvertFromUtf32(0x1F331)
+    phone    = [char]::ConvertFromUtf32(0x1F4F1)
     check    = [string][char]0x2705
 }
 Write-Host "$($G.robot) Updating AI Coding Tools..." -ForegroundColor Cyan
@@ -594,6 +595,55 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
             if ($doctorExit -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
             Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Add-DotTimingMark -Name 'mobile_dev'
+# 5b. mobile_dev (twin of update_ai_tools.sh's 5b). Windows installs no Maestro or
+# agent-device (docs/mobile-development.md), so the sweep here is the SDK's own
+# `sdkmanager --update`: only when [data.packages] mobile_dev is on (read like the
+# guardrail flag below) and the installer's command-line tools exist (ANDROID_HOME /
+# ANDROID_SDK_ROOT, or the installer's own %LOCALAPPDATA%\Android\Sdk). Google's
+# "sdkmanager is deprecated" banner prints on every call and is filtered; errors
+# are kept. Native stderr under 'Stop' would be a terminating error in 5.1, so the
+# call runs with the preference at 'Continue', like Serena's below.
+$mobileDevEnabled = $false
+$mobileDevConfig = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
+if (Test-Path $mobileDevConfig) {
+    $inPkgs = $false
+    foreach ($line in [IO.File]::ReadAllLines($mobileDevConfig)) {
+        if ($line -match '^\s*\[data\.packages\]\s*$') { $inPkgs = $true; continue }
+        if ($inPkgs -and $line -match '^\s*\[') { $inPkgs = $false }
+        if ($inPkgs -and $line -match '^\s*mobile_dev\s*=\s*true\s*$') { $mobileDevEnabled = $true; break }
+    }
+}
+if ($mobileDevEnabled) {
+    $mdSdk = if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) { $env:ANDROID_HOME }
+             elseif ($env:ANDROID_SDK_ROOT -and (Test-Path $env:ANDROID_SDK_ROOT)) { $env:ANDROID_SDK_ROOT }
+             else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
+    $mdSdkManager = Join-Path $mdSdk 'cmdline-tools\latest\bin\sdkmanager.bat'
+    if (Test-Path $mdSdkManager) {
+        Write-Host "$($G.phone) Updating mobile_dev (Android platform-tools)..." -ForegroundColor Yellow
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $mdOutput = @()
+        $mdCode = 1
+        try {
+            $mdOutput = @(& $mdSdkManager '--update' 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object {
+                $_ -and $_ -notmatch 'sdkmanager\) is deprecated|The .android. binary can also be found|To learn more about the Android CLI'
+            })
+            $mdCode = $LASTEXITCODE
+        } catch {
+            $mdOutput = @("$($_.Exception.Message)")
+        } finally {
+            $ErrorActionPreference = $prevEap
+        }
+        if ($mdCode -ne 0) {
+            Write-Host "  Warning: sdkmanager --update failed (exit $mdCode) - continuing" -ForegroundColor Red
+            $mdOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        } else {
+            Write-Host "  Android platform-tools: sdkmanager --update done"
         }
     }
 }

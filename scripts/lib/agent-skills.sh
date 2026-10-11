@@ -50,19 +50,43 @@ error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 # steps); if neither exists the command runs unguarded rather than failing.
 # Resolved per-call, not cached, so a `gtimeout` installed partway through a
 # macOS run is picked up by later steps. `-k 10` follows SIGTERM with SIGKILL
-# after 10s for processes that ignore the first signal. Exit 124 = timed out.
+# after 10s for processes that ignore the first signal (NET_TIMEOUT_KILL_AFTER
+# overrides the 10, for tests).
+#
+# Exit 124 = timed out, and so does 137: when the escalation to SIGKILL fires,
+# `timeout` kills its own process group (itself included) and exits 137, and bash
+# prints the kernel's "Killed" notice for it - a WSL `dot up` (2026-10-11) showed
+#   line 161:  3657 Killed   "$bin" -k 10 "$secs" "$@"
+# for a `claude mcp add` the kernel had stopped (SIGTTIN, #355), and the caller's "failed or timed
+# out" could not say which. Both exits are reported here as one line naming the
+# command and the budget, and come back as 124. The command runs in a subshell
+# whose own stderr is discarded (that is where bash writes the notice) while the
+# command's stderr is routed around it on fd 3, so errors still show.
 #-------------------------------------------------------------------------------
 net_timeout() {
     local secs="$1"; shift
-    local bin=""
+    local bin="" rc=0
     if command -v timeout &>/dev/null; then bin="timeout"
     elif command -v gtimeout &>/dev/null; then bin="gtimeout"
     fi
     if [ -n "$bin" ]; then
-        "$bin" -k 10 "$secs" "$@"
+        ( "$bin" -k "${NET_TIMEOUT_KILL_AFTER:-10}" "$secs" "$@" 2>&3 3>&-; exit $? ) 3>&2 2>/dev/null || rc=$?
+        _net_timeout_report "$rc" "$secs" "$1"
     else
         "$@"
     fi
+}
+
+# _net_timeout_report <rc> <secs> <command> - 124 and 137 both mean the budget ran out:
+# say so once, and return 124 for either; any other status is the command's own.
+_net_timeout_report() {
+    case "$1" in
+        124 | 137)
+            printf '%s timed out after %ss - killed\n' "$3" "$2" >&2
+            return 124
+            ;;
+    esac
+    return "$1"
 }
 
 #-------------------------------------------------------------------------------
@@ -77,10 +101,15 @@ net_timeout() {
 #-------------------------------------------------------------------------------
 net_timeout_tty() {
     local secs="$1"; shift
-    if command -v timeout &>/dev/null; then
-        timeout --foreground -k 10 "$secs" "$@"
-    elif command -v gtimeout &>/dev/null; then
-        gtimeout --foreground -k 10 "$secs" "$@"
+    local bin="" rc=0
+    if command -v timeout &>/dev/null; then bin="timeout"
+    elif command -v gtimeout &>/dev/null; then bin="gtimeout"
+    fi
+    if [ -n "$bin" ]; then
+        # --foreground never kills the timeout process itself, so no "Killed"
+        # notice to hide here; only the 137 -> 124 reading is shared.
+        "$bin" --foreground -k "${NET_TIMEOUT_KILL_AFTER:-10}" "$secs" "$@" || rc=$?
+        _net_timeout_report "$rc" "$secs" "$1"
     else
         "$@"
     fi
@@ -131,6 +160,97 @@ fetch_and_verify() {
         warn "$name: installer CHECKSUM MISMATCH - not running it"
         return 1
     fi
+}
+
+#-------------------------------------------------------------------------------
+# install_maestro <version> <sha256> [retry-hint] - the mobile_dev group's Maestro
+# CLI, pinned and checksum-verified (.chezmoidata.yaml's maestro_version /
+# maestro_sha256), shared by the installer template (`dot up`) and
+# update_ai_tools.sh (`dot upgrade`).
+#
+# Not the vendor's curl-piped-to-bash installer (its URL is in .chezmoidata.yaml's
+# versions comment): it only runs `unzip -qt` on what it downloads - a corruption check, not
+# an authenticity one - which would make the repo's pin meaningless. The exact
+# release asset is fetched and its sha256 verified here instead, the shape
+# install_powershell() uses. The release tag is "cli-$version"; the "cli-" prefix
+# is part of the URL only, never of the stored version. The zip extracts into its
+# own maestro/ directory (maestro/bin/maestro, a Gradle POSIX launcher that
+# resolves JAVA_HOME or falls back to `java` on PATH, plus maestro/lib/*.jar) -
+# confirmed against the real release - so a plain -d destination is enough.
+#
+# Single-user: no sudo, lands under $HOME/.local/opt/maestro, linked from
+# $HOME/.local/bin (on PATH per dot_zshrc's "Local binaries" block).
+#
+# The download is guarded by a STALL limit, not a wall clock: the asset is
+# ~300 MB and a WSL `dot up` (2026-10-11) on a ~170 KiB/s link could never
+# finish inside the 300 s net_timeout it had, every run. curl kills a transfer
+# that drops under 10 KiB/s for 60 s (a dead connection, the only hang class the
+# wall clock was for) and otherwise lets a slow one finish.
+#
+# The installed pin is recorded in $HOME/.local/opt/maestro/.dotfiles-version:
+# the same pin is a no-op, a bumped pin reinstalls (`command -v maestro` alone
+# never did - a pin bump re-rendered the installer and the step skipped itself).
+# A Maestro that is not ours (on PATH, nothing under ~/.local/opt/maestro) is
+# left alone. Every failure warns with the caller's retry hint ("re-run dot
+# upgrade" by default; the installer passes the run_onchange re-entry command)
+# and returns 0 - never aborts a `set -e` run.
+#-------------------------------------------------------------------------------
+install_maestro() {
+    local ver="$1" want="$2" hint="${3:-re-run dot upgrade}"
+    local root="$HOME/.local/opt/maestro" marker have got sha_cmd tmp asset url
+    marker="$root/.dotfiles-version"
+    have="$(/bin/cat "$marker" 2>/dev/null || true)"
+    if [ -x "$root/bin/maestro" ] && [ "$have" = "$ver" ]; then
+        return 0
+    fi
+    if [ ! -e "$root/bin/maestro" ] && command -v maestro >/dev/null 2>&1; then
+        info "maestro already on PATH ($(command -v maestro)) - not installing the pinned $ver alongside it"
+        return 0
+    fi
+    asset="maestro.zip"
+    url="https://github.com/mobile-dev-inc/maestro/releases/download/cli-$ver/$asset"
+    sha_cmd="$(sha256_cmd)"
+    if [ -z "$sha_cmd" ]; then
+        warn "maestro: no SHA-256 tool found - cannot verify the download, skipping ($hint)"
+        return 0
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        warn "maestro: unzip not found - cannot extract the download, skipping ($hint)"
+        return 0
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        warn "maestro: could not create a temporary directory - skipping ($hint)"
+        return 0
+    fi
+    if [ -n "$have" ] && [ "$have" != "$ver" ]; then
+        info "Updating Maestro $have -> $ver (CLI for mobile_dev, ~300 MB)..."
+    else
+        info "Installing Maestro $ver (CLI for mobile_dev, ~300 MB; a slow link is given the time it needs)..."
+    fi
+    if ! curl -fsSL --connect-timeout 30 --speed-limit 10240 --speed-time 60 -o "$tmp/$asset" "$url"; then
+        warn "maestro download failed or stalled - skipping ($hint)"
+        rm -rf "$tmp"
+        return 0
+    fi
+    # shellcheck disable=SC2086  # sha256_cmd may be "shasum -a 256": word-split on purpose
+    got="$($sha_cmd "$tmp/$asset" 2>/dev/null | cut -d' ' -f1)"
+    if [ "$want" != "$got" ]; then
+        warn "maestro CHECKSUM MISMATCH for $asset - not installing (pin stale? re-run scripts/update-versions.sh)"
+        rm -rf "$tmp"
+        return 0
+    fi
+    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+    rm -rf "$root"
+    if unzip -q "$tmp/$asset" -d "$HOME/.local/opt" \
+        && chmod +x "$root/bin/maestro" \
+        && ln -sf "$root/bin/maestro" "$HOME/.local/bin/maestro" \
+        && printf '%s\n' "$ver" >"$marker"; then
+        success "Maestro $ver installed (maestro)"
+    else
+        warn "maestro install failed - continuing ($hint)"
+    fi
+    rm -rf "$tmp"
+    return 0
 }
 
 #-------------------------------------------------------------------------------
@@ -203,9 +323,39 @@ agent_browser_doctor() {
 #-------------------------------------------------------------------------------
 _qapt_rewrite() {
     QAPT_ARGS=("$@")
+    QAPT_CAPTURE=0
     case "$1:${2:-}" in
-        apt:install | apt:update | apt-get:install | apt-get:update) QAPT_ARGS=(apt-get -qq "${@:2}") ;;
+        apt:install | apt:update | apt-get:install | apt-get:update) QAPT_ARGS=(apt-get -qq "${@:2}"); QAPT_CAPTURE=1 ;;
     esac
+}
+
+# _qapt_run <argv...> - run the rewritten command. `apt-get -qq` silences apt but
+# not dpkg: a real install still prints its "Selecting previously unselected
+# package / Unpacking / Setting up / update-alternatives" wall (one JDK on a WSL
+# `dot up`, 2026-10-11). For install/update (QAPT_CAPTURE=1) stdout goes to
+# ~/.local/state/dotfiles/apt.log under a dated header and is replayed on the
+# terminal only when the command fails; stderr, where apt and dpkg report errors
+# (and where sudo prompts), is never touched. Exit code is the command's own.
+_qapt_run() {
+    if [ "${QAPT_CAPTURE:-0}" != 1 ]; then
+        command "$@"
+        return
+    fi
+    local dir log out rc=0
+    dir="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
+    log="$dir/apt.log"
+    out="$(mktemp 2>/dev/null)" || out=""
+    if [ -z "$out" ]; then
+        command "$@"
+        return
+    fi
+    command "$@" >"$out" || rc=$?
+    if mkdir -p "$dir" 2>/dev/null; then
+        { printf '=== %s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)" "$*"; /bin/cat "$out"; } >>"$log" 2>/dev/null || true
+    fi
+    [ "$rc" -eq 0 ] || /bin/cat "$out"
+    rm -f "$out"
+    return "$rc"
 }
 
 quiet_apt_enable() {
@@ -214,16 +364,16 @@ quiet_apt_enable() {
     sudo() {
         if [ "${1:-}" = apt ] || [ "${1:-}" = apt-get ]; then
             _qapt_rewrite "$@"
-            command sudo "${QAPT_ARGS[@]}"
+            _qapt_run sudo "${QAPT_ARGS[@]}"
         else
             command sudo "$@"
         fi
     }
     # shellcheck disable=SC2317
-    apt() { _qapt_rewrite apt "$@"; command "${QAPT_ARGS[@]}"; }
+    apt() { _qapt_rewrite apt "$@"; _qapt_run "${QAPT_ARGS[@]}"; }
     # shellcheck disable=SC2317
-    apt-get() { _qapt_rewrite apt-get "$@"; command "${QAPT_ARGS[@]}"; }
-    info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it); errors are always shown."
+    apt-get() { _qapt_rewrite apt-get "$@"; _qapt_run "${QAPT_ARGS[@]}"; }
+    info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it; ~/.local/state/dotfiles/apt.log keeps it); errors are always shown."
 }
 
 #-------------------------------------------------------------------------------
@@ -486,8 +636,13 @@ opencode_superpowers_refresh() {
 # Project- and local-scope installs are per repository and `claude plugin update` run from
 # elsewhere never touches them, so they fall behind quietly; the report names them.
 claude_superpowers_installs() {
+    local list
     command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
-    net_timeout 60 claude plugin list --json 2>/dev/null \
+    # Exit 1 when the lookup itself fails (timed out, errored): the caller must not
+    # read an empty answer as "not installed" (2026-10-11: a 60 s hang did exactly that
+    # on a box with a user-scope 7.0.0 install).
+    list="$(net_timeout 60 claude plugin list --json 2>/dev/null)" || return 1
+    printf '%s\n' "$list" \
         | jq -b -r '.[]? | select((.id // "") | startswith("superpowers@")) | [(.version // ""), (.scope // ""), (.projectPath // "")] | @tsv' 2>/dev/null
 }
 

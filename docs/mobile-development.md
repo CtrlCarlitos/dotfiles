@@ -85,10 +85,13 @@ Windows-side ADB server through the bridge below. Two cases change that:
 - If an `adb` is already on `PATH` (a distro package, say), the installer
   leaves it alone and installs nothing.
 - Downloading `platform-tools` means accepting Google's Android SDK
-  licenses. The installer asks first, and only in an interactive run. A
-  non-interactive `dot up` skips the licenses and the download, and its
+  licenses. The installer asks first - before any of the group's downloads
+  start, so you can answer and walk away - and only in an interactive run.
+  A non-interactive `dot up` skips the licenses and the download, and its
   warning tells you how to re-run from a terminal
-  (`chezmoi state delete-bucket --bucket=scriptState && dot up`).
+  (`chezmoi state delete-bucket --bucket=scriptState && dot up`). See
+  "Keeping it current" under Linux and macOS for what `dot upgrade` and
+  `dot doctor` do about the group afterwards; both apply to WSL too.
 
 `dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
 templating involved - it is a plain file applied identically everywhere) and
@@ -128,7 +131,7 @@ covers the WSL side of the handshake.
 On native Linux and macOS, `mobile_dev` installs what it installs in WSL -
 the Maestro CLI (pinned and checksum-verified, under
 `~/.local/opt/maestro`, linked from `~/.local/bin`), agent-device (npm
-global), and a standalone JDK 17 (apt's `openjdk-17-jdk` or brew's
+global), and a standalone JDK 17 (apt's `openjdk-17-jdk-headless` or brew's
 `openjdk@17`), plus the same MCP registrations described under "MCP
 servers" below - and the full Android SDK, because here everything runs on
 a single host, with no Windows/WSL split:
@@ -153,10 +156,36 @@ mismatched versions kill each other's server.
 
 The system image is several GB. Downloading it, `platform-tools` and the
 emulator means accepting Google's Android SDK licenses, so the installer
-asks first, and only in an interactive run. A non-interactive `dot up`
-still installs the command-line tools, then skips the licenses and
-everything behind them with a warning. To finish from a terminal, run
+asks first - before the JDK, Maestro, agent-device or command-line tools
+start downloading, so the whole group then runs unattended - and only in an
+interactive run. The wait for your answer is its own line in the closing
+`Timings` summary (`Android licenses`), not booked against the downloads.
+A non-interactive `dot up` still installs the command-line tools, then
+skips the licenses and everything behind them with a warning. To finish
+from a terminal, run
 `chezmoi state delete-bucket --bucket=scriptState && dot up`.
+
+### Keeping it current
+
+The installer is a `run_onchange` script: it re-runs only when its rendered
+content changes, so a download that failed (Maestro's 300 MB asset on a slow
+link, say) or an MCP registration that was killed is not retried by the next
+`dot up`. Every such warning now names the re-entry command above. Two other
+places pick up the slack:
+
+- `dot upgrade` sweeps the group wherever its installer ran: Maestro follows
+  the pin in `.chezmoidata.yaml` (installed, or reinstalled on a pin bump -
+  the installed pin is recorded in `~/.local/opt/maestro/.dotfiles-version`),
+  agent-device follows the npm registry like the other npm globals, and the
+  installer's own SDK gets `sdkmanager --update`.
+- `dot doctor` has a `mobile-dev` check: with `mobile_dev = true` it names
+  whatever is missing - `maestro`, `agent-device`, `adb`, and the Maestro and
+  agent-device MCP registrations of each installed agent - with the re-entry
+  command.
+
+Maestro's download is guarded by a stall limit, not a wall clock (`curl
+--speed-limit 10240 --speed-time 60`): a dead transfer is killed, a slow one
+is allowed to finish.
 
 If you already have an SDK (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or Android
 Studio's default `~/Android/Sdk` or `~/Library/Android/sdk`), the installer

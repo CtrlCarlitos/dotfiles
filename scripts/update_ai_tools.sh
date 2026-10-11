@@ -410,6 +410,7 @@ if command -v opencode &>/dev/null; then
     # never reads: that copy reached 7.0.0 while the loaded one sat at 6.3.0 for two months. The
     # refresh re-resolves the git dependency inside the directory OpenCode loads. Defer-aware: a
     # live opencode session resolves from that directory.
+    dot_timing_mark 'Superpowers (OpenCode)'
     echo "✨ Updating Superpowers (OpenCode)..."
     if deferred opencode; then
         echo "  opencode deferred - Superpowers (OpenCode) update skipped with it."
@@ -456,6 +457,48 @@ if command -v npm &>/dev/null; then
     fi
 fi
 
+dot_timing_mark 'mobile_dev'
+# 5b. mobile_dev: Maestro, agent-device, the Android platform-tools - only where the group's
+# installer ran (its marker, the one dot_zshrc gates on). `dot upgrade` did not know the group
+# existed (2026-10-11): nothing of it was ever refreshed, and a Maestro whose `dot up` download
+# had failed stayed missing. Maestro follows the repo's pin through install_maestro (shared with
+# the installer); agent-device follows the registry like the other npm globals; the installer's
+# own SDK gets `sdkmanager --update` (its licenses were accepted at install time).
+if [ -f "$HOME/.local/state/dotfiles/mobile_dev" ]; then
+    echo "📱 Updating mobile_dev (Maestro, agent-device, Android platform-tools)..."
+    MAESTRO_VER="$(chezmoi execute-template '{{ .versions.maestro_version }}' 2>/dev/null || true)"
+    MAESTRO_SHA="$(chezmoi execute-template '{{ .versions.maestro_sha256 }}' 2>/dev/null || true)"
+    if [ -z "$MAESTRO_VER" ] || [ -z "$MAESTRO_SHA" ]; then
+        echo "   Maestro pin unavailable from chezmoi data - skipping"
+    else
+        maestro_before="$(/bin/cat "$HOME/.local/opt/maestro/.dotfiles-version" 2>/dev/null || true)"
+        install_maestro "$MAESTRO_VER" "$MAESTRO_SHA" 're-run dot upgrade'
+        if [ "$maestro_before" = "$MAESTRO_VER" ] && [ -x "$HOME/.local/opt/maestro/bin/maestro" ]; then
+            echo "   Maestro is current ($MAESTRO_VER)"
+        fi
+    fi
+    if command -v npm &>/dev/null && npm ls -g --depth=0 agent-device >/dev/null 2>&1; then
+        if npm_global_current agent-device; then
+            echo "   agent-device is current ($CURRENT_NPM_VERSION)"
+        else
+            npm_global_upgrade agent-device "$LATEST_NPM_VERSION" agent-device@latest || echo "   agent-device upgrade failed - continuing"
+        fi
+    fi
+    MD_SDKMANAGER="$HOME/.local/opt/android-sdk/cmdline-tools/latest/bin/sdkmanager"
+    if [ -x "$MD_SDKMANAGER" ]; then
+        # Output hidden (sdkmanager's progress bar, and Google's "sdkmanager is deprecated"
+        # banner on every call) and replayed without the banner only on failure.
+        md_out="$(mktemp)"
+        if net_timeout 600 "$MD_SDKMANAGER" --update </dev/null >"$md_out" 2>&1; then
+            echo "   Android platform-tools: sdkmanager --update done"
+        else
+            grep -Ev "sdkmanager\) is deprecated|The 'android' binary can also be found|To learn more about the Android CLI|^[[:space:]]*$" "$md_out" || true
+            echo "   sdkmanager --update failed or timed out - continuing"
+        fi
+        rm -f "$md_out"
+    fi
+fi
+
 dot_timing_mark 'Serena'
 # 6. Serena (uv-managed). Defer-aware: uv recreates the package dir that live
 # sessions resolve from (2026-09-20 live incidents).
@@ -489,24 +532,30 @@ dot_timing_mark 'Superpowers report'
 # for two months, Codex at 6.4.2 behind a lagging catalog, project-scope Claude installs at
 # 6.2.0). Read-only; every lookup degrades to "unknown" offline.
 superpowers_report() {
-    local upstream claude_user claude_stale ver scope project codex_ver codex_cat
+    local upstream claude_user claude_stale claude_installs ver scope project codex_ver codex_cat
     upstream="$(superpowers_latest_version)" || upstream=""
     echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
     if command -v claude &>/dev/null; then
         claude_user=""
         claude_stale=""
-        while IFS=$'\t' read -r ver scope project; do
-            [ -n "$ver" ] || continue
-            if [ "$scope" = user ]; then
-                claude_user="$ver"
-            elif [ -n "$upstream" ] && [ "$ver" != "$upstream" ]; then
-                claude_stale="$claude_stale, $ver in ${project/#"$HOME"/\~}"
+        # A lookup that fails (`claude plugin list --json` hung for its whole 60 s budget on a
+        # WSL box, 2026-10-11) is reported as that, never as "not installed".
+        if ! claude_installs="$(claude_superpowers_installs)"; then
+            echo "   Claude Code: lookup failed (claude plugin list --json errored or timed out - re-run dot upgrade)"
+        else
+            while IFS=$'\t' read -r ver scope project; do
+                [ -n "$ver" ] || continue
+                if [ "$scope" = user ]; then
+                    claude_user="$ver"
+                elif [ -n "$upstream" ] && [ "$ver" != "$upstream" ]; then
+                    claude_stale="$claude_stale, $ver in ${project/#"$HOME"/\~}"
+                fi
+            done <<<"$claude_installs"
+            superpowers_version_line "Claude Code" "$claude_user" "$upstream" "re-run dot upgrade"
+            # `claude plugin update` run here never touches another repository's project-scope install.
+            if [ -n "$claude_stale" ]; then
+                echo "     project-scope installs behind: ${claude_stale#, } - run 'claude plugin update superpowers@superpowers-marketplace' inside each"
             fi
-        done <<<"$(claude_superpowers_installs || true)"
-        superpowers_version_line "Claude Code" "$claude_user" "$upstream" "re-run dot upgrade"
-        # `claude plugin update` run here never touches another repository's project-scope install.
-        if [ -n "$claude_stale" ]; then
-            echo "     project-scope installs behind: ${claude_stale#, } - run 'claude plugin update superpowers@superpowers-marketplace' inside each"
         fi
     fi
     if command -v opencode &>/dev/null; then

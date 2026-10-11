@@ -206,4 +206,74 @@ if [ "$ps1_key_count" -ne "${#PKG_GROUPS[@]}" ]; then
 fi
 echo "  ok: dotfiles-doctor.ps1's \$keys list matches PKG_GROUPS in count ($ps1_key_count)"
 
+# [9] mobile_dev completeness. The group's installer is run_onchange: a failed
+# Maestro download or a killed `claude mcp add` (both on 2026-10-11) are never
+# retried by the next `dot up`, and nothing said so. With mobile_dev = true the
+# doctor names what is missing (binaries, the adb client, the MCP registrations
+# of the agents that are installed) and how to re-enter the installer; off, it
+# skips. Stub claude/codex: `mcp get <name>` answers from a fixture dir, so the
+# host's own registrations never leak in.
+H="$TMP/home-mobile"; valid_config "$H"
+sed -i 's/^mobile_dev = false$/mobile_dev = true/' "$H/.config/chezmoi/chezmoi.toml"
+mkdir -p "$TMP/mobile-bin" "$TMP/mobile-mcp"
+for agent in claude codex; do
+    cat >"$TMP/mobile-bin/$agent" <<EOF
+#!/bin/sh
+if [ "\$1" = mcp ] && [ "\$2" = get ]; then
+    shift 2; [ "\$1" = -s ] && shift 2
+    [ -e "$TMP/mobile-mcp/$agent.\$1" ] && exit 0
+    exit 1
+fi
+exit 0
+EOF
+    chmod +x "$TMP/mobile-bin/$agent"
+done
+# PATH: the stubs, then every system tool EXCEPT the ones under test (the host's
+# own agent-device/codex live in /usr/bin and would otherwise count as installed).
+mkdir -p "$TMP/doctor-bin"
+for f in /usr/bin/* /bin/*; do
+    name="${f##*/}"
+    case "$name" in claude|codex|maestro|agent-device|adb) continue ;; esac
+    [ -e "$TMP/doctor-bin/$name" ] || ln -s "$f" "$TMP/doctor-bin/$name" 2>/dev/null || true
+done
+chezmoi_real="$(command -v chezmoi)"
+[ -e "$TMP/doctor-bin/chezmoi" ] || ln -s "$chezmoi_real" "$TMP/doctor-bin/chezmoi"
+run9() { env -u CHEZMOI_CONFIG_DIR -u ANDROID_HOME -u ANDROID_SDK_ROOT HOME="$H" PATH="$TMP/mobile-bin:$TMP/doctor-bin" bash "$doctor" 2>&1 || true; }
+# a. nothing installed: the binaries and adb are named (the MCP registrations
+#    are gated on the binaries, like the installer's own registration step)
+out9="$(run9)"
+grep -Eq '^warn +mobile-dev .*maestro' <<<"$out9" || fail "[9a] missing maestro must be named: $out9"
+grep -Eq '^warn +mobile-dev .*agent-device' <<<"$out9" || fail "[9a] missing agent-device must be named: $out9"
+grep -Eq '^warn +mobile-dev .*adb' <<<"$out9" || fail "[9a] missing adb must be named: $out9"
+grep -Fq 'chezmoi state delete-bucket --bucket=scriptState && dot up' <<<"$out9" || fail "[9a] the re-entry command must be given: $out9"
+if grep -Eq 'claude:|codex:' <<<"$out9"; then fail "[9a] no registration may be demanded for a binary that is not installed: $out9"; fi
+# b. binaries present, registrations missing (the killed `claude mcp add` case)
+mkdir -p "$H/.local/bin" "$H/.local/opt/android-sdk/platform-tools" "$H/.local/state/dotfiles"
+for b in maestro agent-device; do printf '#!/bin/sh\nexit 0\n' >"$TMP/mobile-bin/$b"; chmod +x "$TMP/mobile-bin/$b"; done
+printf '#!/bin/sh\nexit 0\n' >"$H/.local/opt/android-sdk/platform-tools/adb"; chmod +x "$H/.local/opt/android-sdk/platform-tools/adb"
+touch "$H/.local/state/dotfiles/mobile_dev"
+out9="$(run9)"
+for want in claude:maestro claude:agent-device codex:maestro codex:agent-device; do
+    grep -Eq "^warn +mobile-dev .*$want" <<<"$out9" || fail "[9b] a missing MCP registration must be named as $want: $out9"
+done
+if grep -Eq '^warn +mobile-dev .*(maestro|agent-device|adb)( |$)' <<<"$out9" | grep -v ':'; then :; fi
+# c. everything present: ok
+touch "$TMP/mobile-mcp/claude.maestro" "$TMP/mobile-mcp/claude.agent-device" "$TMP/mobile-mcp/codex.maestro" "$TMP/mobile-mcp/codex.agent-device"
+out9="$(run9)"
+grep -Eq '^ok +mobile-dev ' <<<"$out9" || fail "[9c] with everything present mobile-dev must be ok: $out9"
+# d. in-apply mode checks the files only (no agent CLI calls after every apply)
+rm -f "$TMP/mobile-mcp/claude.maestro"
+out9="$(DOTFILES_DOCTOR_IN_APPLY=1 run9)"
+grep -Eq '^ok +mobile-dev ' <<<"$out9" || fail "[9d] in-apply mode must not query the agents' MCP registrations: $out9"
+touch "$TMP/mobile-mcp/claude.maestro"
+# an agent that is not installed is not asked about
+rm -f "$TMP/mobile-bin/codex" "$TMP/mobile-mcp/codex.maestro" "$TMP/mobile-mcp/codex.agent-device"
+out9="$(run9)"
+grep -Eq '^ok +mobile-dev ' <<<"$out9" || fail "[9] a Codex that is not installed must not count as a missing registration: $out9"
+# mobile_dev off: skipped, never a warning
+H="$TMP/home-mobile-off"; valid_config "$H"
+out9="$(run9)"
+grep -Eq '^skip +mobile-dev ' <<<"$out9" || fail "[9] mobile_dev = false must skip the check: $out9"
+echo "  ok: mobile-dev completeness reported"
+
 finish

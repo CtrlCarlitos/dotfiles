@@ -227,6 +227,40 @@ if ($env:OS -eq 'Windows_NT') {
     Write-Host '  skip: python3 check is Windows-only'
 }
 
+# [8] mobile_dev completeness (twin of the sh test's [9]): with mobile_dev = true
+# and no SDK, sdkmanager and adb are named with the re-entry command; with both
+# present under ANDROID_HOME it is ok; with mobile_dev = false it is skipped.
+$h = Join-Path $Tmp 'mobile'; New-Item -ItemType Directory -Force -Path $h | Out-Null
+New-ValidConfig $h
+$cfg = Join-Path $h '.config/chezmoi/chezmoi.toml'
+(Get-Content $cfg) -replace '^mobile_dev = false$', 'mobile_dev = true' | Set-Content $cfg -Encoding utf8
+$sdk = Join-Path $h 'sdk'
+$origAndroidHome = $env:ANDROID_HOME; $origAndroidRoot = $env:ANDROID_SDK_ROOT; $origLocalAppData = $env:LOCALAPPDATA; $origPath8 = $env:PATH
+try {
+    $env:ANDROID_HOME = $null; $env:ANDROID_SDK_ROOT = $null; $env:LOCALAPPDATA = Join-Path $h 'AppData/Local'
+    # The host's own adb (a dev box with the SDK on PATH) must not count as installed.
+    $env:PATH = (($origPath8 -split [IO.Path]::PathSeparator) | Where-Object {
+        $_ -and -not (Test-Path (Join-Path $_ 'adb')) -and -not (Test-Path (Join-Path $_ 'adb.exe'))
+    }) -join [IO.Path]::PathSeparator
+    $r = Invoke-Doctor $h
+    if ($r.Out -notmatch '(?m)^warn\s+mobile-dev\s+.*sdkmanager') { Fail "[8] missing sdkmanager must be named: $($r.Out)" }
+    if ($r.Out -notmatch '(?m)^warn\s+mobile-dev\s+.*adb') { Fail "[8] missing adb must be named: $($r.Out)" }
+    if ($r.Out -notmatch 'chezmoi state delete-bucket --bucket=scriptState') { Fail "[8] the re-entry command must be given: $($r.Out)" }
+    New-Item -ItemType Directory -Force -Path (Join-Path $sdk 'cmdline-tools/latest/bin'), (Join-Path $sdk 'platform-tools') | Out-Null
+    Set-Content (Join-Path $sdk 'cmdline-tools/latest/bin/sdkmanager.bat') '@echo off' -Encoding ascii
+    Set-Content (Join-Path $sdk 'platform-tools/adb.exe') 'stub' -Encoding ascii
+    $env:ANDROID_HOME = $sdk
+    $r = Invoke-Doctor $h
+    if ($r.Out -notmatch '(?m)^ok\s+mobile-dev\s') { Fail "[8] with sdkmanager and adb under ANDROID_HOME mobile-dev must be ok: $($r.Out)" }
+} finally {
+    $env:ANDROID_HOME = $origAndroidHome; $env:ANDROID_SDK_ROOT = $origAndroidRoot; $env:LOCALAPPDATA = $origLocalAppData; $env:PATH = $origPath8
+}
+$h = Join-Path $Tmp 'mobile-off'; New-Item -ItemType Directory -Force -Path $h | Out-Null
+New-ValidConfig $h
+$r = Invoke-Doctor $h
+if ($r.Out -notmatch '(?m)^skip\s+mobile-dev\s') { Fail "[8] mobile_dev = false must skip the check: $($r.Out)" }
+Write-Host '  ok: mobile-dev completeness reported'
+
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 Write-Host 'PASS: dotfiles-doctor.ps1 (7 scenarios)'
 exit 0
