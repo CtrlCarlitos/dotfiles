@@ -471,6 +471,36 @@ directory and the report against stub tools.
 
 ---
 
+## 20. A command's own prefix assignments see each other, left to right
+
+On one line, `A=1 B=$A cmd` assigns `A` before expanding `B`'s right-hand side:
+bash evaluates a simple command's leading `VAR=value` assignments in order, each
+one visible to the next on the same line, not just to `cmd`. A helper invoked
+from inside one assignment's `$(...)` that reads a variable another assignment
+on the SAME line is about to overwrite sees the new value, not the one the
+caller meant to query.
+
+**The incident.** A test-isolation fix needed to strip the real machine's
+managed-tool directories (`$HOME/.local/bin`, `$HOME/.local/opt/*/bin`) out of
+`$PATH` before handing it to a sandboxed subprocess, via a `safe_path()` helper
+that reads `$HOME`. Written inline as
+`HOME="$sandbox" PATH="$stub:$(safe_path)" cmd`, it stripped nothing: by the
+time `$(safe_path)` ran, `HOME` had already become `$sandbox` for this
+command's own evaluation, so `safe_path` filtered the sandbox's (empty)
+managed directories instead of the real ones - the real `~/.local/bin/maestro`
+kept leaking onto the test's `$PATH` exactly as before the fix (2026-10-11).
+
+**Obey it.** Compute anything that reads a variable the same command line is
+about to reassign into its own statement first:
+`safe="$(safe_path)"; HOME="$sandbox" PATH="$stub:$safe" cmd`. Or sidestep it
+entirely by precomputing the filtered value once, before any function that
+overrides the variable is even defined. An external command
+(`env VAR=val cmd ...`) does not have this problem - its arguments are
+ordinary word expansions under the *current* shell's environment, evaluated
+before `env` itself reassigns anything for its child.
+
+---
+
 ## Checking yourself
 
 ```sh
