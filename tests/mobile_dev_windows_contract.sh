@@ -18,6 +18,15 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sdkmanager'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'HypervisorPlatform'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create avd'
 
+# WHPX (2026-10-11): asked up front like the licenses/AVD questions, and actually run on a
+# yes - not just a warning telling the operator to run the command himself.
+ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
+require "$ps_t" "Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop"
+require "$ps_t" 'Enable it now? [y/N]'
+awk '/\$needWhpx = \(\$whpxState/{a=NR} /Read-Host "  Enable it now/{b=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
+    fail "installer: the WHPX question must be computed and asked before the JDK install, like the licenses/AVD questions"
+pass
+
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
 
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-NetFirewallRule'

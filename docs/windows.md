@@ -297,7 +297,10 @@ belongs to the app, its background helpers included (Antigravity's language serv
 app's command runner), and the Codex app's `CodexSandboxService` is stopped with it when it runs.
 Several share a process name with a CLI (claude, codex, opencode), so the name alone never
 decides. Their installers cannot replace a running app, and Claude Desktop's closes every
-`claude.exe`, so while any runs the winget sweep holds it. A desktop app is not a session: it
+`claude.exe`, so while any OTHER one runs the winget sweep holds it - excluding this shell's
+own ancestry (the terminal and the session running `dot upgrade` itself), which is never
+counted as a reason to hold Claude Desktop out (2026-10-11: it was, on every run from a Claude
+Code session, whether or not Claude Desktop was actually open). A desktop app is not a session: it
 never defers a CLI upgrade, and closing it loses nothing. Ollama is closed the same way rather
 than left to its systray's own "restart to update" offer, so it upgrades consistently with every
 other desktop app in the sweep.
