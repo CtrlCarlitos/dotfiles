@@ -242,8 +242,11 @@ the disk: `Optimize-VHD -Mode Full` first, diskpart's `compact vdisk` when that 
 It prints the size before and after and restarts nothing. `-Yes` skips the question. Prune first to get the
 most out of it. `Optimize-VHD` is in the Hyper-V PowerShell module, a Windows feature: the installer
 (`dev_desktop`) enables only that module (`Microsoft-Hyper-V-Management-PowerShell`) when the cmdlet is
-missing, never the Hyper-V platform (Docker runs on WSL 2). Windows Home has no such feature and uses
-diskpart. `tests/docker_compact_contract.sh` runs the flow against fakes. First real run (2026-10-06, after
+missing, never the Hyper-V platform (Docker runs on WSL 2). Windows Home has no such feature through
+normal means and uses diskpart there instead; the installer's fallback note points at a community DISM
+workaround ([HimDek's gist](https://gist.github.com/HimDek/6edde284203a620745fad3f762be603b)) for anyone
+who wants the real `Optimize-VHD` module on Home anyway. `tests/docker_compact_contract.sh` runs the flow
+against fakes. First real run (2026-10-06, after
 removing ~300 `vsc-*` dev-container images and `docker builder prune`): 158.2 GB -> 63.5 GB in about five
 minutes, through `Optimize-VHD` with only the Hyper-V PowerShell module enabled.
 
