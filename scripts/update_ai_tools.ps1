@@ -128,16 +128,22 @@ Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # (checksum verify each run); this just refreshes the plugin.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
     Write-Host "$($G.sparkles) Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
-    # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
-    $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) {
-        $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red
+    if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+    $agyUp = Get-SuperpowersLatestVersionCached
+    $agyHave = Get-AntigravitySuperpowersVersion
+    if ($agyHave -and $agyHave -eq $agyUp) {
+        # Already at upstream's release (its own plugin.json): no re-clone, same gate as Claude Code's.
+        Write-Host "  Superpowers (Antigravity) is current ($agyHave)"
     } else {
-        # The header printed with nothing under it on every current run (2026-10-12).
-        if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        $agyUp = Get-SuperpowersLatestVersionCached
-        $agyLine = Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $agyUp -Behind "behind upstream v$agyUp (re-run dot upgrade)"
-        if ($agyLine) { Write-Host $agyLine }
+        # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
+        $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) {
+            $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red
+        } else {
+            # The header printed with nothing under it on every current run (2026-10-12).
+            $agyLine = Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $agyUp -Behind "behind upstream v$agyUp (re-run dot upgrade)"
+            if ($agyLine) { Write-Host $agyLine }
+        }
     }
 }
 

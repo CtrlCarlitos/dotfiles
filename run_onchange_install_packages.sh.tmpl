@@ -1535,9 +1535,16 @@ install_apt() {
 {{- end }}
 
 {{- if $core }}
-    info "Installing core packages..."
-    # Names come from .chezmoidata/packages.yaml (see #83).
-    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }}
+    # Names come from .chezmoidata/packages.yaml (see #83). Installed only when one is missing:
+    # `apt install -y` of a present set upgrades it (dot up never upgrades) and said "Installing"
+    # on every run (apt_missing_packages, lib/agent-skills.sh).
+    core_missing="$(apt_missing_packages {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }})"
+    if [ -z "$core_missing" ]; then
+        info "Core packages: all present."
+    else
+        info "Installing core packages (missing: $core_missing)..."
+        $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "core" "catalog" .catalog.packages) }}
+    fi
 
     # The locale dot_zshrc exports, before anything else runs under it.
     ensure_locale
@@ -1608,8 +1615,12 @@ install_apt() {
 {{- end }}
 
 {{- if $remote_access_server }}
-    info "Installing OpenSSH Server prerequisites..."
-    $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+    if [ -z "$(apt_missing_packages openssh-server)" ]; then
+        info "OpenSSH Server prerequisites already installed."
+    else
+        info "Installing OpenSSH Server prerequisites..."
+        $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+    fi
     # The "activation is manual" notice is the [Post-Install] block's, once (it used to print here too).
 {{- end }}
 
@@ -2461,9 +2472,12 @@ PYEOF
 {{- end }}
 {{- end }}
     if [ -n "$AGY_WANT" ]; then
-        info "Registering MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)..."
+        # The merge says whether it changed the file ("changed" / "unchanged" on stdout): the
+        # line used to read "Registering ..." on every run, changed or not (2026-10-12).
         mkdir -p "$(dirname "$AGY_GLOBAL_MCP")"
-        python3 - "$AGY_GLOBAL_MCP" "$AGY_WANT" <<'PYEOF' 2>/dev/null || warn "agy MCP registration failed - continuing"
+        # Beside the config, not mktemp: the sandboxed test PATH carries only the tools the block needs.
+        agy_merge_out="$AGY_GLOBAL_MCP.merge.$$"
+        if python3 - "$AGY_GLOBAL_MCP" "$AGY_WANT" <<'PYEOF' >"$agy_merge_out" 2>/dev/null
 import json, os, sys
 p = sys.argv[1]
 want = set(filter(None, sys.argv[2].split(",")))
@@ -2474,6 +2488,7 @@ if os.path.exists(p) and os.path.getsize(p) > 0:
             cfg = json.load(f)
     except Exception:
         sys.exit(0)
+before = json.dumps(cfg, sort_keys=True)
 if not isinstance(cfg, dict):
     cfg = {}
 servers = cfg.get("mcpServers")
@@ -2498,10 +2513,24 @@ for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
             servers[name] = {"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True}
         else:
             servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
+if json.dumps(cfg, sort_keys=True) == before:
+    print("unchanged")
+    sys.exit(0)
 with open(p, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write(chr(10))
+print("changed")
 PYEOF
+        then
+            if [ "$(/bin/cat "$agy_merge_out")" = unchanged ]; then
+                info "MCP in agy global mcp_config.json already registered ($AGY_WANT)."
+            else
+                info "Registered MCP in agy global mcp_config.json ($AGY_WANT, forceAllToolsEager)."
+            fi
+        else
+            warn "agy MCP registration failed - continuing"
+        fi
+        rm -f "$agy_merge_out"
     fi
     # One-time migration: retire the dotfiles-mcp plugin bundle this repo
     # wrote before #175 - plugin-prefixed server names (mcp_dotfiles-mcp_*)
@@ -2557,16 +2586,20 @@ install_opencode_cli() {
     # the plugin array without clobbering any other settings already in
     # the file.
     if command -v opencode &>/dev/null; then
-        info "Configuring Superpowers for OpenCode..."
-        ensure_jq
         local oc_config_dir="$HOME/.config/opencode"
         local oc_config="$oc_config_dir/opencode.json"
         local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
-        mkdir -p "$oc_config_dir"
-        if [[ ! -f "$oc_config" ]]; then
-            echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
-        elif command -v jq &>/dev/null && ! grep -q "obra/superpowers" "$oc_config"; then
-            jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+        if [[ -f "$oc_config" ]] && grep -q "obra/superpowers" "$oc_config"; then
+            info "Superpowers for OpenCode already configured (opencode.json)."
+        else
+            info "Configuring Superpowers for OpenCode..."
+            ensure_jq
+            mkdir -p "$oc_config_dir"
+            if [[ ! -f "$oc_config" ]]; then
+                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+            elif command -v jq &>/dev/null; then
+                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+            fi
         fi
     fi
 }
@@ -3128,8 +3161,12 @@ main() {
     info "Remote Login is built in to macOS; enable it manually in System Settings. See docs/remote-access.md."
 {{- else }}
     if command -v apt &>/dev/null; then
-        info "Installing OpenSSH Server prerequisites..."
-        $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+        if [ -z "$(apt_missing_packages openssh-server)" ]; then
+            info "OpenSSH Server prerequisites already installed."
+        else
+            info "Installing OpenSSH Server prerequisites..."
+            $SUDO apt install -y openssh-server || warn "OpenSSH Server prerequisite install failed - continuing"
+        fi
     else
         warn "OpenSSH Server prerequisite install requires apt; install it manually."
     fi

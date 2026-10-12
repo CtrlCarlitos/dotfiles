@@ -643,7 +643,33 @@ function Get-CodexSuperpowersRow {
 
 # The installed version ('' when codex says "not installed" or lists no row). `dot up` reads it
 # before `codex plugin add`: re-adding an installed plugin re-fetches it (an upgrade).
+# The newest superpowers version in Codex's plugin cache ($CODEX_HOME or ~/.codex, then
+# plugins\cache\<marketplace>\superpowers\<version>\ with a .codex-plugin manifest inside - the path
+# `codex plugin add` prints as "Installed plugin root"); '' when nothing is cached. Twin of
+# codex_superpowers_cached_version. -CodexHome is for tests.
+function Get-CodexSuperpowersCachedVersion {
+    param([string]$CodexHome = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }))
+    $cache = Join-Path (Join-Path $CodexHome 'plugins') 'cache'
+    if (-not (Test-Path -LiteralPath $cache)) { return '' }
+    $versions = @()
+    foreach ($m in @(Get-ChildItem -LiteralPath $cache -Directory -ErrorAction SilentlyContinue)) {
+        $sp = Join-Path $m.FullName 'superpowers'
+        if (-not (Test-Path -LiteralPath $sp)) { continue }
+        foreach ($v in @(Get-ChildItem -LiteralPath $sp -Directory -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $v.FullName '.codex-plugin'))) { continue }
+            $name = ($v.Name -split '-')[0]
+            if ($name -match '^\d+\.\d+(\.\d+)?$') { $versions += $name }
+        }
+    }
+    if ($versions.Count -eq 0) { return '' }
+    return [string](@($versions | Sort-Object { [version]$_ }) | Select-Object -Last 1)
+}
+# The cache first: `codex plugin list` asks OpenAI's backend and took 19 s on a WSL `dot up`
+# (2026-10-12). The CLI decides only when nothing is cached.
 function Get-CodexSuperpowersInstalledVersion {
+    param([string]$CodexHome = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }))
+    $cached = Get-CodexSuperpowersCachedVersion -CodexHome $CodexHome
+    if ($cached) { return $cached }
     $row = Get-CodexSuperpowersRow
     if ($row -and $row.Installed) { return [string]$row.Version }
     return ''
