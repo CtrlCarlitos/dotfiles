@@ -224,7 +224,6 @@ else
     echo "   Curated skills: Codex installed=0 skipped=$curated_total failed=0"
 fi
 
-dot_timing_mark 'Superpowers (Codex)'
 # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace
 # carries it, and `codex plugin add` both installs and updates (same command,
 # idempotent - like `agy plugin install` above). Defer-aware: the plugin dir is
@@ -236,6 +235,10 @@ dot_timing_mark 'Superpowers (Codex)'
 # the error to /dev/null and printed "Superpowers not installed for Codex",
 # which was false - the plugin was installed, the add was failing on a
 # nonexistent marketplace. A real failure now prints what codex said.
+#
+# The mark sits below the comment: tests/agent_skill_wiring_contract.sh runs the curated-skills
+# region, cut at this comment's first line, without the timing helpers.
+dot_timing_mark 'Superpowers (Codex)'
 if command -v codex &>/dev/null; then
     if deferred codex; then
         echo "  codex deferred - Superpowers (Codex) update skipped with it."
