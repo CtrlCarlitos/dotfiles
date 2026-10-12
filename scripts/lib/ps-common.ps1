@@ -1624,6 +1624,8 @@ function Invoke-DockerDiskCompact {
 # consumer of this file keeps them, and so Read-DotAnswer below can use the marks.
 . (Join-Path $PSScriptRoot 'ps-timing.ps1')
 . (Join-Path $PSScriptRoot 'ps-heartbeat.ps1')
+# Sections of update_ai_tools.ps1 that run side by side (scripts/lib/ps-background.ps1).
+. (Join-Path $PSScriptRoot 'ps-background.ps1')
 
 # Read-Host for dot upgrade's prompts: the time spent answering is its own section ("your
 # answers") in the closing Timings line, not part of the work it interrupted. Twin of

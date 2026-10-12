@@ -141,6 +141,15 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   installer no longer run as a background job (a second PowerShell start, about 2 s each: `winget list` took
   2.7 s directly and 4.6 s through the job); `Invoke-DotNativeCapture` keeps the time cap
   (`scripts/lib/ps-package-inventory.ps1`; `tests/dot_up_whole_run_timing_contract.sh`).
+- **AI tools run side by side.** The AI-tool half of `dot upgrade` took 1m43s because its steps ran one after
+  another (Playwright 18 s, agent-browser 13 s, Serena 13 s, Superpowers 12 s, Claude Code 9 s, Superpowers for
+  OpenCode 7 s), each only waiting on the network. Playwright with agent-browser (it reuses Playwright's Chromium),
+  Serena and the Android SDK step now start in a second copy of `update_ai_tools.ps1` before the Antigravity
+  and skills steps; Claude Code and OpenCode's Superpowers start once the guardrail installer is done, because it
+  edits the same config files. Each step's output is shown at its own place, in the old order and colours. Every
+  copy's own time goes to `upgrade.log` (`background Serena ran 13s`); the timing line shows only the wait. A copy
+  that cannot start runs its steps in place, and `DOT_PARALLEL_AI_TOOLS=0` runs everything in order
+  (`scripts/lib/ps-background.ps1`; `tests/dot_upgrade_parallel_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
