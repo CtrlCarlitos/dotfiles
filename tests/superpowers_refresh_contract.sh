@@ -130,10 +130,20 @@ cat >"$bin/npx" <<'STUB'
 exit 0
 STUB
 # claude: `plugin list --json` prints $CLAUDE_PLUGINS_JSON; `--version` says 9.9.9 (current).
+# CLAUDE_PLUGIN_LIST_HANG sleeps first: on Linux pwsh resolves the bare `claude` command to
+# THIS executable bit file ahead of the claude.ps1 sibling below (unlike Windows pwsh, which
+# has no bare-executable match for an extensionless file and falls through to the .ps1) - the
+# hang simulation has to live in both stubs or section E's PowerShell timeout test only
+# exercises it on Windows.
 cat >"$bin/claude" <<'STUB'
 #!/bin/sh
 [ -n "${STUB_LOG:-}" ] && printf 'claude %s\n' "$*" >>"$STUB_LOG"
-if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then [ "${CLAUDE_PLUGIN_LIST_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"; exit 0; fi
+if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then
+    [ "${CLAUDE_PLUGIN_LIST_HANG:-0}" = 1 ] && sleep 30
+    [ "${CLAUDE_PLUGIN_LIST_FAIL:-0}" = 1 ] && exit 1
+    printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"
+    exit 0
+fi
 [ "${1:-}" = --version ] && printf '9.9.9 (Claude Code)\n'
 exit 0
 STUB
