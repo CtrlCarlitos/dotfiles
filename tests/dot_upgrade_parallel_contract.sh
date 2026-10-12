@@ -84,7 +84,7 @@ esac
 
 # --- sections run side by side, shown in order -------------------------------------------------------
 # A fixture of the same shape as update_ai_tools.ps1: marks, guarded sections, the real dispatcher block.
-dispatcher="$(awk '/^if \(\$OnlySection\) \{/{f=1} f{print} f && /^\}$/{exit}' "$updater" | tr -d '\r' | grep -v 'ps-skills.ps1')"
+dispatcher="$(tr -d '\r' <"$updater" | awk '/^if \(\$OnlySection\) \{/{f=1} f{print} f && /^\}$/{exit}' | grep -v 'ps-skills.ps1')"
 [ -n "$dispatcher" ] || fail "could not extract the -OnlySection dispatcher from update_ai_tools.ps1"
 timing_lib="$repo_root/scripts/lib/ps-timing.ps1"
 make_fixture() { # $1 = path, $2 = the lines that start the copies
