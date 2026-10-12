@@ -256,7 +256,8 @@ grep -Fq 'lib/docker-vscode.sh' "$du" || fail "dotupgrade.sh must source lib/doc
 # holds the packages, and the hold is always released
 upd="$(grep -n 'sudo apt-get "${apt_q\[@\]}" update' "$du" | head -1 | cut -d: -f1)"
 gate="$(grep -n 'dock_gate "${dock_pending% }"' "$du" | head -1 | cut -d: -f1)"
-upg="$(grep -n 'sudo apt-get "${apt_q\[@\]}" upgrade -y' "$du" | head -1 | cut -d: -f1)"
+# the upgrade runs through apt_upgrade_run (its call site, not the function above the sweep)
+upg="$(grep -n '^ *apt_upgrade_run "${apt_q\[@\]}"' "$du" | head -1 | cut -d: -f1)"
 if [ -z "$upd" ] || [ -z "$gate" ] || [ -z "$upg" ] || [ "$upd" -ge "$gate" ] || [ "$gate" -ge "$upg" ]; then
     fail "dotupgrade.sh: the Docker gate must sit between apt-get update and apt-get upgrade"
 fi
