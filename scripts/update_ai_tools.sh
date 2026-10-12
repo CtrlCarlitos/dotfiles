@@ -147,12 +147,19 @@ else
 fi
 
 dot_timing_mark 'Superpowers (Antigravity)'
+# obra/superpowers' newest release, asked once (git ls-remote): the outcome line under each
+# Superpowers refresh below and the report at the end compare against it.
+sp_upstream="$(superpowers_latest_version || true)"
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates (checksum
 # verify each run), so this just refreshes the plugin - re-running `agy plugin
 # install` is the same idempotent pattern used for Claude Code/OpenCode below.
 if command -v agy &>/dev/null; then
     echo "✨ Updating Superpowers (Antigravity)..."
-    agy plugin install https://github.com/obra/superpowers &>/dev/null || echo "   Superpowers plugin update for Antigravity failed - skipping"
+    if agy plugin install https://github.com/obra/superpowers &>/dev/null; then
+        superpowers_refresh_line Antigravity "$(antigravity_superpowers_version || true)" "$sp_upstream" "behind upstream v$sp_upstream (re-run dot upgrade)"
+    else
+        echo "   Superpowers plugin update for Antigravity failed - skipping"
+    fi
 fi
 
 dot_timing_mark 'curated skills'
@@ -248,8 +255,14 @@ if command -v codex &>/dev/null; then
         if [ -z "$cx_market" ]; then
             echo "   no Codex marketplace lists a superpowers plugin - skipping"
         else
-            cx_out="$(net_timeout 300 codex plugin add "superpowers@$cx_market" 2>&1)" \
-                || { printf '%s\n' "$cx_out"; echo "   Superpowers update for Codex failed - skipping"; }
+            if cx_out="$(net_timeout 300 codex plugin add "superpowers@$cx_market" 2>&1)"; then
+                # "Installed plugin root: .../superpowers/<version>" is the add's one fact; the
+                # version is its last path element (no second `codex plugin list` round-trip).
+                cx_ver="$(printf '%s\n' "$cx_out" | sed -n 's#^Installed plugin root: .*/##p' | head -n 1)"
+                superpowers_refresh_line Codex "$cx_ver" "$sp_upstream" "the marketplace has not published v$sp_upstream yet"
+            else
+                printf '%s\n' "$cx_out"; echo "   Superpowers update for Codex failed - skipping"
+            fi
         fi
     fi
 fi
@@ -369,12 +382,11 @@ if command -v claude &>/dev/null; then
     echo "✨ Updating Superpowers (Claude Code)..."
     # `claude plugin update` took 14 s on WSL (2026-10-12) to answer "already at the latest version",
     # booked under "Claude Code" for want of a mark. The user-scope version sits in
-    # ~/.claude/plugins/installed_plugins.json and upstream's newest release is one ls-remote (the
-    # report below reuses it): an install already at that release skips the update. The marketplace
+    # ~/.claude/plugins/installed_plugins.json and upstream's newest release was asked once above
+    # (sp_upstream): an install already at that release skips the update. The marketplace
     # can lag upstream; the update then runs as before and the outcome line says what it found.
     # Named with its marketplace: a machine can carry superpowers from several marketplaces, and
     # the bare name then fails with "installed from more than one marketplace" (silently, here).
-    sp_upstream="$(superpowers_latest_version || true)"
     sp_have="$(claude_superpowers_user_version || true)"
     if [ -n "$sp_have" ] && [ "$sp_have" = "$sp_upstream" ]; then
         echo "   Superpowers (Claude Code) is current ($sp_have)"
@@ -462,7 +474,17 @@ dot_timing_mark 'Playwright Chromium'
 # 4. Playwright Chromium (headless browser for agent automation)
 if command -v npx &>/dev/null; then
     echo "🌐 Updating Playwright Chromium..."
-    net_timeout 600 npx --yes playwright install chromium &>/dev/null || echo "   Playwright Chromium update failed - skipping"
+    # Its output is a download log or nothing; the header printed with nothing under it on every
+    # current run (2026-10-12). "Downloading ..." lines mean a new build arrived.
+    if pw_out="$(net_timeout 600 npx --yes playwright install chromium 2>&1)"; then
+        if printf '%s\n' "$pw_out" | grep -q '^Downloading'; then
+            echo "   Playwright Chromium: new build downloaded"
+        else
+            echo "   Playwright Chromium is up to date"
+        fi
+    else
+        printf '%s\n' "$pw_out"; echo "   Playwright Chromium update failed - skipping"
+    fi
 fi
 
 dot_timing_mark 'agent-browser'
@@ -560,8 +582,7 @@ dot_timing_mark 'Superpowers report'
 # 6.2.0). Read-only; every lookup degrades to "unknown" offline.
 superpowers_report() {
     local upstream claude_user claude_stale claude_gone claude_installs ver scope project codex_ver codex_cat
-    # The Claude Code step above already asked upstream; only a run without claude asks here.
-    upstream="${sp_upstream-$(superpowers_latest_version || true)}"
+    upstream="$sp_upstream"
     echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
     if command -v claude &>/dev/null; then
         claude_user=""

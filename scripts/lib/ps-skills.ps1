@@ -697,6 +697,14 @@ function Get-GitHubLatestTag {
 }
 
 function Get-SuperpowersLatestVersion { return (Get-GitHubLatestTag -Repo 'obra/superpowers') }
+# Asked once per process and reused by every Superpowers outcome line and the report (a background
+# copy of update_ai_tools.ps1 - scripts/lib/ps-background.ps1 - has none of the main script's
+# variables, so the cache lives here, not in a script variable).
+$script:SuperpowersLatestVersionCache = $null
+function Get-SuperpowersLatestVersionCached {
+    if ($null -eq $script:SuperpowersLatestVersionCache) { $script:SuperpowersLatestVersionCache = [string](Get-SuperpowersLatestVersion) }
+    return $script:SuperpowersLatestVersionCache
+}
 
 # Where OpenCode keeps the superpowers plugin it actually loads. For every `plugin` entry in
 # opencode.json OpenCode installs the package into its OWN cache, <cache>\packages\<name>@<spec>\
@@ -923,6 +931,17 @@ function Get-ClaudeSuperpowersInstall {
         $out += [pscustomobject]@{ Version = $version; Scope = $scope; ProjectPath = $project }
     }
     return $out
+}
+
+# The outcome line under an "Updating Superpowers (<harness>)..." header (twin of
+# superpowers_refresh_line): "is current (v)", "is v (upstream unreachable)", or "is v - <Behind>".
+# No version known: '' (the caller prints nothing).
+function Format-SuperpowersRefreshLine {
+    param([string]$Harness, [string]$Version, [string]$Upstream, [string]$Behind = '')
+    if (-not $Version) { return '' }
+    if (-not $Upstream) { return "  Superpowers ($Harness) is $Version (upstream unreachable)" }
+    if ($Version -eq $Upstream) { return "  Superpowers ($Harness) is current ($Version)" }
+    return "  Superpowers ($Harness) is $Version - $Behind"
 }
 
 # One report line (twin of superpowers_version_line): a version equal to upstream is "current";

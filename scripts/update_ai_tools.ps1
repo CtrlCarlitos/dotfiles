@@ -130,7 +130,15 @@ if (Get-Command agy -ErrorAction SilentlyContinue) {
     Write-Host "$($G.sparkles) Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
     # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
     $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) { $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red }
+    if ($LASTEXITCODE -ne 0) {
+        $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red
+    } else {
+        # The header printed with nothing under it on every current run (2026-10-12).
+        if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+        $agyUp = Get-SuperpowersLatestVersionCached
+        $agyLine = Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $agyUp -Behind "behind upstream v$agyUp (re-run dot upgrade)"
+        if ($agyLine) { Write-Host $agyLine }
+    }
 }
 
 Add-DotTimingMark -Name 'curated skills'
@@ -355,7 +363,17 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
         } else {
             # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
             $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
-            if ($LASTEXITCODE -ne 0) { $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red }
+            if ($LASTEXITCODE -ne 0) {
+                $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red
+            } else {
+                # "Installed plugin root: ...\superpowers\<version>" is the add's one fact; the version
+                # is its last path element (no second `codex plugin list` round-trip).
+                $cxVer = ''
+                foreach ($cxLine in $cxOut) { if ($cxLine -match '^Installed plugin root: .*[\\/]([^\\/]+)\s*$') { $cxVer = $Matches[1] } }
+                $cxUp = Get-SuperpowersLatestVersionCached
+                $cxLineOut = Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxVer -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet"
+                if ($cxLineOut) { Write-Host $cxLineOut }
+            }
         }
     }
 }
@@ -551,7 +569,7 @@ if (-not (Show-DotBackgroundSection 'Claude Code')) {
         # installs from claude-plugins-official / superpowers-dev), and the bare name then fails
         # with "installed from more than one marketplace". dotfiles installs this one.
         if (-not (Get-Command Get-ClaudeSuperpowersUserVersion -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        $spUpstream = Get-SuperpowersLatestVersion
+        $spUpstream = Get-SuperpowersLatestVersionCached
         $spHave = Get-ClaudeSuperpowersUserVersion
         if ($spHave -and $spHave -eq $spUpstream) {
             Write-Host "  Superpowers (Claude Code) is current ($spHave)"
@@ -617,7 +635,16 @@ if (-not (Show-DotBackgroundSection 'Playwright Chromium')) {
     # 4. Playwright Chromium (headless browser for agent automation)
     if (Get-Command npx -ErrorAction SilentlyContinue) {
         Write-Host "$($G.globe) Updating Playwright Chromium..." -ForegroundColor Yellow
-        npx --yes playwright install chromium 2>$null
+        # Its output is a download log or nothing; the header printed with nothing under it on every
+        # current run. "Downloading ..." lines mean a new build arrived.
+        $pwOut = @(& npx --yes playwright install chromium 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) {
+            $pwOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Playwright Chromium update failed - continuing" -ForegroundColor Red
+        } elseif (@($pwOut | Where-Object { $_ -match '^Downloading' }).Count -gt 0) {
+            Write-Host "  Playwright Chromium: new build downloaded"
+        } else {
+            Write-Host "  Playwright Chromium is up to date"
+        }
     }
 }
 
@@ -756,8 +783,9 @@ Add-DotTimingMark -Name 'Superpowers report'
 # behind a lagging catalog, project-scope Claude installs at 6.2.0). Read-only.
 if (-not (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
 if (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) {
-    # The Claude Code step above already asked upstream; only a run without claude asks here.
-    if (Test-Path Variable:spUpstream) { Write-SuperpowersReport -Glyph $G.sparkles -Upstream $spUpstream } else { Write-SuperpowersReport -Glyph $G.sparkles }
+    # Asked once per process (the Antigravity line above, in this process; the Claude Code step
+    # runs in a background copy with its own cache).
+    Write-SuperpowersReport -Glyph $G.sparkles -Upstream (Get-SuperpowersLatestVersionCached)
 }
 
 Write-DotTimingSummary -Title 'AI tools'

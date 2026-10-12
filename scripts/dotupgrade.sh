@@ -219,6 +219,30 @@ dot_timing_mark 'system packages'
 # Docker (lib/docker-vscode.sh): an upgrade restarts Docker and stops every container, and a VS
 # Code window attached to a dev container loses it. When a Docker upgrade is pending AND Docker
 # is running, the operator is asked first; on yes VS Code is closed, then Docker stopped. Nothing
+# apt_upgrade_run <apt-get flags...> - `apt-get upgrade -y`. dpkg's routine lines (Preparing to
+# unpack / Unpacking / Setting up / Processing triggers: 17 of them for four packages, 2026-10-12)
+# go to a file and the console gets one line - the list of what upgrades was printed just above;
+# apt's whole output is shown when it fails. Captured stdout means no prompt can be seen or
+# answered, so apt runs non-interactively (DEBIAN_FRONTEND=noninteractive; a changed conffile
+# keeps the installed copy, --force-confold, as unattended-upgrades does). DOT_APT_VERBOSE=1
+# keeps everything on the terminal, prompts included.
+apt_upgrade_run() {
+    local apt_q=("$@") out n
+    if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
+        sudo apt-get "${apt_q[@]}" upgrade -y
+        return $?
+    fi
+    if out="$(sudo env DEBIAN_FRONTEND=noninteractive apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y 2>&1)"; then
+        n="$(printf '%s\n' "$out" | grep -c '^Setting up ' || true)"
+        [ "${n:-0}" -gt 0 ] && echo "  apt: $n package(s) upgraded."
+    else
+        printf '%s\n' "$out"
+        echo "  apt upgrade failed - continuing with the rest of the sweep."
+    fi
+    return 0
+}
+
 # below costs anything when Docker is not running (WSL: Docker Desktop and VS Code are Windows').
 case "$NET_CHOICE:$(uname -s)" in
     skip:*)
@@ -253,16 +277,19 @@ case "$NET_CHOICE:$(uname -s)" in
                 else
                     echo "  apt: nothing to upgrade"
                 fi
-                sudo apt-get "${apt_q[@]}" upgrade -y
+                apt_upgrade_run "${apt_q[@]}"
                 dock_unhold
                 # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
                 # them only when missing: this is where they get upgraded (github_tool_sync,
                 # lib/agent-skills.sh). The closing note then names only what still lags.
-                for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
                 # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
                 # moves them): reinstalled at the pin when the installed version differs
-                # (release_tool_pins_upgrade, lib/agent-skills.sh).
+                # (release_tool_pins_upgrade, lib/agent-skills.sh). The tools that are current
+                # share one line (tool_current_flush); any with news keeps its own.
+                tool_current_collect
+                for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
                 release_tool_pins_upgrade sudo
+                tool_current_flush 'GitHub-release tools'
             fi
         else
             echo "  apt-get not found - skipping system packages."

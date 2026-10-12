@@ -64,6 +64,11 @@ run() {
     PATH="$tmp/bin:$tmp/sys" CURL_LOG="$tmp/curl.log" TOOL_LOG="$tmp/tool.log" FIXTURE_DIR="$tmp/fixture" GITHUB_TOOL_BIN="$tmp/dest" \
         bash -c 'set -euo pipefail; . "$1"; shift; github_latest_tag() { printf "%s\n" "${FAKE_LATEST:-}"; }; rc=0; github_tool_sync "$@" || rc=$?; echo "rc=$rc"' _ "$lib" "$@" 2>&1
 }
+run_collect() { # same, inside tool_current_collect ... tool_current_flush (dot upgrade's span)
+    : >"$tmp/tool.log"; : >"$tmp/curl.log"
+    PATH="$tmp/bin:$tmp/sys" CURL_LOG="$tmp/curl.log" TOOL_LOG="$tmp/tool.log" FIXTURE_DIR="$tmp/fixture" GITHUB_TOOL_BIN="$tmp/dest" \
+        bash -c 'set -euo pipefail; . "$1"; shift; github_latest_tag() { printf "%s\n" "${FAKE_LATEST:-}"; }; rc=0; tool_current_collect; github_tool_sync "$@" || rc=$?; tool_current_flush "GitHub-release tools"; echo "rc=$rc"' _ "$lib" "$@" 2>&1
+}
 
 # A. install, delta missing: newest tag, deb URL, dpkg -i through sudo, one info line
 set_tool delta -
@@ -95,6 +100,10 @@ set_tool dust 1.2.6
 got="$(FAKE_LATEST=1.2.6 run dust sudo upgrade)"
 case "$got" in *'dust is current (1.2.6)'*rc=0*) pass ;; *) fail "upgrade, current: must say so (got: $got)" ;; esac
 [ ! -s "$tmp/curl.log" ] || fail "upgrade, current: must not download"
+# inside a collect span the line is held and flushed as one for every current tool (dot upgrade
+# printed five of them in a row, 2026-10-12)
+got="$(FAKE_LATEST=1.2.6 run_collect dust sudo upgrade)"
+case "$got" in *'dust is current'*) fail "collect span: the per-tool line must be held (got: $got)" ;; *'   GitHub-release tools current: dust 1.2.6'*rc=0*) pass ;; *) fail "collect span: one folded line expected (got: $got)" ;; esac
 set_tool dust 1.2.5
 got="$(FAKE_LATEST=1.2.6 run dust sudo upgrade)"
 grep -Fq 'https://github.com/bootandy/dust/releases/download/v1.2.6/du-dust_1.2.6-1_amd64.deb' "$tmp/curl.log" || fail "dust's asset URL (curl saw: $(/bin/cat "$tmp/curl.log"))"

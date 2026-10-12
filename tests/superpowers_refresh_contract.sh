@@ -80,6 +80,11 @@ fi
 # `mcp get <server>`: nothing registered in the fixture home (mcp_registered falls back to this
 # probe when ~/.codex/config.toml is absent), so `serena setup codex` still runs
 if [ "${1:-}" = mcp ] && [ "${2:-}" = get ]; then exit 1; fi
+# `plugin add`: what the real one prints (the version is the root's last path element)
+if [ "${1:-}" = plugin ] && [ "${2:-}" = add ]; then
+    printf 'Added plugin `superpowers` from marketplace `test-marketplace`.\nInstalled plugin root: /h/.codex/plugins/cache/test-marketplace/superpowers/6.4.2\n'
+    exit 0
+fi
 [ "${1:-}" = --version ] && printf 'codex-cli 1.0.0\n'
 exit 0
 STUB
@@ -123,10 +128,11 @@ if [ "${1:-}" = install ] && [ "${2:-}" = --prefix ]; then
 fi
 exit 0
 STUB
-# npx: logs argv (Playwright's two steps, the skills CLI).
+# npx: logs argv (Playwright's two steps, the skills CLI); `playwright install` prints $NPX_PLAYWRIGHT_SAYS.
 cat >"$bin/npx" <<'STUB'
 #!/bin/sh
 [ -n "${STUB_LOG:-}" ] && printf 'npx %s\n' "$*" >>"$STUB_LOG"
+case "$*" in *"playwright install chromium"*) [ -n "${NPX_PLAYWRIGHT_SAYS:-}" ] && printf '%s\n' "$NPX_PLAYWRIGHT_SAYS" ;; esac
 exit 0
 STUB
 # claude: `plugin list --json` prints $CLAUDE_PLUGINS_JSON; `--version` says 9.9.9 (current).
@@ -350,6 +356,14 @@ expect '   OpenCode: 7.0.0 (current)'
 expect '   Antigravity: 7.0.0 (current)'
 expect '   Codex: 6.4.2 (marketplace latest - upstream v7.0.0 is not published there yet)'
 pass
+# the three headers that printed nothing under them (2026-10-12) each get an outcome line
+expect '   Superpowers (Antigravity) is current (7.0.0)'
+expect '   Superpowers (Codex) is 6.4.2 - the marketplace has not published v7.0.0 yet'
+expect '   Playwright Chromium is up to date'
+out="$tmp/updater-2b.log"
+NPX_PLAYWRIGHT_SAYS='Downloading Chromium 1248 (playwright build v1248) from https://cdn.playwright.dev/...' run_updater "$out"
+expect '   Playwright Chromium: new build downloaded'
+pass
 # no cache yet (a fresh machine before OpenCode's first start), and a deferred opencode
 rm -rf "$home/.cache/opencode"
 out="$tmp/updater-3.log"
@@ -553,6 +567,10 @@ Write-Output ('line-behind=' + (Format-SuperpowersVersionLine -Harness 'Codex' -
 Write-Output ('line-current=' + (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version '7.0.0' -Upstream '7.0.0' -Note 'n'))
 Write-Output ('line-missing=' + (Format-SuperpowersVersionLine -Harness 'Antigravity' -Version '' -Upstream '7.0.0'))
 Write-Output ('line-offline=' + (Format-SuperpowersVersionLine -Harness 'Codex' -Version '6.4.2' -Upstream ''))
+Write-Output ('refresh-current=' + (Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version '7.0.0' -Upstream '7.0.0' -Behind 'x'))
+Write-Output ('refresh-behind=' + (Format-SuperpowersRefreshLine -Harness 'Codex' -Version '6.4.2' -Upstream '7.0.0' -Behind 'the marketplace has not published v7.0.0 yet'))
+Write-Output ('refresh-offline=' + (Format-SuperpowersRefreshLine -Harness 'Codex' -Version '6.4.2' -Upstream ''))
+Write-Output ('refresh-unknown-empty=' + ([string]::IsNullOrEmpty((Format-SuperpowersRefreshLine -Harness 'Codex' -Version '' -Upstream '7.0.0' -Behind 'x'))))
 PSEOF
     : >"$tmp/npm-ps.log"
     ps_out="$(PATH="$bin:$PATH" GIT_TAGS_DIR="$(winpath "$tags")" pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserDir "$(winpath "$home")" -CacheDir "$(winpath "$oc_dir")" -NpmLog "$(winpath "$tmp/npm-ps.log")" 2>&1 | tr -d '\r' || true)"
@@ -585,6 +603,10 @@ PSEOF
     pexpect 'line-current=   OpenCode: 7.0.0 (current)'
     pexpect 'line-missing=   Antigravity: not installed'
     pexpect 'line-offline=   Codex: 6.4.2 (upstream unreachable)'
+    pexpect 'refresh-current=  Superpowers (Antigravity) is current (7.0.0)'
+    pexpect 'refresh-behind=  Superpowers (Codex) is 6.4.2 - the marketplace has not published v7.0.0 yet'
+    pexpect 'refresh-offline=  Superpowers (Codex) is 6.4.2 (upstream unreachable)'
+    pexpect 'refresh-unknown-empty=True'
     pass
 else
     printf 'SKIP (PowerShell twins): pwsh not installed\n'
