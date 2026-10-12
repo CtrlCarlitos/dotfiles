@@ -37,7 +37,9 @@ awk '/^apt_upgrade_run\(\) \{/ {f=1} f {print} f && /^\}$/ {exit}' "$up_sh" >"$h
 grep -q '^apt_upgrade_run() {' "$harness" || fail "dotupgrade.sh: apt_upgrade_run() not found (the apt sweep must be a function the test can run)"
 run() { # prints output and rc; env from the caller
     : >"$tmp/apt.log"
-    PATH="$tmp/bin:/usr/bin:/bin" APT_LOG="$tmp/apt.log" bash -c 'set -u; . "$1"; shift; rc=0; apt_upgrade_run "$@" || rc=$?; echo "rc=$rc"' _ "$harness" "$@" 2>&1
+    # -u DEBIAN_FRONTEND: GitHub's runners export it as noninteractive themselves, which would make the
+    # verbose case look non-interactive for a reason that is not the sweep's
+    env -u DEBIAN_FRONTEND PATH="$tmp/bin:/usr/bin:/bin" APT_LOG="$tmp/apt.log" bash -c 'set -u; . "$1"; shift; rc=0; apt_upgrade_run "$@" || rc=$?; echo "rc=$rc"' _ "$harness" "$@" 2>&1
 }
 
 # 1. quiet: one line, dpkg's lines hidden, apt non-interactive
