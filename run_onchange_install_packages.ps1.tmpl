@@ -110,6 +110,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-timing.ps1" }}
 {{ include "scripts/lib/ps-heartbeat.ps1" }}
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
+{{ include "scripts/lib/ps-adb-bridge.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
 # Installer boilerplate is logged, not shown (scripts/lib/ps-installer-output.ps1).
 Initialize-InstallerOutput
@@ -773,21 +774,12 @@ function Install-MobileDev {
     # subnet, never a LAN-wide opening (#336's explicit caution). Wrapped in
     # try/catch so a Firewall service that is off, or managed by Group
     # Policy, never aborts the rest of the installer.
-    $wslAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'vEthernet (WSL*' -and $_.Status -eq 'Up' } | Select-Object -First 1
-    if ($wslAdapter) {
-        $wslIp = Get-NetIPAddress -InterfaceIndex $wslAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($wslIp) {
-            # The network address from the adapter's own host IP + prefix.
-            # WSL can be in NAT or mirrored networking mode (section 3.3) -
-            # this reads whatever subnet the live adapter actually reports,
-            # the same math either way, never a hardcoded guess.
-            $ipBytes = ([System.Net.IPAddress]::Parse($wslIp.IPAddress)).GetAddressBytes()
-            $prefixLen = $wslIp.PrefixLength
-            $netBytes = for ($i = 0; $i -lt 4; $i++) {
-                $bits = [Math]::Min(8, [Math]::Max(0, $prefixLen - ($i * 8)))
-                [byte]($ipBytes[$i] -band ([byte](0xFF -shl (8 - $bits) -band 0xFF)))
-            }
-            $wslSubnet = ($netBytes -join '.') + "/$prefixLen"
+    # Read cheaply first (scripts/lib/ps-adb-bridge.ps1): .NET for the adapter and its subnet, netsh for the
+    # rule. The rule is only touched with the NetSecurity cmdlets when it is missing or points elsewhere.
+    $wslNet = Get-DotWslSubnet
+    if ($wslNet.Found -and $wslNet.Subnet) {
+        $wslSubnet = $wslNet.Subnet
+        if ((Get-DotFirewallRuleRemoteIp -DisplayName 'mobile_dev: ADB bridge (WSL only)') -ne $wslSubnet) {
             try {
                 $existingRule = Get-NetFirewallRule -Name 'MobileDevAdbBridge' -ErrorAction SilentlyContinue
                 if (-not $existingRule) {
@@ -807,9 +799,9 @@ function Install-MobileDev {
             } catch {
                 Write-Host "  Warning: could not create/update the ADB bridge Firewall rule - $_" -ForegroundColor Red
             }
-        } else {
-            Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
         }
+    } elseif ($wslNet.Found) {
+        Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
     } else {
         Write-Host "  Warning: no WSL vEthernet adapter found - skipping the ADB bridge Firewall rule (install/start WSL first)." -ForegroundColor Red
     }

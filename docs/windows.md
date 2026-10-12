@@ -128,6 +128,12 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   still confirmed live, and a failed choco listing falls back to asking per app
   (`scripts/lib/ps-package-inventory.ps1`; `tests/package_inventory_contract.sh`). `dot upgrade` with nothing to upgrade
   no longer prints choco's opening and closing boilerplate; it stays in `upgrade.log`.
+- **The ADB-bridge firewall check.** `mobile_dev: scrcpy and ADB 12s` in a `dot up` timing line was this
+  check, not scrcpy: the NetTCPIP/NetSecurity cmdlets cost 2-3 s each (`Get-NetAdapter`, `Get-NetIPAddress`,
+  `Get-NetFirewallRule`) to learn that nothing had changed. The adapter and its subnet now come from .NET and the
+  rule from `netsh`, about 0.3 s together. The rule is still created and updated with the NetSecurity cmdlets,
+  and whenever the cheap read cannot say "already current" (no rule, another subnet, or a Windows whose `netsh`
+  labels are not English) (`scripts/lib/ps-adb-bridge.ps1`; `tests/adb_bridge_check_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
