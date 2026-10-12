@@ -47,7 +47,7 @@ extract_fn() {
     awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; if ($0 ~ /\}$/ && $0 !~ /\{$/) exit; next} f{print} f && /^\}$/{exit}' "$2"
 }
 : >"$tmp/fns.sh"
-for fn in live_pids ancestor_pids descendant_pids is_interactive stop_pid_tree agent_tty reset_agent_terminal describe_pid stop_live_sessions; do
+for fn in live_pids ancestor_pids descendant_pids is_interactive stop_pid_tree agent_tty reset_agent_terminal describe_pid resume_hint stop_live_sessions; do
     extract_fn "$fn" "$repo_root/scripts/dotupgrade.sh" >>"$tmp/fns.sh"
     grep -q "^$fn() {" "$tmp/fns.sh" || fail "$fn() not found in scripts/dotupgrade.sh"
 done
@@ -66,11 +66,16 @@ sh_stop() {
         ancestor_pids() { for a in $ancestors; do echo "$a"; done; }
         is_interactive() { [ "$interactive" = 1 ]; }
         stop_pid_tree() { echo "$1" >>"$tmp/stopped"; }
-        count="$(printf '%s' "$answers" | stop_live_sessions opencode claude codex agy serena 2>/dev/null)"
+        count="$(printf '%s' "$answers" | stop_live_sessions opencode claude codex agy serena 2>"$tmp/stderr")"
         echo "$count|$(tr '\n' ' ' <"$tmp/stopped" | sed 's/ $//')"
     )
 }
 two='claude 200 /home/u/.local/bin/claude
+serena 300 /home/u/.local/bin/serena start-mcp-server'
+four='claude 200 /home/u/.local/bin/claude
+codex 210 /home/u/.local/bin/codex
+opencode 220 /home/u/.local/bin/opencode
+agy 230 /home/u/.local/bin/agy
 serena 300 /home/u/.local/bin/serena start-mcp-server'
 daemon='codex 100 /home/u/.codex/packages/app-server-daemon/releases/local-abc/bin/codex app-server'
 
@@ -94,6 +99,20 @@ done
 : >"$tmp/dev/pts9"
 FAKE_TTY='?' DOT_TTY_ROOT="$tmp/dev" sh_stop "$two" "" 1 $'y\n' >/dev/null
 [ ! -s "$tmp/dev/pts9" ] || fail "sh: no tty ('?') must write nothing"
+
+# A stopped CLI session restarts cold; the operator (who may not be the one who ran `dot
+# upgrade --yes` from another terminal - 2026-10-11, this exact scenario ended the Claude Code
+# session behind this very file's own development) needs to be told how to pick it back up,
+# not left to guess. Serena has no CLI of its own to resume - it is an MCP server its host
+# relaunches automatically - so it must get no hint.
+sh_stop "$four" "" 1 $'y\n' >/dev/null
+grep -Fq "stopped claude (pid 200) - resume it with: claude --resume" "$tmp/stderr" || fail "sh: stopping claude must hint how to resume it"
+grep -Fq "stopped codex (pid 210) - resume it with: codex resume" "$tmp/stderr" || fail "sh: stopping codex must hint how to resume it"
+grep -Fq "stopped opencode (pid 220) - resume it with: opencode --continue" "$tmp/stderr" || fail "sh: stopping opencode must hint how to resume it"
+grep -Fq "stopped agy (pid 230) - resume it with: agy --continue" "$tmp/stderr" || fail "sh: stopping agy must hint how to resume it"
+if grep -Fq "serena (pid 300) - resume it with" "$tmp/stderr"; then
+    fail "sh: serena has no CLI resume of its own and must not get a hint"
+fi
 pass
 
 # the real ancestor walk always includes the shell asking
@@ -151,6 +170,23 @@ $daemon = P 'codex' 100 'C:\Users\u\.codex\packages\app-server-daemon\releases\l
 $two = @($code, $serena)
 Case 'all' $two @('y')
 Write-Output ('all-resets-terminal=' + $script:resets)
+
+# A stopped CLI session restarts cold; name how to pick it back up rather than leave the
+# operator to guess (2026-10-11: `dot upgrade --yes` run from another terminal stopped this
+# very session, with no trail beyond "unsaved context is lost unless it can be resumed").
+# Serena has no CLI of its own to resume - its host relaunches it - so it must get no hint.
+$resumeCodex = P 'codex' 210 'C:\Users\u\.local\bin\codex.exe'
+$resumeOc = P 'opencode' 220 'C:\Users\u\AppData\Local\Microsoft\WinGet\Links\opencode.exe'
+$resumeAgy = P 'agy' 230 'C:\Users\u\.local\bin\agy.exe'
+$script:table = @($code, $serena, $resumeCodex, $resumeOc, $resumeAgy)
+$script:answers = [System.Collections.Queue]::new(); $script:answers.Enqueue('y')
+$hints = (Invoke-LiveSessionStop -Name @('opencode', 'claude', 'codex', 'agy', 'serena') 6>&1 | Out-String)
+Write-Output ('hint-claude=' + ($hints -match 'stopped claude \(pid 200\) - resume it with: claude --resume'))
+Write-Output ('hint-codex=' + ($hints -match 'stopped codex \(pid 210\) - resume it with: codex resume'))
+Write-Output ('hint-opencode=' + ($hints -match 'stopped opencode \(pid 220\) - resume it with: opencode --continue'))
+Write-Output ('hint-agy=' + ($hints -match 'stopped agy \(pid 230\) - resume it with: agy --continue'))
+Write-Output ('hint-serena=' + ($hints -match 'stopped serena \(pid 300\) - resume it with'))
+
 # Serena dies with Claude Code's tree: already gone when its turn comes - counted, not stopped again.
 $exited = P 'serena' 301 'C:\Users\u\.local\bin\serena.exe'
 $exited | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
@@ -272,6 +308,11 @@ PSEOF
     expect 'all=2|200,300|prompts=1'
     # the terminal reset is for TUI agents (Claude Code), not for Serena (an MCP server)
     expect 'all-resets-terminal=1'
+    expect 'hint-claude=True'
+    expect 'hint-codex=True'
+    expect 'hint-opencode=True'
+    expect 'hint-agy=True'
+    expect 'hint-serena=False'
     expect 'exited=2|200|prompts=1'
     expect 'exited-resets=1'
     expect 'no=0||prompts=1'
