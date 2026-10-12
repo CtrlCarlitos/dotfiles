@@ -243,6 +243,10 @@ case "$NET_CHOICE:$(uname -s)" in
                 # them only when missing: this is where they get upgraded (github_tool_sync,
                 # lib/agent-skills.sh). The closing note then names only what still lags.
                 for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
+                # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
+                # moves them): reinstalled at the pin when the installed version differs
+                # (release_tool_pins_upgrade, lib/agent-skills.sh).
+                release_tool_pins_upgrade sudo
             fi
         else
             echo "  apt-get not found - skipping system packages."
@@ -335,62 +339,16 @@ fi
 # Only what is actually installed here is named: WSL has none of the desktop apps (they live on
 # Windows), and listing Docker Desktop there read as if WSL had a copy to keep current.
 #
-# The five GitHub-release tools say when they lag: the installed version (first X.Y.Z in
-# --version) against the newest release tag (one `git ls-remote` per repo, all five at once,
-# ~1 s). "delta 0.19.2 (0.20.1 available)" is actionable; a bare name was a reminder to go and
-# look, which nobody did. lychee and vale are pinned in the installer, so a lag there is a pin
-# to bump in this repo, not a reinstall.
-unmanaged_tool_repo() {
-    case "$1" in
-        delta) echo dandavison/delta ;;
-        dust) echo bootandy/dust ;;
-        procs) echo dalance/procs ;;
-        lychee) echo lycheeverse/lychee ;;
-        vale) echo errata-ai/vale ;;
-    esac
-}
-unmanaged_tool_version() { "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1; }
-# unmanaged_prefetch_latest <dir> <name...> - one file per tool in <dir>, holding the newest tag
-# (empty: unreachable). Background jobs, waited for by pid (a bare `wait` would also wait for
-# the VS Code extension update above).
-unmanaged_prefetch_latest() {
-    local dir="$1" n pids=()
-    shift
-    for n in "$@"; do
-        ( github_latest_tag "$(unmanaged_tool_repo "$n")" >"$dir/$n" 2>/dev/null ) &
-        pids+=("$!")
-    done
-    [ "${#pids[@]}" -gt 0 ] && { wait "${pids[@]}" || true; }
-    return 0
-}
-# unmanaged_tool_status <name> <dir> - "<name>" when current or unknown, "<name> X (Y available)" when behind.
-unmanaged_tool_status() {
-    local n="$1" have latest
-    have="$(unmanaged_tool_version "$n")"
-    latest="$(cat "$2/$n" 2>/dev/null)"
-    if [ -n "$have" ] && [ -n "$latest" ] && [ "$have" != "$latest" ] && [ "$(printf '%s\n%s\n' "$have" "$latest" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$latest" ]; then
-        printf '%s %s (%s available)' "$n" "$have" "$latest"
-    else
-        printf '%s' "$n"
-    fi
-}
+# delta, dust and procs are upgraded above (github_tool_sync) and lychee and vale follow their
+# pins (release_tool_pins_upgrade), so none of the five is named here any more (2026-10-11): the
+# note is for the desktop .debs only, which no manager and no pin owns.
 unmanaged_present() {
-    local names=() n tools=() latest_dir
-    # delta, dust, procs: GitHub .debs with no repo; lychee, vale: pinned release tarballs
+    local names=()
     if command -v google-chrome &>/dev/null; then names+=("Chrome"); fi
     if dpkg -s docker-desktop &>/dev/null || command -v docker-desktop &>/dev/null; then names+=("Docker Desktop"); fi
     if dpkg -s termius &>/dev/null || command -v termius &>/dev/null; then names+=("Termius"); fi
     if dpkg -s handy &>/dev/null; then names+=("Handy"); fi
     if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then names+=("OpenCode Desktop"); fi
-    for n in delta dust procs lychee vale; do
-        if command -v "$n" &>/dev/null; then tools+=("$n"); fi
-    done
-    if [ "${#tools[@]}" -gt 0 ]; then
-        latest_dir="$(mktemp -d 2>/dev/null)" || latest_dir=""
-        [ -n "$latest_dir" ] && unmanaged_prefetch_latest "$latest_dir" "${tools[@]}"
-        for n in "${tools[@]}"; do names+=("$(unmanaged_tool_status "$n" "${latest_dir:-/nonexistent}")"); done
-        [ -n "$latest_dir" ] && rm -rf "$latest_dir"
-    fi
     if [ -d "$HOME/.local/share/antigravity-2.0" ]; then names+=("Antigravity 2.0"); fi
     local IFS=','
     printf '%s' "${names[*]}" | sed 's/,/, /g'
@@ -399,7 +357,7 @@ case "$(uname -s)" in
     Linux)
         unmanaged="$(unmanaged_present)"
         if [ -n "$unmanaged" ]; then
-            echo "  Note: outside package managers: $unmanaged - delta, dust and procs are upgraded above when behind; lychee and vale follow a pin in this repo (bump it to move them)."
+            echo "  Note: outside package managers (no auto-upgrade): $unmanaged - re-run the installer or upgrade manually if any lags."
         fi
         ;;
     Darwin)

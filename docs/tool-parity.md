@@ -77,7 +77,7 @@ This document outlines the tools installed by the dotfiles configuration across 
 > passkey approval. Independent of `agent_toolkit` — the installer call sites
 > are hoisted out of that gate. See docs/guardrail-install.md.
 > The Linux/WSL shfmt release binary is also checksum-verified before installation, and so are the
-> pinned lychee and vale release tarballs (`install_release_binary`). `markdownlint-cli2` is an npm
+> pinned lychee and vale release tarballs (`install_release_binary`; the pins live in `.chezmoidata.yaml`, the weekly auto-update moves them and `dot upgrade` reinstalls at the pin). `markdownlint-cli2` is an npm
 > global on every OS (catalog field `npm`): `dot up` installs it when missing, `dot upgrade` updates it.
 
 ## Core & Modern CLI Tools
@@ -145,8 +145,8 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | `shellcheck` | modern_cli | `shellcheck` | `shellcheck` | — | `koalaman.shellcheck` | — | CI and .pre-commit-config.yaml lint shell with it - a fresh machine needs it locally, not only in CI |
 | `shfmt` | modern_cli | procedure | `shfmt` | — | `mvdan.shfmt` | — | apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64 |
 | `markdownlint-cli2` | modern_cli | — | — | — | — | — | npm global on every OS (`npm install -g markdownlint-cli2` after Node), so no manager column names it. Markdown structure lint for any repo; the release-notes and update-docs skills check their output with it (CtrlCarlitos/skills#2, #3) |
-| `lychee` | modern_cli | procedure | `lychee` | — | `lycheeverse.lychee` | — | broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified |
-| `vale` | modern_cli | procedure | `vale` | — | — | `vale` | prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified |
+| `lychee` | modern_cli | procedure | `lychee` | — | `lycheeverse.lychee` | — | broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified (pin in .chezmoidata.yaml versions.*, moved by the weekly auto-update, followed by dot upgrade) |
+| `vale` | modern_cli | procedure | `vale` | — | — | `vale` | prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified (pin in .chezmoidata.yaml versions.*, moved by the weekly auto-update, followed by dot upgrade) |
 | `pstop` | modern_cli | — | — | — | `marlocarlo.pstop` | — |  |
 | `net-tools` | modern_cli | `net-tools` | — | — | — | — | ifconfig/netstat/route/arp; Linux only - macOS and Windows ship their own |
 | `dnsutils` | modern_cli | `dnsutils` | — | — | — | — | dig/nslookup/host; macOS ships dig and nslookup |

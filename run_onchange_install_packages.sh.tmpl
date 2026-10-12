@@ -1672,20 +1672,23 @@ install_apt() {
     
     # Docs tooling (CtrlCarlitos/skills#2, #3): lychee and vale are not in the Ubuntu
     # archive, so pinned GitHub release tarballs, checksum-verified like shfmt. brew and
-    # choco install both from the catalog. A bump changes the version in both URLs and
-    # both checksums (from the release's .sha256 / checksums.txt).
+    # choco install both from the catalog. The pins live in .chezmoidata.yaml
+    # (versions.lychee_*, versions.vale_*): scripts/update-versions.sh moves them, and
+    # `dot upgrade` reinstalls at the pin (release_tool_pin_sync, scripts/lib/agent-skills.sh).
+    # The URL shape here is release_tool_url's - tests/release_tool_pins_contract.sh pins the two
+    # copies together.
     case "$(uname -m)" in
         x86_64|amd64)
-            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz" \
-                1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a lychee-x86_64-unknown-linux-gnu/lychee
-            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_64-bit.tar.gz" \
-                867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214 vale
+            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v{{ .versions.lychee_version }}/lychee-x86_64-unknown-linux-gnu.tar.gz" \
+                {{ .versions.lychee_sha256_x86_64 }} lychee-x86_64-unknown-linux-gnu/lychee
+            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v{{ .versions.vale_version }}/vale_{{ .versions.vale_version }}_Linux_64-bit.tar.gz" \
+                {{ .versions.vale_sha256_x86_64 }} vale
             ;;
         aarch64|arm64)
-            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-aarch64-unknown-linux-gnu.tar.gz" \
-                91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c lychee-aarch64-unknown-linux-gnu/lychee
-            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_arm64.tar.gz" \
-                104cbd349279e50c4cb40adb70adf345d93cc4a3a0191f9e68bdccb97086b582 vale
+            install_release_binary lychee "https://github.com/lycheeverse/lychee/releases/download/lychee-v{{ .versions.lychee_version }}/lychee-aarch64-unknown-linux-gnu.tar.gz" \
+                {{ .versions.lychee_sha256_aarch64 }} lychee-aarch64-unknown-linux-gnu/lychee
+            install_release_binary vale "https://github.com/errata-ai/vale/releases/download/v{{ .versions.vale_version }}/vale_{{ .versions.vale_version }}_Linux_arm64.tar.gz" \
+                {{ .versions.vale_sha256_aarch64 }} vale
             ;;
         *) warn "lychee, vale: unsupported architecture $(uname -m) - skipping" ;;
     esac
