@@ -5,6 +5,9 @@ the AI CLIs (Claude Code, Codex, OpenCode, agy, Serena, act) and
 re-runs the curated-skill install, honoring DOTUPGRADE_DEFER. Entry points:
 `dot upgrade` (which exports the defer list) or direct: .\update_ai_tools.ps1
 #>
+# -OnlySection: set by a background copy of this script (scripts/lib/ps-background.ps1), which runs
+# just those sections ("name|name") instead of the whole update.
+param([string]$OnlySection = '')
 # Windows PowerShell 5.1 redraws the Invoke-WebRequest progress bar for every
 # received chunk, throttling downloads to a crawl. Script-scoped; the child
 # `irm | iex` below is a separate process and sets it itself.
@@ -29,12 +32,26 @@ $G = @{
     phone    = [char]::ConvertFromUtf32(0x1F4F1)
     check    = [string][char]0x2705
 }
-Write-Host "$($G.robot) Updating AI Coding Tools..." -ForegroundColor Cyan
+if (-not $OnlySection) { Write-Host "$($G.robot) Updating AI Coding Tools..." -ForegroundColor Cyan }
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
 # upgrade`) exports DOTUPGRADE_DEFER with the tools whose package dirs
 # cannot be recreated while live agent sessions resolve from them.
 function Test-Deferred([string]$Tool) { return (@($env:DOTUPGRADE_DEFER -split ',') -contains $Tool) }
+
+# A background copy (Invoke-DotBackgroundUnit, below) runs only the sections it was asked for, each
+# between its own timing marks, printing through Write-DotBackgroundHost, and stops here. The
+# sections' own `$PSScriptRoot` loads of ps-skills.ps1 have no file to resolve against, so load it now.
+if ($OnlySection) {
+    Set-Alias -Name Write-Host -Value Write-DotBackgroundHost -Scope Script
+    . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1')
+    $backgroundText = Get-DotSectionText -Path $PSCommandPath -Name ($OnlySection -split '\|')
+    foreach ($backgroundName in $backgroundText.Keys) {
+        Write-DotBackgroundSectionStart -Name $backgroundName
+        . ([scriptblock]::Create($backgroundText[$backgroundName]))
+    }
+    exit 0
+}
 
 Add-DotTimingMark -Name 'NPM packages and OpenCode'
 # 1. NPM Packages (Codex) + OpenCode via choco
@@ -98,6 +115,13 @@ if ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPa
         npm rm -g opencode-ai --loglevel=error --no-progress 2>$null | Out-Null   # its "up to date in 1s" said nothing
     }
 }
+
+# Steps that touch nothing else in this run start now and are shown at their own place below, in the
+# same order as a serial run (scripts/lib/ps-background.ps1; DOT_PARALLEL_AI_TOOLS=0 runs them in place).
+# Playwright goes before agent-browser (which reuses its Chromium), so they share one copy.
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Playwright Chromium', 'agent-browser')
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Serena')
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('mobile_dev')
 
 Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates
@@ -464,218 +488,235 @@ if ($guardrailState -and -not $guardrailVersion) {
 }
 # guardrail-section: end
 
-Add-DotTimingMark -Name 'Claude Code'
-# 2. Claude Code (Native)
-if (Get-Command claude -ErrorAction SilentlyContinue) {
-    Write-Host "$($G.brain) Updating Claude Code..." -ForegroundColor Yellow
-    # Re-run strict native installer. URL from .chezmoidata.yaml
-    # versions.claude_install_ps1 (#125) - the same key the installer template
-    # renders - read at runtime like the guardrail pin below, so `dot upgrade`
-    # can never install a different Claude than the installer did (the old
-    # storage.googleapis.com URL here vs claude.ai in the installer was
-    # exactly that drift).
-    $claudeInstallUrl = ''
-    try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
-    # Deliberately NOT `claude update`: dot upgrade is meant to run with every agent and
-    # harness closed (codex and the others cannot be replaced while a session
-    # runs, and Claude Code should not be replaced under one either), and with nothing
-    # running the full installer is the simple, predictable path.
-    # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
-    # package carries the same version numbers; an unknown answer re-runs it as before.
-    $claudeHave = ''
-    $claudeWant = ''
-    try {
-        $claudeHave = ((& claude --version 2>$null | Select-Object -First 1 | Out-String).Trim() -split '\s+')[0]
-        $claudePkg = (chezmoi execute-template '{{ .agents.npm.claude_code_version }}' | Out-String).Trim()
-        if ($claudePkg) { $claudeWant = (& npm view $claudePkg version 2>$null | Out-String).Trim() }
-    } catch { Write-Verbose "claude version probe failed: $($_.Exception.Message)" }
-    if ($claudeHave -and $claudeHave -eq $claudeWant) {
-        Write-Host "  Claude Code is current ($claudeHave)"
-    } elseif ($claudeInstallUrl) {
-        # The installer prints a banner, a location and a "next steps" block on every run; the
-        # version is the only news. Its whole output is shown only when it fails.
-        $claudeOut = @(& powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex" 2>&1 | ForEach-Object { "$_" })
-        if ($LASTEXITCODE -eq 0) {
-            $claudeVersion = ''
-            foreach ($claudeLine in $claudeOut) { if ($claudeLine -match '^\s*Version:\s*(\S+)') { $claudeVersion = $Matches[1] } }
-            if (-not $claudeVersion) { $claudeVersion = 'installed' }
-            Write-Host "  Claude Code $claudeVersion (installer re-run)"
-        } else {
-            $claudeOut | ForEach-Object { Write-Host $_ }
-            Write-Host "  Claude Code installer failed - continuing" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall" -ForegroundColor Red
-    }
+# These two rewrite Claude Code's and OpenCode's own config, which the guardrail installer above edits
+# too: they start only after it finished.
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Claude Code')
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Superpowers (OpenCode)')
 
-    # Superpowers skills plugin
-    Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
-    # Its "Checking for updates for plugin..." line said nothing on every run: shown only on failure.
-    # Named with its marketplace: a machine can carry superpowers from several (project-local
-    # installs from claude-plugins-official / superpowers-dev), and the bare name then fails
-    # with "installed from more than one marketplace". dotfiles installs this one.
-    $cpOut = @(& claude plugin update superpowers@superpowers-marketplace -y 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) { $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red }
+Add-DotTimingMark -Name 'Claude Code'
+if (-not (Show-DotBackgroundSection 'Claude Code')) {
+    # 2. Claude Code (Native)
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        Write-Host "$($G.brain) Updating Claude Code..." -ForegroundColor Yellow
+        # Re-run strict native installer. URL from .chezmoidata.yaml
+        # versions.claude_install_ps1 (#125) - the same key the installer template
+        # renders - read at runtime like the guardrail pin below, so `dot upgrade`
+        # can never install a different Claude than the installer did (the old
+        # storage.googleapis.com URL here vs claude.ai in the installer was
+        # exactly that drift).
+        $claudeInstallUrl = ''
+        try { $claudeInstallUrl = (chezmoi execute-template '{{ .versions.claude_install_ps1 }}' | Out-String).Trim() } catch { Write-Verbose "claude installer URL probe failed: $($_.Exception.Message)" }
+        # Deliberately NOT `claude update`: dot upgrade is meant to run with every agent and
+        # harness closed (codex and the others cannot be replaced while a session
+        # runs, and Claude Code should not be replaced under one either), and with nothing
+        # running the full installer is the simple, predictable path.
+        # Already the latest? The installer took ~20 s on every run to change nothing. Its npm
+        # package carries the same version numbers; an unknown answer re-runs it as before.
+        $claudeHave = ''
+        $claudeWant = ''
+        try {
+            $claudeHave = ((& claude --version 2>$null | Select-Object -First 1 | Out-String).Trim() -split '\s+')[0]
+            $claudePkg = (chezmoi execute-template '{{ .agents.npm.claude_code_version }}' | Out-String).Trim()
+            if ($claudePkg) { $claudeWant = (& npm view $claudePkg version 2>$null | Out-String).Trim() }
+        } catch { Write-Verbose "claude version probe failed: $($_.Exception.Message)" }
+        if ($claudeHave -and $claudeHave -eq $claudeWant) {
+            Write-Host "  Claude Code is current ($claudeHave)"
+        } elseif ($claudeInstallUrl) {
+            # The installer prints a banner, a location and a "next steps" block on every run; the
+            # version is the only news. Its whole output is shown only when it fails.
+            $claudeOut = @(& powershell -c "`$ProgressPreference = 'SilentlyContinue'; irm $claudeInstallUrl | iex" 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -eq 0) {
+                $claudeVersion = ''
+                foreach ($claudeLine in $claudeOut) { if ($claudeLine -match '^\s*Version:\s*(\S+)') { $claudeVersion = $Matches[1] } }
+                if (-not $claudeVersion) { $claudeVersion = 'installed' }
+                Write-Host "  Claude Code $claudeVersion (installer re-run)"
+            } else {
+                $claudeOut | ForEach-Object { Write-Host $_ }
+                Write-Host "  Claude Code installer failed - continuing" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "  claude installer URL unavailable from chezmoi data - skipping the reinstall" -ForegroundColor Red
+        }
+
+        # Superpowers skills plugin
+        Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
+        # Its "Checking for updates for plugin..." line said nothing on every run: shown only on failure.
+        # Named with its marketplace: a machine can carry superpowers from several (project-local
+        # installs from claude-plugins-official / superpowers-dev), and the bare name then fails
+        # with "installed from more than one marketplace". dotfiles installs this one.
+        $cpOut = @(& claude plugin update superpowers@superpowers-marketplace -y 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red }
+    }
 }
 
 Add-DotTimingMark -Name 'Superpowers (OpenCode)'
-# 3. Superpowers (OpenCode) - separate from Claude Code's plugin above. Two copies can exist:
-#   - the Windows installer's PATH install under ~\.config\opencode\node_modules (its workaround
-#     for the git spec's OpenCode/Windows issues), which opencode.json points at - refreshed by
-#     the same `npm install --prefix` (no version pinned, so it pulls the latest commit);
-#   - OpenCode's OWN cache (Get-OpenCodeSuperpowersCacheDir, scripts/lib/ps-skills.ps1), where
-#     OpenCode installs a git `plugin` spec on first start and never re-resolves it. That is the
-#     copy OpenCode loads for a git spec, and until 2026-10-10 nothing refreshed it (6.3.0 for two
-#     months on WSL while the config-dir copy was at 7.0.0).
-# Defer-aware: a live opencode session resolves from these directories.
-if (Get-Command opencode -ErrorAction SilentlyContinue) {
-    Write-Host "$($G.sparkles) Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
-    if (-not (Get-Command Invoke-OpenCodeSuperpowersRefresh -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-    if (Test-Deferred 'opencode') {
-        Write-Host "  opencode deferred - Superpowers (OpenCode) update skipped with it." -ForegroundColor Yellow
-    } else {
-        $ocBefore = Get-OpenCodeSuperpowersVersion
-        $ocRefreshed = $false
-        $ocFailed = $false
-        if (Get-OpenCodeSuperpowersPathInstall) {
-            # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-            # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
-            npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) { $ocFailed = $true } else { $ocRefreshed = $true }
-        }
-        if (@(Get-OpenCodeSuperpowersCacheDir).Count -gt 0) {
-            if (Invoke-OpenCodeSuperpowersRefresh) { $ocRefreshed = $true } else { $ocFailed = $true }
-        }
-        if ($ocFailed) {
-            Write-Host "   Superpowers (OpenCode) refresh failed - skipping" -ForegroundColor Yellow
-        } elseif (-not $ocRefreshed) {
-            Write-Host "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
+if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
+    # 3. Superpowers (OpenCode) - separate from Claude Code's plugin above. Two copies can exist:
+    #   - the Windows installer's PATH install under ~\.config\opencode\node_modules (its workaround
+    #     for the git spec's OpenCode/Windows issues), which opencode.json points at - refreshed by
+    #     the same `npm install --prefix` (no version pinned, so it pulls the latest commit);
+    #   - OpenCode's OWN cache (Get-OpenCodeSuperpowersCacheDir, scripts/lib/ps-skills.ps1), where
+    #     OpenCode installs a git `plugin` spec on first start and never re-resolves it. That is the
+    #     copy OpenCode loads for a git spec, and until 2026-10-10 nothing refreshed it (6.3.0 for two
+    #     months on WSL while the config-dir copy was at 7.0.0).
+    # Defer-aware: a live opencode session resolves from these directories.
+    if (Get-Command opencode -ErrorAction SilentlyContinue) {
+        Write-Host "$($G.sparkles) Updating Superpowers (OpenCode)..." -ForegroundColor Yellow
+        if (-not (Get-Command Invoke-OpenCodeSuperpowersRefresh -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+        if (Test-Deferred 'opencode') {
+            Write-Host "  opencode deferred - Superpowers (OpenCode) update skipped with it." -ForegroundColor Yellow
         } else {
-            $ocAfter = Get-OpenCodeSuperpowersVersion
-            if ($ocAfter -and $ocAfter -ne $ocBefore) { Write-Host "   Superpowers (OpenCode) upgraded to $ocAfter" }
-            else { $shown = 'installed'; if ($ocAfter) { $shown = $ocAfter }; Write-Host "   Superpowers (OpenCode) is current ($shown)" }
+            $ocBefore = Get-OpenCodeSuperpowersVersion
+            $ocRefreshed = $false
+            $ocFailed = $false
+            if (Get-OpenCodeSuperpowersPathInstall) {
+                # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
+                # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
+                npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
+                if ($LASTEXITCODE -ne 0) { $ocFailed = $true } else { $ocRefreshed = $true }
+            }
+            if (@(Get-OpenCodeSuperpowersCacheDir).Count -gt 0) {
+                if (Invoke-OpenCodeSuperpowersRefresh) { $ocRefreshed = $true } else { $ocFailed = $true }
+            }
+            if ($ocFailed) {
+                Write-Host "   Superpowers (OpenCode) refresh failed - skipping" -ForegroundColor Yellow
+            } elseif (-not $ocRefreshed) {
+                Write-Host "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
+            } else {
+                $ocAfter = Get-OpenCodeSuperpowersVersion
+                if ($ocAfter -and $ocAfter -ne $ocBefore) { Write-Host "   Superpowers (OpenCode) upgraded to $ocAfter" }
+                else { $shown = 'installed'; if ($ocAfter) { $shown = $ocAfter }; Write-Host "   Superpowers (OpenCode) is current ($shown)" }
+            }
         }
     }
 }
 
 Add-DotTimingMark -Name 'Playwright Chromium'
-# 4. Playwright Chromium (headless browser for agent automation)
-if (Get-Command npx -ErrorAction SilentlyContinue) {
-    Write-Host "$($G.globe) Updating Playwright Chromium..." -ForegroundColor Yellow
-    npx --yes playwright install chromium 2>$null
+if (-not (Show-DotBackgroundSection 'Playwright Chromium')) {
+    # 4. Playwright Chromium (headless browser for agent automation)
+    if (Get-Command npx -ErrorAction SilentlyContinue) {
+        Write-Host "$($G.globe) Updating Playwright Chromium..." -ForegroundColor Yellow
+        npx --yes playwright install chromium 2>$null
+    }
 }
 
 Add-DotTimingMark -Name 'agent-browser'
-# 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
-if (Get-Command npm -ErrorAction SilentlyContinue) {
-    Write-Host "$($G.globe) Updating agent-browser..." -ForegroundColor Yellow
-    # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
-    # The browser setup and the verification below still run.
-    $abInstalled = $true
-    if (Test-NpmGlobalCurrent 'agent-browser') {
-        Write-Host "   agent-browser is current ($script:NpmCurrentVersion)"
-    } else {
-        $abInstalled = Install-NpmGlobalLatest -Name 'agent-browser' -Version $script:NpmLatestVersion -Arguments @('--allow-scripts=agent-browser', 'agent-browser')
-    }
-    if (-not $abInstalled) {
-        Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
-    } else {
-        $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
-        if (Test-Path $agentBrowser) {
-            $env:AGENT_BROWSER = $agentBrowser
-            # Every run (Chrome updates on its own schedule), but quiet unless it fails - its
-            # "Installing Chrome... already installed" printed on every upgrade; the bash twin is quiet.
-            $installOutput = @(& $env:AGENT_BROWSER install 2>&1)
-            if ($LASTEXITCODE -ne 0) {
-                $installOutput | ForEach-Object { Write-Host "   $_" }
-                Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red
+if (-not (Show-DotBackgroundSection 'agent-browser')) {
+    # 5. agent-browser. Playwright runs first so this CLI can reuse its Chromium.
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Host "$($G.globe) Updating agent-browser..." -ForegroundColor Yellow
+        # Skipped when already the registry's latest (the reinstall always printed "changed 1 package").
+        # The browser setup and the verification below still run.
+        $abInstalled = $true
+        if (Test-NpmGlobalCurrent 'agent-browser') {
+            Write-Host "   agent-browser is current ($script:NpmCurrentVersion)"
+        } else {
+            $abInstalled = Install-NpmGlobalLatest -Name 'agent-browser' -Version $script:NpmLatestVersion -Arguments @('--allow-scripts=agent-browser', 'agent-browser')
+        }
+        if (-not $abInstalled) {
+            Write-Host "   agent-browser install failed - skipping" -ForegroundColor Red
+        } else {
+            $agentBrowser = Join-Path (npm prefix -g) 'agent-browser.cmd'
+            if (Test-Path $agentBrowser) {
+                $env:AGENT_BROWSER = $agentBrowser
+                # Every run (Chrome updates on its own schedule), but quiet unless it fails - its
+                # "Installing Chrome... already installed" printed on every upgrade; the bash twin is quiet.
+                $installOutput = @(& $env:AGENT_BROWSER install 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                    $installOutput | ForEach-Object { Write-Host "   $_" }
+                    Write-Host "   agent-browser browser setup failed - skipping" -ForegroundColor Red
+                }
+                $doctorOutput = @(& $env:AGENT_BROWSER doctor --json)
+                $doctorExit = $LASTEXITCODE
+                Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
+                if ($doctorExit -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
+                Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
             }
-            $doctorOutput = @(& $env:AGENT_BROWSER doctor --json)
-            $doctorExit = $LASTEXITCODE
-            Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
-            if ($doctorExit -ne 0) { Write-Host "   agent-browser verification failed - continuing" -ForegroundColor Red }
-            Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
         }
     }
 }
 
 Add-DotTimingMark -Name 'mobile_dev'
-# 5b. mobile_dev (twin of update_ai_tools.sh's 5b). Windows installs no Maestro or
-# agent-device (docs/mobile-development.md), so the sweep here is the SDK's own
-# `sdkmanager --update`: only when [data.packages] mobile_dev is on (read like the
-# guardrail flag below) and the installer's command-line tools exist (ANDROID_HOME /
-# ANDROID_SDK_ROOT, or the installer's own %LOCALAPPDATA%\Android\Sdk). Google's
-# "sdkmanager is deprecated" banner prints on every call and is filtered; errors
-# are kept. Native stderr under 'Stop' would be a terminating error in 5.1, so the
-# call runs with the preference at 'Continue', like Serena's below.
-$mobileDevEnabled = $false
-$mobileDevConfig = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
-if (Test-Path $mobileDevConfig) {
-    $inPkgs = $false
-    foreach ($line in [IO.File]::ReadAllLines($mobileDevConfig)) {
-        if ($line -match '^\s*\[data\.packages\]\s*$') { $inPkgs = $true; continue }
-        if ($inPkgs -and $line -match '^\s*\[') { $inPkgs = $false }
-        if ($inPkgs -and $line -match '^\s*mobile_dev\s*=\s*true\s*$') { $mobileDevEnabled = $true; break }
-    }
-}
-if ($mobileDevEnabled) {
-    $mdSdk = if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) { $env:ANDROID_HOME }
-             elseif ($env:ANDROID_SDK_ROOT -and (Test-Path $env:ANDROID_SDK_ROOT)) { $env:ANDROID_SDK_ROOT }
-             else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
-    $mdSdkManager = Join-Path $mdSdk 'cmdline-tools\latest\bin\sdkmanager.bat'
-    if (Test-Path $mdSdkManager) {
-        Write-Host "$($G.phone) Updating mobile_dev (Android platform-tools)..." -ForegroundColor Yellow
-        $prevEap = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $mdOutput = @()
-        $mdCode = 1
-        try {
-            $mdOutput = @(& $mdSdkManager '--update' 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object {
-                $_ -and $_ -notmatch 'sdkmanager\) is deprecated|The .android. binary can also be found|To learn more about the Android CLI'
-            })
-            $mdCode = $LASTEXITCODE
-        } catch {
-            $mdOutput = @("$($_.Exception.Message)")
-        } finally {
-            $ErrorActionPreference = $prevEap
+if (-not (Show-DotBackgroundSection 'mobile_dev')) {
+    # 5b. mobile_dev (twin of update_ai_tools.sh's 5b). Windows installs no Maestro or
+    # agent-device (docs/mobile-development.md), so the sweep here is the SDK's own
+    # `sdkmanager --update`: only when [data.packages] mobile_dev is on (read like the
+    # guardrail flag below) and the installer's command-line tools exist (ANDROID_HOME /
+    # ANDROID_SDK_ROOT, or the installer's own %LOCALAPPDATA%\Android\Sdk). Google's
+    # "sdkmanager is deprecated" banner prints on every call and is filtered; errors
+    # are kept. Native stderr under 'Stop' would be a terminating error in 5.1, so the
+    # call runs with the preference at 'Continue', like Serena's below.
+    $mobileDevEnabled = $false
+    $mobileDevConfig = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
+    if (Test-Path $mobileDevConfig) {
+        $inPkgs = $false
+        foreach ($line in [IO.File]::ReadAllLines($mobileDevConfig)) {
+            if ($line -match '^\s*\[data\.packages\]\s*$') { $inPkgs = $true; continue }
+            if ($inPkgs -and $line -match '^\s*\[') { $inPkgs = $false }
+            if ($inPkgs -and $line -match '^\s*mobile_dev\s*=\s*true\s*$') { $mobileDevEnabled = $true; break }
         }
-        if ($mdCode -ne 0) {
-            Write-Host "  Warning: sdkmanager --update failed (exit $mdCode) - continuing" -ForegroundColor Red
-            $mdOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-        } else {
-            Write-Host "  Android platform-tools: sdkmanager --update done"
+    }
+    if ($mobileDevEnabled) {
+        $mdSdk = if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) { $env:ANDROID_HOME }
+                 elseif ($env:ANDROID_SDK_ROOT -and (Test-Path $env:ANDROID_SDK_ROOT)) { $env:ANDROID_SDK_ROOT }
+                 else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
+        $mdSdkManager = Join-Path $mdSdk 'cmdline-tools\latest\bin\sdkmanager.bat'
+        if (Test-Path $mdSdkManager) {
+            Write-Host "$($G.phone) Updating mobile_dev (Android platform-tools)..." -ForegroundColor Yellow
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $mdOutput = @()
+            $mdCode = 1
+            try {
+                $mdOutput = @(& $mdSdkManager '--update' 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object {
+                    $_ -and $_ -notmatch 'sdkmanager\) is deprecated|The .android. binary can also be found|To learn more about the Android CLI'
+                })
+                $mdCode = $LASTEXITCODE
+            } catch {
+                $mdOutput = @("$($_.Exception.Message)")
+            } finally {
+                $ErrorActionPreference = $prevEap
+            }
+            if ($mdCode -ne 0) {
+                Write-Host "  Warning: sdkmanager --update failed (exit $mdCode) - continuing" -ForegroundColor Red
+                $mdOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            } else {
+                Write-Host "  Android platform-tools: sdkmanager --update done"
+            }
         }
     }
 }
 
 Add-DotTimingMark -Name 'Serena'
-# 6. Serena (uv-managed). Defer-aware: uv recreates the package dir that live
-# sessions resolve from (2026-09-20 live incidents).
-if (Get-Command serena -ErrorAction SilentlyContinue) {
-    if (Test-Deferred 'serena') {
-        Write-Host "$($G.puzzle) Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
-    } else {
-        Write-Host "$($G.puzzle) Updating Serena..." -ForegroundColor Yellow
-        # uv's own news ("Nothing to upgrade" / "Upgraded serena-agent vX -> vY") prints to
-        # stderr, not stdout (confirmed live, uv 0.12.24) - discarding it with 2>$null left
-        # this step silent on every run, unlike every other tool here. Capture it instead.
-        $prevEap = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $serenaOutput = @()
-        $serenaCode = 1
-        try {
-            $serenaOutput = @(& uv tool upgrade serena-agent 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
-            $serenaCode = $LASTEXITCODE
-        } catch {
-            $serenaOutput = @("$($_.Exception.Message)")
-        } finally {
-            $ErrorActionPreference = $prevEap
-        }
-        if ($serenaCode -ne 0) {
-            Write-Host "  Warning: serena upgrade failed (exit $serenaCode) - continuing" -ForegroundColor Red
-            $serenaOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+if (-not (Show-DotBackgroundSection 'Serena')) {
+    # 6. Serena (uv-managed). Defer-aware: uv recreates the package dir that live
+    # sessions resolve from (2026-09-20 live incidents).
+    if (Get-Command serena -ErrorAction SilentlyContinue) {
+        if (Test-Deferred 'serena') {
+            Write-Host "$($G.puzzle) Serena deferred - a serena process is live (dot upgrade reports it)." -ForegroundColor Yellow
         } else {
-            $serenaOutput | ForEach-Object { Write-Host "  serena-agent: $_" }
+            Write-Host "$($G.puzzle) Updating Serena..." -ForegroundColor Yellow
+            # uv's own news ("Nothing to upgrade" / "Upgraded serena-agent vX -> vY") prints to
+            # stderr, not stdout (confirmed live, uv 0.12.24) - discarding it with 2>$null left
+            # this step silent on every run, unlike every other tool here. Capture it instead.
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $serenaOutput = @()
+            $serenaCode = 1
+            try {
+                $serenaOutput = @(& uv tool upgrade serena-agent 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+                $serenaCode = $LASTEXITCODE
+            } catch {
+                $serenaOutput = @("$($_.Exception.Message)")
+            } finally {
+                $ErrorActionPreference = $prevEap
+            }
+            if ($serenaCode -ne 0) {
+                Write-Host "  Warning: serena upgrade failed (exit $serenaCode) - continuing" -ForegroundColor Red
+                $serenaOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            } else {
+                $serenaOutput | ForEach-Object { Write-Host "  serena-agent: $_" }
+            }
         }
     }
 }
