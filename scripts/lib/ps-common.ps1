@@ -863,6 +863,22 @@ function Get-ChocoUpgradeArgument {
 # or prompting installer stays visible), the FULL output goes to the log, and the sweep
 # ends with a summary. A non-zero exit prints the tail so the failing package is on screen.
 # --- Progress for a long package sweep (choco, winget) ------------------------------------------------
+# choco upgrade all opens and closes every run with the same lines (what it is doing, the licence
+# notice, "Chocolatey upgraded 0/31 packages.", a pointer at chocolatey.log), which made a run with
+# nothing to upgrade print five lines around our own "Nothing to upgrade (31 packages checked)" and the
+# upgrade.log pointer. Only these exact lines are dropped; a failure ("... 1 packages failed.") and
+# every other line still show. They stay in upgrade.log. $AfterHeader: the previous line was the
+# "Upgrading the following packages:" header, whose next line is the bare argument ("all").
+function Test-ChocoBoilerplateLine {
+    param([string]$Line, [bool]$AfterHeader = $false)
+    if ($Line -match '^\s*$') { return $true }
+    if ($Line -match '^Upgrading the following packages:\s*$') { return $true }
+    if ($AfterHeader -and $Line -match '^\S+\s*$') { return $true }
+    if ($Line -match '^By upgrading, you accept licenses for the packages\.\s*$') { return $true }
+    if ($Line -match '^Chocolatey upgraded \d+/\d+ packages\.\s*$') { return $true }
+    if ($Line -match '^\s*See the log for details \(.+\)\.?\s*$') { return $true }
+    return $false
+}
 function Invoke-ChocoUpgradeAll {
     param([Parameter(Mandatory)][string[]]$Arguments, [string]$LogPath)
 
@@ -886,6 +902,7 @@ function Invoke-ChocoUpgradeAll {
     # "The upgrade of <name> was successful." ends it.
     $packageTimes = New-Object System.Collections.Generic.List[object]
     $currentPackage = $null
+    $afterHeader = $false
     $beat = Open-DotHeartbeat -Tool choco
     try {
         & choco @Arguments --limit-output 2>&1 | ForEach-Object {
@@ -910,7 +927,11 @@ function Invoke-ChocoUpgradeAll {
                 $stamped = $true
             }
             if ($LogPath) { Add-Content -LiteralPath $LogPath -Value $(if ($stamped) { '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $line } else { $line }) }
-            if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) } else { Write-Host $line; $beat.State.Quiet.Restart() }
+            $isHeader = ($line -match '^Upgrading the following packages:\s*$')
+            if ($line -match '^[^|\s][^|]*\|[^|]*\|[^|]*\|[^|]*$') { $packageLines.Add($line) }
+            elseif (Test-ChocoBoilerplateLine -Line $line -AfterHeader $afterHeader) { $null = $line }
+            else { Write-Host $line; $beat.State.Quiet.Restart() }
+            $afterHeader = $isHeader
             if ($line -match '^\s+-\s+\S+\s+v\S+\s*$') { $footerLines.Add($line) }
         }
         $code = [int]$LASTEXITCODE

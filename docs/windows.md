@@ -121,6 +121,13 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   (`winget packages`), prints the same heartbeat while an install runs, and lists the installs that took
   30 seconds or more. The helpers are `scripts/lib/ps-heartbeat.ps1`, inlined into the installer and
   dot-sourced by `ps-common.ps1`; `tests/dot_up_winget_timing_contract.sh` pins it.
+- **One look at what is installed.** A `winget list --id X --exact` costs about 2.3 s and a
+  `choco list --exact X` about 1.7 s, whatever the answer (measured 2026-10-12). The installer takes one
+  inventory of each at the top, and the desktop-app checks (Chrome, Win-CodexBar, Docker Desktop, Meld) now
+  read those instead of asking per app: about 14 s off a `dot up` with nothing to install. A winget miss is
+  still confirmed live, and a failed choco listing falls back to asking per app
+  (`scripts/lib/ps-package-inventory.ps1`; `tests/package_inventory_contract.sh`). `dot upgrade` with nothing to upgrade
+  no longer prints choco's opening and closing boilerplate; it stays in `upgrade.log`.
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
