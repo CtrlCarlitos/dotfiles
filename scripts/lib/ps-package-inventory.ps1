@@ -41,3 +41,37 @@ function Test-DotChocoPackage {
     $live = (choco list --limit-output --exact $Name 2>$null | Out-String)
     return ($live -match "(?m)^$([regex]::Escape($Name))\|")
 }
+
+# Run a program and capture its output WITHOUT a background job. Invoke-WithTimeout (a job) starts a second
+# PowerShell for every call: a `winget list` of 2.7 s took 4.6 s through it, measured on Windows PowerShell
+# 5.1 (2026-10-12), and the two listings at the top of every `dot up` paid that twice. A plain process
+# with a wait limit keeps the cap and loses the startup. Returns $null when the program is not found, else
+# an object with Text, ExitCode and TimedOut (a program past the limit is killed with its children).
+function Invoke-DotNativeCapture {
+    param([Parameter(Mandatory)][string]$FilePath, [string[]]$ArgumentList = @(), [int]$TimeoutSeconds = 120)
+    $command = Get-Command $FilePath -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) { return $null }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $command.Source
+    $quoted = foreach ($argument in $ArgumentList) {
+        if ($argument -match '[\s"]' -or $argument -eq '') { '"' + ($argument -replace '"', '\"') + '"' } else { $argument }
+    }
+    $startInfo.Arguments = @($quoted) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    # Both streams are drained while it runs: a full pipe would otherwise stall the program for good.
+    $null = $process.StandardError.ReadToEndAsync()
+    $outputTask = $process.StandardOutput.ReadToEndAsync()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        try {
+            if (Get-Command taskkill -ErrorAction SilentlyContinue) { $null = & taskkill /PID $process.Id /T /F 2>&1 } else { $process.Kill() }
+        } catch { Write-Verbose "kill after timeout failed: $($_.Exception.Message)" }
+        return [pscustomobject]@{ Text = ''; ExitCode = -1; TimedOut = $true }
+    }
+    $process.WaitForExit()
+    return [pscustomobject]@{ Text = $outputTask.Result; ExitCode = $process.ExitCode; TimedOut = $false }
+}

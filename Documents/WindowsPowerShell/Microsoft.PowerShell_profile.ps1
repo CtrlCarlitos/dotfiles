@@ -145,9 +145,16 @@ function dot {
     $repoScripts = Join-Path $HOME '.local\share\chezmoi\scripts'
     switch ($sub) {
         'up' {
+            # Where the time of a dot up goes: the installer prints its own sections, this adds the
+            # parts around it (a 3m10s run showed 1m38s of installer timings and nothing for the rest).
+            $upClock = [System.Diagnostics.Stopwatch]::StartNew()
+            $upLap = 0.0
+            $upParts = @()
+            $upFormat = { param([double]$s) $w = [int][math]::Floor($s); if ($w -ge 60) { '{0}m{1:00}s' -f [math]::Floor($w / 60), ($w % 60) } else { "${w}s" } }
             # Pull WITHOUT applying, re-run the config template on the pulled source, then ONE
             # apply with the fresh config (applying before init ran the installer twice).
             chezmoi update --apply=false
+            $upParts += 'pull ' + (& $upFormat ($upClock.Elapsed.TotalSeconds - $upLap)); $upLap = $upClock.Elapsed.TotalSeconds
             if ($LASTEXITCODE -ne 0) {
                 # A feature branch merged (often squashed, as this repo's own PRs are) and
                 # auto-deleted upstream leaves `git pull` nothing to merge into it - raw git
@@ -175,11 +182,14 @@ function dot {
                 return
             }
             chezmoi init
+            $upParts += 'init ' + (& $upFormat ($upClock.Elapsed.TotalSeconds - $upLap)); $upLap = $upClock.Elapsed.TotalSeconds
             if ($LASTEXITCODE -ne 0) { return }
             chezmoi apply
+            $upParts += 'apply ' + (& $upFormat ($upClock.Elapsed.TotalSeconds - $upLap)); $upLap = $upClock.Elapsed.TotalSeconds
             # New installs land in the registry PATH; this session only sees
             # them after a re-read (child installers keep their own PATH).
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            Write-Host ("  dot up took {0}: {1}" -f (& $upFormat $upClock.Elapsed.TotalSeconds), ($upParts -join ', ')) -ForegroundColor DarkGray
         }
         'upgrade'   { & (Join-Path $repoScripts 'dotupgrade.ps1') @rest }
         'backup'    { & (Join-Path $repoScripts 'dotbackup.ps1') @rest }
