@@ -436,7 +436,11 @@ if ($args[0] -eq 'install' -and $args[1] -eq '--prefix') {
 }
 PSSTUB
     cat >"$bin/claude.ps1" <<'PSSTUB'
-if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') { if ($env:CLAUDE_PLUGINS_JSON) { $env:CLAUDE_PLUGINS_JSON } else { '[]' } }
+if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
+    if ($env:CLAUDE_PLUGIN_LIST_FAIL -eq '1') { exit 1 }
+    if ($env:CLAUDE_PLUGINS_JSON) { $env:CLAUDE_PLUGINS_JSON } else { '[]' }
+    exit 0
+}
 PSSTUB
     seed_opencode_cache 6.3.0
     mkdir -p "$home/.cache/ms-playwright/chromium-1248"
@@ -474,6 +478,13 @@ Write-Output ('playwright-absent=' + (Test-PlaywrightChromiumInstalled))
 $env:CLAUDE_PLUGINS_JSON = '[{"id":"superpowers@superpowers-marketplace","version":"7.0.0","scope":"user"},{"id":"superpowers@superpowers-marketplace","version":"6.2.0","scope":"project","projectPath":"/p/takumi"}]'
 $installs = @(Get-ClaudeSuperpowersInstall)
 Write-Output ('claude-installs=' + (($installs | ForEach-Object { "$($_.Version):$($_.Scope):$($_.ProjectPath)" }) -join ';'))
+# A lookup that fails (claude missing, a non-zero exit, bad JSON) must come back as $null, not as
+# an empty-but-successful array - the caller reads $null as "re-run dot upgrade", not "not
+# installed" (2026-10-11: this Windows twin of claude_superpowers_installs did not yet).
+$env:CLAUDE_PLUGIN_LIST_FAIL = '1'
+$failedLookup = Get-ClaudeSuperpowersInstall
+Write-Output ('claude-lookup-failed=' + ($null -eq $failedLookup))
+Remove-Item Env:\CLAUDE_PLUGIN_LIST_FAIL
 Write-Output ('line-behind=' + (Format-SuperpowersVersionLine -Harness 'Codex' -Version '6.4.2' -Upstream '7.0.0' -Note 'the catalog offers 6.4.2'))
 Write-Output ('line-current=' + (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version '7.0.0' -Upstream '7.0.0' -Note 'n'))
 Write-Output ('line-missing=' + (Format-SuperpowersVersionLine -Harness 'Antigravity' -Version '' -Upstream '7.0.0'))
@@ -501,6 +512,7 @@ PSEOF
     pexpect 'playwright=True'
     pexpect 'playwright-absent=False'
     pexpect 'claude-installs=7.0.0:user:;6.2.0:project:/p/takumi'
+    pexpect 'claude-lookup-failed=True'
     pexpect 'line-behind=   Codex: 6.4.2 - behind upstream v7.0.0 (the catalog offers 6.4.2)'
     pexpect 'line-current=   OpenCode: 7.0.0 (current)'
     pexpect 'line-missing=   Antigravity: not installed'

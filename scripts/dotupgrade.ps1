@@ -171,9 +171,16 @@ if ($skipPackageSweeps) {
     # session is itself a claude.exe, and counting it held Claude Desktop out of every single
     # run regardless of whether Claude Desktop (or any other session) was actually open
     # (2026-10-11) - the live-session scan above already offered to close everything else.
+    # Probed for a pending upgrade first, like Docker Desktop/VS Code above: a claude.exe simply
+    # being open held Claude Desktop out (and warned about it) on every run even when nothing was
+    # going to be upgraded anyway (2026-10-11 live log: the warning printed right before "Nothing
+    # to upgrade in winget").
     if (@(Get-Process claude -ErrorAction SilentlyContinue | Where-Object { $ancestorIds -notcontains $_.Id }).Count -gt 0) {
-        $wingetHold += 'Anthropic.Claude'
-        Write-Host "  Claude Desktop held out of this sweep - a claude.exe is running and its installer closes every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
+        $claudeDesktopPendingVersion = Get-WingetPackageUpgrade -Id 'Anthropic.Claude'
+        if ($claudeDesktopPendingVersion) {
+            $wingetHold += 'Anthropic.Claude'
+            Write-Host "  Claude Desktop $claudeDesktopPendingVersion held out of this sweep - a claude.exe is running and its installer closes every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
+        }
     }
     $null = Invoke-WingetUpgradeAll -RunningNote $wingetRunningNote -HoldId $wingetHold   # it prints its own summary and warnings
 } else {

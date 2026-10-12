@@ -843,10 +843,26 @@ function Test-McpRegistered {
     return [bool](Select-String -LiteralPath $f -Pattern $pattern -Quiet)
 }
 
+# $null signals the lookup itself failed (claude missing, a non-zero exit, or invalid JSON) - the
+# caller must not read that the same as a genuinely empty list ("not installed"). Twin of
+# claude_superpowers_installs in scripts/lib/agent-skills.sh, which already made this distinction
+# (2026-10-11: a failed/hung `claude plugin list --json` read as "not installed" on a box with a
+# real user-scope install) - this Windows copy had not caught up.
 function Get-ClaudeSuperpowersInstall {
-    $text = (Invoke-NativeCommand -Command claude -Arguments @('plugin', 'list', '--json')) -join "`n"
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $null }
+    $previous = $ErrorActionPreference
+    $text = ''
+    try {
+        $ErrorActionPreference = 'Continue'
+        # A script command that falls off the end without an explicit `exit` never touches
+        # $LASTEXITCODE at all (it stays whatever it was, or - under Set-StrictMode - unset): reset
+        # it first so a well-behaved success is never mistaken for "never ran".
+        $global:LASTEXITCODE = 0
+        $text = ((& claude plugin list --json 2>$null) | ForEach-Object { "$_" }) -join "`n"
+    } catch { return $null } finally { $ErrorActionPreference = $previous }
+    if ($LASTEXITCODE -ne 0) { return $null }
     if (-not $text.Trim()) { return @() }
-    try { $items = @($text | ConvertFrom-Json) } catch { return @() }
+    try { $items = @($text | ConvertFrom-Json) } catch { return $null }
     $out = @()
     foreach ($item in $items) {
         if (-not $item.PSObject.Properties['id'] -or ([string]$item.id) -notlike 'superpowers@*') { continue }
@@ -881,18 +897,23 @@ function Write-SuperpowersReport {
     if ($upstream) { $label = "v$upstream" }
     Write-Host "$Glyph Superpowers versions (upstream: ${label}):" -ForegroundColor Yellow
     if (Get-Command claude -ErrorAction SilentlyContinue) {
-        $user = ''
-        $stale = @()
-        $gone = @()
-        foreach ($i in @(Get-ClaudeSuperpowersInstall)) {
-            if ($i.Scope -eq 'user') { $user = $i.Version }
-            # a deleted worktree leaves its install behind; "update inside each" cannot be followed there
-            elseif ($i.ProjectPath -and -not (Test-Path -LiteralPath $i.ProjectPath)) { $gone += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
-            elseif ($upstream -and $i.Version -ne $upstream) { $stale += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
+        $installs = Get-ClaudeSuperpowersInstall
+        if ($null -eq $installs) {
+            Write-Host "   Claude Code: lookup failed (claude plugin list --json errored or timed out - re-run dot upgrade)"
+        } else {
+            $user = ''
+            $stale = @()
+            $gone = @()
+            foreach ($i in @($installs)) {
+                if ($i.Scope -eq 'user') { $user = $i.Version }
+                # a deleted worktree leaves its install behind; "update inside each" cannot be followed there
+                elseif ($i.ProjectPath -and -not (Test-Path -LiteralPath $i.ProjectPath)) { $gone += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
+                elseif ($upstream -and $i.Version -ne $upstream) { $stale += "$($i.Version) ($($i.Scope)) in $($i.ProjectPath)" }
+            }
+            Write-Host (Format-SuperpowersVersionLine -Harness 'Claude Code' -Version $user -Upstream $upstream -Note 're-run dot upgrade')
+            if ($stale.Count -gt 0) { Write-Host "     project/local-scope installs behind: $($stale -join ', ') - inside each: 'claude plugin update superpowers@superpowers-marketplace', or 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' so the user-scope install applies" }
+            if ($gone.Count -gt 0) { Write-Host "     stale installs (directory gone): $($gone -join ', ') - recreate the directory, run 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' inside it, then delete it" }
         }
-        Write-Host (Format-SuperpowersVersionLine -Harness 'Claude Code' -Version $user -Upstream $upstream -Note 're-run dot upgrade')
-        if ($stale.Count -gt 0) { Write-Host "     project/local-scope installs behind: $($stale -join ', ') - inside each: 'claude plugin update superpowers@superpowers-marketplace', or 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' so the user-scope install applies" }
-        if ($gone.Count -gt 0) { Write-Host "     stale installs (directory gone): $($gone -join ', ') - recreate the directory, run 'claude plugin uninstall superpowers@superpowers-marketplace --scope <scope>' inside it, then delete it" }
     }
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
         Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version (Get-OpenCodeSuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
