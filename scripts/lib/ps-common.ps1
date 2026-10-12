@@ -526,6 +526,22 @@ function Format-LiveProcess {
     return "$($Process.ProcessName) (pid $($Process.Id)$started)"
 }
 
+# A stopped CLI session restarts cold; name how to pick it back up rather than leave the
+# operator to guess (2026-10-11: `dot upgrade --yes` run from another terminal stopped a live
+# Claude Code session, with no trail beyond "unsaved context is lost unless it can be
+# resumed"). Serena has no CLI of its own to resume - it is an MCP server its host (Claude
+# Code, OpenCode, Codex, Antigravity) relaunches automatically when that host's session does.
+function Get-AgentResumeHint {
+    param([string]$Name)
+    switch ($Name) {
+        'claude' { return 'claude --resume' }
+        'codex' { return 'codex resume' }
+        'opencode' { return 'opencode --continue' }
+        'agy' { return 'agy --continue' }
+        default { return '' }
+    }
+}
+
 # Returns the processes it stopped. Nothing is stopped unless the operator says so;
 # DOTUPGRADE_NO_PROMPT=1 and a non-interactive console both keep today's defer-and-report.
 function Invoke-LiveSessionStop {
@@ -621,16 +637,21 @@ function Invoke-LiveSessionStop {
                 # tree, and stopping it again cost a terminal reset and a taskkill.
                 $gone = $false
                 try { $p.Refresh(); $gone = [bool]$p.HasExited } catch { $gone = $false }
-                if ($gone) { $stopped += $p; continue }
-                # The terminal switch-offs are for TUI agents; an MCP server (Serena) has none.
-                $tui = @('claude', 'codex', 'opencode', 'agy') -contains $p.ProcessName
-                $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
-                if (Stop-AgentProcess -Process $p -ResetTerminal:$tui) { $stopped += $p }
-                # where a slow stop spends its time (it took 12 s on 2026-10-08, cause unknown)
-                if ($stopWatch.Elapsed.TotalSeconds -gt 3) {
-                    $detail = Get-Variable -Name LastStopDetail -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-                    Write-Host ("    stopping {0} (pid {1}) took {2:N1}s: {3}" -f $p.ProcessName, $p.Id, $stopWatch.Elapsed.TotalSeconds, $detail) -ForegroundColor DarkGray
+                if ($gone) {
+                    $stopped += $p
+                } else {
+                    # The terminal switch-offs are for TUI agents; an MCP server (Serena) has none.
+                    $tui = @('claude', 'codex', 'opencode', 'agy') -contains $p.ProcessName
+                    $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+                    if (Stop-AgentProcess -Process $p -ResetTerminal:$tui) { $stopped += $p }
+                    # where a slow stop spends its time (it took 12 s on 2026-10-08, cause unknown)
+                    if ($stopWatch.Elapsed.TotalSeconds -gt 3) {
+                        $detail = Get-Variable -Name LastStopDetail -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+                        Write-Host ("    stopping {0} (pid {1}) took {2:N1}s: {3}" -f $p.ProcessName, $p.Id, $stopWatch.Elapsed.TotalSeconds, $detail) -ForegroundColor DarkGray
+                    }
                 }
+                $hint = Get-AgentResumeHint -Name $p.ProcessName
+                if ($hint) { Write-Host ("    stopped $($p.ProcessName) (pid $($p.Id)) - resume it with: $hint") -ForegroundColor Green }
             }
         }
     }

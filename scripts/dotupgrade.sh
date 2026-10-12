@@ -110,9 +110,22 @@ reset_agent_terminal() {
     return 0
 }
 describe_pid() { printf '%s (pid %s, up %s)' "$(ps -o comm= -p "$1" 2>/dev/null)" "$1" "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
+# A stopped CLI session restarts cold; name how to pick it back up rather than leave the
+# operator to guess (2026-10-11: `dot upgrade --yes` run from another terminal stopped a live
+# Claude Code session, with no trail beyond "unsaved context is lost unless it can be
+# resumed"). Serena has no CLI of its own to resume - it is an MCP server its host (Claude
+# Code, OpenCode, Codex, Antigravity) relaunches automatically when that host's session does.
+resume_hint() {
+    case "$1" in
+        claude) echo "claude --resume" ;;
+        codex) echo "codex resume" ;;
+        opencode) echo "opencode --continue" ;;
+        agy) echo "agy --continue" ;;
+    esac
+}
 # Prints the number of sessions stopped. Nothing is stopped unless the operator says so.
 stop_live_sessions() {
-    local mine pids pid answer each stopped=0 chosen="" tty
+    local mine pids pid answer each stopped=0 chosen="" tty name hint
     [ "${DOTUPGRADE_NO_PROMPT:-}" = 1 ] && { echo 0; return 0; }
     mine=" $(ancestor_pids | tr '\n' ' ')"
     pids=""
@@ -145,9 +158,12 @@ stop_live_sessions() {
     dot_timing_resume 2>/dev/null || true
     for pid in $chosen; do
         tty="$(agent_tty "$pid")"
+        name="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
         stop_pid_tree "$pid"
         reset_agent_terminal "$tty"
         stopped=$((stopped + 1))
+        hint="$(resume_hint "$name")"
+        [ -n "$hint" ] && echo "    stopped $name (pid $pid) - resume it with: $hint" >&2
     done
     [ "$stopped" -gt 0 ] && echo "  Stopped $stopped process(es); re-scanning." >&2
     echo "$stopped"
