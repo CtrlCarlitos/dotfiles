@@ -48,10 +48,14 @@ Set-StrictMode -Version Latest
 . $Lib
 $script:chocoOut = @(); $script:wingetList = @(); $script:pins = @(); $script:calls = @()
 $script:chocoCalls = 0
+$script:listCalls = 0
+# the machine's own uninstall registry must not decide a test: answered here
+$script:installedNames = @()
+function Get-InstalledDisplayName { return @($script:installedNames) }
 function choco { $script:chocoCalls++; $script:chocoOut | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
 function winget {
     $line = ($args -join ' ')
-    if ($args[0] -eq 'list') { $script:wingetList | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
+    if ($args[0] -eq 'list') { $script:listCalls++; $script:wingetList | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
     if ($args[0] -eq 'pin' -and $args[1] -eq 'list') { $script:pins | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
     $script:calls += $line
     $global:LASTEXITCODE = 0
@@ -67,6 +71,12 @@ Write-Output ('owner-winget=' + (Get-DockerDesktopOwner -ChocoLib $lib))
 $script:wingetList = @('No installed package found matching input criteria.')
 Write-Output ('owner-none=[' + (Get-DockerDesktopOwner -ChocoLib $lib) + ']')
 Write-Output ('owner-no-choco-call=' + $script:chocoCalls)
+# Windows' own list of installed apps answers before winget is asked (no `winget list` at all)
+$script:listCalls = 0
+$script:installedNames = @('Docker Desktop')
+$script:wingetList = @()
+Write-Output ('owner-registry=' + (Get-DockerDesktopOwner -ChocoLib $lib) + '|list-calls=' + $script:listCalls)
+$script:installedNames = @()
 Remove-Item -Recurse -Force $lib
 
 # only the owner is probed for a pending Docker Desktop upgrade
@@ -93,6 +103,7 @@ PSEOF
     expect 'owner-choco=choco'
     expect 'owner-winget=winget'
     expect 'owner-none=[]'
+    expect 'owner-registry=winget|list-calls=0'
     expect 'owner-no-choco-call=0'
     expect 'probe-winget-owner=0|1'
     expect 'probe-choco-owner=1|0'

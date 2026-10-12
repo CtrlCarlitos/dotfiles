@@ -205,17 +205,44 @@ $script:AgentDesktopApp = @(
 # with nothing to install (2026-10-10). $null (and an app with no UpgradeId) keeps the old
 # behaviour - offer to close it.
 function Get-WingetPendingId {
+    $lines = Get-WingetUpgradeListing
+    if ($null -eq $lines) { return $null }
+    # the comma keeps an EMPTY list an empty list: bare, it unrolls to $null, which means "unknown"
+    return , @(ConvertFrom-WingetUpgradeTable -Lines $lines | ForEach-Object { $_.Id })
+}
+
+# winget's full upgrade listing, taken once and kept for MaxAgeSeconds: it is the slow call (3-13 s,
+# measured 2026-10-12; winget refreshes its sources over the network), and one `dot upgrade` asked
+# for it in the session scan, again when the scan re-ran after sessions were stopped, and the
+# Docker Desktop, VS Code and Claude Desktop probes each ran their own winget query for one row.
+# $null when winget is missing or cannot answer. -Fresh forces a new one (and replaces the kept one).
+$script:WingetUpgradeListing = $null
+function Get-WingetUpgradeListing {
+    param([switch]$Fresh, [int]$MaxAgeSeconds = 300)
+    $kept = $script:WingetUpgradeListing
+    if (-not $Fresh -and $kept -and (([DateTime]::UtcNow - $kept.At).TotalSeconds -lt $MaxAgeSeconds)) { return , @($kept.Lines) }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $null }
     $previous = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
         $lines = @(& winget upgrade --include-unknown --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
         if ($LASTEXITCODE -ne 0 -and -not ($lines -match '(?i)upgrades? available|No installed package')) { return $null }
-        # the comma keeps an EMPTY list an empty list: bare, it unrolls to $null, which means "unknown"
-        return , @(ConvertFrom-WingetUpgradeTable -Lines $lines | ForEach-Object { $_.Id })
+        $script:WingetUpgradeListing = [pscustomobject]@{ Lines = $lines; At = [DateTime]::UtcNow }
+        return , $lines
     }
     catch { return $null }
     finally { $ErrorActionPreference = $previous }
+}
+
+# What the kept listing says about one package: $null when there is no (recent) listing - the caller
+# asks winget itself - else an object whose Available is the pending version, or '' when none is.
+function Get-WingetKeptUpgrade {
+    param([Parameter(Mandatory)][string]$Id, [int]$MaxAgeSeconds = 300)
+    $kept = $script:WingetUpgradeListing
+    if (-not $kept -or (([DateTime]::UtcNow - $kept.At).TotalSeconds -ge $MaxAgeSeconds)) { return $null }
+    $row = @(ConvertFrom-WingetUpgradeTable -Lines $kept.Lines | Where-Object { $_.Id -eq $Id }) | Select-Object -First 1
+    if ($row) { return [pscustomobject]@{ Available = [string]$row.Available } }
+    return [pscustomobject]@{ Available = '' }
 }
 
 # One entry per RUNNING desktop app: its label, all its processes, and its service when that
@@ -1140,7 +1167,20 @@ function Invoke-WingetUpgradeAll {
     foreach ($line in $allLines) { if ($line -match '\d+ package\(s\) have upgrades blocked') { $sweepBlocked = $line.Trim() } }
 
     if ($installed -gt 0) { Write-Host ("  winget upgraded {0} package(s)." -f $installed) -ForegroundColor Green }
-    $pending = Get-WingetPendingUpgrade -SweepBlocked $sweepBlocked
+    # The kept listing predates this sweep and is stale from here on.
+    $script:WingetUpgradeListing = $null
+    # winget already said there was nothing to upgrade (and no table, no blocked note, nothing
+    # installed): the second listing would only repeat that, at 3-13 s. A sweep that installed
+    # something, printed a table or a blocked count - or a Windows whose winget words it
+    # differently - is listed again, as before.
+    $saidNothing = ($installed -eq 0 -and -not $sweepBlocked -and
+        @($allLines | Where-Object { $_ -match '^\s*No installed package found matching input criteria' }).Count -gt 0 -and
+        @(ConvertFrom-WingetUpgradeTable -Lines @($allLines)).Count -eq 0)
+    if ($saidNothing) {
+        $pending = [pscustomobject]@{ Rows = @(); Other = @(); Blocked = '' }
+    } else {
+        $pending = Get-WingetPendingUpgrade -SweepBlocked $sweepBlocked
+    }
     if (@($pending.Rows).Count -gt 0) {
         $names = @($pending.Rows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
         Write-Host ("  Still pending in winget: {0}" -f ($names -join ', ')) -ForegroundColor Yellow
@@ -1182,9 +1222,14 @@ function Get-DockerDesktopUpgrade {
     try {
         $ErrorActionPreference = 'Continue'
         if ($Owner -ne 'choco') {
-            $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
-            $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
-            if ($row) { return [string]$row.Available }
+            $kept = Get-WingetKeptUpgrade -Id 'Docker.DockerDesktop'
+            if ($null -ne $kept) {
+                if ($kept.Available) { return $kept.Available }
+            } else {
+                $wingetLines = @(& winget upgrade --id Docker.DockerDesktop --accept-source-agreements 2>&1 | ForEach-Object { "$_" })
+                $row = @(ConvertFrom-WingetUpgradeTable -Lines $wingetLines | Where-Object { $_.Id -eq 'Docker.DockerDesktop' }) | Select-Object -First 1
+                if ($row) { return [string]$row.Available }
+            }
             if ($Owner -eq 'winget') { return '' }
         }
         # choco installed it: winget answers "install technology is different" instead of a table
@@ -1290,6 +1335,10 @@ function Invoke-DockerDesktopStopOffer {
 # The available version of one winget package, '' when nothing is pending or the probe fails.
 function Get-WingetPackageUpgrade {
     param([Parameter(Mandatory)][string]$Id)
+    # The session scan's listing answers it when it is recent: the full listing is the authority the
+    # second opinion below asks for anyway.
+    $kept = Get-WingetKeptUpgrade -Id $Id
+    if ($null -ne $kept) { return $kept.Available }
     $previous = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -1353,6 +1402,18 @@ function Invoke-VsCodeUpgradeOffer {
 # Docker's releases (4.93.0 while 4.94.0 was out, 2026-10-06). Docker Desktop is winget's now;
 # a machine that still has the Chocolatey copy is told how to move it (docs/windows.md).
 
+# The display names of the installed apps, from Windows' uninstall registry (the list winget reads).
+# A function of its own so a test can answer for it.
+function Get-InstalledDisplayName {
+    $keys = @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')
+    try {
+        return @(Get-ItemProperty -Path $keys -ErrorAction SilentlyContinue |
+            Where-Object { $_.PSObject.Properties.Name -contains 'DisplayName' -and $_.DisplayName } |
+            ForEach-Object { [string]$_.DisplayName })
+    }
+    catch { return @() }
+}
+
 # 'choco', 'winget' or '' (not installed). winget lists every installed app, Chocolatey's
 # MSI copy included, so Chocolatey is asked first.
 # Chocolatey's ownership from its lib\docker-desktop folder (instant), not `choco list`
@@ -1364,6 +1425,10 @@ function Get-DockerDesktopOwner {
     try {
         $ErrorActionPreference = 'Continue'
         if (Test-Path -LiteralPath (Join-Path $ChocoLib 'docker-desktop')) { return 'choco' }
+        # Not Chocolatey's, and Windows lists it among the installed apps: that is winget's (what winget
+        # lists is the same list). The registry answers in milliseconds; `winget list --id` took 2-6 s.
+        # Only a miss there goes on to ask winget.
+        if (@(Get-InstalledDisplayName) -contains 'Docker Desktop') { return 'winget' }
         if (Get-Command winget -ErrorAction SilentlyContinue) {
             $wingetList = (winget list --id Docker.DockerDesktop --exact --accept-source-agreements 2>$null | Out-String)
             if ($wingetList -match 'Docker\.DockerDesktop') { return 'winget' }

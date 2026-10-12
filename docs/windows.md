@@ -150,6 +150,13 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   copy's own time goes to `upgrade.log` (`background Serena ran 13s`); the timing line shows only the wait. A copy
   that cannot start runs its steps in place, and `DOT_PARALLEL_AI_TOOLS=0` runs everything in order
   (`scripts/lib/ps-background.ps1`; `tests/dot_upgrade_parallel_contract.sh`).
+- **One winget listing per `dot upgrade`.** The upgrade listing is the slow winget call (3-13 s). The session scan
+  took it, then the Docker Desktop, VS Code and Claude Desktop probes each asked winget for their one row, and a
+  sweep that had just said "No installed package found" was followed by a second listing. The scan's listing is now
+  kept for five minutes and answers the probes (an older one is not trusted); Docker Desktop's owner comes from
+  Windows' installed-apps list before `winget list --id` is asked; and a sweep that installed nothing, printed no
+  table and no blocked count is not listed again (any other sweep still is)
+  (`Get-WingetUpgradeListing` in `scripts/lib/ps-common.ps1`; `tests/winget_listing_reuse_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
