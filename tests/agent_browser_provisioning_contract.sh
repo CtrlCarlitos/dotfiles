@@ -207,6 +207,8 @@ function Get-Fn([string]$name) {
     ($lines[$from..$to]) -join "`n"
 }
 Invoke-Expression (Get-Fn 'Write-AgentBrowserDoctorSummary')
+# the timing marks the installer's sections carry (scripts/lib/ps-timing.ps1, inlined there)
+function Add-DotTimingMark { param($Name) $null = $Name }
 
 # Jobs would need a live PowerShell job infrastructure per call; the contract
 # under test is the ACTIONS, so Invoke-WithTimeout runs them inline (and logs).
