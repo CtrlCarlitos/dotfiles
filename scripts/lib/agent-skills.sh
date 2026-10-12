@@ -1033,8 +1033,12 @@ opencode_superpowers_refresh() {
 # install Claude Code knows of (`claude plugin list --json`), the user-scope one included.
 # Project- and local-scope installs are per repository and `claude plugin update` run from
 # elsewhere never touches them, so they fall behind quietly; the report names them.
+# The file first (claude_superpowers_installs_file): Claude writes every install there with its
+# version, scope and projectPath, so the answer is instant and the CLI (2 s here, and once stopped
+# for 60 s on WSL) is asked only when the file cannot say.
 claude_superpowers_installs() {
     local list
+    if list="$(claude_superpowers_installs_file)"; then printf '%s\n' "$list"; return 0; fi
     command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
     # Exit 1 when the lookup itself fails (timed out, errored): the caller must not
     # read an empty answer as "not installed" (2026-10-11: a 60 s hang did exactly that
@@ -1046,6 +1050,29 @@ claude_superpowers_installs() {
     list="$(net_timeout_tty 60 claude plugin list --json 2>/dev/null)" || return 1
     printf '%s\n' "$list" \
         | jq -b -r '.[]? | select((.id // "") | startswith("superpowers@")) | [(.version // ""), (.scope // ""), (.projectPath // "")] | @tsv' 2>/dev/null
+}
+
+# claude_superpowers_installs_file - the same lines from ~/.claude/plugins/installed_plugins.json
+# (every marketplace's superpowers@ entry, every scope). Exit 2 when the file cannot answer: no jq,
+# no file, unreadable or not the known shape - the caller asks the CLI then. Exit 0 with no output
+# means Claude has no superpowers install at all.
+claude_superpowers_installs_file() {
+    local f
+    f="$(claude_plugins_dir)/installed_plugins.json"
+    command -v jq >/dev/null 2>&1 && [ -f "$f" ] || return 2
+    jq -b -r '(if type == "object" and has("plugins") then .plugins else . end)
+        | to_entries[] | select(.key | startswith("superpowers@"))
+        | .value | (if type == "array" then . else [.] end) | .[]
+        | [(.version // ""), (.scope // ""), (.projectPath // "")] | @tsv' "$f" 2>/dev/null || return 2
+}
+
+# claude_superpowers_user_version - the user-scope install's version (the one `dot upgrade`
+# updates); empty and exit 1 when there is none or the lookup failed.
+claude_superpowers_user_version() {
+    local v
+    v="$(claude_superpowers_installs | awk -F'\t' '$2 == "user" { print $1; exit }')" || v=""
+    [ -n "$v" ] || return 1
+    printf '%s\n' "$v"
 }
 
 # superpowers_version_line <harness> <version> <upstream> [note] - one report line. A version

@@ -336,6 +336,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Write-CuratedSkillsSkippedSummary
 }
 
+Add-DotTimingMark -Name 'Superpowers (Codex)'
 # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
 # it, and `codex plugin add` both installs and updates (same command, idempotent
 # - like `agy plugin install` above). Defer-aware: the plugin dir is resolved by
@@ -539,13 +540,33 @@ if (-not (Show-DotBackgroundSection 'Claude Code')) {
         }
 
         # Superpowers skills plugin
+        Add-DotTimingMark -Name 'Superpowers (Claude Code)'
         Write-Host "$($G.sparkles) Updating Superpowers (Claude Code)..." -ForegroundColor Yellow
-        # Its "Checking for updates for plugin..." line said nothing on every run: shown only on failure.
+        # `claude plugin update` took 14 s on WSL (2026-10-12) to answer "already at the latest version".
+        # The user-scope version sits in installed_plugins.json and upstream's newest release is one
+        # ls-remote (the report below reuses it): an install already at that release skips the update.
+        # The marketplace can lag upstream; the update then runs as before and the outcome line says
+        # what it found. Its "Checking for updates for plugin..." line is shown only on failure.
         # Named with its marketplace: a machine can carry superpowers from several (project-local
         # installs from claude-plugins-official / superpowers-dev), and the bare name then fails
         # with "installed from more than one marketplace". dotfiles installs this one.
-        $cpOut = @(& claude plugin update superpowers@superpowers-marketplace -y 2>&1 | ForEach-Object { "$_" })
-        if ($LASTEXITCODE -ne 0) { $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red }
+        if (-not (Get-Command Get-ClaudeSuperpowersUserVersion -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+        $spUpstream = Get-SuperpowersLatestVersion
+        $spHave = Get-ClaudeSuperpowersUserVersion
+        if ($spHave -and $spHave -eq $spUpstream) {
+            Write-Host "  Superpowers (Claude Code) is current ($spHave)"
+        } else {
+            $cpOut = @(& claude plugin update superpowers@superpowers-marketplace -y 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) {
+                $cpOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Claude Code failed - continuing" -ForegroundColor Red
+            } else {
+                $spAfter = Get-ClaudeSuperpowersUserVersion
+                if (-not $spAfter) { Write-Host "  Superpowers (Claude Code): plugin update run (its version could not be read back)" }
+                elseif ($spAfter -ne $spHave) { Write-Host "  Superpowers (Claude Code) upgraded to $spAfter" }
+                elseif ($spUpstream -and $spAfter -ne $spUpstream) { Write-Host "  Superpowers (Claude Code) is $spAfter - the marketplace has not published v$spUpstream yet" }
+                else { Write-Host "  Superpowers (Claude Code) is current ($spAfter)" }
+            }
+        }
     }
 }
 
@@ -734,7 +755,10 @@ Add-DotTimingMark -Name 'Superpowers report'
 # step above reports success (2026-10-10: OpenCode at 6.3.0 for two months, Codex at 6.4.2
 # behind a lagging catalog, project-scope Claude installs at 6.2.0). Read-only.
 if (-not (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-if (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) { Write-SuperpowersReport -Glyph $G.sparkles }
+if (Get-Command Write-SuperpowersReport -ErrorAction SilentlyContinue) {
+    # The Claude Code step above already asked upstream; only a run without claude asks here.
+    if (Test-Path Variable:spUpstream) { Write-SuperpowersReport -Glyph $G.sparkles -Upstream $spUpstream } else { Write-SuperpowersReport -Glyph $G.sparkles }
+}
 
 Write-DotTimingSummary -Title 'AI tools'
 Write-Host "$($G.check) AI Tools Update Complete!" -ForegroundColor Green

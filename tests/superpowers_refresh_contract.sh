@@ -315,8 +315,8 @@ chmod +x "$bin/chezmoi"
 mkdir -p "$home/projects/takumi"
 claude_json='[{"id":"superpowers@superpowers-marketplace","version":"7.0.0","scope":"user","enabled":true},{"id":"superpowers@superpowers-marketplace","version":"6.2.0","scope":"project","enabled":true,"projectPath":"'"$home"'/projects/takumi"},{"id":"superpowers@superpowers-marketplace","version":"6.3.0","scope":"local","enabled":true,"projectPath":"'"$home"'/projects/gone/.worktrees/old"},{"id":"other@m","version":"1.0.0","scope":"user"}]'
 run_updater() { # $1 = output file; extra env from the caller
-    : >"$tmp/npm.log"
-    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" NPM_FAKE_PREFIX="$tmp/prefix" \
+    : >"$tmp/npm.log"; : >"$tmp/stub.log"
+    HOME="$home" PATH="$bin:$PATH" NPM_LOG="$tmp/npm.log" STUB_LOG="$tmp/stub.log" NPM_FAKE_PREFIX="$tmp/prefix" \
         GIT_TAGS_DIR="${GIT_TAGS_DIR:-$tags}" CODEX_ROWS="$row_installed" AGY_IMPORTS=superpowers CLAUDE_PLUGINS_JSON="$claude_json" \
         timeout 120 bash "$ai_sh" >"$1" 2>&1 || fail "update_ai_tools.sh must run to completion: $(tail -3 "$1")"
 }
@@ -375,6 +375,40 @@ CLAUDE_PLUGIN_LIST_FAIL=1 run_updater "$out"
 grep -Fq '   Claude Code: lookup failed (claude plugin list --json errored or timed out - re-run dot upgrade)' "$out" \
     || fail "a failed plugin lookup must be reported as such (got: $(grep -F 'Claude Code:' "$out" | tr '\n' '|'))"
 if grep -Fq '   Claude Code: not installed' "$out"; then fail "a failed lookup must not read as 'not installed'"; else pass; fi
+# `claude plugin update` ran on every run (14 s on WSL, 2026-10-12, to say "already at the latest
+# version") and the report asked `claude plugin list --json`: with installed_plugins.json on disk
+# both read the file, and a user-scope install at upstream's release skips the update.
+mkdir -p "$home/.claude/plugins"
+sp_file="$home/.claude/plugins/installed_plugins.json"
+sp_fixture() { # <user version>
+    printf '{"version": 2, "plugins": {"superpowers@superpowers-marketplace": [{"scope": "user", "version": "%s"}, {"scope": "project", "version": "6.2.0", "projectPath": "%s"}, {"scope": "local", "version": "6.3.0", "projectPath": "%s"}]}}\n' \
+        "$1" "$home/projects/takumi" "$home/projects/gone/.worktrees/old" >"$sp_file"
+}
+if command -v jq >/dev/null 2>&1; then
+    sp_fixture 7.0.0
+    out="$tmp/updater-7.log"
+    CLAUDE_PLUGIN_LIST_FAIL=1 run_updater "$out"
+    grep -Fq '   Superpowers (Claude Code) is current (7.0.0)' "$out" || fail "file at upstream's release: the plugin update must be skipped and say current (got: $(grep -F 'Superpowers (Claude Code)' "$out" | tr '\n' '|'))"
+    if grep -Fq 'claude plugin update' "$tmp/stub.log"; then fail "file at upstream's release: no 'claude plugin update' call (log: $(grep claude "$tmp/stub.log" | tr '\n' '|'))"; else pass; fi
+    if grep -Fq 'claude plugin list' "$tmp/stub.log"; then fail "the report must read installed_plugins.json, not call 'claude plugin list' (log: $(grep claude "$tmp/stub.log" | tr '\n' '|'))"; else pass; fi
+    expect '   Claude Code: 7.0.0 (current)'
+    expect "project/local-scope installs behind: 6.2.0 (project) in ~/projects/takumi - inside each:"
+    expect "stale installs (directory gone): 6.3.0 (local) in ~/projects/gone/.worktrees/old - recreate the directory,"
+    # behind the release: the update runs; the file still says 6.4.2 afterwards (the stub changes
+    # nothing), which is the marketplace-lag outcome
+    sp_fixture 6.4.2
+    out="$tmp/updater-8.log"
+    run_updater "$out"
+    grep -Fq 'claude plugin update superpowers@superpowers-marketplace -y' "$tmp/stub.log" || fail "file behind upstream's release: the plugin update must run (log: $(grep claude "$tmp/stub.log" | tr '\n' '|'))"
+    grep -Fq '   Superpowers (Claude Code) is 6.4.2 - the marketplace has not published v7.0.0 yet' "$out" || fail "an update that moved nothing must say what the marketplace has (got: $(grep -F 'Superpowers (Claude Code)' "$out" | tr '\n' '|'))"
+    expect '   Claude Code: 6.4.2 - behind upstream v7.0.0 (re-run dot upgrade)'
+    pass
+fi
+rm -f "$sp_file"
+require "$ai_sh" "dot_timing_mark 'Superpowers (Codex)'"
+require "$ai_sh" "dot_timing_mark 'Superpowers (Claude Code)'"
+require "$ai_ps1" "Add-DotTimingMark -Name 'Superpowers (Codex)'"
+require "$ai_ps1" "Add-DotTimingMark -Name 'Superpowers (Claude Code)'"
 
 # --- D. dotupgrade.sh: the VS Code extension line and the release-lag note, executed -------------
 up_harness="$tmp/dotupgrade-fns.sh"
@@ -487,13 +521,21 @@ Write-Output ('playwright=' + (Test-PlaywrightChromiumInstalled))
 Remove-Item -Recurse -Force (Join-Path $UserDir '.cache/ms-playwright')
 Write-Output ('playwright-absent=' + (Test-PlaywrightChromiumInstalled))
 $env:CLAUDE_PLUGINS_JSON = '[{"id":"superpowers@superpowers-marketplace","version":"7.0.0","scope":"user"},{"id":"superpowers@superpowers-marketplace","version":"6.2.0","scope":"project","projectPath":"/p/takumi"}]'
-$installs = @(Get-ClaudeSuperpowersInstall)
+$installs = @(Get-ClaudeSuperpowersInstall -UserHome $UserDir)
 Write-Output ('claude-installs=' + (($installs | ForEach-Object { "$($_.Version):$($_.Scope):$($_.ProjectPath)" }) -join ';'))
+# with installed_plugins.json present the file answers (the CLI stub still says 7.0.0/6.2.0)
+$spDir = Join-Path (Join-Path $UserDir '.claude') 'plugins'
+New-Item -ItemType Directory -Force -Path $spDir | Out-Null
+Set-Content -LiteralPath (Join-Path $spDir 'installed_plugins.json') -Value '{"version": 2, "plugins": {"superpowers@superpowers-marketplace": [{"scope": "user", "version": "6.4.2"}]}}'
+$installs = @(Get-ClaudeSuperpowersInstall -UserHome $UserDir)
+Write-Output ('claude-installs-file=' + (($installs | ForEach-Object { "$($_.Version):$($_.Scope):$($_.ProjectPath)" }) -join ';'))
+Write-Output ('claude-user-file=' + (Get-ClaudeSuperpowersUserVersion -UserHome $UserDir))
+Remove-Item -Recurse -Force (Join-Path $UserDir '.claude')
 # A lookup that fails (claude missing, a non-zero exit, bad JSON) must come back as $null, not as
 # an empty-but-successful array - the caller reads $null as "re-run dot upgrade", not "not
 # installed" (2026-10-11: this Windows twin of claude_superpowers_installs did not yet).
 $env:CLAUDE_PLUGIN_LIST_FAIL = '1'
-$failedLookup = Get-ClaudeSuperpowersInstall
+$failedLookup = Get-ClaudeSuperpowersInstall -UserHome $UserDir
 Write-Output ('claude-lookup-failed=' + ($null -eq $failedLookup))
 Remove-Item Env:\CLAUDE_PLUGIN_LIST_FAIL
 # A `claude plugin list --json` that hangs (2026-10-11 Bash incident the Windows twin shares:
@@ -502,7 +544,7 @@ Remove-Item Env:\CLAUDE_PLUGIN_LIST_FAIL
 # fires without actually waiting out the real 60 s default.
 $env:CLAUDE_PLUGIN_LIST_HANG = '1'
 $hangStart = Get-Date
-$hungLookup = Get-ClaudeSuperpowersInstall -TimeoutSeconds 2
+$hungLookup = Get-ClaudeSuperpowersInstall -TimeoutSeconds 2 -UserHome $UserDir
 $hangElapsed = ((Get-Date) - $hangStart).TotalSeconds
 Remove-Item Env:\CLAUDE_PLUGIN_LIST_HANG
 Write-Output ('claude-lookup-hung=' + ($null -eq $hungLookup))
@@ -534,6 +576,8 @@ PSEOF
     pexpect 'playwright=True'
     pexpect 'playwright-absent=False'
     pexpect 'claude-installs=7.0.0:user:;6.2.0:project:/p/takumi'
+    pexpect 'claude-installs-file=6.4.2:user:'
+    pexpect 'claude-user-file=6.4.2'
     pexpect 'claude-lookup-failed=True'
     pexpect 'claude-lookup-hung=True'
     pexpect 'claude-lookup-hung-fast=True'

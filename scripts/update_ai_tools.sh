@@ -235,6 +235,10 @@ fi
 # the error to /dev/null and printed "Superpowers not installed for Codex",
 # which was false - the plugin was installed, the add was failing on a
 # nonexistent marketplace. A real failure now prints what codex said.
+#
+# The mark sits below the comment: tests/agent_skill_wiring_contract.sh runs the curated-skills
+# region, cut at this comment's first line, without the timing helpers.
+dot_timing_mark 'Superpowers (Codex)'
 if command -v codex &>/dev/null; then
     if deferred codex; then
         echo "  codex deferred - Superpowers (Codex) update skipped with it."
@@ -361,10 +365,33 @@ if command -v claude &>/dev/null; then
     fi
 
     # Superpowers skills plugin
+    dot_timing_mark 'Superpowers (Claude Code)'
     echo "✨ Updating Superpowers (Claude Code)..."
+    # `claude plugin update` took 14 s on WSL (2026-10-12) to answer "already at the latest version",
+    # booked under "Claude Code" for want of a mark. The user-scope version sits in
+    # ~/.claude/plugins/installed_plugins.json and upstream's newest release is one ls-remote (the
+    # report below reuses it): an install already at that release skips the update. The marketplace
+    # can lag upstream; the update then runs as before and the outcome line says what it found.
     # Named with its marketplace: a machine can carry superpowers from several marketplaces, and
     # the bare name then fails with "installed from more than one marketplace" (silently, here).
-    claude plugin update superpowers@superpowers-marketplace -y &>/dev/null || echo "   Superpowers update for Claude Code failed - skipping"
+    sp_upstream="$(superpowers_latest_version || true)"
+    sp_have="$(claude_superpowers_user_version || true)"
+    if [ -n "$sp_have" ] && [ "$sp_have" = "$sp_upstream" ]; then
+        echo "   Superpowers (Claude Code) is current ($sp_have)"
+    elif claude plugin update superpowers@superpowers-marketplace -y &>/dev/null; then
+        sp_after="$(claude_superpowers_user_version || true)"
+        if [ -z "$sp_after" ]; then
+            echo "   Superpowers (Claude Code): plugin update run (its version could not be read back)"
+        elif [ "$sp_after" != "$sp_have" ]; then
+            echo "   Superpowers (Claude Code) upgraded to $sp_after"
+        elif [ -n "$sp_upstream" ] && [ "$sp_after" != "$sp_upstream" ]; then
+            echo "   Superpowers (Claude Code) is $sp_after - the marketplace has not published v$sp_upstream yet"
+        else
+            echo "   Superpowers (Claude Code) is current ($sp_after)"
+        fi
+    else
+        echo "   Superpowers update for Claude Code failed - skipping"
+    fi
 fi
 
 dot_timing_mark 'OpenCode'
@@ -533,7 +560,8 @@ dot_timing_mark 'Superpowers report'
 # 6.2.0). Read-only; every lookup degrades to "unknown" offline.
 superpowers_report() {
     local upstream claude_user claude_stale claude_gone claude_installs ver scope project codex_ver codex_cat
-    upstream="$(superpowers_latest_version)" || upstream=""
+    # The Claude Code step above already asked upstream; only a run without claude asks here.
+    upstream="${sp_upstream-$(superpowers_latest_version || true)}"
     echo "✨ Superpowers versions (upstream: ${upstream:+v}${upstream:-unreachable}):"
     if command -v claude &>/dev/null; then
         claude_user=""
