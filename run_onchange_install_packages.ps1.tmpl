@@ -108,6 +108,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-skills.ps1" }}
 {{ include "scripts/lib/ps-desktop-shortcuts.ps1" }}
 {{ include "scripts/lib/ps-timing.ps1" }}
+{{ include "scripts/lib/ps-heartbeat.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
 # Installer boilerplate is logged, not shown (scripts/lib/ps-installer-output.ps1).
 Initialize-InstallerOutput
@@ -1065,6 +1066,9 @@ if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
 # inventory, then a per-id check only for ids it does not show (long ids can be truncated in its
 # table). An app still installed by Chocolatey also shows in winget's list and is left alone:
 # scripts/migrate-to-winget.ps1 moves it (per app, asked).
+# Its own timing mark: the installs used to be counted under 'choco packages' (a dot up showed
+# 'choco packages 10m14s' for 27 winget installs, 2026-10-11).
+Add-DotTimingMark -Name 'winget packages'
 if ($wingetPackages.Count -gt 0) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: winget not found - $($wingetPackages.Count) winget package(s) not installed" -ForegroundColor Red
@@ -1122,23 +1126,38 @@ if ($wingetPackages.Count -gt 0) {
             if ($wingetPerUser -gt 0) { $wingetNote = " ($wingetPerUser still per-user, see above)" }
             Write-Host "  winget packages: all $($wingetPackages.Count - $wingetStillChoco.Count) present$wingetNote"
         }
-        foreach ($wingetEntry in $wingetMissing) {
-            $wingetId, $wingetExtra, $null = $wingetEntry -split '\|', 3
-            Write-Host "  Installing $wingetId (winget)..." -ForegroundColor Yellow
-            # Jobs do not inherit this scope: id and extra args travel via $env (same as CHOCO_PKG above).
-            $env:WINGET_PKG = $wingetId
-            $env:WINGET_ARGS = "$wingetExtra"
-            try {
-                Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
-                    $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
-                    winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
-                    if ($LASTEXITCODE -ne 0) { "winget exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+        # A heartbeat while an install runs (27 installs on a slow link were silent for ~10 min between
+        # lines) and the packages that took 30 s or more named afterwards. Skipped when nothing is missing.
+        $wingetBeat = $null
+        $wingetTimes = New-Object System.Collections.Generic.List[object]
+        if ($wingetMissing.Count -gt 0) { $wingetBeat = Open-DotHeartbeat -Tool winget }
+        try {
+            foreach ($wingetEntry in $wingetMissing) {
+                $wingetId, $wingetExtra, $null = $wingetEntry -split '\|', 3
+                Write-Host "  Installing $wingetId (winget)..." -ForegroundColor Yellow
+                $wingetTime = [pscustomobject]@{ Name = $wingetId; Start = (Get-DotTimingNow); DownloadEnd = $null; End = $null }
+                if ($wingetBeat) { $wingetBeat.State.Package = $wingetId; $wingetBeat.State.Quiet.Restart() }
+                # Jobs do not inherit this scope: id and extra args travel via $env (same as CHOCO_PKG above).
+                $env:WINGET_PKG = $wingetId
+                $env:WINGET_ARGS = "$wingetExtra"
+                try {
+                    Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
+                        $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
+                        winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+                        if ($LASTEXITCODE -ne 0) { "winget exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+                    }
+                } catch {
+                    Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
                 }
-            } catch {
-                Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
+                $wingetTime.End = Get-DotTimingNow
+                $wingetTimes.Add($wingetTime)
+                if ($wingetBeat) { $wingetBeat.State.Quiet.Restart() }
+                Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS -ErrorAction SilentlyContinue
             }
-            Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS -ErrorAction SilentlyContinue
+        } finally {
+            Close-DotHeartbeat -Beat $wingetBeat
         }
+        Write-DotPackageTiming -Tool winget -Package $wingetTimes -LogPath $env:DOT_INSTALLER_LOG
     }
 }
 
