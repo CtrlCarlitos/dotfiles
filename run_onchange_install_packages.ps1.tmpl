@@ -682,7 +682,7 @@ function Install-MobileDev {
             # "just re-run dot up" would not actually re-enter this block.
             # The documented, real re-entry point: clear chezmoi's recorded
             # script hash so the next apply re-runs this script in full.
-            Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
+            Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
         }
 
         # A prior adb (from a manual install) and the SDK's own adb can be
@@ -716,7 +716,7 @@ function Install-MobileDev {
                 # profile; "no" keeps the device profile's own default.
                 Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
             } else {
-                Write-Host "  Skipped - run 'chezmoi state delete-bucket --bucket=scriptState' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
+                Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
             }
         }
     }
@@ -1065,6 +1065,7 @@ if ($wingetPackages.Count -gt 0) {
         } catch { $wingetInventory = '' }
         $wingetMissing = @()
         $wingetStillChoco = @()
+        $wingetPerUser = 0
         # Assigned directly: `$x = if (...) { $set }` enumerates the set into a plain array, whose
         # .Contains is case-sensitive - Chocolatey lists `Wget`, the catalog says `wget`, and the
         # winget copy got installed next to Chocolatey's (2026-10-07).
@@ -1087,19 +1088,27 @@ if ($wingetPackages.Count -gt 0) {
                 # left it pending. Only portable packages leave that folder; others are not detected.
                 if ("$wingetScopeArgs" -match '--scope\s+machine' -and $env:LOCALAPPDATA -and
                     @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') -Directory -Filter "$wingetId`_*" -ErrorAction SilentlyContinue).Count -gt 0) {
+                    $wingetPerUser++
                     Write-Host "  $wingetId is installed per-user but the catalog keeps it machine-wide (dot upgrade cannot upgrade a per-user copy)." -ForegroundColor Yellow
-                    Write-Host "    One-time fix, from a NON-elevated terminal: winget uninstall --id $wingetId --exact   then re-run dot up (it reinstalls machine-wide)" -ForegroundColor Yellow
+                    Write-Host "    One-time fix, from a NON-elevated terminal: winget uninstall --id $wingetId --exact  " -ForegroundColor Yellow
                 }
                 continue
             }
             $wingetMissing += $wingetEntry
+        }
+        if ($wingetPerUser -gt 0) {
+            # Said once, not per package. A plain re-run is skipped: this installer only re-runs when its own content changes.
+            Write-Host "  After the uninstalls, run in this elevated terminal (re-arms this installer), then dot up:" -ForegroundColor Yellow
+            Write-Host "    chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1" -ForegroundColor Yellow
         }
         if ($wingetStillChoco.Count -gt 0) {
             Write-Host "  $($wingetStillChoco.Count) tool(s) are still Chocolatey's here and winget-managed in dotfiles: $($wingetStillChoco -join ', ')" -ForegroundColor Yellow
             Write-Host "    Move them (elevated, asked per app): scripts\migrate-to-winget.ps1 -ListOnly  # see the plan first" -ForegroundColor Yellow
         }
         if ($wingetMissing.Count -eq 0) {
-            Write-Host "  winget packages: all $($wingetPackages.Count - $wingetStillChoco.Count) present"
+            $wingetNote = ''
+            if ($wingetPerUser -gt 0) { $wingetNote = " ($wingetPerUser still per-user, see above)" }
+            Write-Host "  winget packages: all $($wingetPackages.Count - $wingetStillChoco.Count) present$wingetNote"
         }
         foreach ($wingetEntry in $wingetMissing) {
             $wingetId, $wingetExtra, $null = $wingetEntry -split '\|', 3

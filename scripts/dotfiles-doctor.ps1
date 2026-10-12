@@ -272,7 +272,7 @@ if (Test-Path -LiteralPath $config) {
         $mdAdb = @('platform-tools/adb.exe', 'platform-tools/adb') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if (-not $mdAdb -and -not (Get-Command adb -ErrorAction SilentlyContinue)) { $mdMissing += 'adb' }
         if ($mdMissing.Count -gt 0) {
-            Result 'warn' 'mobile-dev' ("missing: " + ($mdMissing -join ' ') + " (SDK: $mdSdk) - re-run the installer: chezmoi state delete-bucket --bucket=scriptState; dot up")
+            Result 'warn' 'mobile-dev' ("missing: " + ($mdMissing -join ' ') + " (SDK: $mdSdk) - re-run the installer: chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1; dot up")
         } else {
             Result 'ok' 'mobile-dev' "sdkmanager and adb present ($mdSdk)"
         }
