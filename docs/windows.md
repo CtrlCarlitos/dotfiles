@@ -134,6 +134,13 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   rule from `netsh`, about 0.3 s together. The rule is still created and updated with the NetSecurity cmdlets,
   and whenever the cheap read cannot say "already current" (no rule, another subnet, or a Windows whose `netsh`
   labels are not English) (`scripts/lib/ps-adb-bridge.ps1`; `tests/adb_bridge_check_contract.sh`).
+- **Where the whole `dot up` goes.** A 3m10s run printed `Timings (dot up, 1m38s)`: the installer's clock began
+  at its first section mark, after the checks and the Node.js step, and nothing timed the pull, the init or the
+  apply. `dot up` now ends with `dot up took 3m10s: pull 4s, init 0s, apply 3m05s`, and the installer's clock
+  starts at `startup` with `WSL` and `Node.js` as their own sections. The two package listings at the top of the
+  installer no longer run as a background job (a second PowerShell start, about 2 s each: `winget list` took
+  2.7 s directly and 4.6 s through the job); `Invoke-DotNativeCapture` keeps the time cap
+  (`scripts/lib/ps-package-inventory.ps1`; `tests/dot_up_whole_run_timing_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.

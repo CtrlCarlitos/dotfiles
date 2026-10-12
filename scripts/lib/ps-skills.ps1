@@ -843,11 +843,20 @@ function Test-McpRegistered {
     return [bool](Select-String -LiteralPath $f -Pattern $pattern -Quiet)
 }
 
-# $null signals the lookup itself failed (claude missing, a non-zero exit, or invalid JSON) - the
-# caller must not read that the same as a genuinely empty list ("not installed"). Twin of
-# claude_superpowers_installs in scripts/lib/agent-skills.sh, which already made this distinction
-# (2026-10-11: a failed/hung `claude plugin list --json` read as "not installed" on a box with a
-# real user-scope install) - this Windows copy had not caught up.
+# $null signals the lookup itself failed (claude missing, a non-zero exit, invalid JSON, or a
+# hang) - the caller must not read that the same as a genuinely empty list ("not installed").
+# Twin of claude_superpowers_installs in scripts/lib/agent-skills.sh, which already made this
+# distinction and already bounds the call at 60s via net_timeout_tty (2026-10-11: a hung
+# `claude plugin list --json` read as "not installed" on a box with a real user-scope install,
+# and separately sat blocked in state T for 17+ minutes under a plain `timeout` wrapper - SIGTTIN
+# stopping a background-process-group command that still touches the tty). This Windows copy
+# caught up on the first distinction in #380, but shipped with no bound on the call at all - a
+# `dot upgrade --yes` on 2026-10-11 Windows logged a Claude Code "lookup failed" (rather than
+# hanging the whole run), proving this call CAN return quickly, but nothing capped it if it
+# didn't: the printed message already claimed "or timed out" for a timeout that did not exist
+# yet. A background job, not a plain Process.Start, because `claude` can resolve to a .ps1 (this
+# file's own test stub) as readily as an npm .cmd shim, and only PowerShell's own command
+# resolution (which a job's script block gets, same as `&` in the foreground) handles both.
 # The file first (Get-ClaudeSuperpowersInstallFromFile): Claude writes every install there with its
 # version, scope and projectPath, so the answer is instant and the CLI is asked only when the file
 # cannot say. -UserHome is for tests; it defaults to this user's home.
@@ -880,21 +889,29 @@ function Get-ClaudeSuperpowersUserVersion {
     return ''
 }
 function Get-ClaudeSuperpowersInstall {
-    param([string]$UserHome = $HOME)
+    param([int]$TimeoutSeconds = 60, [string]$UserHome = $HOME)
     $fromFile = Get-ClaudeSuperpowersInstallFromFile -UserHome $UserHome
     if ($null -ne $fromFile) { return @($fromFile) }
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $null }
-    $previous = $ErrorActionPreference
-    $text = ''
-    try {
+    $job = Start-Job -ScriptBlock {
         $ErrorActionPreference = 'Continue'
         # A script command that falls off the end without an explicit `exit` never touches
         # $LASTEXITCODE at all (it stays whatever it was, or - under Set-StrictMode - unset): reset
         # it first so a well-behaved success is never mistaken for "never ran".
         $global:LASTEXITCODE = 0
-        $text = ((& claude plugin list --json 2>$null) | ForEach-Object { "$_" }) -join "`n"
-    } catch { return $null } finally { $ErrorActionPreference = $previous }
-    if ($LASTEXITCODE -ne 0) { return $null }
+        $out = ((& claude plugin list --json 2>$null) | ForEach-Object { "$_" }) -join "`n"
+        [pscustomobject]@{ Text = $out; ExitCode = $LASTEXITCODE }
+    }
+    $text = ''
+    try {
+        if (-not (Wait-Job -Job $job -Timeout $TimeoutSeconds)) {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            return $null
+        }
+        $result = Receive-Job -Job $job -ErrorAction SilentlyContinue
+        if ($null -eq $result -or $result.ExitCode -ne 0) { return $null }
+        $text = [string]$result.Text
+    } catch { return $null } finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
     if (-not $text.Trim()) { return @() }
     try { $items = @($text | ConvertFrom-Json) } catch { return $null }
     $out = @()

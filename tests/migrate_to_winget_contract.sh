@@ -27,7 +27,7 @@ ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 [ -f "$repo_root/.chezmoitemplates/winget-packages" ] || fail ".chezmoitemplates/winget-packages is missing"
 [ "$(grep -c 'includeTemplate "winget-packages"' "$ps_t")" = "$(grep -c 'includeTemplate "choco-packages"' "$ps_t")" ] ||
     fail "installer: every group that renders choco packages must render its winget packages too"
-grep -Fq 'winget list --accept-source-agreements --disable-interactivity' "$ps_t" || fail "installer: one winget list inventory before installing"
+grep -Fq "'list', '--accept-source-agreements', '--disable-interactivity'" "$ps_t" || fail "installer: one winget list inventory before installing"
 grep -Fq 'winget install --id $env:WINGET_PKG --exact --source winget --silent' "$ps_t" || fail "installer: winget install of missing ids"
 grep -Fq '@extra' "$ps_t" || fail "installer: winget_args must reach winget install"
 # the Chocolatey inventory must stay a case-insensitive set: `$x = if (...) { $set }` turns it into
