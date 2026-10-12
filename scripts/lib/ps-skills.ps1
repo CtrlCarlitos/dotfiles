@@ -848,7 +848,41 @@ function Test-McpRegistered {
 # claude_superpowers_installs in scripts/lib/agent-skills.sh, which already made this distinction
 # (2026-10-11: a failed/hung `claude plugin list --json` read as "not installed" on a box with a
 # real user-scope install) - this Windows copy had not caught up.
+# The file first (Get-ClaudeSuperpowersInstallFromFile): Claude writes every install there with its
+# version, scope and projectPath, so the answer is instant and the CLI is asked only when the file
+# cannot say. -UserHome is for tests; it defaults to this user's home.
+function Get-ClaudeSuperpowersInstallFromFile {
+    param([string]$UserHome = $HOME)
+    $d = Read-JsonFileOrNull -Path (Join-Path (Get-ClaudePluginsDir -UserHome $UserHome) 'installed_plugins.json')
+    if ($null -eq $d) { return $null }
+    $plugins = if ($d.PSObject.Properties['plugins']) { $d.plugins } else { $d }
+    if ($null -eq $plugins -or $plugins -isnot [pscustomobject]) { return $null }
+    $out = @()
+    foreach ($prop in $plugins.PSObject.Properties) {
+        if ($prop.Name -notlike 'superpowers@*') { continue }
+        foreach ($e in @($prop.Value)) {
+            if ($null -eq $e) { continue }
+            $version = ''; if ($e.PSObject.Properties['version']) { $version = [string]$e.version }
+            $scope = ''; if ($e.PSObject.Properties['scope']) { $scope = [string]$e.scope }
+            $project = ''; if ($e.PSObject.Properties['projectPath']) { $project = [string]$e.projectPath }
+            $out += [pscustomobject]@{ Version = $version; Scope = $scope; ProjectPath = $project }
+        }
+    }
+    return $out
+}
+# Get-ClaudeSuperpowersUserVersion - the user-scope install's version (the one `dot upgrade`
+# updates); '' when there is none or the lookup failed.
+function Get-ClaudeSuperpowersUserVersion {
+    param([string]$UserHome = $HOME)
+    $installs = Get-ClaudeSuperpowersInstall -UserHome $UserHome
+    if ($null -eq $installs) { return '' }
+    foreach ($i in @($installs)) { if ($i.Scope -eq 'user') { return [string]$i.Version } }
+    return ''
+}
 function Get-ClaudeSuperpowersInstall {
+    param([string]$UserHome = $HOME)
+    $fromFile = Get-ClaudeSuperpowersInstallFromFile -UserHome $UserHome
+    if ($null -ne $fromFile) { return @($fromFile) }
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $null }
     $previous = $ErrorActionPreference
     $text = ''
@@ -891,8 +925,9 @@ function Format-SuperpowersVersionLine {
 # install mechanisms are four ways to fall behind while every update step reports success.
 # Read-only; every lookup degrades to "unknown" offline.
 function Write-SuperpowersReport {
-    param([string]$Glyph = '*')
-    $upstream = Get-SuperpowersLatestVersion
+    param([string]$Glyph = '*', [string]$Upstream)
+    # -Upstream: the caller already asked (the Claude Code step does); unset asks here.
+    $upstream = if ($PSBoundParameters.ContainsKey('Upstream')) { $Upstream } else { Get-SuperpowersLatestVersion }
     $label = 'unreachable'
     if ($upstream) { $label = "v$upstream" }
     Write-Host "$Glyph Superpowers versions (upstream: ${label}):" -ForegroundColor Yellow

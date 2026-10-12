@@ -76,6 +76,29 @@ pass
 grep -Fxq 'codex mcp get serena' "$tmp/cli.log" || fail "codex, no file: must fall back to the CLI probe"
 pass
 
+# D2. Superpowers installs for Claude Code: the same file answers the report and the update gate
+# (`claude plugin update` took 14 s on WSL, 2026-10-12, to say "already at the latest version")
+got="$(run "$home" claude_superpowers_installs)"
+[ "$got" = "$(printf '7.0.0\tuser\t\n6.2.0\tlocal\t/p\nrc=0')" ] || fail "claude_superpowers_installs (file): got '$got'"
+[ ! -s "$tmp/cli.log" ] || fail "claude_superpowers_installs: the file answered, no CLI call allowed (log: $(/bin/cat "$tmp/cli.log"))"
+[ "$(run "$home" claude_superpowers_user_version)" = "$(printf '7.0.0\nrc=0')" ] || fail "claude_superpowers_user_version: expected 7.0.0"
+run "$tmp/empty-home" claude_superpowers_installs >/dev/null
+grep -Fxq 'claude plugin list --json' "$tmp/cli.log" || fail "claude_superpowers_installs, no file: must fall back to the CLI (log: $(/bin/cat "$tmp/cli.log"))"
+[ "$(run "$tmp/empty-home" claude_superpowers_installs_file)" = "rc=2" ] || fail "claude_superpowers_installs_file, no file: expected 2 (unknown)"
+mkdir -p "$tmp/empty-home/.claude/plugins" && printf 'not json\n' >"$tmp/empty-home/.claude/plugins/installed_plugins.json"
+[ "$(run "$tmp/empty-home" claude_superpowers_installs_file)" = "rc=2" ] || fail "claude_superpowers_installs_file, unreadable JSON: expected 2 (unknown)"
+rm -rf "$tmp/empty-home/.claude"
+pass
+# the updaters gate the plugin update on it and give the two Superpowers refreshes their own marks
+ai_sh="$repo_root/scripts/update_ai_tools.sh"
+ai_ps1="$repo_root/scripts/update_ai_tools.ps1"
+require "$ai_sh" 'claude_superpowers_user_version'
+require "$ai_sh" "dot_timing_mark 'Superpowers (Codex)'"
+require "$ai_sh" "dot_timing_mark 'Superpowers (Claude Code)'"
+require "$ai_ps1" 'Get-ClaudeSuperpowersUserVersion'
+require "$ai_ps1" "Add-DotTimingMark -Name 'Superpowers (Codex)'"
+require "$ai_ps1" "Add-DotTimingMark -Name 'Superpowers (Claude Code)'"
+
 # E. the installer uses the probes; no bare CLI probe is left; Codex has sub-marks
 require "$tmpl" 'claude_marketplace_known superpowers-marketplace'
 require "$tmpl" 'claude_plugin_installed superpowers@superpowers-marketplace'
@@ -136,6 +159,11 @@ Write-Output ('mcp-codex-yes=' + (Test-McpRegistered -Agent codex -Server serena
 Write-Output ('mcp-codex-no=' + (Test-McpRegistered -Agent codex -Server maestro -UserHome $UserHome))
 $u = Test-McpRegistered -Agent claude -Server maestro -UserHome $EmptyHome
 Write-Output ('mcp-nofile-null=' + ($null -eq $u))
+$sp = @(Get-ClaudeSuperpowersInstallFromFile -UserHome $UserHome)
+Write-Output ('sp-installs=' + (($sp | ForEach-Object { "$($_.Version):$($_.Scope):$($_.ProjectPath)" }) -join ';'))
+Write-Output ('sp-user=' + (Get-ClaudeSuperpowersUserVersion -UserHome $UserHome))
+$u = Get-ClaudeSuperpowersInstallFromFile -UserHome $EmptyHome
+Write-Output ('sp-nofile-null=' + ($null -eq $u))
 PSEOF
     printf '{"mcpServers": {"maestro": {}}}\n' >"$home/.claude.json"
     ps_out="$(pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserHome "$(winpath "$home")" -EmptyHome "$(winpath "$tmp/empty-home")" 2>&1 | tr -d '\r' || true)"
@@ -143,6 +171,7 @@ PSEOF
     pexpect 'mk-known=True'; pexpect 'mk-other=False'; pexpect 'mk-nofile-null=True'
     pexpect 'pl-user=True'; pexpect 'pl-local=False'; pexpect 'pl-nofile-null=True'
     pexpect 'mcp-claude-yes=True'; pexpect 'mcp-claude-no=False'; pexpect 'mcp-codex-yes=True'; pexpect 'mcp-codex-no=False'; pexpect 'mcp-nofile-null=True'
+    pexpect 'sp-installs=7.0.0:user:;6.2.0:local:/p'; pexpect 'sp-user=7.0.0'; pexpect 'sp-nofile-null=True'
     pass
 else
     printf 'note: pwsh not installed - the PowerShell probes are not executed\n'
