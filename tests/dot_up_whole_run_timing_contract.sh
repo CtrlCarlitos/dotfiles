@@ -48,6 +48,15 @@ case "$zsh_out" in
     *) fail "zsh/bash: dot up must end with 'dot up took <total>: pull .., init .., apply ..' (got: ${zsh_out:0:300})" ;;
 esac
 
+# --- the slow-step marks: a dot up showed 'Node.js 1m01s' and 'agent toolkit 28s' with nothing inside ---
+for section in 'npm registry check' 'npm catalog tools' 'agent-browser setup' 'Serena' 'agent MCP wiring' 'Codex Superpowers' 'Codex MCP'; do
+    grep -Fq "Add-DotTimingMark -Name '$section'" "$tmpl" || fail "the installer must time '$section' on its own"
+done
+pass
+npm_check="$(grep -nF 'Test-Path -LiteralPath (Join-Path $npmGlobalRoot $npmTool)' "$tmpl" | head -n 1 | cut -d: -f1)"
+npm_ls="$(grep -nF 'npm ls -g --depth=0 $npmTool' "$tmpl" | head -n 1 | cut -d: -f1)"
+if [ -z "$npm_check" ] || [ -z "$npm_ls" ] || [ "$npm_check" -ge "$npm_ls" ]; then fail "a global tool's folder must be checked before the slow npm ls -g"; else pass; fi
+
 command -v pwsh >/dev/null 2>&1 || { printf 'SKIP (executed part needs PowerShell): pwsh not installed\n'; finish; exit 0; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
