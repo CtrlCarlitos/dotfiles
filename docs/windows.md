@@ -163,7 +163,7 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   (`Get-WingetUpgradeListing` in `scripts/lib/ps-common.ps1`; `tests/winget_listing_reuse_contract.sh`).
 - **Codex's desktop app is not a session.** `dot upgrade --yes` stopped two `codex.exe` "sessions" and still said
   "Live agent session(s): codex - deferring" (2026-10-12, twice): they were the Codex desktop app's own runtime
-  (an app-server and an exec-server under `AppData\Local\OpenAI\Codexin\<id>\`), which the app restarts, so
+  (an app-server and an exec-server under `AppData\Local\OpenAI\Codexbin\<id>\`), which the app restarts, so
   Codex's npm upgrade never ran. That folder is now classed with the app, not with the CLI sessions
   (`tests/dotupgrade_live_sessions_contract.sh`).
 
