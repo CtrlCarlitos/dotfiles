@@ -130,10 +130,20 @@ cat >"$bin/npx" <<'STUB'
 exit 0
 STUB
 # claude: `plugin list --json` prints $CLAUDE_PLUGINS_JSON; `--version` says 9.9.9 (current).
+# CLAUDE_PLUGIN_LIST_HANG sleeps first: on Linux pwsh resolves the bare `claude` command to
+# THIS executable bit file ahead of the claude.ps1 sibling below (unlike Windows pwsh, which
+# has no bare-executable match for an extensionless file and falls through to the .ps1) - the
+# hang simulation has to live in both stubs or section E's PowerShell timeout test only
+# exercises it on Windows.
 cat >"$bin/claude" <<'STUB'
 #!/bin/sh
 [ -n "${STUB_LOG:-}" ] && printf 'claude %s\n' "$*" >>"$STUB_LOG"
-if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then [ "${CLAUDE_PLUGIN_LIST_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"; exit 0; fi
+if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then
+    [ "${CLAUDE_PLUGIN_LIST_HANG:-0}" = 1 ] && sleep 30
+    [ "${CLAUDE_PLUGIN_LIST_FAIL:-0}" = 1 ] && exit 1
+    printf '%s\n' "${CLAUDE_PLUGINS_JSON:-[]}"
+    exit 0
+fi
 [ "${1:-}" = --version ] && printf '9.9.9 (Claude Code)\n'
 exit 0
 STUB
@@ -437,6 +447,7 @@ if ($args[0] -eq 'install' -and $args[1] -eq '--prefix') {
 PSSTUB
     cat >"$bin/claude.ps1" <<'PSSTUB'
 if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
+    if ($env:CLAUDE_PLUGIN_LIST_HANG -eq '1') { Start-Sleep -Seconds 30 }
     if ($env:CLAUDE_PLUGIN_LIST_FAIL -eq '1') { exit 1 }
     if ($env:CLAUDE_PLUGINS_JSON) { $env:CLAUDE_PLUGINS_JSON } else { '[]' }
     exit 0
@@ -485,6 +496,17 @@ $env:CLAUDE_PLUGIN_LIST_FAIL = '1'
 $failedLookup = Get-ClaudeSuperpowersInstall
 Write-Output ('claude-lookup-failed=' + ($null -eq $failedLookup))
 Remove-Item Env:\CLAUDE_PLUGIN_LIST_FAIL
+# A `claude plugin list --json` that hangs (2026-10-11 Bash incident the Windows twin shares:
+# claude_superpowers_installs in agent-skills.sh carries a 60 s net_timeout_tty for exactly
+# this) must not block `dot upgrade` forever - -TimeoutSeconds lets the test prove the bound
+# fires without actually waiting out the real 60 s default.
+$env:CLAUDE_PLUGIN_LIST_HANG = '1'
+$hangStart = Get-Date
+$hungLookup = Get-ClaudeSuperpowersInstall -TimeoutSeconds 2
+$hangElapsed = ((Get-Date) - $hangStart).TotalSeconds
+Remove-Item Env:\CLAUDE_PLUGIN_LIST_HANG
+Write-Output ('claude-lookup-hung=' + ($null -eq $hungLookup))
+Write-Output ('claude-lookup-hung-fast=' + ($hangElapsed -lt 10))
 Write-Output ('line-behind=' + (Format-SuperpowersVersionLine -Harness 'Codex' -Version '6.4.2' -Upstream '7.0.0' -Note 'the catalog offers 6.4.2'))
 Write-Output ('line-current=' + (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version '7.0.0' -Upstream '7.0.0' -Note 'n'))
 Write-Output ('line-missing=' + (Format-SuperpowersVersionLine -Harness 'Antigravity' -Version '' -Upstream '7.0.0'))
@@ -513,6 +535,8 @@ PSEOF
     pexpect 'playwright-absent=False'
     pexpect 'claude-installs=7.0.0:user:;6.2.0:project:/p/takumi'
     pexpect 'claude-lookup-failed=True'
+    pexpect 'claude-lookup-hung=True'
+    pexpect 'claude-lookup-hung-fast=True'
     pexpect 'line-behind=   Codex: 6.4.2 - behind upstream v7.0.0 (the catalog offers 6.4.2)'
     pexpect 'line-current=   OpenCode: 7.0.0 (current)'
     pexpect 'line-missing=   Antigravity: not installed'
