@@ -610,9 +610,27 @@ codex_superpowers_marketplace() {
 # "installed, enabled", "installed, disabled" or "not installed". `dot up` reads it before
 # `codex plugin add`: re-adding an installed plugin re-fetches it (an upgrade, ~15 s on WSL),
 # and `dot up` never upgrades.
+# codex_superpowers_cached_version - the newest superpowers version Codex has fetched into its
+# plugin cache: ${CODEX_HOME:-~/.codex}/plugins/cache/<marketplace>/superpowers/<version>/ with
+# a .codex-plugin manifest inside (the path `codex plugin add` prints as "Installed plugin
+# root"). A "<version>-<hash>" directory name counts as <version>. Empty when nothing is cached.
+codex_superpowers_cached_version() {
+    local d v
+    for d in "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/superpowers/*/; do
+        [ -d "$d/.codex-plugin" ] || continue
+        v="${d%/}"; v="${v##*/}"; v="${v%%-*}"
+        printf '%s\n' "$v"
+    done 2>/dev/null | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1
+}
+# The cache first: `codex plugin list` asks OpenAI's backend and took 19 s on a WSL `dot up`
+# (2026-10-12, the "Codex: Superpowers" sub-mark named it); a cached version answers in no time.
+# The CLI decides only when nothing is cached. `dot upgrade` re-adds the plugin regardless, so a
+# cache left behind by a removed plugin costs one skipped `dot up` add, repaired on the next sweep.
 codex_superpowers_installed_version() {
     command -v codex >/dev/null 2>&1 || return 1
     local v
+    v="$(codex_superpowers_cached_version)"
+    if [ -n "$v" ]; then printf '%s\n' "$v"; return 0; fi
     v="$(net_timeout 60 codex plugin list 2>/dev/null \
         | sed -nE 's/^superpowers@[^[:space:]]+[[:space:]]+installed(,[[:space:]]*[a-z]+)?[[:space:]]+([^[:space:]]+).*/\2/p' | head -n 1 || true)"
     [ -n "$v" ] || return 1
@@ -669,6 +687,20 @@ tool_current_flush() { # <label>
     [ -n "$TOOL_CURRENT_LIST" ] || return 0
     echo "   $1 current: ${TOOL_CURRENT_LIST#, }"
     TOOL_CURRENT_LIST=""
+}
+
+# apt_missing_packages <name...> - the names dpkg does not report as installed, space-separated
+# (empty: all present). `apt install -y` of an installed set is not a no-op: it upgrades to the
+# candidate version, which `dot up` promises never to do, and it printed "Installing ..." on
+# every run (2026-10-12). The installer asks this first and skips the install when nothing is
+# missing. No dpkg-query: every name reads as missing, and the install runs as before.
+apt_missing_packages() {
+    local n st
+    command -v dpkg-query >/dev/null 2>&1 || { printf '%s\n' "$*"; return 0; }
+    for n in "$@"; do
+        st="$(dpkg-query -W -f='${Status}' "$n" 2>/dev/null)" || st=""
+        case "$st" in *" installed") ;; *) printf '%s ' "$n" ;; esac
+    done | sed 's/ $//'
 }
 
 # github_latest_tag <owner/repo> - the newest release-looking tag (X.Y or X.Y.Z, after dropping a

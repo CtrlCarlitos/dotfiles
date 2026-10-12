@@ -125,6 +125,9 @@ if command -v npm &>/dev/null; then
         # Package name from .chezmoidata/agents.yaml, read at runtime like the
         # guardrail pin (chezmoi is a hard prerequisite: this script runs via
         # `chezmoi source-path`). No literal fallback - that would be a copy.
+        # Sub-marks: two WSL runs booked "NPM packages 13s" while the section takes ~4 s in
+        # isolation (2026-10-12); the next slow run names its part (Codex's sub-marks found 19 s).
+        dot_timing_mark 'NPM: codex'
         CODEX_PKG="$(chezmoi execute-template '{{ .agents.npm.codex }}' 2>/dev/null || true)"
         if [ -z "$CODEX_PKG" ]; then
             echo "   codex package name unavailable from chezmoi data - skipping"
@@ -135,6 +138,7 @@ if command -v npm &>/dev/null; then
     # The package catalog's npm globals (field `npm`: markdownlint-cli2), read at runtime
     # like the codex name. Updated only when installed and behind; `dot up` installs them.
     for npm_tool in $(chezmoi execute-template '{{ range .catalog.packages }}{{ if hasKey . "npm" }}{{ .npm }} {{ end }}{{ end }}' 2>/dev/null || true); do
+        dot_timing_mark "NPM: $npm_tool"
         npm ls -g --depth=0 "$npm_tool" >/dev/null 2>&1 || continue
         if npm_global_current "$npm_tool"; then
             echo "   $npm_tool is current ($CURRENT_NPM_VERSION)"
@@ -155,7 +159,11 @@ sp_upstream="$(superpowers_latest_version || true)"
 # install` is the same idempotent pattern used for Claude Code/OpenCode below.
 if command -v agy &>/dev/null; then
     echo "✨ Updating Superpowers (Antigravity)..."
-    if agy plugin install https://github.com/obra/superpowers &>/dev/null; then
+    # Already at upstream's release (its own plugin.json): no re-clone, same gate as Claude Code's.
+    agy_have="$(antigravity_superpowers_version || true)"
+    if [ -n "$agy_have" ] && [ "$agy_have" = "$sp_upstream" ]; then
+        echo "   Superpowers (Antigravity) is current ($agy_have)"
+    elif agy plugin install https://github.com/obra/superpowers &>/dev/null; then
         superpowers_refresh_line Antigravity "$(antigravity_superpowers_version || true)" "$sp_upstream" "behind upstream v$sp_upstream (re-run dot upgrade)"
     else
         echo "   Superpowers plugin update for Antigravity failed - skipping"

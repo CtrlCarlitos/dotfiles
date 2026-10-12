@@ -179,6 +179,22 @@ got="$(helper CODEX_ROWS="$row_absent" -- codex_superpowers_catalog_version)"
 got="$(helper CODEX_ROWS="" -- codex_superpowers_catalog_version)"
 [ -z "$got" ] || fail "codex_superpowers_catalog_version: no row must yield nothing, got '$got'"
 pass
+# the plugin cache answers first (`codex plugin list` took 19 s on a WSL dot up, 2026-10-12): a
+# cached <version>/.codex-plugin is the installed version, a "<version>-<hash>" directory counts
+# as <version>, and the CLI is not consulted
+codex_cache="$home/.codex/plugins/cache/test-marketplace/superpowers"
+mkdir -p "$codex_cache/6.4.2/.codex-plugin" "$codex_cache/6.3.0-abc123/.codex-plugin" "$codex_cache/not-a-version"
+got="$(helper CODEX_ROWS="$row_absent" -- codex_superpowers_installed_version)"
+[ "$got" = 6.4.2 ] || fail "codex_superpowers_installed_version: the cache must answer (newest cached version), got '$got'"
+got="$(helper -- codex_superpowers_cached_version)"
+[ "$got" = 6.4.2 ] || fail "codex_superpowers_cached_version: expected 6.4.2, got '$got'"
+rm -rf "$codex_cache/6.4.2"
+got="$(helper -- codex_superpowers_cached_version)"
+[ "$got" = 6.3.0 ] || fail "codex_superpowers_cached_version: a <version>-<hash> directory counts as <version>, got '$got'"
+rm -rf "$home/.codex"
+got="$(helper -- codex_superpowers_cached_version)"
+[ -z "$got" ] || fail "codex_superpowers_cached_version: no cache must yield nothing, got '$got'"
+pass
 
 if ! helper AGY_IMPORTS="superpowers" -- agy_superpowers_installed; then fail "agy_superpowers_installed: an imported superpowers must be found"; fi
 if helper AGY_IMPORTS="something-else" -- agy_superpowers_installed; then fail "agy_superpowers_installed: no superpowers import must fail"; fi
@@ -271,6 +287,12 @@ run_fn() { # <function>; stubs log to $tmp/stub.log, output to $tmp/fn.log
     HOME="$home" PATH="$bin:$PATH" STUB_LOG="$tmp/stub.log" NPM_FAKE_PREFIX="$tmp/prefix" timeout 60 bash "$harness" "$1" >"$tmp/fn.log" 2>&1 || fail "$1 exited non-zero: $(tail -3 "$tmp/fn.log")"
 }
 
+mkdir -p "$codex_cache/6.4.2/.codex-plugin"
+CODEX_ROWS="$row_absent" run_fn install_chatgpt_cli
+grep -Fq 'Superpowers for Codex is installed (6.4.2) - skipping the plugin add (dot upgrade updates it).' "$tmp/fn.log" ||
+    fail "dot up: the cached plugin must be reported installed without asking codex (got: $(cat "$tmp/fn.log"))"
+if grep -Fq 'codex plugin' "$tmp/stub.log"; then fail "dot up: with a cached plugin no 'codex plugin ...' call may run (codex saw: $(grep codex "$tmp/stub.log" | tr '\n' ' '))"; else pass; fi
+rm -rf "$home/.codex"
 CODEX_ROWS="$row_installed" run_fn install_chatgpt_cli
 grep -Fq 'Superpowers for Codex is installed (6.4.2) - skipping the plugin add (dot upgrade updates it).' "$tmp/fn.log" ||
     fail "dot up: an installed Codex plugin must be skipped with a line that says so (got: $(cat "$tmp/fn.log"))"
@@ -334,6 +356,7 @@ grep -Fq "install --prefix $oc_dir superpowers@github:obra/superpowers" "$tmp/np
     fail "dot upgrade must refresh Superpowers inside OpenCode's cache directory; npm saw: $(grep -F superpowers "$tmp/npm.log" | tr '\n' ' ')"
 if grep -Fq '.config/opencode' "$tmp/npm.log"; then fail "dot upgrade must not touch ~/.config/opencode for Superpowers any more"; else pass; fi
 grep -Fq 'Superpowers (OpenCode) upgraded to 7.0.0' "$out" || fail "an OpenCode refresh that moved the version must report it (got: $(grep -F OpenCode "$out" | tr '\n' ' '))"
+grep -Fq 'agy plugin install https://github.com/obra/superpowers' "$tmp/stub.log" || fail "Antigravity behind upstream (10.1.0 here): the plugin must be re-cloned"
 grep -Fq 'AI Tools Update Complete' "$out" || fail "the updater must reach its end (#114)"
 # the report (upstream from the git stub's tags: 10.1.0 is the newest release-looking tag there)
 printf '%s\n' 'aaa refs/tags/v6.4.2' 'bbb refs/tags/v7.0.0' >"$tags/obra_superpowers"
@@ -358,6 +381,7 @@ expect '   Codex: 6.4.2 (marketplace latest - upstream v7.0.0 is not published t
 pass
 # the three headers that printed nothing under them (2026-10-12) each get an outcome line
 expect '   Superpowers (Antigravity) is current (7.0.0)'
+if grep -Fq 'agy plugin install' "$tmp/stub.log"; then fail "Antigravity at upstream's release: no re-clone (agy saw: $(grep agy "$tmp/stub.log" | tr '\n' ' '))"; else pass; fi
 expect '   Superpowers (Codex) is 6.4.2 - the marketplace has not published v7.0.0 yet'
 expect '   Playwright Chromium is up to date'
 out="$tmp/updater-2b.log"
@@ -510,6 +534,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:USERPROFILE = $UserDir
 $env:HOME = $UserDir
+$env:CODEX_HOME = Join-Path $UserDir '.codex'
 . $Lib
 $env:CODEX_ROWS = 'superpowers@test-marketplace    installed, enabled  6.4.2    plugins~Plugin_abc'
 Write-Output ('codex-installed=' + (Get-CodexSuperpowersInstalledVersion))
@@ -517,6 +542,12 @@ Write-Output ('codex-catalog=' + (Get-CodexSuperpowersCatalogVersion))
 $env:CODEX_ROWS = 'superpowers@test-marketplace      not installed       6.4.2    plugins~Plugin_abc'
 Write-Output ('codex-absent-empty=' + ([string]::IsNullOrEmpty((Get-CodexSuperpowersInstalledVersion))))
 Write-Output ('codex-absent-catalog=' + (Get-CodexSuperpowersCatalogVersion))
+$cxCache = Join-Path $env:CODEX_HOME 'plugins/cache/test-marketplace/superpowers'
+New-Item -ItemType Directory -Force -Path (Join-Path $cxCache '6.4.2/.codex-plugin'), (Join-Path $cxCache '6.3.0-abc123/.codex-plugin'), (Join-Path $cxCache 'not-a-version') | Out-Null
+Write-Output ('codex-cached=' + (Get-CodexSuperpowersInstalledVersion))
+Remove-Item -Recurse -Force (Join-Path $cxCache '6.4.2')
+Write-Output ('codex-cached-hash=' + (Get-CodexSuperpowersCachedVersion))
+Remove-Item -Recurse -Force $env:CODEX_HOME
 $env:AGY_IMPORTS = 'superpowers'
 Write-Output ('agy-installed=' + (Test-AgySuperpowersInstalled))
 $env:AGY_IMPORTS = 'other'
@@ -579,6 +610,8 @@ PSEOF
     pexpect 'codex-catalog=6.4.2'
     pexpect 'codex-absent-empty=True'
     pexpect 'codex-absent-catalog=6.4.2'
+    pexpect 'codex-cached=6.4.2'
+    pexpect 'codex-cached-hash=6.3.0'
     pexpect 'agy-installed=True'
     pexpect 'agy-absent=False'
     pexpect 'antigravity-version=7.0.0'
