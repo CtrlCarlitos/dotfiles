@@ -173,11 +173,13 @@ function Test-DevTmpPathSafe {
 # not sessions kept deferring upgrades: Codex's shared app-server daemon (it runs
 # its OWN release copy under ~\.codex\packages\app-server-daemon\, not the npm-global CLI
 # the upgrade replaces) and Claude Desktop (an Electron app, ~10 claude.exe processes under
-# AnthropicClaude\; it is not Claude Code). A process whose path cannot be read (an
+# AnthropicClaude\; it is not Claude Code) and the Codex desktop app's own runtime (an app-server and
+# an exec-server codex.exe under ~\AppData\Local\OpenAI\Codex\bin\<id>\, 2026-10-12: stopping them
+# as "live sessions" only made the app start them again, so Codex was deferred on every run). A process whose path cannot be read (an
 # elevated process seen from a normal shell) still counts: when in doubt, defer.
 $script:NonSessionPathPattern = @{
     claude   = @('\\AnthropicClaude\\')
-    codex    = @('\\\.codex\\packages\\app-server-daemon\\', '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)')
+    codex    = @('\\\.codex\\packages\\app-server-daemon\\', '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)', '\\AppData\\Local\\OpenAI\\Codex\\')
     opencode = @('\\@opencode-ai?desktop\\', '\\AppData\\Local\\OpenCode\\')
 }
 
@@ -193,7 +195,7 @@ $script:NonSessionPathPattern = @{
 # app in this list, so winget upgrades it the same way regardless of what the tray offers.
 $script:AgentDesktopApp = @(
     [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; UpgradeId = 'Anthropic.Claude' }
-    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)';            Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
+    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)|\\AppData\\Local\\OpenAI\\Codex\\'; Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
     [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; UpgradeId = 'Google.Antigravity' }
     [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; UpgradeId = '' }
     [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; UpgradeId = 'SST.OpenCodeDesktop' }

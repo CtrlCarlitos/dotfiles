@@ -161,6 +161,11 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   Windows' installed-apps list before `winget list --id` is asked; and a sweep that installed nothing, printed no
   table and no blocked count is not listed again (any other sweep still is)
   (`Get-WingetUpgradeListing` in `scripts/lib/ps-common.ps1`; `tests/winget_listing_reuse_contract.sh`).
+- **Codex's desktop app is not a session.** `dot upgrade --yes` stopped two `codex.exe` "sessions" and still said
+  "Live agent session(s): codex - deferring" (2026-10-12, twice): they were the Codex desktop app's own runtime
+  (an app-server and an exec-server under `AppData\Local\OpenAI\Codexin\<id>\`), which the app restarts, so
+  Codex's npm upgrade never ran. That folder is now classed with the app, not with the CLI sessions
+  (`tests/dotupgrade_live_sessions_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
