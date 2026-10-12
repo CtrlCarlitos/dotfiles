@@ -2096,6 +2096,7 @@ install_claude_cli() {
         # on a fresh machine. -s user: the default scope (local) is private to
         # the installer's own working directory, invisible from any project.
         if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Claude Code' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user maestro -- maestro mcp
         fi
         # agent-device MCP registration for Claude Code lives HERE too, same
@@ -2110,6 +2111,7 @@ install_claude_cli() {
         # also keeps the CLI's own "Added ... / File modified" lines off the
         # terminal: one dotfiles line on success, the raw output on failure.
         if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Claude Code' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user agent-device -- agent-device mcp
         fi
 {{- end }}
@@ -2629,6 +2631,7 @@ install_chatgpt_cli() {
         # install_mobile_dev() (which main() runs before codex exists on a
         # fresh machine). Codex has no scope flag: one global config.toml.
         if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Codex' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add maestro -- maestro mcp
         fi
         # agent-device's Codex registration lives HERE too, same reason as
@@ -2636,6 +2639,7 @@ install_chatgpt_cli() {
         # mcp_add_quiet: same WSL tty-stop hang and same quiet output as the
         # Claude Code registration above.
         if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Codex' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add agent-device -- agent-device mcp
         fi
 {{- end }}
