@@ -28,7 +28,7 @@ if printf '%s\n' "$rec" | grep -q '^      choco:'; then fail "catalog: docker-de
 printf '%s\n' "$rec" | grep -Fq 'cask: docker' || fail "catalog: macOS keeps the docker cask"
 grep -Fq 'winget install --id Docker.DockerDesktop --exact --source winget' "$ps_t" || fail "installer: Docker Desktop must be installed through winget"
 if grep -Eq 'choco (uninstall|install)[^\n]*docker-desktop' "$ps_t"; then fail "installer: must never install or uninstall Chocolatey's docker-desktop itself"; fi
-awk '/chocoDockerList -match/{a=NR} /winget install --id Docker.DockerDesktop/{b=NR} END{exit !(a && b && a<b)}' "$ps_t" ||
+awk '/Test-DotChocoPackage .docker-desktop./{a=NR} /winget install --id Docker.DockerDesktop/{b=NR} END{exit !(a && b && a<b)}' "$ps_t" ||
     fail "installer: a Chocolatey copy must be detected before any winget install"
 pass
 
