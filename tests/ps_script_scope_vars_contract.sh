@@ -143,6 +143,9 @@ function node { 'v99.0.0' }
 # npm reports an older version than the registry, so the upgrade is due (once).
 function npm { if ($args[0] -eq 'view') { '99.0.0' } else { '1.0.0' } }
 function Invoke-Quietly { param($Description, $Action) $script:calls++ }
+# the timing library (inlined ahead of these functions in the installer) with its state
+function Add-DotTimingMark { param($Name) $script:DotTimingLast = $Name }
+$script:DotTimingLast = ''
 if ($init) { Invoke-Expression $init }
 Invoke-Expression $fn
 try { Install-Node; Install-Node; "OK upgrades=$script:calls" } catch { "FAIL $($_.Exception.Message)" }

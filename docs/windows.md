@@ -141,6 +141,10 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   installer no longer run as a background job (a second PowerShell start, about 2 s each: `winget list` took
   2.7 s directly and 4.6 s through the job); `Invoke-DotNativeCapture` keeps the time cap
   (`scripts/lib/ps-package-inventory.ps1`; `tests/dot_up_whole_run_timing_contract.sh`).
+  The first run with those marks showed `Node.js 1m01s` (the npm registry check and the global-tool check; the
+  same commands take about 4 s on a fast link) and `agent toolkit 28s` / `Codex 15s` on runs that install nothing,
+  so the npm registry check, the npm catalog tools, the agent-browser setup, Serena, the agent MCP wiring and the
+  two Codex steps are timed on their own, and a global npm tool's folder is checked before `npm ls -g`.
 - **AI tools run side by side.** The AI-tool half of `dot upgrade` took 1m43s because its steps ran one after
   another (Playwright 18 s, agent-browser 13 s, Serena 13 s, Superpowers 12 s, Claude Code 9 s, Superpowers for
   OpenCode 7 s), each only waiting on the network. Playwright with agent-browser (it reuses Playwright's Chromium),
