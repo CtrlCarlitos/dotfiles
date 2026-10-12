@@ -166,8 +166,12 @@ if ($skipPackageSweeps) {
     if (@($defer) -contains 'opencode') { $wingetHold += 'SST.opencode' }
     # Claude Desktop and Claude Code share the process name claude.exe, and its installer closes
     # claude.exe (Chocolatey's force-killed every one, Claude Code sessions included). While any
-    # runs, Claude Desktop waits for the next run - the same rule the choco sweep keeps.
-    if (@(Get-Process claude -ErrorAction SilentlyContinue).Count -gt 0) {
+    # OTHER one runs, Claude Desktop waits for the next run - the same rule the choco sweep keeps.
+    # $ancestorIds excludes THIS shell's own ancestry: a `dot upgrade` run from a Claude Code
+    # session is itself a claude.exe, and counting it held Claude Desktop out of every single
+    # run regardless of whether Claude Desktop (or any other session) was actually open
+    # (2026-10-11) - the live-session scan above already offered to close everything else.
+    if (@(Get-Process claude -ErrorAction SilentlyContinue | Where-Object { $ancestorIds -notcontains $_.Id }).Count -gt 0) {
         $wingetHold += 'Anthropic.Claude'
         Write-Host "  Claude Desktop held out of this sweep - a claude.exe is running and its installer closes every claude.exe (Claude Code sessions included). Close them and re-run to take it." -ForegroundColor Yellow
     }

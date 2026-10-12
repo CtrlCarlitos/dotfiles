@@ -18,10 +18,11 @@ clickable link, here).
 `Install-MobileDev` (in `run_onchange_install_packages.ps1.tmpl`) installs a
 standalone JDK 17+, the Android SDK command-line tools, platform-tools, the
 emulator, a default Pixel-like AVD, and scrcpy, then adds a Windows Firewall
-rule scoped to the WSL vEthernet subnet for the ADB bridge. It warns rather
-than aborts when Windows Hypervisor Platform (WHPX) is disabled, and asks
-for explicit confirmation before accepting the Android SDK licenses and
-before downloading the multi-GB system image.
+rule scoped to the WSL vEthernet subnet for the ADB bridge. It asks for
+explicit confirmation - up front, alongside the Android SDK licenses and the
+system-image download - before enabling Windows Hypervisor Platform (WHPX)
+when it is disabled; declining leaves the Android emulator without hardware
+acceleration and re-asks on the next `dot up`.
 
 The ADB server itself is never started or registered as a service - run it
 yourself, each session, before using Maestro/agent-device from WSL:
