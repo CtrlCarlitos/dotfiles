@@ -529,6 +529,12 @@ function Stop-AgentProcess {
     if ($ResetTerminal) { $null = Reset-AgentTerminal -ProcessId $Process.Id }
     $resetSeconds = $watch.Elapsed.TotalSeconds - $windowSeconds
     Stop-ProcessTree -Id $Process.Id
+    # Stop-Process -Force signals termination but does not wait for it: `dot upgrade` printed
+    # "Stopped 2 process(es); re-scanning" and the live-session check right after it still found
+    # one of those same codex processes, because the kill had been issued but had not finished
+    # (2026-10-12). Give it a bounded moment to actually disappear before reporting success.
+    $killDeadline = (Get-Date).AddSeconds(3)
+    while ((Get-Process -Id $Process.Id -ErrorAction SilentlyContinue) -and (Get-Date) -lt $killDeadline) { Start-Sleep -Milliseconds 200 }
     $treeSeconds = $watch.Elapsed.TotalSeconds - $windowSeconds - $resetSeconds
     $script:LastStopDetail = ('window {0:N1}s, terminal reset {1:N1}s, process tree {2:N1}s' -f $windowSeconds, $resetSeconds, $treeSeconds)
     return $true

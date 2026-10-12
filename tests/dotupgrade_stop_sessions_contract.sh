@@ -374,6 +374,33 @@ PSEOF
     expect 'with=reset:77,tree'
     expect 'without=tree'
     for code in '?1000l' '?1006l' '?1004l' '?2004l' '<99u' '?25h'; do expect "seq-$code=True"; done
+
+    # Stop-Process -Force signals termination but does not confirm it: `dot upgrade` reported
+    # "Stopped N process(es); re-scanning" and the very next live-session check still found one
+    # it had just "stopped" (2026-10-12). Stop-AgentProcess must poll, bounded, until the
+    # process is actually gone before it reports success.
+    cat >"$tmp/wait.ps1" <<'PSEOF'
+param([string]$Lib)
+Set-StrictMode -Version Latest
+. $Lib
+function Stop-ProcessTree { param([int]$Id) }
+$script:getProcessCalls = 0
+function Get-Process {
+    param([int]$Id, [string]$ErrorAction)
+    $script:getProcessCalls++
+    if ($script:getProcessCalls -lt 3) { return [pscustomobject]@{ Id = $Id } }
+    return $null
+}
+function Start-Sleep { param([int]$Milliseconds) }   # no real delay in the test
+$proc = [pscustomobject]@{ ProcessName = 'codex'; Id = 88 }
+$proc | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value { return $false }
+$result = Stop-AgentProcess -Process $proc
+Write-Output ('result=' + $result)
+Write-Output ('polls=' + $script:getProcessCalls)
+PSEOF
+    out="$(pwsh -NoProfile -File "$(winpath "$tmp/wait.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-common.ps1")" 2>&1 | tr -d '\r')"
+    expect 'result=True'
+    expect 'polls=3'
 else
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'
 fi
