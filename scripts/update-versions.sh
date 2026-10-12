@@ -20,6 +20,18 @@ parse_maestro_sha256() { # stdin = homebrew-tap Formula/maestro.rb content
     sed -n 's/^ *sha256 "\([^"]*\)"$/\1/p'
 }
 
+# lychee/vale pin writer (section 2d below): the three keys of one tool move together. Above the
+# guard so tests/release_tool_pins_contract.sh can run the REAL rewrite on a fixture.
+release_tool_pin_write() { # <name> <version> <sha256 x86_64> <sha256 aarch64> <data file>
+    local tmp_data
+    tmp_data="$(mktemp)"
+    sed -E -e "s|^  $1_version: .*|  $1_version: \"$2\"|" \
+           -e "s|^  $1_sha256_x86_64: .*|  $1_sha256_x86_64: \"$3\"|" \
+           -e "s|^  $1_sha256_aarch64: .*|  $1_sha256_aarch64: \"$4\"|" \
+           "$5" > "$tmp_data"
+    mv "$tmp_data" "$5"
+}
+
 # Sourcing guard: a test sources this file (`. scripts/update-versions.sh`) to
 # reach the functions above without running the network-fetching,
 # file-mutating main flow below (and without inheriting this script's `set
@@ -191,6 +203,43 @@ else
         echo "  Maestro -> $MAESTRO_LATEST ($MAESTRO_SHA)"
     fi
 fi
+
+# 2d. lychee and vale (modern_cli docs tooling): pinned Linux release tarballs for
+# both architectures, rendered by the installer and followed by `dot upgrade`
+# (release_tool_pin_sync, lib/agent-skills.sh). Until 2026-10-11 the pins were
+# literals in the template and nothing moved them. The newest tag comes from
+# github_latest_tag (git ls-remote, no API auth); the digests are computed from a
+# fresh download of each asset, since neither project publishes a hashes file in
+# one shape. A pin is left unchanged unless BOTH arch digests resolve.
+RT_SHA="$(sha256_cmd)"
+for rt in lychee vale; do
+    echo "Fetching latest $rt release..."
+    rt_latest="$(github_latest_tag "$(release_tool_repo "$rt")")" || rt_latest=""
+    if [ -z "$rt_latest" ]; then
+        echo "Warning: could not resolve the latest $rt release - pin left unchanged."
+        continue
+    fi
+    if [ -z "$RT_SHA" ]; then
+        echo "Warning: no sha256 tool found - $rt pin left unchanged."
+        continue
+    fi
+    rt_tmp="$(mktemp -d)"
+    rt_x86=""
+    rt_arm=""
+    if net_timeout 120 curl -fsSLo "$rt_tmp/x86.tar.gz" "$(release_tool_url "$rt" "$rt_latest" x86_64)"; then
+        rt_x86="$($RT_SHA "$rt_tmp/x86.tar.gz" | cut -d' ' -f1)"
+    fi
+    if net_timeout 120 curl -fsSLo "$rt_tmp/arm.tar.gz" "$(release_tool_url "$rt" "$rt_latest" aarch64)"; then
+        rt_arm="$($RT_SHA "$rt_tmp/arm.tar.gz" | cut -d' ' -f1)"
+    fi
+    rm -rf "$rt_tmp"
+    if [ -z "$rt_x86" ] || [ -z "$rt_arm" ]; then
+        echo "Warning: $rt $rt_latest is missing an x86_64 or aarch64 asset - pin left unchanged."
+        continue
+    fi
+    release_tool_pin_write "$rt" "$rt_latest" "$rt_x86" "$rt_arm" .chezmoidata.yaml
+    echo "  $rt -> $rt_latest (x86_64 + aarch64 digests pinned)"
+done
 
 # 3. Refresh .chezmoiexternal.toml pins: resolve each external repo's
 # default-branch SHA (git ls-remote - no API auth), rewrite the

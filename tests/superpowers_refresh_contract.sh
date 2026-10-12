@@ -366,7 +366,7 @@ up_harness="$tmp/dotupgrade-fns.sh"
 {
     printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail' ". \"$lib\""
     awk '/^vscode_extensions_report\(\) \{/{f=1} f{print} f && /^\}$/{exit}' "$up_sh"
-    awk '/^unmanaged_tool_repo\(\) \{/{f=1} f{print} /^unmanaged_present\(\) \{/{g=1} g && /^\}$/{exit}' "$up_sh"
+    awk '/^unmanaged_present\(\) \{/{f=1} f{print} f && /^\}$/{exit}' "$up_sh"
     printf '%s\n' '"$@"'
 } >"$up_harness"
 grep -q 'unmanaged_present() {' "$up_harness" || fail "dotupgrade.sh: the unmanaged helpers were not extracted"
@@ -382,7 +382,9 @@ printf '%s' "$got" | grep -Fq 'VS Code extension update did not finish cleanly (
 printf '%s' "$got" | grep -Fq 'could not reach the marketplace' || fail "a failed extension update must show its output"
 pass
 
-# A PATH of stubs plus the coreutils the functions need, so the host's own delta/dust/procs cannot leak in.
+# A PATH of stubs plus the coreutils the function needs, so the host's own tools cannot leak in.
+# delta and dust are upgraded by `dot upgrade` itself since 2026-10-11 (github_tool_sync), so
+# the note no longer names them, lagging or not.
 sys="$tmp/sys"
 mkdir -p "$sys"
 for c in bash sh grep sed sort head tail cat tr wc paste mktemp rm mkdir uname awk cut timeout env printf dirname basename readlink; do
@@ -390,14 +392,10 @@ for c in bash sh grep sed sort head tail cat tr wc paste mktemp rm mkdir uname a
 done
 printf '#!/bin/sh\nprintf "delta 0.19.2\\n"\n' >"$sys/delta"
 printf '#!/bin/sh\nprintf "Dust 1.2.6\\n"\n' >"$sys/dust"
-cp "$bin/git" "$sys/git"
-chmod +x "$sys/delta" "$sys/dust" "$sys/git"
-printf '%s\n' 'a refs/tags/0.19.2' 'b refs/tags/0.20.1' 'c refs/tags/windows-strip-binary' >"$tags/dandavison_delta"
-printf '%s\n' 'a refs/tags/v1.2.5' 'b refs/tags/v1.2.6' >"$tags/bootandy_dust"
-got="$(HOME="$home" PATH="$sys" GIT_TAGS_DIR="$tags" bash "$up_harness" unmanaged_present)"
-[ "$got" = 'delta 0.19.2 (0.20.1 available), dust' ] || fail "unmanaged_present: a lagging tool names the newer release, a current one stays bare; got '$got'"
-got="$(HOME="$home" PATH="$sys" GIT_TAGS_DIR=/nonexistent bash "$up_harness" unmanaged_present)"
-[ "$got" = 'delta, dust' ] || fail "unmanaged_present offline: bare names, no false lag; got '$got'"
+printf '#!/bin/sh\nexit 1\n' >"$sys/dpkg"
+chmod +x "$sys/delta" "$sys/dust" "$sys/dpkg"
+got="$(HOME="$home" PATH="$sys" bash "$up_harness" unmanaged_present)"
+[ -z "$got" ] || fail "unmanaged_present: tools dot upgrade keeps current must not be named; got '$got'"
 pass
 
 # --- E. PowerShell twins, executed under pwsh -----------------------------------------------------

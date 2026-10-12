@@ -365,12 +365,12 @@ catalog:
       winget: lycheeverse.lychee
       winget_args: "--scope machine"
       choco_was: lychee
-      note: "broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
+      note: "broken-link checker for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified (pin in .chezmoidata.yaml versions.*, moved by the weekly auto-update, followed by dot upgrade)"
     - id: vale
       group: modern_cli
       brew: vale
       choco: vale
-      note: "prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified"
+      note: "prose and style linter for docs (CtrlCarlitos/skills#3); apt: not in the archive - pinned GitHub release tarball by procedure, checksum-verified (pin in .chezmoidata.yaml versions.*, moved by the weekly auto-update, followed by dot upgrade)"
     - id: pstop
       group: modern_cli
       winget: marlocarlo.pstop

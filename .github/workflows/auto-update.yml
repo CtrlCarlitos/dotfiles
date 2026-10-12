@@ -59,6 +59,9 @@ jobs:
               Windows floats via Chocolatey)
             - **agent-guardrails** (stable GitHub release only; all supported
               platform binaries and `SHA256SUMS` must be present)
+            - **lychee and vale** (Linux release tarballs: newest tag via
+              `git ls-remote`, both architecture digests recomputed; `dot upgrade`
+              reinstalls at the pin)
 
             *(Node.js remains pinned to v24 - see the comment in
             scripts/update-versions.sh for where the pin lives.)*

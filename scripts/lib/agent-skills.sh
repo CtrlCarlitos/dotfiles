@@ -786,6 +786,135 @@ github_tool_sync() {
     return 0
 }
 
+#-------------------------------------------------------------------------------
+# Pinned release tools: lychee and vale (modern_cli docs tooling). On Linux they
+# are release tarballs with no apt package; the installer verifies them against
+# the pins in .chezmoidata.yaml (versions.<tool>_version, _sha256_x86_64,
+# _sha256_aarch64). Until 2026-10-11 those were literals inside the template:
+# nothing bumped them and `dot upgrade` only listed the two names. Now
+# scripts/update-versions.sh moves the pins (the weekly auto-update PR) and
+# `dot upgrade` reinstalls at the pin. On macOS and Windows both come from brew,
+# winget and choco, which the upgrade sweep covers.
+# tests/release_tool_pins_contract.sh executes these against fixtures.
+#
+#   release_tool_repo <name>                 lycheeverse/lychee | errata-ai/vale
+#   release_tool_url <name> <version> <arch> the Linux tarball (x86_64|aarch64;
+#                                            amd64/arm64 accepted); the installer
+#                                            template writes the same URL shape
+#   release_tool_member <name> <arch>        the binary's path inside the tarball
+#   release_tool_pin_sync <name> <pin> <sha> <sudo-cmd>   (`dot upgrade`)
+#     absent: nothing; installed outside GITHUB_TOOL_BIN (/usr/local/bin): not
+#     ours, left alone; at the pin: "is current", naming a newer upstream release
+#     and the remedy; otherwise download (stall-guarded), verify, reinstall.
+#     Always returns 0.
+#   release_tool_pins_upgrade <sudo-cmd>     both tools, pins read from chezmoi
+#-------------------------------------------------------------------------------
+release_tool_arch() {
+    case "${1:-$(uname -m)}" in
+        x86_64 | amd64) echo x86_64 ;;
+        aarch64 | arm64) echo aarch64 ;;
+        *) return 1 ;;
+    esac
+}
+release_tool_repo() {
+    case "$1" in
+        lychee) echo lycheeverse/lychee ;;
+        vale) echo errata-ai/vale ;;
+        *) return 1 ;;
+    esac
+}
+release_tool_url() {
+    local arch
+    arch="$(release_tool_arch "$3")" || return 1
+    case "$1" in
+        lychee) echo "https://github.com/lycheeverse/lychee/releases/download/lychee-v$2/lychee-$arch-unknown-linux-gnu.tar.gz" ;;
+        vale)
+            if [ "$arch" = x86_64 ]; then
+                echo "https://github.com/errata-ai/vale/releases/download/v$2/vale_$2_Linux_64-bit.tar.gz"
+            else
+                echo "https://github.com/errata-ai/vale/releases/download/v$2/vale_$2_Linux_arm64.tar.gz"
+            fi
+            ;;
+        *) return 1 ;;
+    esac
+}
+release_tool_member() {
+    local arch
+    arch="$(release_tool_arch "$2")" || return 1
+    case "$1" in
+        lychee) echo "lychee-$arch-unknown-linux-gnu/lychee" ;;
+        vale) echo vale ;;
+        *) return 1 ;;
+    esac
+}
+release_tool_pin_sync() {
+    local name="$1" pin="$2" sha="$3" run_as="$4" path bindir have arch url member tmp sha_cmd latest note=""
+    path="$(command -v "$name" 2>/dev/null)" || return 0
+    bindir="${GITHUB_TOOL_BIN:-/usr/local/bin}"
+    have="$("$name" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)" || have=""
+    if [ "$path" != "$bindir/$name" ]; then
+        echo "   $name ${have:-?} at $path is not the dotfiles' install - left alone"
+        return 0
+    fi
+    if [ "$have" = "$pin" ]; then
+        latest="$(github_latest_tag "$(release_tool_repo "$name")" 2>/dev/null || true)"
+        if [ -n "$latest" ] && [ "$latest" != "$pin" ]; then
+            note="; upstream $latest - the weekly auto-update PR bumps the pin"
+        fi
+        echo "   $name is current ($pin$note)"
+        return 0
+    fi
+    if ! arch="$(release_tool_arch)"; then
+        echo "   $name: no Linux asset for $(uname -m) - left at ${have:-?}"
+        return 0
+    fi
+    url="$(release_tool_url "$name" "$pin" "$arch")"
+    member="$(release_tool_member "$name" "$arch")"
+    sha_cmd="$(sha256_cmd)"
+    if [ -z "$sha_cmd" ]; then
+        echo "   Warning: $name: no SHA-256 tool found - cannot verify the download, still ${have:-?}"
+        return 0
+    fi
+    if ! tmp="$(mktemp -d)"; then
+        echo "   Warning: $name: could not create a temporary directory - still ${have:-?}"
+        return 0
+    fi
+    echo "   Reinstalling $name at pin $pin (installed ${have:-?})..."
+    # shellcheck disable=SC2086  # $run_as is "sudo", "dot_sudo" or empty (root): word-split on purpose
+    if ! curl -fsSL --connect-timeout 30 --speed-limit 10240 --speed-time 60 -o "$tmp/release.tar.gz" "$url"; then
+        echo "   Warning: $name download failed or stalled - still ${have:-?}"
+    elif ! printf '%s  %s\n' "$sha" "$tmp/release.tar.gz" | $sha_cmd -c - >/dev/null 2>&1; then
+        echo "   Warning: $name checksum verification failed - not installed, still ${have:-?} (pin stale? re-run scripts/update-versions.sh)"
+    elif ! tar -xzf "$tmp/release.tar.gz" -C "$tmp" "$member" 2>/dev/null; then
+        echo "   Warning: $name: $member not found in the release archive - still ${have:-?}"
+    elif ! $run_as install "$tmp/$member" "$bindir/$name"; then
+        echo "   Warning: $name install failed - still ${have:-?}"
+    else
+        echo "   $name reinstalled at pin $pin (was ${have:-?})"
+    fi
+    rm -rf "$tmp"
+    return 0
+}
+release_tool_pins_upgrade() {
+    local run_as="$1" arch name pin sha
+    arch="$(release_tool_arch)" || return 0
+    if ! command -v chezmoi >/dev/null 2>&1; then
+        echo "   lychee, vale: chezmoi not found - pins unknown, left as they are"
+        return 0
+    fi
+    for name in lychee vale; do
+        command -v "$name" >/dev/null 2>&1 || continue
+        pin="$(chezmoi execute-template "{{ .versions.${name}_version }}" 2>/dev/null || true)"
+        sha="$(chezmoi execute-template "{{ .versions.${name}_sha256_${arch} }}" 2>/dev/null || true)"
+        if [ -z "$pin" ] || [ -z "$sha" ]; then
+            echo "   $name: pin unavailable from chezmoi data - left as is"
+            continue
+        fi
+        release_tool_pin_sync "$name" "$pin" "$sha" "$run_as"
+    done
+    return 0
+}
+
 # superpowers_latest_version - obra/superpowers' newest release (empty: unreachable).
 superpowers_latest_version() { github_latest_tag obra/superpowers; }
 
