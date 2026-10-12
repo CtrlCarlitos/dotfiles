@@ -8,7 +8,9 @@ set -euo pipefail
 # orphan holding Chocolatey's global mutex. Contracts:
 #   1. Package inventory is ONE batched local `choco list --limit-output`
 #      call (single process spawn), never a per-package probe.
-#   2. The batched call is timeout-capped like every network/install step.
+#   2. The batched call is timeout-capped like every network/install step
+#      (Invoke-DotNativeCapture: a plain process with a wait limit - a job
+#      cost a second PowerShell start, about 2 s, for a 1.7 s listing).
 #   3. A failed/timed-out batch degrades to nupkg-presence checks (imperfect:
 #      broken packages keep their nupkg - wiztree, live - but the registry
 #      fuzzy-skip catches those apps anyway).
@@ -55,17 +57,17 @@ render_to "$rendered" ps1 '{"core": true}'
 [ -s "$rendered" ] || fail "ps1 installer did not render"
 
 # Batched inventory, present exactly once and capped.
-inv_line="$(grep -nF '$chocoListOutput = Invoke-WithTimeout' "$rendered" | head -1)"
+inv_line="$(grep -nF '$chocoListOutput = @()' "$rendered" | head -1)"
 [ -n "$inv_line" ] || fail "rendered installer: batched choco inventory missing"
-if grep -Fq 'choco list --limit-output' "$rendered" && grep -Fq 'batched choco list' "$rendered"; then
+if grep -Fq "Invoke-DotNativeCapture -FilePath 'choco'" "$rendered" && grep -Fq "'list', '--limit-output'" "$rendered" && grep -Fq 'batched choco list' "$rendered"; then
     pass
 else
-    fail "rendered installer: the batch must run choco list --limit-output under Invoke-WithTimeout"
+    fail "rendered installer: the batch must run choco list --limit-output through Invoke-DotNativeCapture"
 fi
 
 iwt_start="$(grep -nF 'function Invoke-WithTimeout' "$rendered" | head -1 | cut -d: -f1)"
 iwt_end="$(awk -v s="$iwt_start" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
-inv_start="$(grep -nF '$chocoListOutput = Invoke-WithTimeout' "$rendered" | head -1 | cut -d: -f1)"
+inv_start="$(grep -nF '$chocoListOutput = @()' "$rendered" | head -1 | cut -d: -f1)"
 inv_end="$(awk -v s="$inv_start" 'NR >= s && $0 == "}"{print NR; exit}' "$rendered")"
 loop_start="$(grep -nF 'foreach ($pkg in $packages)' "$rendered" | head -1 | cut -d: -f1)"
 loop_end="$(awk -v s="$loop_start" 'NR > s && $0 == "}"{print NR; exit}' "$rendered")"
@@ -111,7 +113,8 @@ esac
 fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
 cat >"$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
-$rendered, $iwtStart, $iwtEnd, $invStart, $invEnd, $loopStart, $loopEnd, $mode = $args
+$rendered, $iwtStart, $iwtEnd, $invStart, $invEnd, $loopStart, $loopEnd, $mode, $inventoryLib = $args
+. $inventoryLib   # the installer inlines this; the extracted inventory statement calls Invoke-DotNativeCapture
 $lines = [IO.File]::ReadAllLines($rendered)
 function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
 $iwt = Slice $lines $iwtStart $iwtEnd
@@ -161,10 +164,13 @@ fixture_ok() { # $1 = fixture log, $2 = label - the fixture's FAIL lines decide
     if grep -q 'FAIL' "$1"; then fail "$2: $(cat "$1")"; else pass; fi
 }
 
+inventory_lib="$repo_root/scripts/lib/ps-package-inventory.ps1"
+case "${OSTYPE:-}" in msys*|cygwin*) inventory_lib="$(cygpath -w "$inventory_lib")" ;; esac
+
 run_ps() { # $1 = mode, $2 = outfile
     local mode="$1" outfile="$2"
     PATH="$bin:/usr/bin:/bin" \
-        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$iwt_start" "$iwt_end" "$inv_start" "$inv_end" "$loop_start" "$loop_end" "$mode" \
+        "$(command -v pwsh)" -NoProfile -File "$fixture" "$rendered" "$iwt_start" "$iwt_end" "$inv_start" "$inv_end" "$loop_start" "$loop_end" "$mode" "$inventory_lib" \
         >"$outfile" 2>&1
 }
 
@@ -185,7 +191,7 @@ fixture_ok "$tmp/timeout.log" "timeout"
 grep -Fq 'stalled probe - timed out after 2s (process tree killed)' "$tmp/timeout.log" ||
     fail "the cap must announce the timeout and the tree kill: $(cat "$tmp/timeout.log")"
 
-# 1./2. Batched inventory really collected through Invoke-WithTimeout.
+# 1./2. Batched inventory really collected through Invoke-DotNativeCapture.
 : >"$tmp/choco.log"
 run_ps inventory "$tmp/inventory.log" || fail "inventory scenario failed: $(cat "$tmp/inventory.log")"
 fixture_ok "$tmp/inventory.log" "inventory"

@@ -46,7 +46,7 @@ function Test-DotChocoPackage {
 # PowerShell for every call: a `winget list` of 2.7 s took 4.6 s through it, measured on Windows PowerShell
 # 5.1 (2026-10-12), and the two listings at the top of every `dot up` paid that twice. A plain process
 # with a wait limit keeps the cap and loses the startup. Returns $null when the program is not found, else
-# an object with Text, ExitCode and TimedOut (a program past the limit is killed with its children).
+# an object with Text, ExitCode and TimedOut (a program past the limit is killed).
 function Invoke-DotNativeCapture {
     param([Parameter(Mandatory)][string]$FilePath, [string[]]$ArgumentList = @(), [int]$TimeoutSeconds = 120)
     $command = Get-Command $FilePath -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -67,9 +67,12 @@ function Invoke-DotNativeCapture {
     $null = $process.StandardError.ReadToEndAsync()
     $outputTask = $process.StandardOutput.ReadToEndAsync()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-        try {
-            if (Get-Command taskkill -ErrorAction SilentlyContinue) { $null = & taskkill /PID $process.Id /T /F 2>&1 } else { $process.Kill() }
-        } catch { Write-Verbose "kill after timeout failed: $($_.Exception.Message)" }
+        # Kill($true) takes the children too (PowerShell 7); Windows PowerShell 5.1 has only Kill(). Never
+        # `taskkill /T`: it follows reused parent ids (tests/process_tree_reuse_contract.sh).
+        try { $process.Kill($true) }
+        catch {
+            try { $process.Kill() } catch { Write-Verbose "kill after timeout failed: $($_.Exception.Message)" }
+        }
         return [pscustomobject]@{ Text = ''; ExitCode = -1; TimedOut = $true }
     }
     $process.WaitForExit()
