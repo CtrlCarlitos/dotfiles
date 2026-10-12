@@ -128,16 +128,26 @@ Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # (checksum verify each run); this just refreshes the plugin.
 if (Get-Command agy -ErrorAction SilentlyContinue) {
     Write-Host "$($G.sparkles) Updating Superpowers (Antigravity)..." -ForegroundColor Yellow
-    # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
-    $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) {
-        $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red
+    if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+    # Already at upstream's latest release: the install re-clones the repository (12-21 s) for nothing.
+    # An unreadable version on either side installs, as before.
+    $agyHave = Get-AntigravitySuperpowersVersion
+    $agyWant = Get-SuperpowersLatestVersionCached
+    $agyCurrent = [bool]($agyHave -and $agyWant -and $agyHave -eq $agyWant)
+    if ($agyCurrent) {
+        Write-Host (Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version $agyHave -Upstream $agyWant)
     } else {
-        # The header printed with nothing under it on every current run (2026-10-12).
-        if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        $agyUp = Get-SuperpowersLatestVersionCached
-        $agyLine = Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $agyUp -Behind "behind upstream v$agyUp (re-run dot upgrade)"
-        if ($agyLine) { Write-Host $agyLine }
+        # Its seven-line "Cloning plugin... [ok] superpowers" block said nothing on every run.
+        $agyOut = @(& agy plugin install https://github.com/obra/superpowers 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) {
+            $agyOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Antigravity failed - continuing" -ForegroundColor Red
+        } else {
+            # The header printed with nothing under it on every current run (2026-10-12).
+            if (-not (Get-Command Get-SuperpowersLatestVersionCached -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+            $agyUp = Get-SuperpowersLatestVersionCached
+            $agyLine = Format-SuperpowersRefreshLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $agyUp -Behind "behind upstream v$agyUp (re-run dot upgrade)"
+            if ($agyLine) { Write-Host $agyLine }
+        }
     }
 }
 
