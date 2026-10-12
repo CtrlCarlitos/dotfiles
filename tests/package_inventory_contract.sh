@@ -95,7 +95,7 @@ function choco {
         $global:LASTEXITCODE = 0
     }
 }
-$log = Join-Path $env:TEMP ("choco-quiet-{0}.log" -f [guid]::NewGuid())
+$log = Join-Path ([IO.Path]::GetTempPath()) ("choco-quiet-{0}.log" -f [guid]::NewGuid())
 $quiet = (Invoke-ChocoUpgradeAll -Arguments @('upgrade', 'all') -LogPath $log *>&1 | Out-String)
 Out 'quiet-has-summary' ($quiet -match 'Nothing to upgrade \(2 packages checked\)')
 Out 'quiet-no-header' (-not ($quiet -match 'Upgrading the following packages'))

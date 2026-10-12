@@ -1,6 +1,6 @@
 # scripts/lib/ps-package-inventory.ps1 - ask winget and choco ONE time what is installed.
 #
-# Every `winget list --id <id> --exact` costs about 2.3 s and every `choco list --exact <name>` about
+# Every `winget list --id <id> --exact` costs about 2.3 s and every per-package `choco list` query about
 # 1.7 s, whatever the answer (measured 2026-10-12: a full `winget list` is 2.5 s, `choco list` 1.8 s).
 # The Windows installer already takes both inventories at the top (the package sweeps use them); the
 # desktop-app section (Chrome, Win-CodexBar, Docker Desktop, Meld) then asked again per app, and a

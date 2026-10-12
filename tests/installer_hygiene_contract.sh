@@ -35,7 +35,7 @@ grep -Fq 'lib-bkp' "$ps1_installer" ||
 #    removed before winget installs it (same ordering as Meld's migration).
 grep -Fq 'winget install --id Google.Chrome --exact --source winget' "$ps1_installer" ||
     fail "$ps1_installer: Google Chrome must be installed through winget"
-awk '/chocoChromeList -match/{a=NR} /winget install --id Google\.Chrome/{b=NR} END{exit !(a && b && a<b)}' "$ps1_installer" ||
+awk '/Test-DotChocoPackage .googlechrome./{a=NR} /winget install --id Google\.Chrome/{b=NR} END{exit !(a && b && a<b)}' "$ps1_installer" ||
     fail "$ps1_installer: a Chocolatey GoogleChrome copy must be detected before any winget install"
 
 # 4. The installer NEVER upgrades: upgrades moved to `dot upgrade`

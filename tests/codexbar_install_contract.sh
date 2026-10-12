@@ -51,7 +51,8 @@ end="$(awk -v s="$start" 'NR > s && $0 == "}"{print NR; exit}' "$ps1_rendered")"
 fixture="$(mktemp)" && mv "$fixture" "$fixture.ps1" && fixture="$fixture.ps1"
 cat >"$fixture" <<'POWERSHELL'
 $ErrorActionPreference = 'Stop'
-$rendered, $start, $end, $logPath, $mode = $args
+$rendered, $start, $end, $logPath, $mode, $inventoryLib = $args
+. $inventoryLib   # the installer inlines this; the extracted block needs it defined
 $lines = [IO.File]::ReadAllLines($rendered)
 function Slice([object[]]$All, [int]$From, [int]$To) { ($All[($From - 1)..($To - 1)] -join "`n") + "`n" }
 $block = Slice $lines $start $end
@@ -90,10 +91,13 @@ case "${OSTYPE:-}" in
     *)             wlog_arg="$tmp/winget.log" ;;
 esac
 
+inventory_lib="$repo_root/scripts/lib/ps-package-inventory.ps1"
+case "${OSTYPE:-}" in msys*|cygwin*) inventory_lib="$(cygpath -w "$inventory_lib")" ;; esac
+
 run_block() { # $1 = mode, $2 = list-output, $3 = outfile
     local mode="$1" listout="$2" outfile="$3"
     PATH="$bin:/usr/bin:/bin" WINGET_LIST_OUT="$listout" \
-        "$(command -v pwsh)" -NoProfile -File "$fixture" "$ps1_rendered" "$start" "$end" "$wlog_arg" "$mode" \
+        "$(command -v pwsh)" -NoProfile -File "$fixture" "$ps1_rendered" "$start" "$end" "$wlog_arg" "$mode" "$inventory_lib" \
         >"$outfile" 2>&1
 }
 
