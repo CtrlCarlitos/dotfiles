@@ -2829,8 +2829,11 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 
 # Optimize-VHD for `dot docker-compact`: it lives in the Hyper-V PowerShell module, a Windows
 # feature (no package manager carries it). Only the module is enabled, never the Hyper-V
-# platform (Docker runs on WSL 2). Windows Home has no such feature; dot docker-compact uses
-# diskpart there, so a failure here is a note, not a warning.
+# platform (Docker runs on WSL 2). Windows Home has no such feature through normal means
+# (Enable-WindowsOptionalFeature fails: "The Microsoft-Hyper-V-Management-PowerShell feature
+# name is unknown"); dot docker-compact uses diskpart there instead, so this is a note, not a
+# warning - but Home CAN get the real module via a documented community DISM workaround, so
+# the note points there rather than leaving diskpart as the only option it mentions.
 {{- if $dev_desktop }}
 if (-not (Get-Command Optimize-VHD -ErrorAction SilentlyContinue)) {
     try {
@@ -2841,6 +2844,7 @@ if (-not (Get-Command Optimize-VHD -ErrorAction SilentlyContinue)) {
         }
     } catch {
         Write-Host "  Hyper-V PowerShell module not available here - dot docker-compact uses diskpart instead." -ForegroundColor DarkGray
+        Write-Host "    On Windows Home this feature is blocked by default; a community DISM workaround can enable it: https://gist.github.com/HimDek/6edde284203a620745fad3f762be603b" -ForegroundColor DarkGray
     }
 }
 {{- end }}
