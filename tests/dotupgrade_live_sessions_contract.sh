@@ -89,6 +89,7 @@ $cli    = P 'codex' 'C:\Users\u\AppData\Roaming\npm-global\node_modules\@openai\
 $desktop = P 'claude' 'C:\Users\u\AppData\Local\AnthropicClaude\app-2.19675.0\claude.exe'
 $code    = P 'claude' 'C:\Users\u\.local\bin\claude.exe'
 $blind   = P 'codex' $null
+$appRuntime = P 'codex' 'C:\Users\u\AppData\Local\OpenAI\Codex\bin\2e5e00daee91c61d\codex.exe'
 Case 'daemon-only' @($daemon) @('codex')
 Case 'cli' @($cli) @('codex')
 Case 'daemon-and-cli' @($daemon, $cli) @('codex')
@@ -97,6 +98,8 @@ Case 'desktop-ten-processes' @(1..10 | ForEach-Object { $desktop }) @('opencode'
 Case 'claude-code' @($code) @('claude')
 Case 'desktop-and-code' @($desktop, $code) @('claude')
 Case 'unreadable-path' @($blind) @('codex')
+Case 'app-runtime-only' @($appRuntime, $appRuntime) @('codex')
+Case 'app-runtime-and-cli' @($appRuntime, $cli) @('codex')
 Case 'nothing' @() @('codex', 'claude')
 $script:table = @($daemon, $desktop, $code)
 Write-Output ('names=' + ((Get-LiveAgentProcess @('opencode', 'claude', 'codex', 'agy', 'serena') | ForEach-Object { $_.ProcessName } | Select-Object -Unique | Sort-Object) -join ','))
@@ -111,6 +114,8 @@ PSEOF
     expect 'claude-code=True'
     expect 'desktop-and-code=True'
     expect 'unreadable-path=True'
+    expect 'app-runtime-only=False'
+    expect 'app-runtime-and-cli=True'
     expect 'nothing=False'
     expect 'names=claude'
 else
