@@ -38,7 +38,9 @@ run() { # [env...] -> stdout and stderr, separated, plus rc
         bash -c 'set -euo pipefail; . "$1"; shift; rc=0; mcp_add_quiet "$@" >"$OUT" 2>"$ERR" || rc=$?; echo "rc=$rc"' \
         _ "$lib" "$@"
 }
-hint='chezmoi state delete-bucket --bucket=scriptState && dot up'
+# shellcheck disable=SC2016 # literal text the installer prints; the shell must not expand it
+hint='chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up'
+hint_re="${hint//\$/\\\$}" # the pattern below is an ERE: a bare $HOME would read as an end anchor
 
 # A. success: one line, the CLI's chatter kept off the terminal, argv passed through, rc 0
 : >"$tmp/cli.log"
@@ -67,7 +69,7 @@ case "$body" in *net_timeout_tty*) pass ;; *) fail "mcp_add_quiet must run the C
 #    re-entry command; no bare net_timeout_tty mcp add remains
 for argv in 'claude mcp add -s user maestro -- maestro mcp' 'claude mcp add -s user agent-device -- agent-device mcp' \
             'codex mcp add maestro -- maestro mcp' 'codex mcp add agent-device -- agent-device mcp'; do
-    grep -Eq "mcp_add_quiet '[^']+' [a-z-]+ '$hint' $argv\$" "$tmpl" || fail "installer: $argv must go through mcp_add_quiet with the re-entry hint"
+    grep -Eq "mcp_add_quiet '[^']+' [a-z-]+ '$hint_re' $argv\$" "$tmpl" || fail "installer: $argv must go through mcp_add_quiet with the re-entry hint"
 done
 forbid "$tmpl" 'net_timeout_tty 60 claude mcp add'
 forbid "$tmpl" 'net_timeout_tty 60 codex mcp add'

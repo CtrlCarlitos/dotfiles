@@ -57,7 +57,7 @@ require "$lib" '$HOME/.local/bin/maestro'
 # The retry hint is `dot upgrade`: since #359 it installs a missing Maestro by itself (install_maestro
 # is shared), so a failed download no longer needs the whole run_onchange installer re-entered.
 require "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'dot upgrade'"
-forbid "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete-bucket"
+forbid "$tmpl" "install_maestro '{{ .versions.maestro_version }}' '{{ .versions.maestro_sha256 }}' 'chezmoi state delete"
 forbid "$tmpl" 'net_timeout 300 curl -fsSLo "$maestro_tmp'
 
 # --- agent-device: npm global, reusing core's Node, command -v guarded ----
@@ -120,7 +120,7 @@ require "$tmpl" 'codex mcp get agent-device'
 # tests/mcp_add_quiet_contract.sh executes it).
 for who in maestro agent-device; do
     for agent in "'Claude Code'" "'Codex'"; do
-        require "$tmpl" "mcp_add_quiet $agent $who 'chezmoi state delete-bucket --bucket=scriptState && dot up'"
+        require "$tmpl" "mcp_add_quiet $agent $who 'chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up'"
     done
 done
 
@@ -263,7 +263,7 @@ forbid "$docs_file" '**Known gap:** the Android SDK command-line tools'
 require "$docs_file" '`mobile_dev_pixel`'
 # shellcheck disable=SC2088  # literal ~ assertion: docs must reference the tilde form
 require "$docs_file" '~/.local/opt/android-sdk'
-require "$docs_file" 'chezmoi state delete-bucket --bucket=scriptState && dot up'
+require "$docs_file" 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up'
 
 # tests/zshrc_startup_contract.sh already runs `zsh -n` + shellcheck on the
 # whole file; a quick syntax check here just pins this task's own addition.
@@ -732,7 +732,7 @@ EOF
         pass
     fi
     case "$got" in
-        *"not accepting Google's Android SDK licenses on your behalf"*'chezmoi state delete-bucket --bucket=scriptState'*) pass ;;
+        *"not accepting Google's Android SDK licenses on your behalf"*'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh'*) pass ;;
         *) fail "SDK non-interactive: must warn that the licenses were skipped and how to re-run (output: $got)" ;;
     esac
 
@@ -785,7 +785,7 @@ EOF
     got="$(ANDROID_LICENSES=n run_sdk "$h" "$swapped_fns" adb '' no Linux x86_64)"
     if grep -Eq '^(sdkmanager|avdmanager)' "$h/sdk.log" 2>/dev/null; then fail "SDK ANDROID_LICENSES=n: nothing may run after a declined prompt"; else pass; fi
     case "$got" in
-        *'Skipped the Android SDK licenses'*'chezmoi state delete-bucket --bucket=scriptState'*) pass ;;
+        *'Skipped the Android SDK licenses'*'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh'*) pass ;;
         *) fail "SDK ANDROID_LICENSES=n: must say the licenses were skipped and how to re-run (output: $got)" ;;
     esac
     # The package download budget: a multi-GB system image on a slow link

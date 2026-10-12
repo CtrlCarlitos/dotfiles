@@ -245,7 +245,7 @@ try {
     $r = Invoke-Doctor $h
     if ($r.Out -notmatch '(?m)^warn\s+mobile-dev\s+.*sdkmanager') { Fail "[8] missing sdkmanager must be named: $($r.Out)" }
     if ($r.Out -notmatch '(?m)^warn\s+mobile-dev\s+.*adb') { Fail "[8] missing adb must be named: $($r.Out)" }
-    if ($r.Out -notmatch 'chezmoi state delete-bucket --bucket=scriptState') { Fail "[8] the re-entry command must be given: $($r.Out)" }
+    if ($r.Out -notmatch '--bucket=entryState --key=') { Fail "[8] the re-entry command must be given: $($r.Out)" }
     New-Item -ItemType Directory -Force -Path (Join-Path $sdk 'cmdline-tools/latest/bin'), (Join-Path $sdk 'platform-tools') | Out-Null
     Set-Content (Join-Path $sdk 'cmdline-tools/latest/bin/sdkmanager.bat') '@echo off' -Encoding ascii
     Set-Content (Join-Path $sdk 'platform-tools/adb.exe') 'stub' -Encoding ascii
