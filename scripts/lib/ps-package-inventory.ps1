@@ -49,10 +49,10 @@ function Test-DotChocoPackage {
 # an object with Text, ExitCode and TimedOut (a program past the limit is killed).
 function Invoke-DotNativeCapture {
     param([Parameter(Mandatory)][string]$FilePath, [string[]]$ArgumentList = @(), [int]$TimeoutSeconds = 120)
-    $command = Get-Command $FilePath -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $command) { return $null }
+    $program = Get-Command $FilePath -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $program) { return $null }
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $command.Source
+    $startInfo.FileName = $program.Source
     $quoted = foreach ($argument in $ArgumentList) {
         if ($argument -match '[\s"]' -or $argument -eq '') { '"' + ($argument -replace '"', '\"') + '"' } else { $argument }
     }
