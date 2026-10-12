@@ -37,6 +37,17 @@ for profile in Documents/PowerShell Documents/WindowsPowerShell; do
 done
 pass
 
+# --- the zsh/bash dot up, executed with chezmoi stubbed (invariant #10: every dispatcher) -----------
+zsh_tmp="$(mktemp -d)"
+awk '/^dot\(\) \{/{f=1} f{print} f && /^\}$/{exit}' "$repo_root/dot_aliases.zsh" >"$zsh_tmp/dot.fn"
+[ -s "$zsh_tmp/dot.fn" ] || fail "could not extract dot() from dot_aliases.zsh"
+zsh_out="$(bash -c 'eval "$(cat "$1")"; chezmoi() { return 0; }; DOTFILES_DIR=/x dot up' _ "$zsh_tmp/dot.fn" 2>&1)"
+rm -rf "$zsh_tmp"
+case "$zsh_out" in
+    *'dot up took '*'pull '*'init '*'apply '*) pass ;;
+    *) fail "zsh/bash: dot up must end with 'dot up took <total>: pull .., init .., apply ..' (got: ${zsh_out:0:300})" ;;
+esac
+
 command -v pwsh >/dev/null 2>&1 || { printf 'SKIP (executed part needs PowerShell): pwsh not installed\n'; finish; exit 0; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

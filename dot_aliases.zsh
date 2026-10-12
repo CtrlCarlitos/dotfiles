@@ -198,8 +198,15 @@ dot() {
     local repo_scripts="${DOTFILES_DIR:-$(chezmoi source-path)}/scripts"
     case "$sub" in
         up)
+            # Where the time of a dot up goes: the installer prints its own sections, this adds the
+            # parts around it (twin of the PowerShell profiles' "dot up took" line).
+            _dot_up_secs() {   # 125 -> 2m05s, 45 -> 45s
+                if [ "$1" -ge 60 ]; then printf '%dm%02ds' $(($1 / 60)) $(($1 % 60)); else printf '%ds' "$1"; fi
+            }
+            local up_start=$SECONDS up_lap=$SECONDS up_parts=""
             chezmoi update --apply=false
             local update_rc=$?
+            up_parts="pull $(_dot_up_secs $((SECONDS - up_lap)))"; up_lap=$SECONDS
             if [ "$update_rc" -ne 0 ]; then
                 # A feature branch merged (often squashed, as this repo's own PRs are) and
                 # auto-deleted upstream leaves `git pull` nothing to merge into it - raw git
@@ -219,7 +226,9 @@ dot() {
                 return "$update_rc"
             fi
             chezmoi init || return
+            up_parts="$up_parts, init $(_dot_up_secs $((SECONDS - up_lap)))"; up_lap=$SECONDS
             chezmoi apply || return
+            up_parts="$up_parts, apply $(_dot_up_secs $((SECONDS - up_lap)))"
             # zsh caches every PATH dir's listing on first command lookup
             # (HASH_LIST_ALL): installs from this run stay invisible to THIS
             # shell until the cache is dropped - `codex` was "not found" in a
@@ -229,6 +238,7 @@ dot() {
             # function under bash too, where rehash does not exist, and an
             # unguarded tail would return non-zero (#116 class).
             if command -v rehash >/dev/null 2>&1; then rehash; fi
+            printf '  dot up took %s: %s\n' "$(_dot_up_secs $((SECONDS - up_start)))" "$up_parts"
             ;;
         upgrade)  shift; bash "$repo_scripts/dotupgrade.sh" "$@" ;;
         backup)   shift; bash "$repo_scripts/dotbackup.sh" "$@" ;;
