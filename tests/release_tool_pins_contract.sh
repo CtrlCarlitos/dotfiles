@@ -89,6 +89,11 @@ run() { # <pin> <sha> : prints output and rc; github_latest_tag answers $FAKE_LA
     PATH="$tmp/dest:$tmp/elsewhere:$tmp/bin:$tmp/sys" CURL_LOG="$tmp/curl.log" TOOL_LOG="$tmp/tool.log" FIXTURE_TGZ="$tmp/release.tar.gz" GITHUB_TOOL_BIN="$tmp/dest" \
         bash -c 'set -euo pipefail; . "$1"; shift; github_latest_tag() { printf "%s\n" "${FAKE_LATEST:-}"; }; rc=0; release_tool_pin_sync lychee "$@" sudo || rc=$?; echo "rc=$rc"' _ "$lib" "$@" 2>&1
 }
+run_collect() { # same, inside tool_current_collect ... tool_current_flush (dot upgrade's span)
+    : >"$tmp/curl.log"; : >"$tmp/tool.log"
+    PATH="$tmp/dest:$tmp/elsewhere:$tmp/bin:$tmp/sys" CURL_LOG="$tmp/curl.log" TOOL_LOG="$tmp/tool.log" FIXTURE_TGZ="$tmp/release.tar.gz" GITHUB_TOOL_BIN="$tmp/dest" \
+        bash -c 'set -euo pipefail; . "$1"; shift; github_latest_tag() { printf "%s\n" "${FAKE_LATEST:-}"; }; rc=0; tool_current_collect; release_tool_pin_sync lychee "$@" sudo || rc=$?; tool_current_flush "GitHub-release tools"; echo "rc=$rc"' _ "$lib" "$@" 2>&1
+}
 # a. at the pin: current, nothing downloaded; a newer upstream is named with the remedy
 set_lychee "$tmp/dest" 0.24.2
 got="$(FAKE_LATEST=0.24.2 run 0.24.2 "$good")"
@@ -96,6 +101,13 @@ case "$got" in *'lychee is current (0.24.2)'*rc=0*) pass ;; *) fail "at pin: mus
 [ ! -s "$tmp/curl.log" ] || fail "at pin: must not download"
 got="$(FAKE_LATEST=0.25.0 run 0.24.2 "$good")"
 case "$got" in *'lychee is current (0.24.2'*'0.25.0'*'auto-update'*rc=0*) pass ;; *) fail "pin behind upstream: must name the newer release and the auto-update remedy (got: $got)" ;; esac
+# inside dot upgrade's collect span a plainly current tool joins the folded line; a pin behind
+# upstream has news and keeps its own line
+got="$(FAKE_LATEST=0.24.2 run_collect 0.24.2 "$good")"
+case "$got" in *'lychee is current'*) fail "collect span: the per-tool line must be held (got: $got)" ;; *'   GitHub-release tools current: lychee 0.24.2'*rc=0*) pass ;; *) fail "collect span: one folded line expected (got: $got)" ;; esac
+got="$(FAKE_LATEST=0.25.0 run_collect 0.24.2 "$good")"
+case "$got" in *'lychee is current (0.24.2; upstream 0.25.0'*) pass ;; *) fail "collect span, pin behind upstream: must keep its own line (got: $got)" ;; esac
+case "$got" in *'GitHub-release tools current'*) fail "collect span, pin behind upstream: must not also be folded (got: $got)" ;; *) pass ;; esac
 # b. behind the pin, ours: downloaded, verified, reinstalled through sudo, reported
 set_lychee "$tmp/dest" 0.23.0
 got="$(FAKE_LATEST=0.24.2 run 0.24.2 "$good")"

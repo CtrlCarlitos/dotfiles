@@ -649,6 +649,28 @@ antigravity_superpowers_version() {
     return 1
 }
 
+# tool_current_report <name> <version> - "<name> is current (<version>)". Inside a
+# tool_current_collect ... tool_current_flush span the line is held and the span's end prints one
+# line for all of them: `dot upgrade` printed five "is current" lines in a row for delta, dust,
+# procs, lychee and vale (2026-10-12). A tool with news (upgraded, pin behind upstream) keeps its
+# own line.
+TOOL_CURRENT_LIST=""
+TOOL_CURRENT_COLLECTING=0
+tool_current_collect() { TOOL_CURRENT_LIST=""; TOOL_CURRENT_COLLECTING=1; }
+tool_current_report() {
+    if [ "$TOOL_CURRENT_COLLECTING" = 1 ]; then
+        TOOL_CURRENT_LIST="$TOOL_CURRENT_LIST, $1 $2"
+    else
+        echo "   $1 is current ($2)"
+    fi
+}
+tool_current_flush() { # <label>
+    TOOL_CURRENT_COLLECTING=0
+    [ -n "$TOOL_CURRENT_LIST" ] || return 0
+    echo "   $1 current: ${TOOL_CURRENT_LIST#, }"
+    TOOL_CURRENT_LIST=""
+}
+
 # github_latest_tag <owner/repo> - the newest release-looking tag (X.Y or X.Y.Z, after dropping a
 # "<name>-" and/or "v" prefix: v7.0.0, lychee-v0.24.2, 0.20.1), via one `git ls-remote` - no API
 # quota, and the same proxy git itself uses. Empty when unreachable. Sorted numerically field by
@@ -769,7 +791,7 @@ github_tool_sync() {
         fi
         newest="$(printf '%s\n%s\n' "$have" "$latest" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
         if [ "$have" = "$latest" ] || [ "$newest" = "$have" ]; then
-            echo "   $name is current ($have)"
+            tool_current_report "$name" "$have"
             return 0
         fi
         echo "   Upgrading $name $have -> $latest..."
@@ -861,7 +883,7 @@ release_tool_pin_sync() {
         if [ -n "$latest" ] && [ "$latest" != "$pin" ]; then
             note="; upstream $latest - the weekly auto-update PR bumps the pin"
         fi
-        echo "   $name is current ($pin$note)"
+        if [ -n "$note" ]; then echo "   $name is current ($pin$note)"; else tool_current_report "$name" "$pin"; fi
         return 0
     fi
     if ! arch="$(release_tool_arch)"; then
@@ -1073,6 +1095,22 @@ claude_superpowers_user_version() {
     v="$(claude_superpowers_installs | awk -F'\t' '$2 == "user" { print $1; exit }')" || v=""
     [ -n "$v" ] || return 1
     printf '%s\n' "$v"
+}
+
+# superpowers_refresh_line <harness> <version> <upstream> <behind> - the outcome line under an
+# "Updating Superpowers (<harness>)..." header (the Antigravity and Codex headers printed nothing,
+# 2026-10-12): "is current (v)", "is v (upstream unreachable)", or "is v - <behind>" where
+# <behind> says why the harness is not at upstream. No version known: nothing printed.
+superpowers_refresh_line() {
+    local harness="$1" ver="$2" upstream="$3" behind="$4"
+    [ -n "$ver" ] || return 0
+    if [ -z "$upstream" ]; then
+        printf '   Superpowers (%s) is %s (upstream unreachable)\n' "$harness" "$ver"
+    elif [ "$ver" = "$upstream" ]; then
+        printf '   Superpowers (%s) is current (%s)\n' "$harness" "$ver"
+    else
+        printf '   Superpowers (%s) is %s - %s\n' "$harness" "$ver" "$behind"
+    fi
 }
 
 # superpowers_version_line <harness> <version> <upstream> [note] - one report line. A version
