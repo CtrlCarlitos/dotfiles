@@ -746,13 +746,13 @@ install_android_sdk() {
         # changes, so "just run dot up again" would not re-enter here; the
         # real re-entry point is clearing chezmoi's recorded script state.
         if [[ "${ANDROID_LICENSES:-}" = n ]]; then
-            warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+            warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
             return 0
         fi
         if [[ "${ANDROID_LICENSES:-}" != y ]]; then
             if ! android_sdk_interactive; then
                 warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
-                warn "  To accept them, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+                warn "  To accept them, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
                 return 0
             fi
             info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
@@ -762,7 +762,7 @@ install_android_sdk() {
             read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
             dot_timing_resume 2>/dev/null || true
             if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
-                warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete-bucket --bucket=scriptState && dot up"
+                warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
                 return 0
             fi
         fi
@@ -2110,7 +2110,8 @@ install_claude_cli() {
         # on a fresh machine. -s user: the default scope (local) is private to
         # the installer's own working directory, invisible from any project.
         if command -v maestro &>/dev/null && ! mcp_registered claude maestro; then
-            mcp_add_quiet 'Claude Code' maestro 'chezmoi state delete-bucket --bucket=scriptState && dot up' claude mcp add -s user maestro -- maestro mcp
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
+            mcp_add_quiet 'Claude Code' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user maestro -- maestro mcp
         fi
         # agent-device MCP registration for Claude Code lives HERE too, same
         # reason as Maestro's above: main() runs install_mobile_dev() (which
@@ -2124,7 +2125,8 @@ install_claude_cli() {
         # also keeps the CLI's own "Added ... / File modified" lines off the
         # terminal: one dotfiles line on success, the raw output on failure.
         if command -v agent-device &>/dev/null && ! mcp_registered claude agent-device; then
-            mcp_add_quiet 'Claude Code' agent-device 'chezmoi state delete-bucket --bucket=scriptState && dot up' claude mcp add -s user agent-device -- agent-device mcp
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
+            mcp_add_quiet 'Claude Code' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user agent-device -- agent-device mcp
         fi
 {{- end }}
     fi
@@ -2656,14 +2658,16 @@ install_chatgpt_cli() {
         # install_mobile_dev() (which main() runs before codex exists on a
         # fresh machine). Codex has no scope flag: one global config.toml.
         if command -v maestro &>/dev/null && ! mcp_registered codex maestro; then
-            mcp_add_quiet 'Codex' maestro 'chezmoi state delete-bucket --bucket=scriptState && dot up' codex mcp add maestro -- maestro mcp
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
+            mcp_add_quiet 'Codex' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add maestro -- maestro mcp
         fi
         # agent-device's Codex registration lives HERE too, same reason as
         # Maestro's above. Codex has no scope flag: one global config.toml.
         # mcp_add_quiet: same WSL tty-stop hang and same quiet output as the
         # Claude Code registration above.
         if command -v agent-device &>/dev/null && ! mcp_registered codex agent-device; then
-            mcp_add_quiet 'Codex' agent-device 'chezmoi state delete-bucket --bucket=scriptState && dot up' codex mcp add agent-device -- agent-device mcp
+            # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
+            mcp_add_quiet 'Codex' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add agent-device -- agent-device mcp
         fi
 {{- end }}
     fi

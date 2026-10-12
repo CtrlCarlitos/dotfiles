@@ -48,4 +48,17 @@ grep -Fq 'installed for user scope cannot be uninstalled when running with admin
     fail "the winget sweep must recognise the elevated per-user failure"
 pass
 
+# Lived 2026-10-11: the one-time fix said "re-run dot up", but this installer is run_onchange_, so a
+# plain re-run skipped it; the first suggested reset (scriptState) was the wrong bucket, so it skipped
+# it again. chezmoi keeps run_onchange_ hashes in entryState, keyed by the script's target path.
+grep -Fq -- '--bucket=entryState --key=' "$installer" ||
+    fail "installer: the per-user report must name the entryState reset that re-arms the installer"
+grep -Fq 'still per-user, see above' "$installer" ||
+    fail "installer: the 'all present' line must not hide per-user copies"
+stale=$(grep -rIlF --exclude-dir=.git --exclude-dir=graft --exclude=winget_machine_scope_contract.sh -- 'delete-bucket --bucket=scriptState' "$repo_root" || true)
+if [ -n "$stale" ]; then
+    fail "advice names the scriptState bucket, which does not re-arm a run_onchange_ script (use entryState): $stale"
+fi
+pass
+
 finish

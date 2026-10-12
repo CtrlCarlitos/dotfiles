@@ -245,7 +245,7 @@ out9="$(run9)"
 grep -Eq '^warn +mobile-dev .*maestro' <<<"$out9" || fail "[9a] missing maestro must be named: $out9"
 grep -Eq '^warn +mobile-dev .*agent-device' <<<"$out9" || fail "[9a] missing agent-device must be named: $out9"
 grep -Eq '^warn +mobile-dev .*adb' <<<"$out9" || fail "[9a] missing adb must be named: $out9"
-grep -Fq 'chezmoi state delete-bucket --bucket=scriptState && dot up' <<<"$out9" || fail "[9a] the re-entry command must be given: $out9"
+grep -Fq 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' <<<"$out9" || fail "[9a] the re-entry command must be given: $out9"
 if grep -Eq 'claude:|codex:' <<<"$out9"; then fail "[9a] no registration may be demanded for a binary that is not installed: $out9"; fi
 # b. binaries present, registrations missing (the killed `claude mcp add` case)
 mkdir -p "$H/.local/bin" "$H/.local/opt/android-sdk/platform-tools" "$H/.local/state/dotfiles"
@@ -266,7 +266,7 @@ grep -Eq '^ok +mobile-dev ' <<<"$out9" || fail "[9c] with everything present mob
 rm -f "$TMP/mobile-bin/maestro"
 out9="$(run9)"
 grep -Eq '^warn +mobile-dev +missing: maestro - .*dot upgrade' <<<"$out9" || fail "[9e] only maestro missing must point at dot upgrade: $out9"
-if grep -Fq 'delete-bucket' <<<"$out9"; then fail "[9e] only maestro missing must not demand the installer re-entry: $out9"; fi
+if grep -Fq 'chezmoi state delete' <<<"$out9"; then fail "[9e] only maestro missing must not demand the installer re-entry: $out9"; fi
 printf '#!/bin/sh\nexit 0\n' >"$TMP/mobile-bin/maestro"; chmod +x "$TMP/mobile-bin/maestro"
 # d. in-apply mode checks the files only (no agent CLI calls after every apply)
 rm -f "$TMP/mobile-mcp/claude.maestro"

@@ -42,7 +42,7 @@ download), `Install-MobileDev` tells you to accept next time - but
 rendered content changes, not on every `dot up`. To force it to run again:
 
 ```
-chezmoi state delete-bucket --bucket=scriptState
+chezmoi state delete --bucket=entryState --key="$($HOME -replace '\\','/')/install_packages.ps1"
 dot up
 ```
 
@@ -90,7 +90,7 @@ Windows-side ADB server through the bridge below. Two cases change that:
   start, so you can answer and walk away - and only in an interactive run.
   A non-interactive `dot up` skips the licenses and the download, and its
   warning tells you how to re-run from a terminal
-  (`chezmoi state delete-bucket --bucket=scriptState && dot up`). See
+  (`chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`). See
   "Keeping it current" under Linux and macOS for what `dot upgrade` and
   `dot doctor` do about the group afterwards; both apply to WSL too.
 
@@ -164,7 +164,7 @@ interactive run. The wait for your answer is its own line in the closing
 A non-interactive `dot up` still installs the command-line tools, then
 skips the licenses and everything behind them with a warning. To finish
 from a terminal, run
-`chezmoi state delete-bucket --bucket=scriptState && dot up`.
+`chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`.
 
 ### Keeping it current
 

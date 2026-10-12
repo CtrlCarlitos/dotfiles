@@ -63,8 +63,8 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Set-NetFirewallRule
 # the real re-entry point after declining a prompt (run_onchange only
 # re-runs on a rendered-content change, not on every `dot up`) is
 # documented and used in the skip messages, not a misleading "just re-run".
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'chezmoi state delete-bucket --bucket=scriptState'
-require "$repo_root/docs/mobile-development.md" 'chezmoi state delete-bucket --bucket=scriptState'
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" '--bucket=entryState --key='
+require "$repo_root/docs/mobile-development.md" '--bucket=entryState --key='
 # no scheduled task either - the "no new always-on service" constraint
 # covers more than just Windows Services.
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Register-ScheduledTask'
