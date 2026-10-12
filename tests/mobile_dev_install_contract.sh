@@ -89,7 +89,8 @@ require "$tmpl" 'command -v scrcpy'
 
 # --- Maestro MCP registration for Claude Code and Codex, idempotent -------
 # (Task 3, moved by the final fix round): mirrors the serena precedent's own
-# gating shape ("mcp get" idempotency check, warn-and-continue on failure -
+# gating shape (mcp_registered idempotency check - the agent's config file first, its
+# `mcp get` only when the file cannot say; warn-and-continue on failure -
 # never abort under `set -e`). Maestro has no vendor setup helper, unlike
 # serena, so the raw "mcp add" call is used directly. Claude Code's call is
 # USER scope: the default (local) scope is private to the installer's own
@@ -100,18 +101,18 @@ require "$tmpl" 'command -v scrcpy'
 require "$tmpl" 'claude mcp add -s user maestro -- maestro mcp'
 forbid "$tmpl" 'claude mcp add maestro -- maestro mcp'
 require "$tmpl" 'codex mcp add maestro -- maestro mcp'
-require "$tmpl" 'claude mcp get maestro'
-require "$tmpl" 'codex mcp get maestro'
+require "$tmpl" 'mcp_registered claude maestro'
+require "$tmpl" 'mcp_registered codex maestro'
 
 # --- agent-device MCP registration for Claude Code and Codex, idempotent --
 # (Task 8, mirrors Maestro's own two call sites above exactly): same scope
 # rule (Claude Code at user scope, Codex with no scope flag) and same
-# gating (command -v agent-device, "mcp get" idempotency check).
+# gating (command -v agent-device, mcp_registered idempotency check).
 require "$tmpl" 'claude mcp add -s user agent-device -- agent-device mcp'
 forbid "$tmpl" 'claude mcp add agent-device -- agent-device mcp'
 require "$tmpl" 'codex mcp add agent-device -- agent-device mcp'
-require "$tmpl" 'claude mcp get agent-device'
-require "$tmpl" 'codex mcp get agent-device'
+require "$tmpl" 'mcp_registered claude agent-device'
+require "$tmpl" 'mcp_registered codex agent-device'
 # A failed registration is never retried by the next `dot up` (run_onchange), so
 # every one of the four registrations carries the re-entry command as its retry hint
 # (2026-10-11: a killed `claude mcp add` left agent-device unregistered with nothing

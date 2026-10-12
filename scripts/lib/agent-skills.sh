@@ -915,6 +915,73 @@ release_tool_pins_upgrade() {
     return 0
 }
 
+#-------------------------------------------------------------------------------
+# Agent config probes: answers from the agents' own files instead of CLI
+# round-trips. A no-op WSL `dot up` (2026-10-11) spent 17 s in
+# install_claude_cli - `claude plugin install` 7.8 s and two `claude mcp get`
+# probes 8.8 s - plus `serena setup codex` 2 s every run, for facts that sit in
+# ~/.claude/plugins/*.json, ~/.claude.json and ~/.codex/config.toml. Twins:
+# Test-ClaudeMarketplaceKnown / Test-ClaudePluginInstalled / Test-McpRegistered
+# in scripts/lib/ps-skills.ps1. tests/agent_config_probes_contract.sh executes
+# both against fixture files and fake CLIs.
+#
+#   claude_marketplace_known <name>   0 yes, 1 no, 2 unknown (no jq, no file,
+#   claude_plugin_installed <id>      unreadable). <id> at USER scope: a project
+#                                     or local install is not "installed" here.
+#   mcp_registered <claude|codex> <server>  0 yes / 1 no, always definitive:
+#                                     the file first, the agent's own `mcp get`
+#                                     only when the file cannot say.
+# Callers treat 2 as "run the CLI": the old behaviour, so a machine without jq
+# or with a moved config loses nothing but the shortcut.
+#-------------------------------------------------------------------------------
+claude_plugins_dir() { printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"; }
+claude_user_config() {
+    if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then printf '%s\n' "$CLAUDE_CONFIG_DIR/.claude.json"; else printf '%s\n' "$HOME/.claude.json"; fi
+}
+_jq_bool_rc() { # <rc of jq -e> -> 0 true, 1 false, 2 anything else (parse error, no output)
+    case "$1" in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+claude_marketplace_known() {
+    local f rc
+    f="$(claude_plugins_dir)/known_marketplaces.json"
+    command -v jq >/dev/null 2>&1 && [ -f "$f" ] || return 2
+    jq -e --arg n "$1" 'type == "object" and has($n)' "$f" >/dev/null 2>&1; rc=$?
+    _jq_bool_rc "$rc"
+}
+claude_plugin_installed() {
+    local f rc
+    f="$(claude_plugins_dir)/installed_plugins.json"
+    command -v jq >/dev/null 2>&1 && [ -f "$f" ] || return 2
+    # {"version": 2, "plugins": {...}} today; a flat {id: entries} before that. An entry is one
+    # object or a list of them (one per scope/project).
+    jq -e --arg id "$1" '(if type == "object" and has("plugins") then .plugins else . end)
+        | (.[$id] // []) | (if type == "array" then . else [.] end)
+        | map(select(.scope == "user")) | length > 0' "$f" >/dev/null 2>&1; rc=$?
+    _jq_bool_rc "$rc"
+}
+mcp_registered() {
+    local agent="$1" server="$2" f rc
+    case "$agent" in
+        claude)
+            f="$(claude_user_config)"
+            if command -v jq >/dev/null 2>&1 && [ -f "$f" ]; then
+                jq -e --arg s "$server" '(.mcpServers // {}) | has($s)' "$f" >/dev/null 2>&1; rc=$?
+                case "$rc" in 0) return 0 ;; 1) return 1 ;; esac
+            fi
+            claude mcp get "$server" >/dev/null 2>&1
+            ;;
+        codex)
+            f="${CODEX_HOME:-$HOME/.codex}/config.toml"
+            if [ -f "$f" ]; then
+                grep -Eq "^\[mcp_servers\.\"?${server}\"?\]" "$f"
+                return $?
+            fi
+            codex mcp get "$server" >/dev/null 2>&1
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 # superpowers_latest_version - obra/superpowers' newest release (empty: unreachable).
 superpowers_latest_version() { github_latest_tag obra/superpowers; }
 

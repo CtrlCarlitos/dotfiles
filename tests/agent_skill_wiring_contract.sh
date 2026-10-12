@@ -720,7 +720,7 @@ if [[ "$scope" != "windows" ]]; then
     require_contains scripts/lib/agent-skills.sh 'mv "$backup" "$target"'
     require_contains scripts/lib/agent-skills.sh 'rm -rf "$backup"'
     require_contains 'run_onchange_install_packages.sh.tmpl' "{{ .chezmoi.sourceDir | replace \"'\" \"'\\\"'\\\"'\" }}"
-    require_contains 'run_onchange_install_packages.sh.tmpl' 'claude mcp get serena'
+    require_contains 'run_onchange_install_packages.sh.tmpl' 'mcp_registered claude serena'
 fi
 
 if [[ "$scope" != "unix" ]]; then

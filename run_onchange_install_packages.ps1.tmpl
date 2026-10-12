@@ -1654,10 +1654,15 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             }
         }
         if (Get-Command claude -ErrorAction SilentlyContinue) {
-            $claudeHasSerena = $false
-            # try/catch, not bare 2>$null: under EAP=Stop a missing claude binary
-            # is a terminating error the exit-code check below never sees.
-            try { claude mcp get serena *> $null; $claudeHasSerena = ($LASTEXITCODE -eq 0) } catch { Write-Verbose "claude mcp get serena probe failed: $($_.Exception.Message)" }
+            # ~/.claude.json first (Test-McpRegistered, scripts/lib/ps-skills.ps1); the CLI probe
+            # (several seconds) only when the file cannot say.
+            $claudeHasSerena = Test-McpRegistered -Agent claude -Server serena
+            if ($null -eq $claudeHasSerena) {
+                $claudeHasSerena = $false
+                # try/catch, not bare 2>$null: under EAP=Stop a missing claude binary
+                # is a terminating error the exit-code check below never sees.
+                try { claude mcp get serena *> $null; $claudeHasSerena = ($LASTEXITCODE -eq 0) } catch { Write-Verbose "claude mcp get serena probe failed: $($_.Exception.Message)" }
+            }
             if (-not $claudeHasSerena) {
                 Invoke-WithTimeout -Description "serena setup claude-code" -Seconds 60 -Action { serena setup claude-code 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
             }
@@ -2043,9 +2048,19 @@ function Set-ClaudeAttribution {
 # mechanism, not npm). Re-running add/install is safe if already present.
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     Set-ClaudeAttribution
-    Write-Host "  Installing Superpowers plugin for Claude Code..." -ForegroundColor Yellow
-    Invoke-Quietly -Description "Failed to add Superpowers marketplace for Claude Code" -Action { claude plugin marketplace add obra/superpowers-marketplace 2>$null }
-    Invoke-Quietly -Description "Failed to install Superpowers plugin for Claude Code" -Action { claude plugin install superpowers@superpowers-marketplace 2>$null }
+    # Claude's own files say whether the marketplace and the plugin are there
+    # (Test-ClaudeMarketplaceKnown / Test-ClaudePluginInstalled, scripts/lib/ps-skills.ps1,
+    # twins of the shell probes): a no-op run paid `plugin install` and the marketplace add
+    # every time (2026-10-11). $null (no file) runs the CLI as before; `dot upgrade` owns updates.
+    if (-not (Test-ClaudeMarketplaceKnown -Name 'superpowers-marketplace')) {
+        Invoke-Quietly -Description "Failed to add Superpowers marketplace for Claude Code" -Action { claude plugin marketplace add obra/superpowers-marketplace 2>$null }
+    }
+    if (Test-ClaudePluginInstalled -Id 'superpowers@superpowers-marketplace') {
+        Write-Host "  Superpowers for Claude Code is installed - skipping the plugin install (dot upgrade updates it)." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Installing Superpowers plugin for Claude Code..." -ForegroundColor Yellow
+        Invoke-Quietly -Description "Failed to install Superpowers plugin for Claude Code" -Action { claude plugin install superpowers@superpowers-marketplace 2>$null }
+    }
 }
 {{- end }}
 
@@ -2112,7 +2127,11 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
     # (see that section's note): codex only exists from this point on a
     # fresh/reinstall machine. Idempotent: serena's own setup tool rewrites
     # its entry.
-    $null = Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -NoStream -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    # config.toml already carrying [mcp_servers.serena] means serena's own setup has run
+    # (it rewrites its entry); skipped then, like the Claude Code probe above.
+    if (-not (Test-McpRegistered -Agent codex -Server serena)) {
+        $null = Invoke-WithTimeout -Description "serena setup codex" -Seconds 60 -NoStream -Action { serena setup codex 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+    }
 }
 {{- end }}
 

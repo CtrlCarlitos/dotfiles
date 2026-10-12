@@ -793,6 +793,56 @@ function Test-PlaywrightChromiumInstalled {
 # One object per superpowers install Claude Code knows of (`claude plugin list --json`), the
 # user-scope one included: Version, Scope, ProjectPath. Project- and local-scope installs are per
 # repository and `claude plugin update` run elsewhere never touches them.
+# Agent config probes (twins of claude_marketplace_known / claude_plugin_installed /
+# mcp_registered in scripts/lib/agent-skills.sh): answers from the agents' own files instead of
+# CLI round-trips - a no-op run paid `claude plugin install` and the `mcp get` probes every time
+# (2026-10-11). $true / $false, or $null when the file is missing or unreadable: the caller then
+# runs the CLI as before. -UserHome is for tests; it defaults to this user's home.
+function Get-ClaudePluginsDir {
+    param([string]$UserHome = $HOME)
+    if ($env:CLAUDE_CONFIG_DIR) { return (Join-Path $env:CLAUDE_CONFIG_DIR 'plugins') }
+    return (Join-Path (Join-Path $UserHome '.claude') 'plugins')
+}
+function Read-JsonFileOrNull {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try { return (Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json) } catch { return $null }
+}
+function Test-ClaudeMarketplaceKnown {
+    param([Parameter(Mandatory)][string]$Name, [string]$UserHome = $HOME)
+    $d = Read-JsonFileOrNull -Path (Join-Path (Get-ClaudePluginsDir -UserHome $UserHome) 'known_marketplaces.json')
+    if ($null -eq $d) { return $null }
+    return [bool]($d.PSObject.Properties[$Name])
+}
+function Test-ClaudePluginInstalled {
+    param([Parameter(Mandatory)][string]$Id, [string]$UserHome = $HOME)
+    $d = Read-JsonFileOrNull -Path (Join-Path (Get-ClaudePluginsDir -UserHome $UserHome) 'installed_plugins.json')
+    if ($null -eq $d) { return $null }
+    # {"version": 2, "plugins": {...}} today; a flat {id: entries} before that. An entry is one
+    # object or a list of them (one per scope/project); only USER scope counts as installed.
+    $plugins = if ($d.PSObject.Properties['plugins']) { $d.plugins } else { $d }
+    if (-not $plugins.PSObject.Properties[$Id]) { return $false }
+    foreach ($e in @($plugins.$Id)) {
+        if ($e.PSObject.Properties['scope'] -and [string]$e.scope -eq 'user') { return $true }
+    }
+    return $false
+}
+function Test-McpRegistered {
+    param([Parameter(Mandatory)][ValidateSet('claude', 'codex')][string]$Agent,
+          [Parameter(Mandatory)][string]$Server, [string]$UserHome = $HOME)
+    if ($Agent -eq 'claude') {
+        $f = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json' } else { Join-Path $UserHome '.claude.json' }
+        $d = Read-JsonFileOrNull -Path $f
+        if ($null -eq $d) { return $null }
+        if (-not $d.PSObject.Properties['mcpServers']) { return $false }
+        return [bool]($d.mcpServers.PSObject.Properties[$Server])
+    }
+    $f = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'config.toml' } else { Join-Path (Join-Path $UserHome '.codex') 'config.toml' }
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $pattern = '^\[mcp_servers\."?' + [regex]::Escape($Server) + '"?\]'
+    return [bool](Select-String -LiteralPath $f -Pattern $pattern -Quiet)
+}
+
 function Get-ClaudeSuperpowersInstall {
     $text = (Invoke-NativeCommand -Command claude -Arguments @('plugin', 'list', '--json')) -join "`n"
     if (-not $text.Trim()) { return @() }
