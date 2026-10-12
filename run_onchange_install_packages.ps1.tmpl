@@ -112,6 +112,9 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
 {{ include "scripts/lib/ps-adb-bridge.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
+# The clock starts here, so the total is the whole installer and what ran before the first section
+# (the checks and the Node.js step used to sit ahead of the first mark, unmeasured).
+Add-DotTimingMark -Name 'startup'
 # Installer boilerplate is logged, not shown (scripts/lib/ps-installer-output.ps1).
 Initialize-InstallerOutput
 # [data.upgrade] desktop_shortcuts = false: the installers this run starts drop shortcuts on
@@ -816,6 +819,7 @@ function Install-MobileDev {
 # WSL: no package manager owns it (catalog note on wsl2). Installed here only when missing; it
 # needs a reboot to finish, so this says so instead of continuing as if it were ready.
 # WSL_UTF8: wsl.exe writes UTF-16 otherwise, which PowerShell prints with a NUL between letters.
+Add-DotTimingMark -Name 'WSL'
 $env:WSL_UTF8 = '1'
 $wslReady = $false
 if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
@@ -834,6 +838,7 @@ Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue
 # Node.js (versions.node_major pin, #125) - a core fundamental (spec section 2). The npm-dependent groups
 # (agent_toolkit, chatgpt_cli) call Install-Node themselves too, so they
 # also work with core off.
+Add-DotTimingMark -Name 'Node.js'
 Install-Node
 {{- end }}
 
@@ -961,9 +966,14 @@ Write-PendingRebootNote
 # nupkg on disk is NOT proof choco considers the package installed
 # (confirmed live: wiztree's nupkg survived an interrupted install while
 # choco list correctly reported it gone).
-$chocoListOutput = Invoke-WithTimeout -Description "batched choco list (local inventory)" -Seconds 120 -NoStream -Action {
-    choco list --limit-output
-    if ($LASTEXITCODE -ne 0) { throw "choco list exited with $LASTEXITCODE" }
+$chocoListOutput = @()
+$chocoListed = Invoke-DotNativeCapture -FilePath 'choco' -ArgumentList @('list', '--limit-output') -TimeoutSeconds 120
+if ($chocoListed -and $chocoListed.TimedOut) {
+    Write-Host "  Warning: batched choco list (local inventory) - timed out after 120s (process tree killed), continuing" -ForegroundColor Red
+} elseif ($chocoListed -and $chocoListed.ExitCode -ne 0) {
+    Write-Host "  Warning: batched choco list (local inventory) - failed (exit $($chocoListed.ExitCode))" -ForegroundColor Red
+} elseif ($chocoListed) {
+    $chocoListOutput = @($chocoListed.Text -split "`r?`n" | Where-Object { $_ })
 }
 $chocoInstalled = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $chocoInventoryUsable = $false
@@ -1068,11 +1078,12 @@ if ($wingetPackages.Count -gt 0) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: winget not found - $($wingetPackages.Count) winget package(s) not installed" -ForegroundColor Red
     } else {
+        # No background job (Invoke-DotNativeCapture): a job costs a second PowerShell start, about 2 s.
         $wingetInventory = ''
         try {
-            $wingetInventory = (@(Invoke-WithTimeout -Description "winget list (local inventory)" -Seconds 180 -NoStream -Action {
-                winget list --accept-source-agreements --disable-interactivity 2>$null
-            }) -join "`n")
+            $wingetListed = Invoke-DotNativeCapture -FilePath 'winget' -ArgumentList @('list', '--accept-source-agreements', '--disable-interactivity') -TimeoutSeconds 180
+            if ($wingetListed -and $wingetListed.TimedOut) { Write-Host "  Warning: winget list (local inventory) - timed out after 180s (process tree killed), continuing" -ForegroundColor Red }
+            elseif ($wingetListed) { $wingetInventory = ($wingetListed.Text -replace "`r", '') }
         } catch { $wingetInventory = '' }
         Register-DotPackageInventory -Winget $wingetInventory
         $wingetMissing = @()
