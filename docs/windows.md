@@ -116,6 +116,11 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   part: `desktop apps 14.9s (winget listing 14.2s)`. That part is one `winget upgrade` listing, which
   refreshes wingets source over the network, so it moves with the link (4.7 s one run, 14.9 s the next).
   A session whose start time Windows will not give is listed with the creation time from the process table.
+- **`dot up` too.** Reinstalling 27 winget packages on the degraded link took 11m48s of silence, and the
+  timing line blamed `choco packages 10m14s`. The winget section now has its own timing mark
+  (`winget packages`), prints the same heartbeat while an install runs, and lists the installs that took
+  30 seconds or more. The helpers are `scripts/lib/ps-heartbeat.ps1`, inlined into the installer and
+  dot-sourced by `ps-common.ps1`; `tests/dot_up_winget_timing_contract.sh` pins it.
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
