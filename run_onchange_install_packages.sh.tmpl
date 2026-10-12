@@ -2090,15 +2090,26 @@ install_claude_cli() {
     # mechanism, not npm). Re-running add/install is safe if already present.
     if command -v claude &>/dev/null; then
         configure_claude_attribution
-        info "Installing Superpowers plugin for Claude Code..."
-        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-        claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+        # Claude's own files say whether the marketplace and the plugin are there
+        # (claude_marketplace_known / claude_plugin_installed, scripts/lib/agent-skills.sh):
+        # a no-op run paid `plugin install` 7.8 s plus the marketplace add every time
+        # (2026-10-11). An unknown answer (no jq, no file) runs the CLI as before;
+        # `dot upgrade` owns updates.
+        if claude_marketplace_known superpowers-marketplace; then :; else
+            claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+        fi
+        if claude_plugin_installed superpowers@superpowers-marketplace; then
+            info "Superpowers for Claude Code is installed - skipping the plugin install (dot upgrade updates it)."
+        else
+            info "Installing Superpowers plugin for Claude Code..."
+            claude plugin install superpowers@superpowers-marketplace 2>/dev/null || warn "Superpowers plugin install failed - continuing"
+        fi
 {{- if $mobile_dev }}
         # Maestro MCP registration for Claude Code lives HERE, not in
         # install_mobile_dev(): main() runs that first, before claude exists
         # on a fresh machine. -s user: the default scope (local) is private to
         # the installer's own working directory, invisible from any project.
-        if command -v maestro &>/dev/null && ! claude mcp get maestro &>/dev/null; then
+        if command -v maestro &>/dev/null && ! mcp_registered claude maestro; then
             # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Claude Code' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user maestro -- maestro mcp
         fi
@@ -2113,7 +2124,7 @@ install_claude_cli() {
         # of ever letting the 60s timeout fire, hanging `dot up` forever. It
         # also keeps the CLI's own "Added ... / File modified" lines off the
         # terminal: one dotfiles line on success, the raw output on failure.
-        if command -v agent-device &>/dev/null && ! claude mcp get agent-device &>/dev/null; then
+        if command -v agent-device &>/dev/null && ! mcp_registered claude agent-device; then
             # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Claude Code' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' claude mcp add -s user agent-device -- agent-device mcp
         fi
@@ -2290,7 +2301,9 @@ install_agent_toolkit() {
                     warn "could not set Serena dashboard settings - continuing"
                 fi
             fi
-            if command -v claude &>/dev/null && ! claude mcp get serena &>/dev/null; then
+            # mcp_registered (scripts/lib/agent-skills.sh): ~/.claude.json first, `claude mcp get`
+            # (several seconds) only when the file cannot say.
+            if command -v claude &>/dev/null && ! mcp_registered claude serena; then
                 net_timeout 60 serena setup claude-code || warn "serena setup claude-code failed - continuing"
             fi
             # Codex is registered AFTER its install below, not here: this
@@ -2564,6 +2577,10 @@ install_chatgpt_cli() {
     # its cross-cutting gate, matching the .ps1 twin); superpowers' plugin for
     # Codex is the one piece with no codex wiring (see the block below);
     # guardrail's plane wiring is done by the agent-guardrails installer.
+    # Sub-marks: a WSL `dot up` booked "Codex 16s" on a run that installed nothing, while the
+    # section's CLI calls add up to ~3 s in isolation (2026-10-11). The closing Timings line
+    # lists only sections of 5 s or more, so these name the slow part when there is one.
+    dot_timing_mark 'Codex: node'
     if [ "$PKG_MANAGER" = apt ]; then
         install_node
     fi
@@ -2608,6 +2625,7 @@ install_chatgpt_cli() {
     # `<plugin>@<marketplace>` row per available plugin, so the name codex
     # itself uses is right there - and a future rename cannot break us again.
     if command -v codex &>/dev/null; then
+        dot_timing_mark 'Codex: Superpowers'
         if codex_installed="$(codex_superpowers_installed_version)"; then
             info "Superpowers for Codex is installed ($codex_installed) - skipping the plugin add (dot upgrade updates it)."
         else
@@ -2627,13 +2645,19 @@ install_chatgpt_cli() {
         # above (see that section's note): codex only exists from this point
         # on a fresh/reinstall machine. Idempotent: serena's own setup tool
         # rewrites its entry.
-        serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
-            || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
+        dot_timing_mark 'Codex: Serena MCP'
+        # ~/.codex/config.toml already carrying [mcp_servers.serena] means serena's own setup
+        # has run (it rewrites its entry; 2 s a run); skipped then, like the Claude Code probe.
+        if mcp_registered codex serena; then :; else
+            serena_codex_out="$(net_timeout 60 serena setup codex 2>&1)" \
+                || { printf '%s\n' "$serena_codex_out" >&2; warn "Serena MCP registration for Codex failed - continuing"; }
+        fi
+        dot_timing_mark 'Codex: MCP'
 {{- if $mobile_dev }}
         # Maestro's Codex registration lives HERE too, not in
         # install_mobile_dev() (which main() runs before codex exists on a
         # fresh machine). Codex has no scope flag: one global config.toml.
-        if command -v maestro &>/dev/null && ! codex mcp get maestro &>/dev/null; then
+        if command -v maestro &>/dev/null && ! mcp_registered codex maestro; then
             # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Codex' maestro 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add maestro -- maestro mcp
         fi
@@ -2641,7 +2665,7 @@ install_chatgpt_cli() {
         # Maestro's above. Codex has no scope flag: one global config.toml.
         # mcp_add_quiet: same WSL tty-stop hang and same quiet output as the
         # Claude Code registration above.
-        if command -v agent-device &>/dev/null && ! codex mcp get agent-device &>/dev/null; then
+        if command -v agent-device &>/dev/null && ! mcp_registered codex agent-device; then
             # shellcheck disable=SC2016 # the hint is text for the operator's shell, not for this one
             mcp_add_quiet 'Codex' agent-device 'chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up' codex mcp add agent-device -- agent-device mcp
         fi

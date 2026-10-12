@@ -77,6 +77,9 @@ if [ "${1:-}" = plugin ] && [ "${2:-}" = list ]; then
     [ -n "${CODEX_ROWS:-}" ] && printf '%s\n' "$CODEX_ROWS"
     exit 0
 fi
+# `mcp get <server>`: nothing registered in the fixture home (mcp_registered falls back to this
+# probe when ~/.codex/config.toml is absent), so `serena setup codex` still runs
+if [ "${1:-}" = mcp ] && [ "${2:-}" = get ]; then exit 1; fi
 [ "${1:-}" = --version ] && printf 'codex-cli 1.0.0\n'
 exit 0
 STUB
@@ -239,7 +242,9 @@ for fn in install_chatgpt_cli install_antigravity_cli install_playwright_chromiu
 done
 harness="$tmp/installer-harness.sh"
 {
-    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' ". \"$lib\"" \
+    # timing.sh too: install_chatgpt_cli carries "Codex: ..." sub-marks (2026-10-11), and the
+    # installer always has the timing helpers inlined next to the lib.
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' ". \"$lib\"" ". \"$repo_root/scripts/lib/timing.sh\"" \
         'PKG_MANAGER=apt; npm_sudo=""; NPM_BIN="$(command -v npm)"; NPX_BIN="$(command -v npx)"' \
         'install_node() { :; }' 'sudo_net_timeout_tty() { shift 2; "$@"; }' 'ensure_jq() { :; }'
     extract install_chatgpt_cli; extract install_antigravity_cli; extract install_playwright_chromium
