@@ -583,7 +583,25 @@ if command -v serena &>/dev/null; then
         # stderr, not stdout (confirmed live, uv 0.12.24) - discarding it left this step
         # silent on every run, unlike every other tool here. Capture it instead.
         if serena_output=$(uv tool upgrade serena-agent 2>&1); then
-            [ -n "$serena_output" ] && printf '%s\n' "$serena_output" | sed 's/^/  serena-agent: /'
+            # uv also lists every dependency it moved (16 lines for the 2.0.0 upgrade, 2026-10-13):
+            # the console keeps uv's verdict lines, the rest goes to the upgrade log under a dated
+            # header (the apt treatment of #389). DOT_UV_VERBOSE=1 shows everything.
+            serena_news="$(printf '%s\n' "$serena_output" | grep -E 'Nothing to upgrade|Updated |Upgraded |Installed [0-9]+ executable|rror|arning' || true)"
+            # `grep -c` exits 1 on zero matches: without the `|| true` an empty uv output ended the
+            # whole updater here under set -e (every step after Serena vanished, caught by tests).
+            serena_lines="$(printf '%s\n' "$serena_output" | grep -c . || true)"
+            serena_news_lines="$(printf '%s\n' "$serena_news" | grep -c . || true)"
+            serena_hidden=$(( serena_lines - serena_news_lines ))
+            if [ "${DOT_UV_VERBOSE:-}" = 1 ] || [ "$serena_hidden" -le 0 ]; then
+                [ -n "$serena_output" ] && printf '%s\n' "$serena_output" | sed 's/^/  serena-agent: /'
+            else
+                [ -n "$serena_news" ] && printf '%s\n' "$serena_news" | sed 's/^/  serena-agent: /'
+                serena_log="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/upgrade.log"
+                if mkdir -p "$(dirname "$serena_log")" 2>/dev/null; then
+                    { printf '=== %s uv tool upgrade serena-agent\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)"; printf '%s\n' "$serena_output"; } >>"$serena_log" 2>/dev/null || true
+                fi
+                echo "  serena-agent: ($serena_hidden dependency line(s) hidden; full output in $serena_log, or DOT_UV_VERBOSE=1)"
+            fi
         else
             serena_code=$?
             echo "  Warning: serena upgrade failed (exit $serena_code) - continuing"

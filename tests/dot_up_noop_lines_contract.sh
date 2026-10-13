@@ -41,6 +41,21 @@ got="$(PATH="/nonexistent" /bin/bash -c '. "$1"; apt_missing_packages git curl' 
 [ "$got" = "git curl" ] || fail "no dpkg-query: every name reads as missing (the install runs as before), got '$got'"
 pass
 
+# 1b. apt_index_age_hours, executed: the newest release file's age; nothing -> exit 1
+mkdir -p "$tmp/lists"
+touch -d '3 hours ago' "$tmp/lists/archive.ubuntu.com_ubuntu_dists_noble_InRelease"
+touch -d '30 hours ago' "$tmp/lists/archive.ubuntu.com_ubuntu_dists_noble-updates_InRelease"
+touch -d '1 hour ago' "$tmp/lists/lock"
+got="$(APT_LISTS_DIR="$tmp/lists" run_lib apt_index_age_hours)"
+[ "$got" = 3 ] || fail "apt_index_age_hours: newest release file is 3 h old (the lock file does not count), got '$got'"
+mkdir -p "$tmp/nolists"
+if APT_LISTS_DIR="$tmp/nolists" run_lib apt_index_age_hours >/dev/null; then fail "apt_index_age_hours: no release file must exit 1"; else pass; fi
+# the installer skips its refresh while the index is younger than a day; DOT_APT_REFRESH=1 forces it
+require "$tmpl" 'apt_age="$(apt_index_age_hours || true)"'
+require "$tmpl" 'if [ "${DOT_APT_REFRESH:-}" != 1 ] && [ -n "$apt_age" ] && [ "$apt_age" -lt 24 ]; then'
+require "$tmpl" 'info "apt index is ${apt_age}h old - refresh skipped (DOT_APT_REFRESH=1 forces it; dot upgrade always refreshes)"'
+require "$tmpl" '$SUDO apt update -y || true'
+
 # 2. the installer: core and OpenSSH install only when something is missing, and say so otherwise
 require "$tmpl" 'core_missing="$(apt_missing_packages '
 require "$tmpl" 'info "Core packages: all present."'

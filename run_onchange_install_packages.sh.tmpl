@@ -1528,8 +1528,16 @@ install_apt() {
     # sweep). It used to run `apt upgrade -y` here too, so a plain `dot up` upgraded every package
     # on the box (cloudflared moved 2026.9.3 -> 2026.10.0 during one) behind the back of the
     # live-session guards that only `dot upgrade` has.
-    info "Refreshing the apt package index..."
-    $SUDO apt update -y || true
+    # A refresh costs 12-25 s on WSL and this step installs only what is missing: an index younger
+    # than a day (apt's own cadence) is used as is (apt_index_age_hours, lib/agent-skills.sh).
+    # DOT_APT_REFRESH=1 forces it; `dot upgrade` always refreshes, it upgrades.
+    apt_age="$(apt_index_age_hours || true)"
+    if [ "${DOT_APT_REFRESH:-}" != 1 ] && [ -n "$apt_age" ] && [ "$apt_age" -lt 24 ]; then
+        info "apt index is ${apt_age}h old - refresh skipped (DOT_APT_REFRESH=1 forces it; dot upgrade always refreshes)"
+    else
+        info "Refreshing the apt package index..."
+        $SUDO apt update -y || true
+    fi
 {{- else }}
     info "No package categories enabled - skipping the apt index refresh."
 {{- end }}
@@ -2512,7 +2520,7 @@ for name, srv in json.loads(r"""{{ .agents.mcp | toJson }}""").items():
                 continue
             servers[name] = {"httpUrl": srv["url"], "oauth": {}, "forceAllToolsEager": True}
         else:
-            servers[name] = {"command": srv["command"], "args": srv["args"], "forceAllToolsEager": True}
+            servers[name] = {"command": srv["command"], "args": srv.get("args_agy", srv["args"]), "forceAllToolsEager": True}
 if json.dumps(cfg, sort_keys=True) == before:
     print("unchanged")
     sys.exit(0)

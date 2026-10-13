@@ -6,7 +6,9 @@
   renders
 
     $mcpCatalog = @{
-        'serena' = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'ide-assistant') }
+        'serena' = @{ command = 'serena'; args = @('start-mcp-server', '--context', 'claude-code'); args_agy = @('start-mcp-server', '--context', 'antigravity') }
+
+  args_agy (optional in the catalog) is the Antigravity override; consumers for other agents read args.
     }
 
   Keys come out in sorted order (Go template map iteration); nothing depends
@@ -28,7 +30,7 @@
 $mcpCatalog = @{
 {{- range $name, $srv := . }}
 {{- if not (hasKey $srv "type") }}
-    '{{ $name }}' = @{ command = '{{ $srv.command | replace "'" "''" }}'; args = @({{ includeTemplate "ps-list" $srv.args }}) }
+    '{{ $name }}' = @{ command = '{{ $srv.command | replace "'" "''" }}'; args = @({{ includeTemplate "ps-list" $srv.args }}){{ if hasKey $srv "args_agy" }}; args_agy = @({{ includeTemplate "ps-list" $srv.args_agy }}){{ end }} }
 {{- end }}
 {{- end }}
 }
