@@ -66,7 +66,10 @@ if command -v pwsh >/dev/null 2>&1; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-    awk '/^if \(\$vsCodeExtensionUpdate\) \{$/{f=1} f{print} f && /^\}$/{exit}' "$repo_root/scripts/dotupgrade.ps1" >"$tmp/block.ps1"
+    # \r?: *.ps1 is eol=crlf (.gitattributes) even on a Linux checkout; the anchors would
+    # otherwise never match the trailing \r (2026-10-13 CI failure - it passed locally, where
+    # git-bash's awk opens files in text mode and strips \r transparently).
+    awk '/^if \(\$vsCodeExtensionUpdate\) \{\r?$/{f=1} f{print} f && /^\}\r?$/{exit}' "$repo_root/scripts/dotupgrade.ps1" >"$tmp/block.ps1"
     grep -Fq 'WaitForExit' "$tmp/block.ps1" || fail "block extraction lost the VS Code extension wait (source shape changed?)"
     cat >"$tmp/harness.ps1" <<'PSEOF'
 param([string]$Block)
