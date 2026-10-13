@@ -266,18 +266,27 @@ if ($vsCodeExtensionUpdate) {
         Write-Host "  VS Code extension update still running after 5 minutes - left to finish on its own" -ForegroundColor Yellow
     } else {
         # Redirected output: WaitForExit(Int32) can return before ExitCode (and the redirected
-        # streams) have actually settled - .NET's own documented caveat for this overload - and
-        # a real run read ExitCode as blank right after it ("exited with code  - continuing",
-        # 2026-10-12). The process has already exited, so the parameterless overload returns
-        # immediately; call it before reading ExitCode.
+        # streams) have actually settled - .NET's own documented caveat for this overload - so
+        # the parameterless overload (which blocks until that settles, returning at once since
+        # the process has already exited) runs before ExitCode is read.
         $vsCodeExtensionUpdate.WaitForExit()
-        if ($vsCodeExtensionUpdate.ExitCode -ne 0) {
-            Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
-            if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
-        } else {
+        # A real run read ExitCode as blank here ("exited with code  - continuing", 2026-10-12,
+        # and again 2026-10-13 after the WaitForExit() fix above shipped). A direct repro on this
+        # machine (unelevated, with and without a running VS Code instance, with and without a
+        # delay before the wait) read ExitCode as 0 every time - `dot upgrade` always runs
+        # elevated, the one variable that repro could not cover, so the real cause is still
+        # open. PowerShell's property-get access swallows a .NET getter exception entirely (no
+        # catchable error, confirmed 2026-10-13) - a try/catch around this read cannot surface
+        # one - so a $null is reported for what it is instead of printed blank.
+        $vsCodeExitCode = $vsCodeExtensionUpdate.ExitCode
+        if ($vsCodeExitCode -eq 0) {
             $vsCodeExtLines = @()
             foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
             Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
+        } else {
+            $why = if ($null -eq $vsCodeExitCode) { "exited, but its exit code could not be read" } else { "exited with code $vsCodeExitCode" }
+            Write-Host "  VS Code extension update $why - continuing" -ForegroundColor Yellow
+            if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
         }
     }
     foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
