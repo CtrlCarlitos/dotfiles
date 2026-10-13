@@ -29,7 +29,8 @@ trap 'rm -rf "$tmp"' EXIT
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 # the real function text, sliced from the template (it holds no template actions)
-tr -d '\r' <"$tmpl" | awk '/^function Invoke-NpmUpgradeOnce \{/{f=1} f{print} f && /^\}$/{exit}' >"$tmp/npm-fn.ps1"
+tr -d '\r' <"$tmpl" >"$tmp/installer.lf"
+awk '/^function Invoke-NpmUpgradeOnce \{/{f=1} f{print} f && /^\}$/{exit}' "$tmp/installer.lf" >"$tmp/npm-fn.ps1"
 [ -s "$tmp/npm-fn.ps1" ] || fail "could not extract Invoke-NpmUpgradeOnce from the installer"
 
 cat >"$tmp/harness.ps1" <<'PSEOF'
