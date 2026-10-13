@@ -597,6 +597,17 @@ graft_retire() {
 #-------------------------------------------------------------------------------
 codex_superpowers_marketplace() {
     command -v codex >/dev/null 2>&1 || return 0
+    # The plugin cache names the marketplace the plugin came from
+    # (${CODEX_HOME:-~/.codex}/plugins/cache/<marketplace>/superpowers/<version>/.codex-plugin), so
+    # a machine that has it once never asks OpenAI's backend again (`codex plugin list`: 25 s on
+    # WSL, 2026-10-12, together with the add).
+    local d
+    for d in "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/superpowers/*/.codex-plugin; do
+        [ -d "$d" ] || continue
+        d="${d%/superpowers/*}"
+        printf '%s\n' "${d##*/}"
+        return 0
+    done
     # `|| true` inside the substitution: the consumers set -e/pipefail, where a
     # codex that cannot list would otherwise abort the whole run on assignment.
     net_timeout 60 codex plugin list 2>/dev/null \

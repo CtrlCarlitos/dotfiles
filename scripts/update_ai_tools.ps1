@@ -122,6 +122,10 @@ if ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPa
 $null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Playwright Chromium', 'agent-browser')
 $null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Serena')
 $null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('mobile_dev')
+# `codex plugin add` reaches OpenAI's plugin backend (25 s on WSL, 2026-10-12, to change nothing) and
+# touches only ~/.codex/plugins; its section sits just before the report, so this copy overlaps
+# everything in between.
+$null = Invoke-DotBackgroundUnit -Script $PSCommandPath -Section @('Superpowers (Codex)')
 
 Add-DotTimingMark -Name 'Superpowers (Antigravity)'
 # 1a. Superpowers plugin for Antigravity CLI (agy). agy self-updates
@@ -348,40 +352,6 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     }
 } else {
     Write-CuratedSkillsSkippedSummary
-}
-
-Add-DotTimingMark -Name 'Superpowers (Codex)'
-# Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
-# it, and `codex plugin add` both installs and updates (same command, idempotent
-# - like `agy plugin install` above). Defer-aware: the plugin dir is resolved by
-# live codex sessions, same premise as the npm upgrade above. The marketplace
-# name comes from codex itself - see Get-CodexSuperpowersMarketplace in
-# scripts/lib/ps-skills.ps1 for why hardcoding it was wrong.
-if (Get-Command codex -ErrorAction SilentlyContinue) {
-    if (Test-Deferred 'codex') {
-        Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
-    } else {
-        Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
-        if (-not (Get-Command Get-CodexSuperpowersMarketplace -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        $cxMarket = Get-CodexSuperpowersMarketplace
-        if (-not $cxMarket) {
-            Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
-        } else {
-            # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
-            $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
-            if ($LASTEXITCODE -ne 0) {
-                $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red
-            } else {
-                # "Installed plugin root: ...\superpowers\<version>" is the add's one fact; the version
-                # is its last path element (no second `codex plugin list` round-trip).
-                $cxVer = ''
-                foreach ($cxLine in $cxOut) { if ($cxLine -match '^Installed plugin root: .*[\\/]([^\\/]+)\s*$') { $cxVer = $Matches[1] } }
-                $cxUp = Get-SuperpowersLatestVersionCached
-                $cxLineOut = Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxVer -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet"
-                if ($cxLineOut) { Write-Host $cxLineOut }
-            }
-        }
-    }
 }
 
 Add-DotTimingMark -Name 'guardrail'
@@ -614,6 +584,12 @@ if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
             $ocBefore = Get-OpenCodeSuperpowersVersion
             $ocRefreshed = $false
             $ocFailed = $false
+            $ocUp = Get-SuperpowersLatestVersionCached
+            if ($ocBefore -and $ocBefore -eq $ocUp) {
+                # Already at upstream's release (the loaded copy's package.json): no npm re-resolve,
+                # the same gate as Claude Code's and Antigravity's.
+                Write-Host "   Superpowers (OpenCode) is current ($ocBefore)"
+            } else {
             if (Get-OpenCodeSuperpowersPathInstall) {
                 # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
                 # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
@@ -631,6 +607,7 @@ if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
                 $ocAfter = Get-OpenCodeSuperpowersVersion
                 if ($ocAfter -and $ocAfter -ne $ocBefore) { Write-Host "   Superpowers (OpenCode) upgraded to $ocAfter" }
                 else { $shown = 'installed'; if ($ocAfter) { $shown = $ocAfter }; Write-Host "   Superpowers (OpenCode) is current ($shown)" }
+            }
             }
         }
     }
@@ -781,6 +758,43 @@ Add-DotTimingMark -Name 'Graft retirement'
 # nothing to do).
 if (-not (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
 if (Get-Command Invoke-GraftRetirement -ErrorAction SilentlyContinue) { Invoke-GraftRetirement }
+
+Add-DotTimingMark -Name 'Superpowers (Codex)'
+if (-not (Show-DotBackgroundSection 'Superpowers (Codex)')) {
+    # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace carries
+    # it, and `codex plugin add` both installs and updates (same command, idempotent
+    # - like `agy plugin install` above). Defer-aware: the plugin dir is resolved by
+    # live codex sessions, same premise as the npm upgrade above. The marketplace
+    # name comes from codex itself - see Get-CodexSuperpowersMarketplace in
+    # scripts/lib/ps-skills.ps1 for why hardcoding it was wrong.
+    if (Get-Command codex -ErrorAction SilentlyContinue) {
+        if (Test-Deferred 'codex') {
+            Write-Host "  codex deferred - Superpowers (Codex) update skipped with it." -ForegroundColor Yellow
+        } else {
+            Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
+            if (-not (Get-Command Get-CodexSuperpowersMarketplace -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
+            $cxMarket = Get-CodexSuperpowersMarketplace
+            if (-not $cxMarket) {
+                Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+            } else {
+                # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
+                $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
+                if ($LASTEXITCODE -ne 0) {
+                    $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red
+                } else {
+                    # "Installed plugin root: ...\superpowers\<version>" is the add's one fact; the version
+                    # is its last path element (no second `codex plugin list` round-trip).
+                    $cxVer = ''
+                    foreach ($cxLine in $cxOut) { if ($cxLine -match '^Installed plugin root: .*[\\/]([^\\/]+)\s*$') { $cxVer = $Matches[1] } }
+                    $cxUp = Get-SuperpowersLatestVersionCached
+                    $cxLineOut = Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxVer -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet"
+                    if ($cxLineOut) { Write-Host $cxLineOut }
+                }
+            }
+        }
+    }
+
+}
 
 Add-DotTimingMark -Name 'Superpowers report'
 # 8. Superpowers per harness, against upstream's latest release (Write-SuperpowersReport,

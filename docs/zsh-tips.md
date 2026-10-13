@@ -259,6 +259,25 @@ See [Starship Documentation](https://starship.rs/config/) for all options.
 - History: `h` or `history` shows recent commands
 - Path: `path` shows your PATH directories
 
+## Updating Oh-My-Zsh
+
+Do not run `omz update`, and answer **n** if an old shell ever asks
+`[oh-my-zsh] Would you like to update?`. Oh-My-Zsh and its plugins are pinned
+chezmoi externals (`.chezmoiexternal.toml`: a commit SHA plus its sha256); the
+weekly auto-update PR moves the pins and the next `dot up` applies them, so
+`dot up` is the updater. Oh-My-Zsh's own updater would git-pull over the tree
+chezmoi writes: on one machine an accepted prompt left `~/.oh-my-zsh/.git` in a
+merge conflict (15 unmerged files), while chezmoi kept restoring the pinned
+files on every apply. `.zshrc` therefore sets `zstyle ':omz:update' mode disabled`,
+and a fresh install never has a `.git` directory there at all.
+
+If your `~/.oh-my-zsh` predates the dotfiles and still carries one, remove it
+once; the next `dot up` leaves the tree exactly as pinned:
+
+```bash
+rm -rf ~/.oh-my-zsh/.git
+```
+
 ## Troubleshooting
 
 ### Slow shell startup?

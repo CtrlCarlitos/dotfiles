@@ -244,37 +244,23 @@ fi
 # idempotent - like `agy plugin install` above). Defer-aware: the plugin dir is
 # resolved by live codex sessions, same premise as the npm upgrade above.
 #
-# The marketplace name comes from codex itself (see
-# codex_superpowers_marketplace in scripts/lib/agent-skills.sh for why
-# hardcoding it was wrong). The old line also MISREPORTED its failure: it sent
-# the error to /dev/null and printed "Superpowers not installed for Codex",
-# which was false - the plugin was installed, the add was failing on a
-# nonexistent marketplace. A real failure now prints what codex said.
-#
-# The mark sits below the comment: tests/agent_skill_wiring_contract.sh runs the curated-skills
-# region, cut at this comment's first line, without the timing helpers.
-dot_timing_mark 'Superpowers (Codex)'
-if command -v codex &>/dev/null; then
-    if deferred codex; then
-        echo "  codex deferred - Superpowers (Codex) update skipped with it."
-    else
-        echo "✨ Updating Superpowers (Codex)..."
-        cx_market="$(codex_superpowers_marketplace)"
-        if [ -z "$cx_market" ]; then
-            echo "   no Codex marketplace lists a superpowers plugin - skipping"
-        else
-            if cx_out="$(net_timeout 300 codex plugin add "superpowers@$cx_market" 2>&1)"; then
-                # "Installed plugin root: .../superpowers/<version>" is the add's one fact; the
-                # version is its last path element (no second `codex plugin list` round-trip).
-                cx_ver="$(printf '%s\n' "$cx_out" | sed -n 's#^Installed plugin root: .*/##p' | head -n 1)"
-                superpowers_refresh_line Codex "$cx_ver" "$sp_upstream" "the marketplace has not published v$sp_upstream yet"
-            else
-                printf '%s\n' "$cx_out"; echo "   Superpowers update for Codex failed - skipping"
-            fi
-        fi
+# The add reaches OpenAI's plugin backend and took 25 s on WSL (2026-10-12) to change nothing.
+# It touches only ~/.codex/plugins, so it starts here in the background and is joined in the
+# 'Superpowers (Codex)' section just before the report, overlapping sections 1c, 2 and 3 below.
+# The marketplace name comes from the plugin cache (codex_superpowers_marketplace,
+# scripts/lib/agent-skills.sh - `codex plugin list` only when nothing is cached). The old line also
+# MISREPORTED its failure: it sent the error to /dev/null and printed "Superpowers not installed
+# for Codex", which was false; a real failure prints what codex said.
+# (tests/agent_skill_wiring_contract.sh cuts the curated-skills region at this comment's first line.)
+CX_JOB_PID=""; CX_JOB_OUT=""; cx_market=""
+if command -v codex &>/dev/null && ! deferred codex; then
+    cx_market="$(codex_superpowers_marketplace)"
+    if [ -n "$cx_market" ]; then
+        CX_JOB_OUT="$(mktemp)"
+        ( rc=0; net_timeout 300 codex plugin add "superpowers@$cx_market" >"$CX_JOB_OUT" 2>&1 || rc=$?; echo "$rc" >"$CX_JOB_OUT.rc" ) &
+        CX_JOB_PID=$!
     fi
 fi
-
 dot_timing_mark 'guardrail'
 # guardrail-section: begin
 # 1c. Agent guardrails: single opt-in desired-state flag read from
@@ -421,6 +407,25 @@ if command -v opencode &>/dev/null; then
         echo "  opencode deferred - an opencode session is live (upgrading it races the running binary)."
     else
         echo "💻 Updating OpenCode..."
+        # `opencode upgrade` (no --major): OpenCode's own path, 1.2 s when current against 7 s for
+        # the installer re-run, and it follows the 1.x line this repo supports - OpenCode 2 replaces
+        # the binary in place and the dotfiles are not ready for it (dotfiles#395). Its "OpenCode 2
+        # is available" notice is surfaced as one line, never acted on. The installer below stays
+        # as the fallback when the command itself fails (no install method detected, network).
+        oc_before="$(opencode --version 2>/dev/null | head -n 1)" || oc_before=""
+        if oc_up="$(net_timeout 600 opencode upgrade </dev/null 2>&1)"; then
+            oc_ver="$(opencode --version 2>/dev/null | head -n 1)" || oc_ver=""
+            if [ -n "$oc_ver" ] && [ "$oc_ver" != "$oc_before" ]; then
+                echo "   OpenCode upgraded to $oc_ver"
+            else
+                echo "   OpenCode is current (${oc_ver:-installed})"
+            fi
+            if printf '%s\n' "$oc_up" | grep -q 'OpenCode 2 is available'; then
+                echo "   OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose"
+            fi
+        else
+            printf '%s\n' "$oc_up"
+            echo "   opencode upgrade failed - re-running the installer"
         # Fetch-then-run with the same guard shape as the Claude installer
         # above (#114).
         oc_inst="$(mktemp)"
@@ -444,6 +449,7 @@ if command -v opencode &>/dev/null; then
             echo "   OpenCode installer download failed - continuing"
         fi
         rm -f "$oc_inst"
+        fi
     fi
     # A legacy npm-global opencode-ai shim (dead binary - postinstall never
     # ran) can shadow the native binary this installer just refreshed; remove
@@ -465,7 +471,11 @@ if command -v opencode &>/dev/null; then
         echo "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
     else
         oc_sp_before="$(opencode_superpowers_version)" || oc_sp_before=""
-        if opencode_superpowers_refresh "$(command -v npm)"; then
+        # Already at upstream's release (the loaded copy's package.json): no npm re-resolve, the
+        # same gate as Claude Code's and Antigravity's.
+        if [ -n "$oc_sp_before" ] && [ "$oc_sp_before" = "$sp_upstream" ]; then
+            echo "   Superpowers (OpenCode) is current ($oc_sp_before)"
+        elif opencode_superpowers_refresh "$(command -v npm)"; then
             oc_sp_after="$(opencode_superpowers_version)" || oc_sp_after=""
             if [ -n "$oc_sp_after" ] && [ "$oc_sp_after" != "$oc_sp_before" ]; then
                 echo "   Superpowers (OpenCode) upgraded to $oc_sp_after"
@@ -583,6 +593,34 @@ dot_timing_mark 'Graft retirement'
 # is nothing to do). Same npm sudo decision as the npm steps above.
 graft_retire "$npm_sudo"
 
+dot_timing_mark 'Superpowers (Codex)'
+# The add started after the curated skills (see there); its output is read here.
+cx_ver=""
+if command -v codex &>/dev/null; then
+    if deferred codex; then
+        echo "  codex deferred - Superpowers (Codex) update skipped with it."
+    else
+        echo "✨ Updating Superpowers (Codex)..."
+        if [ -z "$cx_market" ]; then
+            echo "   no Codex marketplace lists a superpowers plugin - skipping"
+        else
+            [ -z "$CX_JOB_PID" ] || wait "$CX_JOB_PID" 2>/dev/null || true
+            cx_rc="$(/bin/cat "$CX_JOB_OUT.rc" 2>/dev/null || echo 1)"
+            cx_out="$(/bin/cat "$CX_JOB_OUT" 2>/dev/null || true)"
+            rm -f "$CX_JOB_OUT" "$CX_JOB_OUT.rc"
+            if [ "$cx_rc" = 0 ]; then
+                # "Installed plugin root: .../superpowers/<version>" is the add's one fact; the
+                # version is its last path element (no second `codex plugin list` round-trip), and
+                # the report below takes it as the marketplace's catalog version.
+                cx_ver="$(printf '%s\n' "$cx_out" | sed -n 's#^Installed plugin root: .*/##p' | head -n 1)"
+                superpowers_refresh_line Codex "$cx_ver" "$sp_upstream" "the marketplace has not published v$sp_upstream yet"
+            else
+                printf '%s\n' "$cx_out"; echo "   Superpowers update for Codex failed - skipping"
+            fi
+        fi
+    fi
+fi
+
 dot_timing_mark 'Superpowers report'
 # 8. Superpowers per harness, against upstream's latest release. Four install mechanisms are
 # four ways to fall behind while every step above reports success (2026-10-10: OpenCode at 6.3.0
@@ -633,7 +671,9 @@ superpowers_report() {
     fi
     if command -v codex &>/dev/null; then
         codex_ver="$(codex_superpowers_installed_version || true)"
-        codex_cat="$(codex_superpowers_catalog_version || true)"
+        # The add's "Installed plugin root" version IS what the marketplace offers; only a run
+        # without it asks `codex plugin list`.
+        codex_cat="${cx_ver:-$(codex_superpowers_catalog_version || true)}"
         # Codex installs only from a marketplace: when the catalog itself is behind upstream there
         # is nothing `codex plugin add` could fetch, and nothing for the dotfiles to do.
         # That is not a problem to act on, so it prints as "latest there", not as "behind".
