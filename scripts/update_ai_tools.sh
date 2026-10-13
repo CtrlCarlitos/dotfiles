@@ -27,10 +27,15 @@ deferred() { case ",${DOTUPGRADE_DEFER:-}," in *,"$1",*) return 0 ;; *) return 1
 # installed, registry unreachable - returns 1 and the caller installs as before.
 CURRENT_NPM_VERSION=""
 LATEST_NPM_VERSION=""
+# <label>, when given, opens a timing sub-mark before each of the two npm calls ("<label>: npm ls",
+# "<label>: npm view"): three WSL runs booked "NPM: codex" at 6-8 s against ~2.5 s for the same
+# calls in isolation (2026-10-13), and the next slow run has to name which one.
 npm_global_current() {
-    local pkg="$1" have want
+    local pkg="$1" label="${2:-}" have want
     command -v jq &>/dev/null || return 1
+    [ -z "$label" ] || dot_timing_mark "$label: npm ls"
     have="$(npm ls -g "$pkg" --depth=0 --json 2>/dev/null | jq -b -r --arg p "$pkg" '.dependencies[$p].version // empty' 2>/dev/null)" || have=""
+    [ -z "$label" ] || dot_timing_mark "$label: npm view"
     want="$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]')" || want=""
     LATEST_NPM_VERSION="$want"
     [ -n "$have" ] && [ "$have" = "$want" ] && CURRENT_NPM_VERSION="$have"
@@ -81,7 +86,7 @@ codex_works() { command -v codex &>/dev/null && codex --version &>/dev/null; }
 # starts.
 upgrade_codex_npm() {
     local pkg="$1" want
-    if codex_works && npm_global_current "$pkg"; then
+    if codex_works && npm_global_current "$pkg" 'NPM: codex'; then
         echo "   codex is current ($CURRENT_NPM_VERSION)"
         return 0
     fi

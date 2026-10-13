@@ -79,6 +79,10 @@ fi
 
 # 5. the updater: NPM sub-marks, the Antigravity gate in both twins
 require "$ai_sh" "dot_timing_mark 'NPM: codex'"
+# the codex check's two npm calls are marked apart (6-8 s live against ~2.5 s isolated, 2026-10-13)
+require "$ai_sh" 'npm_global_current "$pkg" '"'"'NPM: codex'"'"
+require "$ai_sh" 'dot_timing_mark "$label: npm ls"'
+require "$ai_sh" 'dot_timing_mark "$label: npm view"'
 require "$ai_sh" 'dot_timing_mark "NPM: $npm_tool"'
 require "$ai_sh" 'Superpowers (Antigravity) is current ($agy_have)'
 require "$ai_ps1" 'Superpowers (Antigravity) is current ($agyHave)'
