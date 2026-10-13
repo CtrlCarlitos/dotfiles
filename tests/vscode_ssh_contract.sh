@@ -57,17 +57,16 @@ awk '/update_ai_tools.sh"$/{a=NR} /wait "\$vscode_ext_pid"/{b=NR} END{exit !(a &
 awk '/update_ai_tools.ps1.\)/{a=NR} /vsCodeExtensionUpdate.WaitForExit/{b=NR} END{exit !(a && b && a<b)}' "$repo_root/scripts/dotupgrade.ps1" ||
     fail "dotupgrade.ps1: the background extension update must be waited for after the AI tools"
 
-# .NET's WaitForExit(Int32) can return true before ExitCode (and the redirected streams) have
-# actually settled; a real run read it as blank ("exited with code  - continuing", 2026-10-12
-# and again 2026-10-13 after the fix below first shipped). A direct repro on this machine
-# (unelevated, with and without a running VS Code instance, with and without a delay before the
-# wait) read ExitCode as 0 every time - `dot upgrade` always runs elevated (Test-IsAdmin), the
-# one variable that repro could not cover, so the real cause is still open. PowerShell's
-# property-get access silently swallows a .NET getter exception (confirmed 2026-10-13: no
-# catchable error, no $Error entry, $? stays True), so a try/catch here would be dead code - the
-# block must still call the parameterless WaitForExit() (the documented, harmless-if-not-the-
-# cause fix for the race it DOES describe), and report a still-null ExitCode as unreadable
-# instead of printing it blank. EXTRACTED from dotupgrade.ps1 and run against a fake Process.
+# Root cause of the blank exit code ("exited with code  - continuing", 2026-10-12, and again
+# 2026-10-13 after an unrelated fix): `dot upgrade` runs under Windows PowerShell 5.1 (.NET
+# Framework), where Start-Process -PassThru never turns on the Process object's exited-event
+# bookkeeping - without it, .ExitCode stays unreadable forever even once HasExited is already
+# true. Confirmed by reproducing it directly under powershell.exe, not pwsh (which never showed
+# it) - EnableRaisingEvents right after Start-Process is the actual fix. PowerShell's
+# property-get access silently swallows a .NET getter exception regardless (confirmed 2026-10-13:
+# no catchable error, no $Error entry, $? stays True), so the remaining fallback below reports a
+# still-null ExitCode as unreadable instead of printing it blank, rather than a try/catch (dead
+# code: it could never fire). EXTRACTED from dotupgrade.ps1 and run against fakes.
 if command -v pwsh >/dev/null 2>&1; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
@@ -75,6 +74,23 @@ if command -v pwsh >/dev/null 2>&1; then
     # \r?: *.ps1 is eol=crlf (.gitattributes) even on a Linux checkout; the anchors would
     # otherwise never match the trailing \r (2026-10-13 CI failure - it passed locally, where
     # git-bash's awk opens files in text mode and strips \r transparently).
+    awk '/^\$vsCodeExtensionUpdate = \$null\r?$/{f=1} f{print} f && /^\}\r?$/{exit}' "$repo_root/scripts/dotupgrade.ps1" >"$tmp/start_block.ps1"
+    grep -Fq 'EnableRaisingEvents' "$tmp/start_block.ps1" || fail "start_block extraction lost the VS Code extension start (source shape changed?)"
+    cat >"$tmp/start_harness.ps1" <<'PSEOF'
+param([string]$Block)
+Set-StrictMode -Version Latest
+function Get-Command { param($Name, $ErrorAction) [pscustomobject]@{ Source = 'C:\fake\code.cmd' } }
+function Start-Process {
+    param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError)
+    [pscustomobject]@{ EnableRaisingEvents = $false }
+}
+. $Block
+Write-Output ('enableRaisingEvents=' + $vsCodeExtensionUpdate.EnableRaisingEvents)
+PSEOF
+    out="$(pwsh -NoProfile -File "$(winpath "$tmp/start_harness.ps1")" -Block "$(winpath "$tmp/start_block.ps1")" 2>&1 | tr -d '\r')"
+    printf '%s\n' "$out" | grep -Fxq 'enableRaisingEvents=True' || fail "EnableRaisingEvents must be set right after Start-Process, or .ExitCode never becomes readable under Windows PowerShell 5.1 (got: $out)"
+    pass
+
     awk '/^if \(\$vsCodeExtensionUpdate\) \{\r?$/{f=1} f{print} f && /^\}\r?$/{exit}' "$repo_root/scripts/dotupgrade.ps1" >"$tmp/block.ps1"
     grep -Fq 'WaitForExit' "$tmp/block.ps1" || fail "block extraction lost the VS Code extension wait (source shape changed?)"
     cat >"$tmp/harness.ps1" <<'PSEOF'

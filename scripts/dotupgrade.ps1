@@ -251,6 +251,15 @@ if ($codeCommand) {
         $vsCodeExtOut = [IO.Path]::GetTempFileName()
         $vsCodeExtErr = [IO.Path]::GetTempFileName()
         $vsCodeExtensionUpdate = Start-Process -FilePath $codeCommand.Source -ArgumentList '--update-extensions' -WindowStyle Hidden -PassThru -RedirectStandardOutput $vsCodeExtOut -RedirectStandardError $vsCodeExtErr
+        # Windows PowerShell 5.1 (.NET Framework - what `dot upgrade` actually runs under;
+        # PowerShell 7/pwsh never showed this in testing): Start-Process -PassThru never turns on
+        # the Process object's exited-event bookkeeping, and without it .ExitCode stays
+        # unreadable forever even once HasExited is already true ("exited with code  -
+        # continuing", 2026-10-12 and again 2026-10-13 after an unrelated fix). Confirmed by
+        # reproducing it directly under powershell.exe, not pwsh (2026-10-13); EnableRaisingEvents
+        # turns that bookkeeping on and is the actual fix - set before any wait, since the
+        # process could in principle exit before this line runs otherwise.
+        $vsCodeExtensionUpdate.EnableRaisingEvents = $true
     } catch {
         Write-Host "  VS Code extension update did not start ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
     }
@@ -270,14 +279,9 @@ if ($vsCodeExtensionUpdate) {
         # the parameterless overload (which blocks until that settles, returning at once since
         # the process has already exited) runs before ExitCode is read.
         $vsCodeExtensionUpdate.WaitForExit()
-        # A real run read ExitCode as blank here ("exited with code  - continuing", 2026-10-12,
-        # and again 2026-10-13 after the WaitForExit() fix above shipped). A direct repro on this
-        # machine (unelevated, with and without a running VS Code instance, with and without a
-        # delay before the wait) read ExitCode as 0 every time - `dot upgrade` always runs
-        # elevated, the one variable that repro could not cover, so the real cause is still
-        # open. PowerShell's property-get access swallows a .NET getter exception entirely (no
-        # catchable error, confirmed 2026-10-13) - a try/catch around this read cannot surface
-        # one - so a $null is reported for what it is instead of printed blank.
+        # The real cause of the blank exit code (above: EnableRaisingEvents) should keep this
+        # branch from firing at all now. Kept as a fallback - ExitCode still $null for some
+        # other reason reports itself as unreadable instead of printing blank.
         $vsCodeExitCode = $vsCodeExtensionUpdate.ExitCode
         if ($vsCodeExitCode -eq 0) {
             $vsCodeExtLines = @()
