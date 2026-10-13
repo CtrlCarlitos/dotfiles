@@ -67,4 +67,39 @@ require "$up_sh" 'apt_upgrade_run "${apt_q[@]}"'
 require "$up_sh" 'tool_current_collect'
 require "$up_sh" "tool_current_flush 'GitHub-release tools'"
 
+# 5. apt_sudo_prime: the sudo password prompt is its own timing section ("sudo password"), not
+#    "system packages" - a WSL dot upgrade reported 53s of "system packages" with apt having
+#    nothing at all to do (2026-10-12), almost all of it the operator typing the password. A
+#    cached credential (sudo -n true succeeds) opens no extra section at all.
+harness2="$tmp/prime-fn.sh"
+awk '/^apt_sudo_prime\(\) \{/ {f=1} f {print} f && /^\}$/ {exit}' "$up_sh" >"$harness2"
+grep -q '^apt_sudo_prime() {' "$harness2" || fail "dotupgrade.sh: apt_sudo_prime() not found (the apt sudo prompt must be a function the test can run)"
+cat >"$tmp/bin/sudo" <<'EOF'
+#!/bin/sh
+if [ "$1" = -n ] && [ "$2" = true ]; then
+    [ "${FAKE_SUDO_CACHED:-0}" = 1 ] && exit 0 || exit 1
+fi
+if [ "$1" = -v ]; then exit "${FAKE_SUDO_V_RC:-0}"; fi
+exec "$@"
+EOF
+chmod +x "$tmp/bin/sudo"
+prime_run() {
+    env PATH="$tmp/bin:/usr/bin:/bin" bash -c '
+        set -u
+        . "'"$repo_root"'/scripts/lib/timing.sh"
+        . "'"$harness2"'"
+        dot_timing_mark "system packages"
+        apt_sudo_prime
+        dot_timing_mark "after"
+        for i in "${!DOT_TIMING_NAMES[@]}"; do printf "%s\n" "${DOT_TIMING_NAMES[$i]}"; done
+    '
+}
+out="$(FAKE_SUDO_CACHED=1 prime_run)"
+[ "$out" = "system packages" ] || fail "apt_sudo_prime: a cached credential must open no extra timing section (got: $(printf '%s' "$out" | tr '\n' '|'))"
+out="$(FAKE_SUDO_CACHED=0 prime_run)"
+expected="$(printf 'system packages\nsudo password\nsystem packages')"
+[ "$out" = "$expected" ] || fail "apt_sudo_prime: a real prompt must get its own 'sudo password' section, not count against system packages (got: $(printf '%s' "$out" | tr '\n' '|'))"
+pass
+require "$up_sh" 'apt_sudo_prime'
+
 finish

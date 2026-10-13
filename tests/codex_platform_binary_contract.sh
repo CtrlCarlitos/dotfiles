@@ -44,7 +44,7 @@ if command -v jq >/dev/null 2>&1; then
 s="$tmp"
 case "\$*" in
     "ls -g @openai/codex --depth=0 --json") printf '{"dependencies":{"@openai/codex":{"version":"%s"}}}' "\$(cat "\$s/have")" ;;
-    "view @openai/codex version") cat "\$s/want" ;;
+    "view @openai/codex version"*) cat "\$s/want" ;;
     "view @openai/codex@"*" optionalDependencies --json") v="\$(cat "\$s/want")"; printf '{"@openai/codex-linux-x64":"npm:@openai/codex@%s-linux-x64"}' "\$v" ;;
     "view @openai/codex@"*"-linux-x64 version") [ "\$(cat "\$s/published")" = 1 ] && echo "\${2#@openai/codex@}" ;;
     "install -g @openai/codex@latest "*) echo install >>"\$s/calls"; cat "\$s/want" >"\$s/have"; [ "\$(cat "\$s/published")" = 1 ] && [ "\$(cat "\$s/fixes")" = 1 ] && echo 1 >"\$s/works" ;;
@@ -90,7 +90,7 @@ function npm {
     $global:LASTEXITCODE = 0
     switch -Wildcard ($line) {
         'ls -g @openai/codex --depth=0 --json' { '{"dependencies":{"@openai/codex":{"version":"' + $script:st.have + '"}}}' }
-        'view @openai/codex version' { $script:st.want }
+        'view @openai/codex version*' { $script:st.want }
         'view @openai/codex@* optionalDependencies --json' { '{"@openai/codex-win32-x64":"npm:@openai/codex@' + $script:st.want + '-win32-x64"}' }
         'view @openai/codex@*-win32-x64 version' { if ($script:st.published) { $args[1] } }
         'install -g @openai/codex@latest*' { $script:st.calls += 'install'; $script:st.have = $script:st.want; if ($script:st.published -and $script:st.fixes) { $script:st.works = $true } }

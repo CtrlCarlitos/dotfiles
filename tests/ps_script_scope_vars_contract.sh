@@ -145,6 +145,8 @@ function npm { if ($args[0] -eq 'view') { '99.0.0' } else { '1.0.0' } }
 function Invoke-Quietly { param($Description, $Action) $script:calls++ }
 # the timing library (inlined ahead of these functions in the installer) with its state
 function Add-DotTimingMark { param($Name) $script:DotTimingLast = $Name }
+# the 24-hour check stamps (scripts/lib/ps-skills.ps1): never recent here
+function Test-DotCheckRecent { $false }; function Get-DotCheckValue { '' }; function Write-DotCheckStamp { }
 $script:DotTimingLast = ''
 if ($init) { Invoke-Expression $init }
 Invoke-Expression $fn

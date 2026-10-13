@@ -166,6 +166,12 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   (an app-server and an exec-server under `AppData\Local\OpenAI\Codexbin\<id>\`), which the app restarts, so
   Codex's npm upgrade never ran. That folder is now classed with the app, not with the CLI sessions
   (`tests/dotupgrade_live_sessions_contract.sh`).
+- **A no-op `dot up` does not redo what is done.** With the new timing marks a run that installed nothing showed
+  `npm registry check 41s`, `OpenCode 25s`, `Serena 15s` and `agent-browser setup 12s`. The npm registry question is
+  now one try of ten seconds and asked once a day per npm version (a stamp under `~\.local\state\dotfiles\checks`);
+  the OpenCode Superpowers install (a git clone through npm) runs only when it is missing; `serena init` only while
+  Serena has no config; agent-browser's browser setup once per agent-browser version. `dot upgrade` refreshes all of
+  them as before (`scripts/lib/ps-skills.ps1`; `tests/dot_up_recurring_work_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.

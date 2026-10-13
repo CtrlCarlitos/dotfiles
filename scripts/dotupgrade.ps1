@@ -103,9 +103,16 @@ $dockerOwner = Get-DockerDesktopOwner
 if ($dockerOwner -eq 'choco') {
     Write-Host "  Docker Desktop is still Chocolatey's (its package lags Docker's releases, and winget will not upgrade it). To move it to winget and keep your data, see docs/windows.md (Docker Desktop through winget)." -ForegroundColor Yellow
 }
+# Where Docker Desktop ran from, kept so the run can start it again when it was the one to stop it.
+$dockerExePath = ''
+$dockerStopped = $false
 if (-not $skipPackageSweeps -and @(Get-DockerDesktopProcess).Count -gt 0) {
+    try { $dockerExePath = [string](@(Get-DockerDesktopProcess)[0].Path) } catch { $dockerExePath = '' }
     $dockerPendingVersion = Get-DockerDesktopUpgrade -Owner $dockerOwner
-    if ($dockerPendingVersion) { $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId)) }
+    if ($dockerPendingVersion) {
+        $dockerKept = -not (Invoke-DockerDesktopStopOffer -Version $dockerPendingVersion -ExcludeId @(Get-AncestorProcessId))
+        $dockerStopped = -not $dockerKept
+    }
 }
 
 Add-DotTimingMark -Name 'choco'
@@ -194,11 +201,19 @@ if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
     Write-Host "  Updating WSL (wsl --update)..." -ForegroundColor Yellow
     $previousWslUtf8 = $env:WSL_UTF8
     $env:WSL_UTF8 = '1'   # wsl.exe writes UTF-16 otherwise (a NUL between every letter)
+    # Shown as it arrives, with a "still running" line: a real update took 3 minutes (2026-10-12) with
+    # nothing printed until it ended, which looked like a hang.
+    $wslBeat = Open-DotHeartbeat -Tool 'wsl --update'
     try {
-        $wslOut = @(& wsl.exe --update 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        & wsl.exe --update 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | ForEach-Object {
+            Write-Host "  $_"
+            $wslBeat.State.Quiet.Restart()
+        }
         if ($LASTEXITCODE -ne 0) { Write-Host "  wsl --update exited with code $LASTEXITCODE - continuing" -ForegroundColor Yellow }
-        foreach ($line in $wslOut) { Write-Host "  $line" }
-    } finally { $env:WSL_UTF8 = $previousWslUtf8 }
+    } finally {
+        Close-DotHeartbeat -Beat $wslBeat
+        $env:WSL_UTF8 = $previousWslUtf8
+    }
 }
 
 Add-DotTimingMark -Name 'VS Code extensions'
@@ -249,15 +264,34 @@ if ($vsCodeExtensionUpdate) {
     Add-DotTimingMark -Name 'VS Code extensions (waiting)'
     if (-not $vsCodeExtensionUpdate.WaitForExit(300000)) {
         Write-Host "  VS Code extension update still running after 5 minutes - left to finish on its own" -ForegroundColor Yellow
-    } elseif ($vsCodeExtensionUpdate.ExitCode -ne 0) {
-        Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
-        if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
     } else {
-        $vsCodeExtLines = @()
-        foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
-        Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
+        # Redirected output: WaitForExit(Int32) can return before ExitCode (and the redirected
+        # streams) have actually settled - .NET's own documented caveat for this overload - and
+        # a real run read ExitCode as blank right after it ("exited with code  - continuing",
+        # 2026-10-12). The process has already exited, so the parameterless overload returns
+        # immediately; call it before reading ExitCode.
+        $vsCodeExtensionUpdate.WaitForExit()
+        if ($vsCodeExtensionUpdate.ExitCode -ne 0) {
+            Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
+            if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
+        } else {
+            $vsCodeExtLines = @()
+            foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
+            Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
+        }
     }
     foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+}
+
+# Docker Desktop was stopped for its upgrade (its containers with them): start it again, after the
+# sweeps and the WSL update that it depends on. Containers with a restart policy come back with it.
+if ($dockerStopped) {
+    Add-DotTimingMark -Name 'Docker Desktop restart'
+    if (Resume-DockerDesktop -Path $dockerExePath) {
+        Write-Host "  Docker Desktop started again (it was stopped for its upgrade)." -ForegroundColor Green
+    } else {
+        Write-Host "  Docker Desktop was stopped for its upgrade and could not be started again from here: start it from the Start menu." -ForegroundColor Yellow
+    }
 }
 
 if ($dropDesktopShortcuts) {
