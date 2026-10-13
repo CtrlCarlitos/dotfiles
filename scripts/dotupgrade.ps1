@@ -249,13 +249,21 @@ if ($vsCodeExtensionUpdate) {
     Add-DotTimingMark -Name 'VS Code extensions (waiting)'
     if (-not $vsCodeExtensionUpdate.WaitForExit(300000)) {
         Write-Host "  VS Code extension update still running after 5 minutes - left to finish on its own" -ForegroundColor Yellow
-    } elseif ($vsCodeExtensionUpdate.ExitCode -ne 0) {
-        Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
-        if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
     } else {
-        $vsCodeExtLines = @()
-        foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
-        Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
+        # Redirected output: WaitForExit(Int32) can return before ExitCode (and the redirected
+        # streams) have actually settled - .NET's own documented caveat for this overload - and
+        # a real run read ExitCode as blank right after it ("exited with code  - continuing",
+        # 2026-10-12). The process has already exited, so the parameterless overload returns
+        # immediately; call it before reading ExitCode.
+        $vsCodeExtensionUpdate.WaitForExit()
+        if ($vsCodeExtensionUpdate.ExitCode -ne 0) {
+            Write-Host "  VS Code extension update exited with code $($vsCodeExtensionUpdate.ExitCode) - continuing" -ForegroundColor Yellow
+            if ($vsCodeExtErr -and (Test-Path -LiteralPath $vsCodeExtErr)) { Get-Content -LiteralPath $vsCodeExtErr | Where-Object { $_ } | ForEach-Object { Write-Host "    $_" } }
+        } else {
+            $vsCodeExtLines = @()
+            foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f -and (Test-Path -LiteralPath $f)) { $vsCodeExtLines += @(Get-Content -LiteralPath $f) } }
+            Write-VSCodeExtensionsReport -Lines $vsCodeExtLines
+        }
     }
     foreach ($f in @($vsCodeExtOut, $vsCodeExtErr)) { if ($f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
 }
