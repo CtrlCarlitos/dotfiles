@@ -35,7 +35,10 @@ pass
 # --- bash twin, executed ------------------------------------------------------------------------
 if command -v jq >/dev/null 2>&1; then
     extract_fn() { awk -v n="$1" 'index($0, n "() {") == 1 {f=1; print; next} f{print} f && /^\}$/{exit}' "$repo_root/scripts/update_ai_tools.sh"; }
-    for fn in npm_global_current npm_global_upgrade npm_platform_tag npm_platform_published codex_works upgrade_codex_npm; do extract_fn "$fn"; done >"$tmp/fns.sh"
+    # timing.sh too: npm_global_current opens sub-marks when given a label (the updater always has
+    # the timing helpers sourced before these functions).
+    { printf '%s\n' ". $repo_root/scripts/lib/timing.sh"
+      for fn in npm_global_current npm_global_upgrade npm_platform_tag npm_platform_published codex_works upgrade_codex_npm; do extract_fn "$fn"; done; } >"$tmp/fns.sh"
     grep -q '^upgrade_codex_npm() {' "$tmp/fns.sh" || fail "upgrade_codex_npm() not found in update_ai_tools.sh"
     mkdir -p "$tmp/bin"
     # state: $tmp/have (installed version), $tmp/want (latest), $tmp/published (1/0), $tmp/works (1/0)
