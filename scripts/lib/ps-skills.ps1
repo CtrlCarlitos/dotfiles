@@ -1034,3 +1034,47 @@ function Write-SuperpowersReport {
         }
     }
 }
+
+# --- checks that need not run every time -------------------------------------------------------------
+# Some probes cost seconds on a slow link and answer the same for days (is npm current; has the Codex
+# marketplace caught up with upstream). A stamp file per check records when it last gave its "nothing
+# to do" answer; the check is skipped while the stamp is younger than -Hours. Stamps live beside the
+# skills-sources record (XDG_STATE_HOME or ~\.local\state, under dotfiles\checks).
+function Get-DotCheckStampPath {
+    param([Parameter(Mandatory)][string]$Name)
+    $base = if ($env:XDG_STATE_HOME -and [IO.Path]::IsPathRooted($env:XDG_STATE_HOME)) { $env:XDG_STATE_HOME } else { Join-Path (Get-SkillsHome) '.local\state' }
+    return Join-Path (Join-Path (Join-Path $base 'dotfiles') 'checks') $Name
+}
+
+# $true while the check's stamp is younger than -Hours (and not from the future).
+function Test-DotCheckRecent {
+    param([Parameter(Mandatory)][string]$Name, [int]$Hours = 24)
+    try {
+        $path = Get-DotCheckStampPath -Name $Name
+        if (-not (Test-Path -LiteralPath $path)) { return $false }
+        $age = [DateTime]::UtcNow - (Get-Item -LiteralPath $path).LastWriteTimeUtc
+        return ($age.TotalSeconds -ge 0 -and $age.TotalHours -lt $Hours)
+    }
+    catch { return $false }
+}
+
+# Record that the check just gave its "nothing to do" answer (-Value: what it saw, read back by Get-DotCheckValue).
+function Write-DotCheckStamp {
+    param([Parameter(Mandatory)][string]$Name, [string]$Value = '')
+    try {
+        $path = Get-DotCheckStampPath -Name $Name
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        [IO.File]::WriteAllText($path, $Value, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    catch { Write-Verbose "check stamp not written: $($_.Exception.Message)" }
+}
+
+function Get-DotCheckValue {
+    param([Parameter(Mandatory)][string]$Name)
+    try {
+        $path = Get-DotCheckStampPath -Name $Name
+        if (Test-Path -LiteralPath $path) { return ([IO.File]::ReadAllText($path)).Trim() }
+    }
+    catch { Write-Verbose "check stamp unreadable: $($_.Exception.Message)" }
+    return ''
+}

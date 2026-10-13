@@ -823,7 +823,9 @@ function Test-NpmGlobalCurrent {
                 $have = "$($deps.Value.PSObject.Properties[$Package].Value.version)"
             }
         }
-        $want = ((npm view $Package version 2>$null) | Out-String).Trim()
+        # One retry, twenty seconds each: npm's defaults wait minutes on a degraded link ("NPM packages 9-13s"
+        # on a run with nothing to upgrade, and 41 s for one `npm view` in the installer).
+        $want = ((npm view $Package version --fetch-retries=1 --fetch-timeout=20000 2>$null) | Out-String).Trim()
         $script:NpmLatestVersion = $want
         if ($have -and $have -eq $want) {
             $script:NpmCurrentVersion = $have
@@ -1250,6 +1252,21 @@ function Get-DockerDesktopUpgrade {
     catch { Write-Verbose "docker desktop upgrade probe failed: $($_.Exception.Message)" }
     finally { $ErrorActionPreference = $previous }
     return ''
+}
+
+# Start Docker Desktop again after `dot upgrade` stopped it for its installer. -Path: where it ran from
+# (read before it was stopped); the default install folder otherwise. $false when no executable is found
+# or it does not start.
+function Resume-DockerDesktop {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Path = '')
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        $Path = Join-Path (Join-Path (Join-Path $env:ProgramFiles 'Docker') 'Docker') 'Docker Desktop.exe'
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    if (-not $PSCmdlet.ShouldProcess('Docker Desktop', 'Start')) { return $false }
+    try { Start-Process -FilePath $Path | Out-Null; return $true }
+    catch { Write-Verbose "docker desktop start failed: $($_.Exception.Message)"; return $false }
 }
 
 # Graceful first (`docker desktop stop` also stops the engine and the backend), then the

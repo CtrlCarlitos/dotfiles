@@ -363,22 +363,32 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
     } else {
         Write-Host "$($G.sparkles) Updating Superpowers (Codex)..." -ForegroundColor Yellow
         if (-not (Get-Command Get-CodexSuperpowersMarketplace -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
-        $cxMarket = Get-CodexSuperpowersMarketplace
-        if (-not $cxMarket) {
-            Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
+        $cxHave = Get-CodexSuperpowersCachedVersion
+        # The marketplace lags upstream for days (6.4.2 against 7.0.0): once the add has run for the
+        # version that is installed, it is not asked again for a day (the add calls OpenAI's backend, 18 s).
+        $cxRecent = [bool]($cxHave -and (Test-DotCheckRecent -Name 'codex-superpowers') -and ((Get-DotCheckValue -Name 'codex-superpowers') -eq $cxHave))
+        if ($cxRecent) {
+            $cxUp = Get-SuperpowersLatestVersionCached
+            Write-Host ((Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxHave -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet") + ' (checked within the last day)')
         } else {
-            # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
-            $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
-            if ($LASTEXITCODE -ne 0) {
-                $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red
+            $cxMarket = Get-CodexSuperpowersMarketplace
+            if (-not $cxMarket) {
+                Write-Host "  No Codex marketplace lists a superpowers plugin - skipping" -ForegroundColor Yellow
             } else {
-                # "Installed plugin root: ...\superpowers\<version>" is the add's one fact; the version
-                # is its last path element (no second `codex plugin list` round-trip).
-                $cxVer = ''
-                foreach ($cxLine in $cxOut) { if ($cxLine -match '^Installed plugin root: .*[\\/]([^\\/]+)\s*$') { $cxVer = $Matches[1] } }
-                $cxUp = Get-SuperpowersLatestVersionCached
-                $cxLineOut = Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxVer -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet"
-                if ($cxLineOut) { Write-Host $cxLineOut }
+                # Its "Added plugin ... / Installed plugin root ..." lines said nothing on every run.
+                $cxOut = @(& codex plugin add "superpowers@$cxMarket" 2>&1 | ForEach-Object { "$_" })
+                if ($LASTEXITCODE -ne 0) {
+                    $cxOut | ForEach-Object { Write-Host "  $_" }; Write-Host "  Superpowers update for Codex failed - continuing" -ForegroundColor Red
+                } else {
+                    # "Installed plugin root: ...\superpowers\<version>" is the add's one fact; the version
+                    # is its last path element (no second `codex plugin list` round-trip).
+                    $cxVer = ''
+                    foreach ($cxLine in $cxOut) { if ($cxLine -match '^Installed plugin root: .*[\\/]([^\\/]+)\s*$') { $cxVer = $Matches[1] } }
+                    $cxUp = Get-SuperpowersLatestVersionCached
+                    $cxLineOut = Format-SuperpowersRefreshLine -Harness 'Codex' -Version $cxVer -Upstream $cxUp -Behind "the marketplace has not published v$cxUp yet"
+                    if ($cxLineOut) { Write-Host $cxLineOut }
+                    if ($cxVer) { Write-DotCheckStamp -Name 'codex-superpowers' -Value $cxVer }
+                }
             }
         }
     }
