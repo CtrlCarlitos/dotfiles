@@ -26,6 +26,11 @@
   The WSL profile re-pins font + scheme on purpose: WSL's generated fragment
   forces "Ubuntu Mono" + the purple Ubuntu scheme, breaking starship glyphs.
 
+  Dropdown: four segments in one order on every machine (PowerShell + psmux, the WSL distros,
+  the SSH hosts, Windows PowerShell + Command Prompt), separators between them, the Developer and
+  Azure profiles hidden. Ctrl+Shift+1..9 stay Terminal's position chords - see the "Order and groups" comment
+  below for why a custom mapping cannot be labelled truthfully.
+
   Agent keys: Ctrl+Alt+C/X/O/A type claude/codex/opencode/agy + Enter into
   the FOCUSED pane (sendInput), so one chord works in pwsh, WSL zsh, and an
   SSH session alike (the CLI just has to exist there). Add Shift to open it in
@@ -269,60 +274,70 @@
 {{-   end }}
 {{- end -}}
 {{- /* Order and groups (2026-10-13: the dropdown differed per machine because Terminal appends
-       its generated profiles in first-seen order). Three groups, same order everywhere:
-         Windows  psmux, PowerShell (7), Windows PowerShell, Command Prompt
-         WSL      every distro, by name (several Ubuntu-26.04 instances with custom names sort too)
+       its generated profiles in first-seen order). Same order everywhere:
+         Windows  PowerShell (7), psmux
+         WSL      every distro, by name (several Ubuntu-26.04 instances with custom names sort too);
+                  a legacy Windows.Terminal.Wsl profile that shares its name with a Microsoft.WSL
+                  one is the store generator's orphaned twin - it stays in the list but out of the
+                  menu (Terminal drew it with no chord on one machine)
          SSH      [[data.ssh_hosts]] in config order
+         Windows  Windows PowerShell, Command Prompt (after the hosts, by request)
        Developer * (Visual Studio) and Azure Cloud Shell are hidden, not removed: Terminal
        regenerates them, and a hidden entry with their guid is what keeps them out. Anything else
-       Terminal or the user adds follows, untouched. newTabMenu draws the same groups with
-       separators; remainingProfiles keeps new ones visible. Ctrl+Shift+1..9 open PROFILES, not
-       dropdown positions, three per group: 1-3 psmux, PowerShell, Windows PowerShell (Command
-       Prompt has none), 4-6 the first three WSL distros, 7-9 the first three SSH hosts; a slot
-       without a profile on this machine is unbound rather than left on Terminal's
-       position-based default. */ -}}
-{{- $ps7 := list }}{{ $ps5 := list }}{{ $cmd := list }}{{ $wslByName := dict }}{{ $rest := list -}}
+       Terminal or the user adds follows, untouched. newTabMenu draws the four segments with
+       separators; remainingProfiles keeps new ones visible.
+       Ctrl+Shift+1..9 are Terminal's own position chords, deliberately: the label beside the
+       profile at index i is the chord of the default action Terminal.OpenNewTabProfile<i>, and
+       that lookup keeps the default chord even when a user binding takes the chord away
+       (ActionMap::_PopulateCumulativeKeyMaps, 2026-10-13), so any custom mapping shows wrong
+       labels. With the order fixed, position = the same profile on every machine. The entries the
+       earlier version wrote (User.tab<n> actions and null unbinds of ctrl+shift+<n>) are removed
+       below; the merge would keep them otherwise. */ -}}
+{{- $ps7 := list }}{{ $ps5 := list }}{{ $cmd := list }}{{ $wslByName := dict }}{{ $wslLegacy := list }}{{ $rest := list -}}
 {{- range $ep := $kept }}
 {{-   $src := toString (get $ep "source") }}{{ $guid := lower (toString (get $ep "guid")) }}
 {{-   if eq $src "Windows.Terminal.PowershellCore" }}{{ $ps7 = append $ps7 $ep }}
 {{-   else if eq $guid "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}" }}{{ $ps5 = append $ps5 $ep }}
 {{-   else if eq $guid "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}" }}{{ $cmd = append $cmd $ep }}
-{{-   else if or (eq $src "Microsoft.WSL") (eq $src "Windows.Terminal.Wsl") }}{{ $_ := set $wslByName (printf "%s|%s" (toString (get $ep "name")) $guid) $ep }}
+{{-   else if or (eq $src "Microsoft.WSL") (eq $src "Windows.Terminal.Wsl") }}
+{{-     $name := toString (get $ep "name") }}
+{{-     if hasKey $wslByName $name }}
+{{- /* same name twice: Microsoft.WSL wins, the other is the legacy twin */ -}}
+{{-       if eq $src "Microsoft.WSL" }}{{ $wslLegacy = append $wslLegacy (get $wslByName $name) }}{{ $_ := set $wslByName $name $ep }}{{ else }}{{ $wslLegacy = append $wslLegacy $ep }}{{ end }}
+{{-     else }}{{ $_ := set $wslByName $name $ep }}{{ end }}
 {{-   else }}
 {{-     if or (eq $src "Windows.Terminal.VisualStudio") (eq $src "Windows.Terminal.Azure") }}{{ $_ := set $ep "hidden" true }}{{ end }}
 {{-     $rest = append $rest $ep }}
 {{-   end }}
 {{- end -}}
 {{- $wsl := list }}{{ range $k := keys $wslByName | sortAlpha }}{{ $wsl = append $wsl (get $wslByName $k) }}{{ end -}}
-{{- $win := concat (list $psmux) $ps7 $ps5 $cmd -}}
-{{- $_ := set $profiles "list" (concat $win $wsl $ssh $rest) -}}
+{{- $win := concat $ps7 (list $psmux) -}}
+{{- $tail := concat $ps5 $cmd -}}
+{{- $_ := set $profiles "list" (concat $win $wsl $ssh $tail $wslLegacy $rest) -}}
 
-{{- /* newTabMenu: the three groups with a separator between non-empty neighbours */ -}}
+{{- /* newTabMenu: the four segments with a separator between non-empty neighbours */ -}}
 {{- $menu := list }}
 {{- range $ep := $win }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}
 {{- if $wsl }}{{ $menu = append $menu (dict "type" "separator") }}{{ range $ep := $wsl }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}{{ end }}
 {{- if $ssh }}{{ $menu = append $menu (dict "type" "separator") }}{{ range $ep := $ssh }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}{{ end }}
+{{- if $tail }}{{ $menu = append $menu (dict "type" "separator") }}{{ range $ep := $tail }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}{{ end }}
 {{- $menu = append $menu (dict "type" "remainingProfiles") }}
 {{- $_ := set $cur "newTabMenu" $menu -}}
 
-{{- /* Ctrl+Shift+1..9 -> profiles: actions User.tab<n> + keybindings; empty slots unbound */ -}}
-{{- $slots := dict }}
-{{- range $i, $ep := (concat (list $psmux) $ps7 $ps5) }}{{ if lt $i 3 }}{{ $_ := set $slots (toString (add $i 1)) $ep }}{{ end }}{{ end }}
-{{- range $i, $ep := $wsl }}{{ if lt $i 3 }}{{ $_ := set $slots (toString (add $i 4)) $ep }}{{ end }}{{ end }}
-{{- range $i, $ep := $ssh }}{{ if lt $i 3 }}{{ $_ := set $slots (toString (add $i 7)) $ep }}{{ end }}{{ end }}
-{{- $tabActions := list }}{{ $tabKeys := list }}
-{{- range $n := list "1" "2" "3" "4" "5" "6" "7" "8" "9" }}
-{{-   $keys := printf "ctrl+shift+%s" $n }}
-{{-   if hasKey $slots $n }}
-{{-     $ep := get $slots $n }}
-{{-     $tabActions = append $tabActions (dict "id" (printf "User.tab%s" $n) "name" (printf "Tab %s: %s" $n (toString (get $ep "name"))) "command" (dict "action" "newTab" "profile" (get $ep "guid"))) }}
-{{-     $tabKeys = append $tabKeys (dict "id" (printf "User.tab%s" $n) "keys" $keys) }}
-{{-   else }}
-{{-     $tabKeys = append $tabKeys (dict "id" nil "keys" $keys) }}
+{{- /* retire the earlier version's chord entries: User.tab<n> actions and their keybindings, and
+       the null unbinds of ctrl+shift+<n> it wrote for empty slots */ -}}
+{{- if kindIs "slice" (get $cur "actions") }}
+{{-   $acts := list }}{{ range $e := get $cur "actions" }}{{ if not (regexMatch "^User\\.tab[1-9]$" (toString (get $e "id"))) }}{{ $acts = append $acts $e }}{{ end }}{{ end }}
+{{-   $_ := set $cur "actions" $acts }}
+{{- end }}
+{{- if kindIs "slice" (get $cur "keybindings") }}
+{{-   $kbs := list }}{{ range $e := get $cur "keybindings" }}
+{{-     $eid := toString (get $e "id") }}{{ $ekeys := lower (toString (get $e "keys")) }}
+{{-     $ours := or (regexMatch "^User\\.tab[1-9]$" $eid) (and (not (get $e "id")) (regexMatch "^ctrl\\+shift\\+[1-9]$" $ekeys)) }}
+{{-     if not $ours }}{{ $kbs = append $kbs $e }}{{ end }}
 {{-   end }}
-{{- end -}}
-{{- $_ := set $want "actions" (concat $want.actions $tabActions) -}}
-{{- $_ := set $want "keybindings" (concat $want.keybindings $tabKeys) -}}
+{{-   $_ := set $cur "keybindings" $kbs }}
+{{- end }}
 
 {{- /* schemes + themes by name */ -}}
 {{- range $section := list "schemes" "themes" }}
