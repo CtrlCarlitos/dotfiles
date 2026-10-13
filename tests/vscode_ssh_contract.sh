@@ -58,10 +58,16 @@ awk '/update_ai_tools.ps1.\)/{a=NR} /vsCodeExtensionUpdate.WaitForExit/{b=NR} EN
     fail "dotupgrade.ps1: the background extension update must be waited for after the AI tools"
 
 # .NET's WaitForExit(Int32) can return true before ExitCode (and the redirected streams) have
-# actually settled; a real run read it as blank ("exited with code  - continuing", 2026-10-12).
-# The block must call the parameterless WaitForExit() - which blocks until that settles - before
-# reading ExitCode. EXTRACTED from dotupgrade.ps1 and run against a fake Process whose ExitCode
-# only becomes readable once the parameterless overload runs.
+# actually settled; a real run read it as blank ("exited with code  - continuing", 2026-10-12
+# and again 2026-10-13 after the fix below first shipped). A direct repro on this machine
+# (unelevated, with and without a running VS Code instance, with and without a delay before the
+# wait) read ExitCode as 0 every time - `dot upgrade` always runs elevated (Test-IsAdmin), the
+# one variable that repro could not cover, so the real cause is still open. PowerShell's
+# property-get access silently swallows a .NET getter exception (confirmed 2026-10-13: no
+# catchable error, no $Error entry, $? stays True), so a try/catch here would be dead code - the
+# block must still call the parameterless WaitForExit() (the documented, harmless-if-not-the-
+# cause fix for the race it DOES describe), and report a still-null ExitCode as unreadable
+# instead of printing it blank. EXTRACTED from dotupgrade.ps1 and run against a fake Process.
 if command -v pwsh >/dev/null 2>&1; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
@@ -72,7 +78,7 @@ if command -v pwsh >/dev/null 2>&1; then
     awk '/^if \(\$vsCodeExtensionUpdate\) \{\r?$/{f=1} f{print} f && /^\}\r?$/{exit}' "$repo_root/scripts/dotupgrade.ps1" >"$tmp/block.ps1"
     grep -Fq 'WaitForExit' "$tmp/block.ps1" || fail "block extraction lost the VS Code extension wait (source shape changed?)"
     cat >"$tmp/harness.ps1" <<'PSEOF'
-param([string]$Block)
+param([string]$Block, [string]$Mode)
 Set-StrictMode -Version Latest
 function Add-DotTimingMark { param([string]$Name) }
 function Write-VSCodeExtensionsReport { param([string[]]$Lines) Write-Output ('report=' + ($Lines -join '|')) }
@@ -81,22 +87,29 @@ $vsCodeExtensionUpdate = [pscustomobject]@{ ExitCode = $null }
 $vsCodeExtensionUpdate | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
     param($Milliseconds)
     $script:waitCalls += $Milliseconds
-    # the timed overload: the process has already exited, but (as in real .NET) ExitCode is
-    # not readable yet - only the parameterless overload below settles it
-    if ($null -eq $Milliseconds) { $this.ExitCode = 0 }
+    # the parameterless overload returns void in real .NET - no `return` here, unlike the timed
+    # overload below, so a bare call doesn't leak a stray value into the pipeline
+    if ($null -eq $Milliseconds) {
+        # the process has already exited, but (as in real .NET) ExitCode is not readable yet -
+        # only this overload settles it (settled mode only)
+        if ($Mode -eq 'settled') { $this.ExitCode = 0 }
+        return
+    }
     return $true
 }
 $vsCodeExtOut = $null
 $vsCodeExtErr = $null
 . $Block
-Write-Output ('exitcode=' + $vsCodeExtensionUpdate.ExitCode)
 Write-Output ('waits=' + ($script:waitCalls -join ','))
 PSEOF
-    out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Block "$(winpath "$tmp/block.ps1")" 2>&1 | tr -d '\r')"
-    expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300))"; }
-    expect 'exitcode=0'
-    expect 'waits=300000,'
-    printf '%s\n' "$out" | grep -Fq 'report=' || fail "ExitCode read before it settled must not be misreported as a failed update (got: $out)"
+    run_mode() { pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Block "$(winpath "$tmp/block.ps1")" -Mode "$1" 2>&1 | tr -d '\r'; }
+
+    out="$(run_mode settled)"
+    printf '%s\n' "$out" | grep -Fxq 'waits=300000,' || fail "settled: expected 'waits=300000,' (got: $(printf '%s' "$out" | tr '\n' ' '))"
+    printf '%s\n' "$out" | grep -Fq 'report=' || fail "settled: ExitCode read before it settled must not be misreported as a failed update (got: $out)"
+
+    out="$(run_mode stillnull)"
+    printf '%s\n' "$out" | grep -Fq 'exited, but its exit code could not be read' || fail "stillnull: a null ExitCode must say so, not print blank (got: $out)"
     pass
 else
     printf 'note: pwsh not installed - the executed VS Code wait check was skipped\n'
