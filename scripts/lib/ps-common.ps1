@@ -814,8 +814,11 @@ function Test-NpmGlobalCurrent {
     # PS 5.1 promotes native stderr to a terminating error under Stop; the answer is the signal.
     $ErrorActionPreference = 'Continue'
     try {
-        $have = ''
-        $listing = ((npm ls -g $Package --depth=0 --json 2>$null) | Out-String).Trim()
+        # The installed version is a file and the latest one HTTPS request (ps-npm-registry.ps1): no node
+        # start, and a time limit that holds. npm answers only for what those cannot.
+        $have = Get-NpmInstalledVersion -Package $Package
+        $listing = ''
+        if (-not $have) { $listing = ((npm ls -g $Package --depth=0 --json 2>$null) | Out-String).Trim() }
         if ($listing) {
             $parsed = $listing | ConvertFrom-Json
             $deps = $parsed.PSObject.Properties['dependencies']
@@ -825,7 +828,8 @@ function Test-NpmGlobalCurrent {
         }
         # One retry, twenty seconds each: npm's defaults wait minutes on a degraded link ("NPM packages 9-13s"
         # on a run with nothing to upgrade, and 41 s for one `npm view` in the installer).
-        $want = ((npm view $Package version --fetch-retries=1 --fetch-timeout=20000 2>$null) | Out-String).Trim()
+        $want = Get-NpmLatestVersion -Package $Package -TimeoutSeconds 20
+        if (-not $want) { $want = ((npm view $Package version --fetch-retries=1 --fetch-timeout=20000 2>$null) | Out-String).Trim() }
         $script:NpmLatestVersion = $want
         if ($have -and $have -eq $want) {
             $script:NpmCurrentVersion = $have
@@ -1716,6 +1720,8 @@ function Invoke-DockerDiskCompact {
 . (Join-Path $PSScriptRoot 'ps-heartbeat.ps1')
 # Sections of update_ai_tools.ps1 that run side by side (scripts/lib/ps-background.ps1).
 . (Join-Path $PSScriptRoot 'ps-background.ps1')
+# Is a global npm package current, without starting npm (scripts/lib/ps-npm-registry.ps1).
+. (Join-Path $PSScriptRoot 'ps-npm-registry.ps1')
 
 # Read-Host for dot upgrade's prompts: the time spent answering is its own section ("your
 # answers") in the closing Timings line, not part of the work it interrupted. Twin of

@@ -179,6 +179,16 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   3 minutes in silence). A Docker Desktop that `dot upgrade` stopped for its installer is started again after the
   sweeps and the AI tools (`Resume-DockerDesktop`; one this run did not stop is left alone)
   (`tests/dot_upgrade_recurring_work_contract.sh`).
+- **"Is it current?" without starting npm.** One registry question inside a real `dot up` took 41 s and 48 s, while
+  the same `npm view` at the prompt took 2.7 s (elevated) and the fetch limit did not cut it. The installed version
+  of a global npm package is now read from its `package.json` under the global prefix, and the latest version from
+  one HTTPS request to the registry's `/latest` document with a 10 s (20 s in `dot upgrade`) time limit; npm is
+  asked only for what those cannot say (a registry or prefix set in `~\.npmrc` or the environment, a failed
+  request). Measured here: 0.2 s per package against 4-5 s through npm. The installer times `npm version` and
+  `npm registry check` apart, prints either when it takes over 3 s, and sets `npm_config_update_notifier=false`
+  for its npm calls; the Serena step is timed in parts (`Serena: uv`, `Serena: config`, `Serena: claude
+  registration`). `DOT_NPM_DIRECT=0` turns the direct reads off (`scripts/lib/ps-npm-registry.ps1`;
+  `tests/npm_registry_direct_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.

@@ -12,6 +12,8 @@ param([string]$OnlySection = '')
 # received chunk, throttling downloads to a crawl. Script-scoped; the child
 # `irm | iex` below is a separate process and sets it itself.
 $ProgressPreference = 'SilentlyContinue'
+# npm's own update notifier asks the registry on exit; nothing here wants that (and the background copies inherit it).
+$env:npm_config_update_notifier = 'false'
 # Shared helpers (the current-version checks below); the file sits next to this script.
 if ($PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-common.ps1') }
 # Native tools print UTF-8; PowerShell decodes their output with the console's OEM code page,
@@ -512,7 +514,11 @@ if (-not (Show-DotBackgroundSection 'Claude Code')) {
         try {
             $claudeHave = ((& claude --version 2>$null | Select-Object -First 1 | Out-String).Trim() -split '\s+')[0]
             $claudePkg = (chezmoi execute-template '{{ .agents.npm.claude_code_version }}' | Out-String).Trim()
-            if ($claudePkg) { $claudeWant = (& npm view $claudePkg version 2>$null | Out-String).Trim() }
+            if ($claudePkg) {
+                # One HTTPS request with a time limit; npm only when that cannot say (ps-npm-registry.ps1).
+                $claudeWant = Get-NpmLatestVersion -Package $claudePkg
+                if (-not $claudeWant) { $claudeWant = (& npm view $claudePkg version 2>$null | Out-String).Trim() }
+            }
         } catch { Write-Verbose "claude version probe failed: $($_.Exception.Message)" }
         if ($claudeHave -and $claudeHave -eq $claudeWant) {
             Write-Host "  Claude Code is current ($claudeHave)"

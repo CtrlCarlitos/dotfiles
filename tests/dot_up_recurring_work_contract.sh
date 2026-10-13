@@ -63,6 +63,7 @@ function npm {
 }
 function Invoke-Quietly { param([string]$Description, [scriptblock]$Action) & $Action }
 function Add-DotTimingMark { param($Name) $script:DotTimingLast = $Name }
+function Get-NpmInstalledVersion { param($Package) '' }; function Get-NpmLatestVersion { param($Package) '' }   # DOT_NPM_DIRECT=0: npm decides
 $script:DotTimingLast = 'Node.js'
 . $Fn
 function Run { $script:NpmUpgraded = $false; (Invoke-NpmUpgradeOnce *>&1 | Out-String).Trim() }
