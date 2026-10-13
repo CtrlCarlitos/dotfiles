@@ -497,11 +497,16 @@ operator guide for running agents in these sessions:
 - **What is deliberately different:** no TPM (psmux has no plugin manager, and
   its server already keeps sessions alive across detaches); no `clip.exe`/
   `xclip` copy pipes (psmux yanks straight to the Windows clipboard); panes run
-  pwsh like every local tab (`default-shell pwsh`); and `paste-detection off`,
-  because psmux's own `Ctrl+V` handling stripped the first escape bytes of a
-  paste (a literal `[A` in OpenCode/Claude) and once deadlocked a pane, so
-  Windows Terminal pastes natively and the TUI's bracketed paste does the rest
-  (upstream psmux#719). The reload key (`prefix` `r`) re-reads
+  pwsh like every local tab (`default-shell pwsh`); and `paste-detection on`
+  (needs psmux 3.4.0 or newer): psmux sees `Ctrl+V` and wraps the paste in
+  bracketed-paste markers, so Claude Code and OpenCode collapse it to
+  `[Paste ... +N lines]`. On 3.3.8 it stripped the first escape bytes of a paste
+  (a literal `[A`) and a very large one could stall the server, so this was
+  `off` until 3.4.0 (upstream psmux#719). At a shell prompt a plain
+  right-click pastes; inside an agent CLI that captures the mouse (Claude Code,
+  OpenCode) it does nothing, because psmux forwards the click to the app. Paste
+  there with `Ctrl+V` or **Shift+right-click**; Shift+drag likewise hands the mouse
+  back to Windows Terminal. The reload key (`prefix` `r`) re-reads
   `~/.config/psmux/psmux.conf`. For a newline inside an agent CLI, use `Ctrl+J`
   (see [above](#keys-inside-the-agent-clis)).
 

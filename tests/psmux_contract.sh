@@ -52,8 +52,12 @@ for line in \
 done
 
 # psmux-only behavior.
-grep -Fq 'set -g paste-detection off' "$psmux_conf" ||
-    fail "psmux.conf: paste detection must be off (psmux's own paste injection strips escape bytes - literal [A in pastes - and has deadlocked panes; Windows Terminal pastes natively)"
+# Detection ON: with it off a paste reaches the pane as typed characters, so no TUI can collapse it
+# to "[Paste ... +N lines]"; psmux >= 3.4.0 wraps it in bracketed-paste markers (psmux#719, retested
+# 2026-10-13: no stray "[A", placeholder shown, a 1.3 MB paste leaves the server responsive).
+grep -Fq 'set -g paste-detection on' "$psmux_conf" ||
+    fail "psmux.conf: paste detection must be on (psmux >= 3.4.0; off made pastes arrive as typed characters, no [Paste +N lines])"
+if grep -Fq 'paste-detection off' "$psmux_conf"; then fail "psmux.conf: paste-detection off is the pre-3.4.0 workaround for psmux#719"; else pass; fi
 grep -Fq 'set -s set-clipboard on' "$psmux_conf" ||
     fail "psmux.conf: set-clipboard must be on (OSC 52 reaches Windows Terminal's clipboard)"
 grep -Fq 'default-shell pwsh' "$psmux_conf" ||
