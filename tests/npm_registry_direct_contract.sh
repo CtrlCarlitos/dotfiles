@@ -92,7 +92,7 @@ Out 'registry-corporate' ('[' + (Get-NpmRegistryTarget -Package 'npm') + ']')
 [IO.File]::WriteAllLines((Join-Path $fakeHome '.npmrc'), @('@openai:registry=https://npm.corp.example/'))
 Out 'registry-scope-hit' ('[' + (Get-NpmRegistryTarget -Package '@openai/codex') + ']')
 Out 'registry-scope-miss' (Get-NpmRegistryTarget -Package 'markdownlint-cli2')
-Remove-Item (Join-Path $fakeHome '.npmrc')
+Remove-Item -Force (Join-Path $fakeHome '.npmrc')
 $env:npm_config_registry = 'https://mirror.example/'
 Out 'registry-env' ('[' + (Get-NpmRegistryTarget -Package 'npm') + ']')
 Remove-Item Env:\npm_config_registry

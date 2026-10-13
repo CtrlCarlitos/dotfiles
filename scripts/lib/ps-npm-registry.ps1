@@ -82,6 +82,8 @@ function Get-NpmInstalledVersion {
 # One GET with a time limit; the parsed answer, or $null. A function of its own so a test can answer for it.
 function Invoke-NpmRegistryRequest {
     param([Parameter(Mandatory)][string]$Uri, [int]$TimeoutSeconds = 10)
+    # Windows PowerShell 5.1 redraws a progress bar per received chunk, which slows even a small download.
+    $ProgressPreference = 'SilentlyContinue'
     try {
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
         return (Invoke-RestMethod -Uri $Uri -UseBasicParsing -TimeoutSec $TimeoutSeconds -ErrorAction Stop)
