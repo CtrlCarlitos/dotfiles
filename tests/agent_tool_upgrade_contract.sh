@@ -68,10 +68,20 @@ mkdir -p "$bin" "$home" "$prefix/bin"
 
 # --- Stubs -------------------------------------------------------------------
 # codex starts (exit 0): "current" requires a codex that runs (tests/codex_platform_binary_contract.sh)
-for c in npx git uv serena agy codex; do
+for c in npx git serena agy codex; do
     printf '#!/bin/sh\nexit 0\n' >"$bin/$c"
     chmod +x "$bin/$c"
 done
+# uv: quiet by default; UV_SAYS_UPGRADE=1 prints what `uv tool upgrade serena-agent` printed for the
+# 2.0.0 upgrade (2026-10-13): the verdict lines plus a dependency diff, all on stderr
+cat >"$bin/uv" <<'EOF'
+#!/bin/sh
+if [ "${UV_SAYS_UPGRADE:-0}" = 1 ] && [ "${1:-}" = tool ] && [ "${2:-}" = upgrade ]; then
+    printf '%s\n' 'Updated serena-agent v1.7.0 -> v2.0.0' ' - click==8.5.0' ' + click==8.3.1' ' - mcp==1.28.1' ' + mcp==2.2.0' 'Installed 3 executables: serena, serena-agent, serena-hooks' >&2
+fi
+exit 0
+EOF
+chmod +x "$bin/uv"
 # opencode: `--version` answers 9.9.9; `upgrade` is OpenCode's own path (1.x line, no --major) and
 # says "already installed", or fails with OPENCODE_UPGRADE_FAIL=1 so the installer fallback runs;
 # OPENCODE_SAYS_V2=1 adds the notice the 1.19.0 binary prints.
@@ -224,6 +234,17 @@ grep -Fq 'OpenCode installer download failed - continuing' "$tmp/run4.log" ||
     fail "a failed OpenCode installer download must warn-and-continue"
 grep -Fq 'AI Tools Update Complete' "$tmp/run4.log" ||
     fail "curl failures must not abort the remaining tools (#114)"
+
+# --- 4a. Serena: uv's verdict lines on the console, the dependency diff in the upgrade log -------
+XDG_STATE_HOME="$tmp/state" UV_SAYS_UPGRADE=1 run_updater "$tmp/run4a.log" || true
+grep -Fq '  serena-agent: Updated serena-agent v1.7.0 -> v2.0.0' "$tmp/run4a.log" || fail "the uv verdict line must stay on the console (got: $(grep -F serena-agent "$tmp/run4a.log" | tr '\n' '|'))"
+grep -Fq '  serena-agent: Installed 3 executables: serena, serena-agent, serena-hooks' "$tmp/run4a.log" || fail "the executables line must stay on the console"
+if grep -Fq 'click==' "$tmp/run4a.log"; then fail "the dependency diff must not reach the console"; else pass; fi
+grep -Fq "serena-agent: (4 dependency line(s) hidden; full output in $tmp/state/dotfiles/upgrade.log, or DOT_UV_VERBOSE=1)" "$tmp/run4a.log" || fail "the hidden-lines note must count the diff and name the log (got: $(grep -F hidden "$tmp/run4a.log"))"
+grep -Fq ' + mcp==2.2.0' "$tmp/state/dotfiles/upgrade.log" || fail "the diff must land in the upgrade log under its dated header"
+grep -Eq '^=== [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+ uv tool upgrade serena-agent$' "$tmp/state/dotfiles/upgrade.log" || fail "the upgrade log needs a dated header per run"
+XDG_STATE_HOME="$tmp/state" UV_SAYS_UPGRADE=1 DOT_UV_VERBOSE=1 run_updater "$tmp/run4a2.log" || true
+grep -Fq '  serena-agent:  + click==8.3.1' "$tmp/run4a2.log" || fail "DOT_UV_VERBOSE=1 must show the whole diff on the console"
 
 # --- 4b. OpenCode: `opencode upgrade` is the path; the installer only when it fails ---------------
 # (7 s installer re-run -> 1.2 s; it follows the 1.x line - OpenCode 2 replaces the binary in place

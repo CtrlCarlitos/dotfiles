@@ -714,6 +714,20 @@ apt_missing_packages() {
     done | sed 's/ $//'
 }
 
+# apt_index_age_hours - whole hours since the newest release file under /var/lib/apt/lists
+# (APT_LISTS_DIR for tests) was written, i.e. since the last `apt update`; empty and exit 1 when
+# there is none. The installer skips its refresh while the index is younger than a day.
+apt_index_age_hours() {
+    local dir="${APT_LISTS_DIR:-/var/lib/apt/lists}" newest=0 f m
+    for f in "$dir"/*Release "$dir"/*InRelease; do
+        [ -f "$f" ] || continue
+        m="$(stat -c %Y "$f" 2>/dev/null)" || m=0
+        [ "$m" -gt "$newest" ] && newest="$m"
+    done
+    [ "$newest" -gt 0 ] || return 1
+    printf '%s\n' "$(( ($(date +%s) - newest) / 3600 ))"
+}
+
 # github_latest_tag <owner/repo> - the newest release-looking tag (X.Y or X.Y.Z, after dropping a
 # "<name>-" and/or "v" prefix: v7.0.0, lychee-v0.24.2, 0.20.1), via one `git ls-remote` - no API
 # quota, and the same proxy git itself uses. Empty when unreachable. Sorted numerically field by

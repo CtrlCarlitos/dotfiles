@@ -53,8 +53,14 @@ done
 # 3. The catalog carries serena with the live-verified command: the installed
 #    binary, not an npx form (#175: with an npx -y form agy exposed zero
 #    tools - slow npx cold start).
-grep -Fq 'args: [start-mcp-server, --context, ide-assistant]' "$repo_root/.chezmoidata/agents.yaml" ||
+# Serena 2.0.0 (2026-10-13) renamed `ide-assistant` to `claude-code` and ships an `antigravity`
+# context; the catalog's `args_agy` is the Antigravity override, read by both agy branches.
+grep -Fq 'args: [start-mcp-server, --context, claude-code]' "$repo_root/.chezmoidata/agents.yaml" ||
     fail ".chezmoidata/agents.yaml: serena MCP command changed from the live-verified form"
+grep -Fq 'args_agy: [start-mcp-server, --context, antigravity]' "$repo_root/.chezmoidata/agents.yaml" ||
+    fail ".chezmoidata/agents.yaml: serena must carry the Antigravity context override (args_agy)"
+grep -Fq 'srv.get("args_agy", srv["args"])' "$sh_installer" || fail "$sh_installer: the agy merge must read args_agy before args"
+grep -Fq "ContainsKey('args_agy')" "$ps1_installer" || fail "$ps1_installer: the agy registration must read args_agy before args"
 grep -Fq 'command: serena' "$repo_root/.chezmoidata/agents.yaml" ||
     fail ".chezmoidata/agents.yaml: serena MCP must be the installed binary, not npx (#175)"
 
@@ -220,6 +226,8 @@ sync_check 'OpenCode must get Expo (render has mobile_dev=true)' "$oc_json" 'd["
 sync_check 'agy must get maestro as {command, args, forceAllToolsEager}' "$agy_json" \
     'd["mcpServers"]["maestro"] == {"command":"maestro","args":["mcp"],"forceAllToolsEager":True}'
 sync_check 'agy must still get serena' "$agy_json" '"serena" in d["mcpServers"]'
+sync_check 'agy must get serena with the antigravity context (args_agy)' "$agy_json" 'd["mcpServers"]["serena"]["args"] == ["start-mcp-server","--context","antigravity"]'
+sync_check 'OpenCode must get serena with the claude-code context (args)' "$oc_json" 'd["mcp"]["serena"]["command"] == ["serena","start-mcp-server","--context","claude-code"]'
 sync_check 'agy must get Expo (render has mobile_dev=true)' "$agy_json" '"expo" in d["mcpServers"]'
 # No maestro binary: no maestro entry for either agent (the local gate holds).
 rm -f "$sync_tmp/bin/maestro"

@@ -38,7 +38,7 @@ q() { # $1 = json file, $2 = python expression over d -> compact JSON
 }
 
 stale='{"plugin":["superpowers"],"mcp":{"serena":{"type":"local","command":["npx","-y","serena-agent","start-mcp-server"],"enabled":false},"custom":{"type":"local","command":["mine"],"enabled":true}}}'
-serena_cmd='["serena","start-mcp-server","--context","ide-assistant"]'
+serena_cmd='["serena","start-mcp-server","--context","claude-code"]'
 
 check_twin() { # $1 = label, $2 = function that runs the registration: run CONFIG NAME...
     local label="$1" run="$2" cfg before after out

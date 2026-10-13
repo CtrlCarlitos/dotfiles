@@ -21,7 +21,7 @@ wired up. Graft, the second tool this page used to cover, was removed on
 | :--- | :--- |
 | Install | `uv tool install -p 3.13 serena-agent` (uv auto-manages Python 3.13; no system Python needed) |
 | Client wiring | Registered as an MCP server per client: Claude first checks `claude mcp get serena` and runs `serena setup claude-code` only when missing; `serena setup codex` (run once the Codex CLI is installed); JSON merge into OpenCode's global `mcp` key (opencode reads MCP only from that block); Antigravity gets it in the top-level `~/.gemini/config/mcp_config.json` with `forceAllToolsEager: true` — agy marks every server's tools lazy by default, lazy tools are only reachable through the generic `call_mcp_tool` invoker guardrail denies, and a plugin bundle would prefix the server names into forms guardrail's registry does not know (#175) |
-| agy command form | `serena start-mcp-server --context ide-assistant` (the installed binary, not an `npx -y` form: with one, agy exposed no tools at all, a slow npx cold start being the prime suspect, #175) |
+| agy command form | `serena start-mcp-server --context antigravity` (Serena 2.0's own Antigravity context, the catalog's `args_agy`; other agents get `--context claude-code`, the renamed generic context; the installed binary, not an `npx -y` form: with one, agy exposed no tools at all, a slow npx cold start being the prime suspect, #175) |
 | Per-repo step | None — works in whatever project the client opens; a per-project `.serena/` memory dir is optional |
 | Upgrade | `dot upgrade` only (via `scripts/update_ai_tools.*`; `dot up` never upgrades): `uv tool upgrade serena-agent` |
 
@@ -53,7 +53,7 @@ package directory a running server resolves from): close the agents first, as
 ## Where the wiring values live
 
 The MCP server definitions the installers register for OpenCode and agy
-(Serena's `start-mcp-server --context ide-assistant`, the installed binary),
+(Serena's `start-mcp-server --context claude-code`, `--context antigravity` for agy, the installed binary),
 the Codex package name and the list of agent CLIs the curated skills are
 installed for all come from one file: `.chezmoidata/agents.yaml`. Both
 installers render from it and `scripts/update_ai_tools.{sh,ps1}` read it at

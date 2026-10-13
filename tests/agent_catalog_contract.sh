@@ -151,7 +151,8 @@ else:
     # name (agent-device) doesn't break PowerShell's hashtable-key parser
     # (confirmed live 2026-10-10: a bare hyphenated key is a parse error).
     for name, srv in mcp_local.items():
-        want = "'%s' = @{ command = '%s'; args = @(%s) }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]))
+        want = "'%s' = @{ command = '%s'; args = @(%s)%s }" % (name, srv["command"], ", ".join("'%s'" % x for x in srv["args"]),
+            ("; args_agy = @(%s)" % ", ".join("'%s'" % x for x in srv["args_agy"])) if "args_agy" in srv else "")
         if want not in body: err("ps1 render: $mcpCatalog lacks %s as %s" % (name, want))
     for name in mcp:
         if name not in mcp_local and ("'%s' = @{" % name) in body:

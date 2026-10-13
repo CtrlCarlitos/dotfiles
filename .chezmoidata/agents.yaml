@@ -47,9 +47,13 @@ agents:
   # Windows twin's $mcpCatalog (.chezmoitemplates/mcp-servers-ps1) reads only
   # command/args and ignores `group`.
   mcp:
+    # Serena 2.0.0 (2026-10-13) renamed the generic `ide-assistant` context to `claude-code` (a
+    # deprecation warning on every start otherwise) and ships one per harness; `args_agy` is the
+    # Antigravity override, read by both installers' agy branch, `args` serves everyone else.
     serena:
       command: serena
-      args: [start-mcp-server, --context, ide-assistant]
+      args: [start-mcp-server, --context, claude-code]
+      args_agy: [start-mcp-server, --context, antigravity]
     maestro:
       command: maestro
       args: [mcp]

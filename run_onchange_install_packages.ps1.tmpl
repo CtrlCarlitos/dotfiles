@@ -1890,7 +1890,8 @@ if ($agyWantServers.Count -gt 0) {
         # whose binary is present are (re)written; everything else in the
         # file is passed through untouched.
         if ($agyWantServers -contains 'serena') {
-            $serenaDef = @{ command = $mcpCatalog.serena.command; args = $mcpCatalog.serena.args; forceAllToolsEager = $true }
+            $serenaArgs = if ($mcpCatalog.serena.ContainsKey('args_agy')) { $mcpCatalog.serena.args_agy } else { $mcpCatalog.serena.args }
+            $serenaDef = @{ command = $mcpCatalog.serena.command; args = $serenaArgs; forceAllToolsEager = $true }
             if ($agyCfg.mcpServers.PSObject.Properties['serena']) { $agyCfg.mcpServers.serena = $serenaDef }
             else { $agyCfg.mcpServers | Add-Member -MemberType NoteProperty -Name serena -Value $serenaDef }
         }
