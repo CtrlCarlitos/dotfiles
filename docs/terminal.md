@@ -502,8 +502,11 @@ operator guide for running agents in these sessions:
   bracketed-paste markers, so Claude Code and OpenCode collapse it to
   `[Paste ... +N lines]`. On 3.3.8 it stripped the first escape bytes of a paste
   (a literal `[A`) and a very large one could stall the server, so this was
-  `off` until 3.4.0 (upstream psmux#719). Right-click pastes through psmux's own
-  route and Shift+drag hands the mouse back to Windows Terminal. The reload key (`prefix` `r`) re-reads
+  `off` until 3.4.0 (upstream psmux#719). At a shell prompt a plain
+  right-click pastes; inside an agent CLI that captures the mouse (Claude Code,
+  OpenCode) it does nothing, because psmux forwards the click to the app. Paste
+  there with `Ctrl+V` or **Shift+right-click**; Shift+drag likewise hands the mouse
+  back to Windows Terminal. The reload key (`prefix` `r`) re-reads
   `~/.config/psmux/psmux.conf`. For a newline inside an agent CLI, use `Ctrl+J`
   (see [above](#keys-inside-the-agent-clis)).
 
