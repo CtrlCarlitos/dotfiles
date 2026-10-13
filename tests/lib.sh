@@ -39,6 +39,10 @@ _lib_state="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-tests-state.XXXXXX" 2>/dev/nul
 mkdir -p "$_lib_state" 2>/dev/null || true
 if command -v cygpath >/dev/null 2>&1; then _lib_state="$(cygpath -m "$_lib_state")"; fi
 export XDG_STATE_HOME="$_lib_state"
+# The npm "is it current" checks read package.json files and ask the registry over HTTPS before they ask
+# npm (scripts/lib/ps-npm-registry.ps1). Tests that stub `npm` must stay on the stubs, whatever the host
+# has installed; the test of that library turns it back on itself.
+export DOT_NPM_DIRECT=0
 
 _tests_checks=0
 _tests_failed=0

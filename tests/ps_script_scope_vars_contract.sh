@@ -147,6 +147,7 @@ function Invoke-Quietly { param($Description, $Action) $script:calls++ }
 function Add-DotTimingMark { param($Name) $script:DotTimingLast = $Name }
 # the 24-hour check stamps (scripts/lib/ps-skills.ps1): never recent here
 function Test-DotCheckRecent { $false }; function Get-DotCheckValue { '' }; function Write-DotCheckStamp { }
+function Get-NpmInstalledVersion { param($Package) '' }; function Get-NpmLatestVersion { param($Package) '' }   # ps-npm-registry.ps1: not found here, npm decides
 $script:DotTimingLast = ''
 if ($init) { Invoke-Expression $init }
 Invoke-Expression $fn
