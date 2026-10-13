@@ -242,6 +242,20 @@ apt_upgrade_run() {
     fi
     return 0
 }
+# apt_sudo_prime - prime sudo's credential cache (and time its own prompt as "sudo password",
+# not "system packages") before the first privileged apt call. The same shape and name as
+# run_onchange_install_packages.sh.tmpl's own dot_sudo_prime: a WSL `dot upgrade` reported 53s
+# of "system packages" with apt having nothing at all to do (2026-10-12), almost all of it the
+# operator typing the password. `sudo -n true` says whether a prompt is coming at all; a
+# cached credential opens no extra section.
+apt_sudo_prime() {
+    local prompt=0 rc=0
+    sudo -n true >/dev/null 2>&1 || prompt=1
+    [ "$prompt" = 0 ] || dot_timing_wait 'sudo password' 2>/dev/null || true
+    sudo -v || rc=$?
+    [ "$prompt" = 0 ] || dot_timing_resume 2>/dev/null || true
+    return "$rc"
+}
 
 # below costs anything when Docker is not running (WSL: Docker Desktop and VS Code are Windows').
 case "$NET_CHOICE:$(uname -s)" in
@@ -255,6 +269,7 @@ case "$NET_CHOICE:$(uname -s)" in
             # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
             apt_q=(-qq)
             if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
+            apt_sudo_prime
             if sudo apt-get "${apt_q[@]}" update; then
                 # The password was just typed (or cached): keep it alive for the rest of the run -
                 # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
