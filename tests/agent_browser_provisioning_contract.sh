@@ -343,6 +343,13 @@ if grep -q 'FAIL' "$tmp/ps1-nobin.log"; then fail "ps1 twin nobin: $(cat "$tmp/p
 grep -Fq 'agent-browser command was not installed - skipping browser setup' "$tmp/ps1-nobin.log" ||
     fail "ps1 twin: a missing CLI must be reported and skipped"
 
+# dot up skips `doctor` (9 of the 10 s of this section) when it was clean for this version within a
+# day, and never remembers a warning or a failure (2026-10-13).
+grep -Fq "Test-DotCheckRecent -Name 'agent-browser-doctor'" "$repo_root/run_onchange_install_packages.ps1.tmpl" ||
+    fail "ps1 twin: a clean doctor for this version within a day must be skipped"
+grep -Fq 'summary.warn -eq 0 -and $doctorJson.summary.fail -eq 0' "$repo_root/run_onchange_install_packages.ps1.tmpl" ||
+    fail "ps1 twin: only a clean doctor may be remembered"
+
 rm -f "$fixture"
 
 finish

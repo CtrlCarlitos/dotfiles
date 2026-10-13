@@ -876,13 +876,47 @@ function Test-ClaudePluginInstalled {
     }
     return $false
 }
+# The top-level object under -Key of a JSON file as a case-sensitive dictionary, $null when the key is
+# absent, '__unreadable__' when the file does not parse at all. PowerShell 7 has ConvertFrom-Json
+# -AsHashTable; Windows PowerShell 5.1 does not, so it parses with JavaScriptSerializer.
+function Read-JsonKeyCaseSensitive {
+    param([string]$Path, [string]$Key)
+    try {
+        $raw = Get-Content -Raw -LiteralPath $Path
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $d = $raw | ConvertFrom-Json -AsHashTable
+        } else {
+            Add-Type -AssemblyName System.Web.Extensions
+            $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+            $ser.MaxJsonLength = [int]::MaxValue
+            $ser.RecursionLimit = 1000
+            $d = $ser.DeserializeObject($raw)
+        }
+        if ($d -is [System.Collections.IDictionary] -and $d.ContainsKey($Key) -and $d[$Key] -is [System.Collections.IDictionary]) {
+            # a typed copy: JavaScriptSerializer's Dictionary[string,object] and a hashtable both answer ContainsKey
+            $copy = @{}
+            foreach ($k in $d[$Key].Keys) { $copy[[string]$k] = $true }
+            return $copy
+        }
+        return $null
+    }
+    catch { return '__unreadable__' }
+}
 function Test-McpRegistered {
     param([Parameter(Mandatory)][ValidateSet('claude', 'codex')][string]$Agent,
           [Parameter(Mandatory)][string]$Server, [string]$UserHome = $HOME)
     if ($Agent -eq 'claude') {
         $f = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json' } else { Join-Path $UserHome '.claude.json' }
         $d = Read-JsonFileOrNull -Path $f
-        if ($null -eq $d) { return $null }
+        if ($null -eq $d) {
+            # ~/.claude.json keeps one project key per path spelling, and Windows paths differ only
+            # by case (C:/x and c:/x): ConvertFrom-Json refuses that, this returned $null, and every
+            # dot up paid the 11 s `claude mcp get` (2026-10-13). A case-sensitive parse answers.
+            $servers = Read-JsonKeyCaseSensitive -Path $f -Key 'mcpServers'
+            if ($servers -eq '__unreadable__') { return $null }
+            if ($null -eq $servers) { return $false }
+            return [bool]$servers.ContainsKey($Server)
+        }
         if (-not $d.PSObject.Properties['mcpServers']) { return $false }
         return [bool]($d.mcpServers.PSObject.Properties[$Server])
     }

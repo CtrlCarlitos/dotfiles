@@ -165,7 +165,7 @@ Add-DotTimingMark -Name 'curated skills'
 # terminating error - keep stderr empty instead (see installer for full notes).
 function Write-CuratedSkillsSkippedSummary {
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=$curatedSkillTotal failed=0"
+        Write-Host "  Curated skills: $agent present=0 skipped=$curatedSkillTotal failed=0"
     }
 }
 
@@ -349,7 +349,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             }
         }
         foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-            Write-Host "  Curated skills: $agent installed=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
+            Write-Host "  Curated skills: $agent present=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
         }
     }
 } else {

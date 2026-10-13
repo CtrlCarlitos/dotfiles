@@ -141,7 +141,7 @@ fi
 if command -v pwsh >/dev/null 2>&1; then
     winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
     cat >"$tmp/ps-harness.ps1" <<'PSEOF'
-param([string]$Lib, [string]$UserHome, [string]$EmptyHome)
+param([string]$Lib, [string]$UserHome, [string]$EmptyHome, [string]$CaseHome)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . $Lib
@@ -158,6 +158,10 @@ Write-Output ('mcp-claude-no=' + (Test-McpRegistered -Agent claude -Server agent
 Write-Output ('mcp-codex-yes=' + (Test-McpRegistered -Agent codex -Server serena -UserHome $UserHome))
 Write-Output ('mcp-codex-no=' + (Test-McpRegistered -Agent codex -Server maestro -UserHome $UserHome))
 $u = Test-McpRegistered -Agent claude -Server maestro -UserHome $EmptyHome
+# project keys that differ only by case (Windows paths) made ConvertFrom-Json throw, the probe
+# returned $null and the installer ran the 11 s `claude mcp get` on every dot up (2026-10-13)
+Write-Output ('mcp-case-yes=' + (Test-McpRegistered -Agent claude -Server serena -UserHome $CaseHome))
+Write-Output ('mcp-case-no=' + (Test-McpRegistered -Agent claude -Server maestro -UserHome $CaseHome))
 Write-Output ('mcp-nofile-null=' + ($null -eq $u))
 $sp = @(Get-ClaudeSuperpowersInstallFromFile -UserHome $UserHome)
 Write-Output ('sp-installs=' + (($sp | ForEach-Object { "$($_.Version):$($_.Scope):$($_.ProjectPath)" }) -join ';'))
@@ -166,11 +170,15 @@ $u = Get-ClaudeSuperpowersInstallFromFile -UserHome $EmptyHome
 Write-Output ('sp-nofile-null=' + ($null -eq $u))
 PSEOF
     printf '{"mcpServers": {"maestro": {}}}\n' >"$home/.claude.json"
-    ps_out="$(pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserHome "$(winpath "$home")" -EmptyHome "$(winpath "$tmp/empty-home")" 2>&1 | tr -d '\r' || true)"
+    mkdir -p "$tmp/case-home"
+    printf '{"projects": {"C:/p/x": {}, "c:/p/x": {}}, "mcpServers": {"serena": {}}}
+' >"$tmp/case-home/.claude.json"
+    ps_out="$(pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserHome "$(winpath "$home")" -EmptyHome "$(winpath "$tmp/empty-home")" -CaseHome "$(winpath "$tmp/case-home")" 2>&1 | tr -d '\r' || true)"
     pexpect() { printf '%s\n' "$ps_out" | grep -Fxq -- "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$ps_out" | tr '\n' '|' | cut -c1-600))"; }
     pexpect 'mk-known=True'; pexpect 'mk-other=False'; pexpect 'mk-nofile-null=True'
     pexpect 'pl-user=True'; pexpect 'pl-local=False'; pexpect 'pl-nofile-null=True'
     pexpect 'mcp-claude-yes=True'; pexpect 'mcp-claude-no=False'; pexpect 'mcp-codex-yes=True'; pexpect 'mcp-codex-no=False'; pexpect 'mcp-nofile-null=True'
+    pexpect 'mcp-case-yes=True'; pexpect 'mcp-case-no=False'
     pexpect 'sp-installs=7.0.0:user:;6.2.0:local:/p'; pexpect 'sp-user=7.0.0'; pexpect 'sp-nofile-null=True'
     pass
 else

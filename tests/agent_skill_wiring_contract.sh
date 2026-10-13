@@ -79,7 +79,7 @@ verify_unix_no_npx_summaries() {
     output="$(PATH="$tmp/bin" "$BASH" "$harness")"
 
     for agent in 'Claude Code' OpenCode Antigravity Codex; do
-        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=$expected failed=0" <<< "$output"; then
+        if ! grep -Fqx -- "   Curated skills: $agent present=0 skipped=$expected failed=0" <<< "$output"; then
             fail "Unix updater must report skipped curated skills without npx for $agent"
         fi
     done
@@ -156,11 +156,11 @@ EOF
         printf '%s\n' 'install_agent_skills'
     } > "$harness"
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
-    if ! grep -Fqx -- 'Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
+    if ! grep -Fqx -- 'Curated skills: Claude Code present=1 skipped=0 failed=0' <<< "$output"; then
         fail 'Unix lifecycle must count only Claude skills with a supported SKILL.md target'
     fi
     for agent in OpenCode Codex; do
-        if ! grep -Fqx -- "Curated skills: $agent installed=0 skipped=0 failed=1" <<< "$output"; then
+        if ! grep -Fqx -- "Curated skills: $agent present=0 skipped=0 failed=1" <<< "$output"; then
             fail "Unix lifecycle must not count $agent installed when its shared SKILL.md target is missing"
         fi
     done
@@ -188,11 +188,11 @@ EOF
         awk '/^catalog=/{copy=1} /^# Superpowers for Codex/{exit} copy{print}' "$repo_root/scripts/update_ai_tools.sh"
     } > "$updater_harness"
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$updater_harness")"
-    if ! grep -Fqx -- '   Curated skills: Claude Code installed=1 skipped=0 failed=0' <<< "$output"; then
+    if ! grep -Fqx -- '   Curated skills: Claude Code present=1 skipped=0 failed=0' <<< "$output"; then
         fail 'Unix updater must count only Claude skills with a supported SKILL.md target'
     fi
     for agent in OpenCode Codex; do
-        if ! grep -Fqx -- "   Curated skills: $agent installed=0 skipped=0 failed=1" <<< "$output"; then
+        if ! grep -Fqx -- "   Curated skills: $agent present=0 skipped=0 failed=1" <<< "$output"; then
             fail "Unix updater must not count $agent installed when its shared SKILL.md target is missing"
         fi
     done
@@ -263,7 +263,7 @@ EOF
     } > "$harness"
 
     output="$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$harness")"
-    if ! grep -Fqx -- 'Curated skills: Antigravity installed=0 skipped=0 failed=1' <<< "$output"; then
+    if ! grep -Fqx -- 'Curated skills: Antigravity present=0 skipped=0 failed=1' <<< "$output"; then
         fail 'Unix lifecycle must report a failed Antigravity promotion'
     fi
     target="$tmp/home/.gemini/antigravity-cli/skills/handoff/SKILL.md"
@@ -518,10 +518,10 @@ try {
             $output = & ([scriptblock]::Create($lifecycleBody)) 6>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.InformationRecord]) { $_.MessageData } else { $_ }
             }
-            if (($output -join "`n") -notmatch 'Curated skills: Codex installed=0 skipped=0 failed=0') {
+            if (($output -join "`n") -notmatch 'Curated skills: Codex present=0 skipped=0 failed=0') {
                 throw "Codex summary counted a shared OpenCode skill for an OpenCode-only operation: $lifecycle"
             }
-            if (($output -join "`n") -notmatch 'Curated skills: Antigravity installed=0 .* failed=1') {
+            if (($output -join "`n") -notmatch 'Curated skills: Antigravity present=0 .* failed=1') {
                 throw "Antigravity summary reported stale skill as installed: $lifecycle"
             }
             & ([scriptblock]::Create($fixturePrelude + $match.Value)) | Out-Null
@@ -580,7 +580,7 @@ $ErrorActionPreference = 'Stop'
 # it is unavailable), so the rows are matched by shape, not by a literal count.
 $summaryRows = @(
     'Claude Code', 'OpenCode', 'Antigravity', 'Codex' | ForEach-Object {
-        "Curated skills: $_ installed=0 skipped=\d+ failed=0"
+        "Curated skills: $_ present=0 skipped=\d+ failed=0"
     }
 )
 
@@ -695,7 +695,7 @@ if [[ "$scope" != "windows" ]]; then
         fi
 
         for agent in 'Claude Code' OpenCode Antigravity Codex; do
-        require_contains "$file" "Curated skills: $agent installed="
+        require_contains "$file" "Curated skills: $agent present="
         done
     done
 
@@ -747,7 +747,7 @@ if [[ "$scope" != "unix" ]]; then
         require_contains "$file" 'managed-by: chezmoi-curated-skills'
         require_contains "$file" "\$markerPattern = '(?m)^<!-- managed-by: chezmoi-curated-skills -->\\r?$'"
         require_contains "$file" 'Get-ChildItem -Force -LiteralPath $source | Copy-Item'
-        require_contains "$file" 'Curated skills: $agent installed='
+        require_contains "$file" 'Curated skills: $agent present='
         require_contains "$file" '$ARGUMENTS'
         require_contains "$file" 'SKILL.md'
         require_contains "$file" '$env:USERPROFILE\.agents\skills\$skill'

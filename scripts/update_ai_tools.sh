@@ -233,15 +233,15 @@ if command -v npx &>/dev/null; then
         claude_installed=0; opencode_installed=0; codex_installed=0
         verify_curated_skill_targets "$claude_reported" "$opencode_reported" "$codex_reported"
     fi
-    echo "   Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
-    echo "   Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
-    echo "   Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
-    echo "   Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
+    echo "   Curated skills: Claude Code present=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+    echo "   Curated skills: OpenCode present=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+    echo "   Curated skills: Antigravity present=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+    echo "   Curated skills: Codex present=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 else
-    echo "   Curated skills: Claude Code installed=0 skipped=$curated_total failed=0"
-    echo "   Curated skills: OpenCode installed=0 skipped=$curated_total failed=0"
-    echo "   Curated skills: Antigravity installed=0 skipped=$curated_total failed=0"
-    echo "   Curated skills: Codex installed=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: Claude Code present=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: OpenCode present=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: Antigravity present=0 skipped=$curated_total failed=0"
+    echo "   Curated skills: Codex present=0 skipped=$curated_total failed=0"
 fi
 
 # Superpowers for Codex CLI: the pre-configured Codex plugin marketplace

@@ -1099,10 +1099,10 @@ install_agent_skills() {
         # The count renders from scripts/curated-agent-skills.txt's line count
         # (see $curatedTotal above) - never a literal, which drifted every time
         # the catalog gained a skill.
-        info "Curated skills: Claude Code installed=0 skipped={{ $curatedTotal }} failed=0"
-        info "Curated skills: OpenCode installed=0 skipped={{ $curatedTotal }} failed=0"
-        info "Curated skills: Antigravity installed=0 skipped={{ $curatedTotal }} failed=0"
-        info "Curated skills: Codex installed=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: Claude Code present=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: OpenCode present=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: Antigravity present=0 skipped={{ $curatedTotal }} failed=0"
+        info "Curated skills: Codex present=0 skipped={{ $curatedTotal }} failed=0"
         return
     fi
     local catalog
@@ -1154,10 +1154,10 @@ install_agent_skills() {
 
     if [[ ! -r "$catalog" ]]; then
         warn "Curated skill catalog is not readable: $catalog"
-        info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
-        info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
-        info "Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
-        info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
+        info "Curated skills: Claude Code present=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+        info "Curated skills: OpenCode present=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+        info "Curated skills: Antigravity present=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+        info "Curated skills: Codex present=$codex_installed skipped=$codex_skipped failed=$codex_failed"
         return
     fi
 
@@ -1171,10 +1171,10 @@ install_agent_skills() {
     # arguments - a target only counts failed when its CLI phase ran.
     verify_curated_skill_targets "$claude_reported" "$opencode_reported" "$codex_reported"
 
-    info "Curated skills: Claude Code installed=$claude_installed skipped=$claude_skipped failed=$claude_failed"
-    info "Curated skills: OpenCode installed=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
-    info "Curated skills: Antigravity installed=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
-    info "Curated skills: Codex installed=$codex_installed skipped=$codex_skipped failed=$codex_failed"
+    info "Curated skills: Claude Code present=$claude_installed skipped=$claude_skipped failed=$claude_failed"
+    info "Curated skills: OpenCode present=$opencode_installed skipped=$opencode_skipped failed=$opencode_failed"
+    info "Curated skills: Antigravity present=$antigravity_installed skipped=$antigravity_skipped failed=$antigravity_failed"
+    info "Curated skills: Codex present=$codex_installed skipped=$codex_skipped failed=$codex_failed"
 }
 
 VSCODE_SETTINGS="{{ $vscodeSettings }}"
