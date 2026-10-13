@@ -153,7 +153,19 @@ fi
 [ "${1:-}" = --version ] && printf '9.9.9 (Claude Code)\n'
 exit 0
 STUB
-for c in uv opencode curl; do printf '#!/bin/sh\nexit 0\n' >"$bin/$c"; done
+for c in uv curl; do printf '#!/bin/sh\nexit 0\n' >"$bin/$c"; done
+# opencode: logs argv; `--version` 1.19.0; `upgrade` says already installed (+ the OpenCode 2 notice
+# with OPENCODE_V2_NOTICE=1)
+cat >"$bin/opencode" <<'STUB'
+#!/bin/sh
+[ -n "${STUB_LOG:-}" ] && printf 'opencode %s\n' "$*" >>"$STUB_LOG"
+[ "${1:-}" = --version ] && echo 1.19.0
+if [ "${1:-}" = upgrade ]; then
+    echo 'OpenCode upgrade skipped: 1.19.0 is already installed'
+    [ "${OPENCODE_V2_NOTICE:-0}" = 1 ] && echo 'OpenCode 2 is available. Upgrade with `opencode upgrade --major`'
+fi
+exit 0
+STUB
 printf '#!/bin/sh\n[ -n "${STUB_LOG:-}" ] && printf "serena %%s\\n" "$*" >>"$STUB_LOG"\nexit 0\n' >"$bin/serena"
 # curl fails the installer downloads (the updater must warn-and-continue past them, #114)
 printf '#!/bin/sh\nexit 7\n' >"$bin/curl"
@@ -363,6 +375,10 @@ printf '%s\n' 'aaa refs/tags/v6.4.2' 'bbb refs/tags/v7.0.0' >"$tags/obra_superpo
 out="$tmp/updater-2.log"
 run_updater "$out"
 grep -Fq 'Superpowers (OpenCode) is current (7.0.0)' "$out" || fail "a second refresh with nothing new must say current (got: $(grep -F OpenCode "$out" | tr '\n' ' '))"
+# at upstream's release the loaded copy is not re-resolved (the npm round-trip took ~5 s per run)
+if grep -Fq 'install --prefix' "$tmp/npm.log"; then fail "Superpowers (OpenCode) at upstream's release: no npm re-resolve (npm saw: $(grep -F superpowers "$tmp/npm.log" | tr '\n' ' '))"; else pass; fi
+grep -Fq '   OpenCode is current (1.19.0)' "$out" || fail "OpenCode must be checked through 'opencode upgrade', not the installer (got: $(grep -F 'OpenCode' "$out" | head -3 | tr '\n' '|'))"
+grep -Fq 'opencode upgrade' "$tmp/stub.log" || fail "'opencode upgrade' must run (stub saw: $(grep opencode "$tmp/stub.log" | tr '\n' ' '))"
 expect() { grep -Fq -- "$1" "$out" || fail "report: expected '$1' (got: $(grep -F -A8 'Superpowers versions' "$out" | tr '\n' '|'))"; }
 expect 'Superpowers versions (upstream: v7.0.0):'
 expect '   Claude Code: 7.0.0 (current)'
@@ -387,6 +403,23 @@ expect '   Playwright Chromium is up to date'
 out="$tmp/updater-2b.log"
 NPX_PLAYWRIGHT_SAYS='Downloading Chromium 1248 (playwright build v1248) from https://cdn.playwright.dev/...' run_updater "$out"
 expect '   Playwright Chromium: new build downloaded'
+pass
+# with the plugin cache on disk a whole run makes no `codex plugin list` call: the marketplace name
+# comes from the cache, the add runs in the background from the curated-skills step and is joined
+# before the report, whose catalog version is the add's "Installed plugin root" (25 s of OpenAI
+# backend round-trips on WSL, 2026-10-12). The OpenCode 2 notice is one line.
+mkdir -p "$codex_cache/6.4.2/.codex-plugin"
+out="$tmp/updater-2c.log"
+OPENCODE_V2_NOTICE=1 run_updater "$out"
+if grep -Fq 'codex plugin list' "$tmp/stub.log"; then fail "cached plugin: no 'codex plugin list' may run (codex saw: $(grep codex "$tmp/stub.log" | tr '\n' ' '))"; else pass; fi
+grep -Fq 'codex plugin add superpowers@test-marketplace' "$tmp/stub.log" || fail "cached plugin: the add must still run (codex saw: $(grep codex "$tmp/stub.log" | tr '\n' ' '))"
+expect '   Superpowers (Codex) is 6.4.2 - the marketplace has not published v7.0.0 yet'
+expect '   Codex: 6.4.2 (marketplace latest - upstream v7.0.0 is not published there yet)'
+expect "   OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose"
+# the Codex section is reported after the Claude Code and OpenCode steps now (its add overlaps them)
+cx_line="$(grep -n 'Updating Superpowers (Codex)' "$out" | head -1 | cut -d: -f1)"; oc_line="$(grep -n 'Updating OpenCode' "$out" | head -1 | cut -d: -f1)"
+if [ -n "$cx_line" ] && [ -n "$oc_line" ] && [ "$cx_line" -gt "$oc_line" ]; then pass; else fail "the Codex section must be joined after the OpenCode step (codex at line $cx_line, opencode at $oc_line)"; fi
+rm -rf "$home/.codex"
 pass
 # no cache yet (a fresh machine before OpenCode's first start), and a deferred opencode
 rm -rf "$home/.cache/opencode"

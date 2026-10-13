@@ -68,10 +68,24 @@ mkdir -p "$bin" "$home" "$prefix/bin"
 
 # --- Stubs -------------------------------------------------------------------
 # codex starts (exit 0): "current" requires a codex that runs (tests/codex_platform_binary_contract.sh)
-for c in npx git uv serena opencode agy codex; do
+for c in npx git uv serena agy codex; do
     printf '#!/bin/sh\nexit 0\n' >"$bin/$c"
     chmod +x "$bin/$c"
 done
+# opencode: `--version` answers 9.9.9; `upgrade` is OpenCode's own path (1.x line, no --major) and
+# says "already installed", or fails with OPENCODE_UPGRADE_FAIL=1 so the installer fallback runs;
+# OPENCODE_SAYS_V2=1 adds the notice the 1.19.0 binary prints.
+cat >"$bin/opencode" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = --version ] && { echo 9.9.9; exit 0; }
+if [ "${1:-}" = upgrade ]; then
+    [ "${OPENCODE_UPGRADE_FAIL:-0}" = 1 ] && { echo 'Could not detect the installation method.' >&2; exit 1; }
+    echo 'OpenCode upgrade skipped: 9.9.9 is already installed'
+    [ "${OPENCODE_SAYS_V2:-0}" = 1 ] && echo 'OpenCode 2 is available. Upgrade with `opencode upgrade --major`'
+fi
+exit 0
+EOF
+chmod +x "$bin/opencode"
 
 # npm: logs every argv; `prefix -g` answers $NPM_FAKE_PREFIX; installs fail
 # only when NPM_FAIL=1. A successful `install` prints npm's own summary line,
@@ -165,7 +179,8 @@ run_updater() { # $1 = output file; extra env via caller's exported vars
 rm -f "$prefix/bin/agent-browser"; make_agent_browser
 : >"$tmp/agent-browser.log"
 out="$tmp/run1.log"
-if run_updater "$out"; then pass; else fail "update_ai_tools.sh must run to completion with all tools present: $(tail -3 "$out")"; fi
+if OPENCODE_UPGRADE_FAIL=1 run_updater "$out"; then pass; else fail "update_ai_tools.sh must run to completion with all tools present: $(tail -3 "$out")"; fi
+grep -Fq 'opencode upgrade failed - re-running the installer' "$out" || fail "a failing 'opencode upgrade' must fall back to the installer (got: $(grep -F OpenCode "$out" | tr '\n' '|'))"
 grep -Fq 'install -g @openai/codex@latest' "$tmp/npm.log" ||
     fail "codex must upgrade via npm -g <catalog package>@latest; npm saw: $(grep codex "$tmp/npm.log" || true)"
 grep -Fq 'install -g --allow-scripts=agent-browser agent-browser' "$tmp/npm.log" ||
@@ -202,13 +217,24 @@ grep -Fq 'AI Tools Update Complete' "$tmp/run3.log" ||
 
 # --- 4. Installer download failures warn-and-continue (#114) ------------------
 : >"$tmp/npm.log"
-CURL_MODE=fail run_updater "$tmp/run4.log" || true
+CURL_MODE=fail OPENCODE_UPGRADE_FAIL=1 run_updater "$tmp/run4.log" || true
 grep -Fq 'Claude Code installer download failed - continuing' "$tmp/run4.log" ||
     fail "a failed Claude installer download must warn-and-continue"
 grep -Fq 'OpenCode installer download failed - continuing' "$tmp/run4.log" ||
     fail "a failed OpenCode installer download must warn-and-continue"
 grep -Fq 'AI Tools Update Complete' "$tmp/run4.log" ||
     fail "curl failures must not abort the remaining tools (#114)"
+
+# --- 4b. OpenCode: `opencode upgrade` is the path; the installer only when it fails ---------------
+# (7 s installer re-run -> 1.2 s; it follows the 1.x line - OpenCode 2 replaces the binary in place
+# and the dotfiles are not ready for it, dotfiles#395 - and the binary's "OpenCode 2 is available"
+# notice is surfaced, never acted on)
+OPENCODE_SAYS_V2=1 run_updater "$tmp/run4b.log" || true
+grep -Fq 'OpenCode is current (9.9.9)' "$tmp/run4b.log" || fail "a current OpenCode must be reported from 'opencode upgrade' (got: $(grep -F OpenCode "$tmp/run4b.log" | tr '\n' '|'))"
+if grep -Fq 'installer re-run' "$tmp/run4b.log"; then fail "with 'opencode upgrade' succeeding the installer must not run"; else pass; fi
+grep -Fq "OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose" "$tmp/run4b.log" \
+    || fail "the binary's OpenCode 2 notice must be surfaced as one line (got: $(grep -F 'OpenCode 2' "$tmp/run4b.log" | tr '\n' '|'))"
+if grep -Fq 'opencode upgrade --major' "$tmp/npm.log"; then fail "never run the major upgrade"; else pass; fi
 
 # --- 5. agent-browser binary missing at the prefix: setup skipped quietly -----
 rm -f "$prefix/bin/agent-browser"

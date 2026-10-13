@@ -93,13 +93,16 @@ make_stub() { # $1 = the superpowers row to print (empty for "no such plugin")
     } >"$tmp/bin/codex.ps1"
 }
 
-sh_answer() { PATH="$tmp/bin:$PATH" bash -c '. "$1"; codex_superpowers_marketplace' _ "$sh_lib"; }
+# CODEX_HOME points at a fixture: the helpers read the plugin cache first (the host's own
+# ~/.codex would answer for the stub otherwise), and the CLI only when nothing is cached.
+mkdir -p "$tmp/codexhome"
+sh_answer() { CODEX_HOME="$tmp/codexhome" PATH="$tmp/bin:$PATH" bash -c '. "$1"; codex_superpowers_marketplace' _ "$sh_lib"; }
 # pwsh needs a Windows-style path to dot-source - a POSIX one ("/c/Users/...") embedded in a
 # -Command string fails to resolve, and the 2>/dev/null below used to swallow that failure
 # silently, so this looked like a marketplace-parsing bug instead of a path format one.
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 ps_lib_win="$(winpath "$ps_lib")"
-ps_answer() { PATH="$tmp/bin:$PATH" pwsh -NoProfile -Command ". '$ps_lib_win'; \$m = Get-CodexSuperpowersMarketplace; if (\$m) { Write-Output \$m }" 2>/dev/null | tr -d '\r'; }
+ps_answer() { CODEX_HOME="$(winpath "$tmp/codexhome")" PATH="$tmp/bin:$PATH" pwsh -NoProfile -Command ". '$ps_lib_win'; \$m = Get-CodexSuperpowersMarketplace; if (\$m) { Write-Output \$m }" 2>/dev/null | tr -d '\r'; }
 
 make_stub 'superpowers@test-marketplace not installed'
 sh_got="$(sh_answer || true)"
@@ -113,7 +116,18 @@ sh_empty="$(sh_answer || true)"
 [ -z "$sh_empty" ] || fail "shell helper: a codex with no superpowers plugin must return nothing, got '$sh_empty'"
 pass
 
+# A cached plugin names its marketplace by directory: no `codex plugin list` at all (the call
+# reached OpenAI's backend and took 25 s on WSL, 2026-10-12), even when the CLI stub lists nothing.
+mkdir -p "$tmp/codexhome/plugins/cache/cached-market/superpowers/6.4.2/.codex-plugin"
+sh_cached="$(sh_answer || true)"
+[ "$sh_cached" = "cached-market" ] || fail "shell helper: the plugin cache must name the marketplace, got '$sh_cached'"
+pass
+
 if command -v pwsh >/dev/null 2>&1; then
+    ps_cached="$(ps_answer || true)"
+    [ "$ps_cached" = "cached-market" ] || fail "PowerShell helper: the plugin cache must name the marketplace, got '$ps_cached'"
+    pass
+    rm -rf "$tmp/codexhome/plugins"
     make_stub 'superpowers@test-marketplace not installed'
     ps_got="$(ps_answer || true)"
     [ "$ps_got" = "test-marketplace" ] || fail "PowerShell helper: expected test-marketplace, got '$ps_got'"
@@ -125,6 +139,7 @@ if command -v pwsh >/dev/null 2>&1; then
     [ -z "$ps_empty" ] || fail "PowerShell helper: a codex with no superpowers plugin must return nothing, got '$ps_empty'"
     pass
 else
+    rm -rf "$tmp/codexhome/plugins"
     printf 'SKIP (PowerShell twin only): pwsh not installed\n'
 fi
 

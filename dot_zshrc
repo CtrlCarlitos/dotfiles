@@ -73,6 +73,13 @@ fi
 # list the *_sign keys too - loading only the auth key is the classic miss.
 [[ -f "$HOME/.ssh/agent-identities.zsh" ]] && source "$HOME/.ssh/agent-identities.zsh"
 
+# Oh-My-Zsh is a pinned chezmoi external (.chezmoiexternal.toml): `dot up` applies the weekly pin
+# bump, so its own updater must never run. An accepted "[oh-my-zsh] Would you like to update?" once
+# git-pulled over the tree chezmoi writes and stopped in a merge conflict (15 unmerged files in
+# ~/.oh-my-zsh, 2026-10-12). Set before oh-my-zsh.sh runs tools/check_for_upgrade.sh.
+# docs/zsh-tips.md#updating-oh-my-zsh
+zstyle ':omz:update' mode disabled
+
 # Load Oh My Zsh
 if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
   source "$ZSH/oh-my-zsh.sh"

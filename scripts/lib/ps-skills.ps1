@@ -267,7 +267,22 @@ $script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warning
 # Callers must tolerate $null: a codex that cannot list (offline, first run, a catalog needing auth)
 # is a skip, never a hard failure.
 function Get-CodexSuperpowersMarketplace {
+    param([string]$CodexHome = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }))
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $null }
+    # The plugin cache names the marketplace the plugin came from
+    # (plugins\cache\<marketplace>\superpowers\<version>\.codex-plugin): no `codex plugin list` round-trip to
+    # OpenAI's backend (25 s on WSL, 2026-10-12) once the plugin has been fetched. Twin of
+    # codex_superpowers_marketplace.
+    $cache = Join-Path (Join-Path $CodexHome 'plugins') 'cache'
+    if (Test-Path -LiteralPath $cache) {
+        foreach ($m in @(Get-ChildItem -LiteralPath $cache -Directory -ErrorAction SilentlyContinue)) {
+            $sp = Join-Path $m.FullName 'superpowers'
+            if (-not (Test-Path -LiteralPath $sp)) { continue }
+            foreach ($v in @(Get-ChildItem -LiteralPath $sp -Directory -ErrorAction SilentlyContinue)) {
+                if (Test-Path -LiteralPath (Join-Path $v.FullName '.codex-plugin')) { return $m.Name }
+            }
+        }
+    }
     $rows = @()
     try { $rows = @(& codex plugin list 2>$null | ForEach-Object { "$_" }) } catch { return $null }
     foreach ($row in $rows) {
