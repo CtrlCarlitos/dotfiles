@@ -58,6 +58,7 @@ if command -v pwsh >/dev/null 2>&1; then
         {
             printf '%s\n' 'Set-StrictMode -Version Latest' '$ErrorActionPreference = "Stop"' "\$global:latest = '$1'" '$global:installs = 0' '$script:NpmUpgraded = $false'
             printf '%s\n' 'function Invoke-Quietly { param([string]$Description, [scriptblock]$Action) & $Action }'
+            printf '%s\n' 'function Test-DotCheckRecent { $false }; function Get-DotCheckValue { "" }; function Write-DotCheckStamp { }'
             printf '%s\n' 'function npm { if ($args[0] -eq "-v") { "10.9.0" } elseif ($args[0] -eq "view") { if ($global:latest) { $global:latest } } elseif ($args[0] -eq "install") { $global:installs++ } }'
             cat "$tmp/fn.ps1"
             printf '%s\n' 'Invoke-NpmUpgradeOnce | Out-Null; Invoke-NpmUpgradeOnce | Out-Null' 'Write-Output "installs=$global:installs"'

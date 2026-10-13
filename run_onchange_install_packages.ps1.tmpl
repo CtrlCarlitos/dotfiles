@@ -361,9 +361,18 @@ function Invoke-NpmUpgradeOnce {
         # Native stderr throws under Stop on Windows PowerShell 5.1; probe under Continue.
         $ErrorActionPreference = 'Continue'
         $current = "$(npm -v 2>$null)".Trim()
-        $latest = "$(npm view npm version 2>$null)".Trim()
+        # Confirmed current within the last day, for this very version: the registry is not asked again
+        # (the one `npm view` took 41 s on a degraded link, 2026-10-12).
+        if ($current -and (Test-DotCheckRecent -Name 'npm-registry') -and (Get-DotCheckValue -Name 'npm-registry') -eq $current) {
+            Write-Host "  npm is current ($current) - checked within the last day" -ForegroundColor DarkGray
+            return
+        }
+        # One try, ten seconds: npm's own defaults retry for minutes. An unanswered question is not
+        # "behind": it falls through to the upgrade as before, which has its own fetch limits.
+        $latest = "$(npm view npm version --fetch-retries=0 --fetch-timeout=10000 2>$null)".Trim()
         if ($latest -and $latest -eq $current) {
             Write-Host "  npm is current ($current)" -ForegroundColor DarkGray
+            Write-DotCheckStamp -Name 'npm-registry' -Value $current
             return
         }
         Write-Host "  Upgrading npm to latest..." -ForegroundColor Yellow
@@ -1634,9 +1643,25 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             # Output shown only on failure: on every run the setup printed an "Installing
             # Chrome... already installed" pair (and a Linux warning on WSL) that are not about
             # this install. Same as the sh twin.
-            Invoke-WithTimeout -Description "agent-browser browser setup" -Seconds 600 -Action {
-                $setupOutput = @(& $env:AGENT_BROWSER install 2>&1 | ForEach-Object { "$_" })
-                if ($LASTEXITCODE -ne 0) { $setupOutput; throw "exit $LASTEXITCODE" }
+            # Once per agent-browser version (this ran, through a job, on every dot up: 12 s with the
+            # verification below). `dot upgrade` runs it on every run anyway; the stamp is written
+            # by the job itself, only after a clean exit.
+            $abVersion = ''
+            try { $abVersion = [string]((Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $agentBrowser) 'node_modules\agent-browser\package.json') | ConvertFrom-Json).version) } catch { $abVersion = '' }
+            if ($abVersion -and (Get-DotCheckValue -Name 'agent-browser-setup') -eq $abVersion) {
+                Write-Host "  agent-browser $abVersion browser setup is done - skipping it (dot upgrade repeats it)." -ForegroundColor Yellow
+            } else {
+                $env:DOT_AB_VERSION = $abVersion
+                $env:DOT_AB_STAMP = Get-DotCheckStampPath -Name 'agent-browser-setup'
+                Invoke-WithTimeout -Description "agent-browser browser setup" -Seconds 600 -Action {
+                    $setupOutput = @(& $env:AGENT_BROWSER install 2>&1 | ForEach-Object { "$_" })
+                    if ($LASTEXITCODE -ne 0) { $setupOutput; throw "exit $LASTEXITCODE" }
+                    if ($env:DOT_AB_VERSION -and $env:DOT_AB_STAMP) {
+                        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:DOT_AB_STAMP) | Out-Null
+                        [IO.File]::WriteAllText($env:DOT_AB_STAMP, $env:DOT_AB_VERSION)
+                    }
+                }
+                Remove-Item Env:\DOT_AB_VERSION, Env:\DOT_AB_STAMP -ErrorAction SilentlyContinue
             }
             # -NoStream returns the job output, so the JSON is summarised here (the job
             # cannot see this session's functions) instead of dumped as a ~3 KB blob.
@@ -1686,7 +1711,11 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     if (Get-Command serena -ErrorAction SilentlyContinue) {
         # -NoStream: `serena init` prints the version, the config path and a list of `serena setup
         # <client>` commands (this repo already runs them) on every run; a failure still warns.
-        $null = Invoke-WithTimeout -Description "serena init" -Seconds 60 -NoStream -Action { serena init 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        # Only while Serena has no config yet: on every dot up it cost seconds (a job, then Serena's own
+        # Python start) to rewrite what is already there - the one line re-asserted below is what differs.
+        if (-not (Test-Path -LiteralPath "$env:USERPROFILE\.serena\serena_config.yml")) {
+            $null = Invoke-WithTimeout -Description "serena init" -Seconds 60 -NoStream -Action { serena init 2>$null; if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" } }
+        }
         # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
         # per-machine override [data.agents.serena] open_dashboard = true in
         # chezmoi.toml). serena init regenerates the file with Serena's default
@@ -1992,7 +2021,13 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         # --allow-git=all: npm 12+ blocks git-URL dependencies by default
         # (EALLOWGIT) - confirmed live on this exact command, breaking the
         # whole install.ps1 run under set -e-equivalent error handling.
+        # Only when missing: the install is a git clone through npm (15-20 s on a slow link) and
+        # `dot up` never upgrades - `dot upgrade` refreshes it (update_ai_tools.ps1).
+        if (Test-Path -LiteralPath (Join-Path $ocConfigDir 'node_modules\superpowers\package.json')) {
+            Write-Host "  Superpowers for OpenCode is installed - skipping the npm install (dot upgrade updates it)." -ForegroundColor Yellow
+        } else {
         Invoke-Quietly -Description "Failed to install Superpowers for OpenCode" -Action { npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$ocConfigDir" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null }
+        }
 
         # Both writes below must be BOM-less UTF-8: PS 5.1's
         # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
