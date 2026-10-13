@@ -1676,11 +1676,23 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
             }
             # -NoStream returns the job output, so the JSON is summarised here (the job
             # cannot see this session's functions) instead of dumped as a ~3 KB blob.
-            $doctorOutput = Invoke-WithTimeout -Description "agent-browser verification" -Seconds 60 -NoStream -Action {
-                & $env:AGENT_BROWSER doctor --json
-                if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+            # `doctor` is 9 of the 10 s this section took (2026-10-13). A clean answer for this very
+            # version holds for a day; `dot upgrade` runs it on every run, and a warning or failure is
+            # never remembered, so it shows again until fixed.
+            if ($abVersion -and (Test-DotCheckRecent -Name 'agent-browser-doctor') -and (Get-DotCheckValue -Name 'agent-browser-doctor') -eq $abVersion) {
+                Write-Host "  agent-browser doctor: clean for $abVersion within the last day - skipping it (dot upgrade runs it)." -ForegroundColor DarkGray
+            } else {
+                $doctorOutput = Invoke-WithTimeout -Description "agent-browser verification" -Seconds 60 -NoStream -Action {
+                    & $env:AGENT_BROWSER doctor --json
+                    if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+                }
+                $doctorLines = @($doctorOutput | ForEach-Object { "$_" })
+                Write-AgentBrowserDoctorSummary -Output $doctorLines
+                try {
+                    $doctorJson = (@($doctorLines) -join "`n") | ConvertFrom-Json -ErrorAction Stop
+                    if ($abVersion -and $doctorJson.summary.warn -eq 0 -and $doctorJson.summary.fail -eq 0) { Write-DotCheckStamp -Name 'agent-browser-doctor' -Value $abVersion }
+                } catch { Write-Verbose "agent-browser doctor result not recorded: $($_.Exception.Message)" }
             }
-            Write-AgentBrowserDoctorSummary -Output ($doctorOutput | ForEach-Object { "$_" })
             Remove-Item Env:\AGENT_BROWSER -ErrorAction SilentlyContinue
         } else {
             Write-Host "  Warning: agent-browser command was not installed - skipping browser setup" -ForegroundColor Red
@@ -2327,7 +2339,7 @@ function Write-CuratedSkillsSkippedSummary {
     # literal, which drifted every time the catalog gained a skill.
     $curatedSkillTotal = {{ $curatedTotal }}
     foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-        Write-Host "  Curated skills: $agent installed=0 skipped=$curatedSkillTotal failed=0"
+        Write-Host "  Curated skills: $agent present=0 skipped=$curatedSkillTotal failed=0"
     }
 }
 
@@ -2556,7 +2568,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
             }
         }
         foreach ($agent in 'Claude Code', 'OpenCode', 'Antigravity', 'Codex') {
-            Write-Host "  Curated skills: $agent installed=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
+            Write-Host "  Curated skills: $agent present=$($skillSummary[$agent].installed) skipped=$($skillSummary[$agent].skipped) failed=$($skillSummary[$agent].failed)"
         }
     }
 } else {
