@@ -172,6 +172,13 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   the OpenCode Superpowers install (a git clone through npm) runs only when it is missing; `serena init` only while
   Serena has no config; agent-browser's browser setup once per agent-browser version. `dot upgrade` refreshes all of
   them as before (`scripts/lib/ps-skills.ps1`; `tests/dot_up_recurring_work_contract.sh`).
+- **`dot upgrade` asks less, says more.** Superpowers for Codex (`codex plugin add` calls OpenAI's backend, 18 s)
+  is asked once a day per installed version: the marketplace lags upstream for days, and the run says so
+  ("checked within the last day"). Every `npm view` of the npm-global check waits one retry of twenty seconds, not
+  npm's own minutes. `wsl --update` streams its output and prints a "still running" line (a real update took
+  3 minutes in silence). A Docker Desktop that `dot upgrade` stopped for its installer is started again after the
+  sweeps and the AI tools (`Resume-DockerDesktop`; one this run did not stop is left alone)
+  (`tests/dot_upgrade_recurring_work_contract.sh`).
 
 The 50 Mbit/s default is a guess for one stream of a 10 MB test, which can read below a plans headline
 speed: judge it after a provider change and set `DOT_SLOW_MBPS` to taste.
