@@ -153,6 +153,32 @@ The practical consequences:
   | Sapphire | Windows PowerShell 5.1 |
   | Grey | Command Prompt |
 
+- **Dropdown order is the same on every machine.** Terminal appends the profiles it
+  generates (PowerShell, WSL distros, Visual Studio, Azure) in the order it first saw
+  them, so two machines showed two different lists. The template now orders
+  `profiles.list` and draws the new-tab menu (`newTabMenu`) as three groups with a
+  separator line between them:
+
+  | Group | Profiles | `Ctrl+Shift+` |
+  |---|---|---|
+  | Windows | `psmux`, PowerShell (7), Windows PowerShell, Command Prompt | `1` `2` `3` (Command Prompt: none) |
+  | WSL | every distro, sorted by name | `4` `5` `6` (the first three) |
+  | SSH | one per `[[data.ssh_hosts]]`, in config order | `7` `8` `9` (the first three) |
+
+  Three chords per group. They open a *profile*, not a position in the list, so `Ctrl+Shift+4` is the
+  first WSL distro on every machine; a chord whose profile is absent on a machine is
+  unbound rather than left on Terminal's position-based default. Anything else
+  Terminal or you add (Git Bash, a second PowerShell) follows the three groups under
+  `remainingProfiles`. The `Developer * for VS 2022` and `Azure Cloud Shell` profiles
+  are hidden, not deleted: Terminal regenerates them on every start, and a hidden
+  entry with their GUID is what keeps them out of the list.
+- **Several Ubuntu instances:** WSL can hold more than one Ubuntu-26.04, each under
+  its own name: `wsl --install Ubuntu-26.04 --name UbuntuWebDev` installs a named
+  instance, and `wsl --import <name> <dir> <backup.tar.gz>` duplicates one from a
+  backup (Ubuntu's [manage and configure][ubuntu-wsl-manage] guide, "Naming
+  instances"). Each one is its own WSL profile here, styled the same, sorted by its
+  name within the WSL group; the first three get a `Ctrl+Shift` chord, the rest are
+  one click away in the dropdown.
 - **WSL profiles are styled by source, not GUID**, so every distro on every machine
   (Ubuntu-24.04, 26.04, or a new one) gets the look automatically. This also fixes
   WSL's own generated profile, which forces `Ubuntu Mono` and breaks starship icons.
@@ -173,6 +199,7 @@ The practical consequences:
 | `Alt+Shift+D` | Split pane, automatic direction |
 | `Alt+Arrows` | Move focus between panes |
 | `Alt+Shift+Z` | Zoom current pane |
+| `Ctrl+Shift+1` … `Ctrl+Shift+9` | New tab in a profile: 1-3 Windows group, 4-6 WSL, 7-9 SSH (table above) |
 | `Ctrl+Shift+W` | Close pane |
 | `Ctrl+Shift+P` | Command palette |
 | `Ctrl+Shift+R` | Rename tab |
@@ -528,3 +555,5 @@ What you get in its `SSH: <name>` tab:
 - **A new split opens in your home folder:** the shell isn't reporting its folder.
   pwsh needs starship (the hook is `Invoke-Starship-PreCommand`); WSL zsh needs
   `WT_SESSION` (passed in by default through `WSLENV`) and `wslpath`.
+
+[ubuntu-wsl-manage]: https://ubuntu.com/wsl/docs/stable/howto/manage-and-configure

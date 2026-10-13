@@ -86,8 +86,50 @@ JSON
     # WSL styling is by source, so a distro with an unknown GUID (e.g.
     # Ubuntu-26.04 on another machine) gets the same look.
     printf '%s' '{"profiles":{"list":[{"guid":"{11111111-2222-3333-4444-555555555555}","name":"Ubuntu-26.04","source":"Microsoft.WSL","font":{"face":"Ubuntu Mono"}}]}}' |
-        merge '{}' | jq -e '.profiles.list[0].font.face == "MesloLGS Nerd Font Mono" and .profiles.list[0].tabColor == "#FAB387"' >/dev/null ||
+        merge '{}' | jq -e '.profiles.list[] | select(.source == "Microsoft.WSL") | .font.face == "MesloLGS Nerd Font Mono" and .tabColor == "#FAB387"' >/dev/null ||
         fail "any Microsoft.WSL distro must get the Nerd Font + WSL tab color"
+
+    # Three groups in one order on every machine (2026-10-13: the dropdown differed per box because
+    # Terminal appends generated profiles in first-seen order): Windows (psmux, PowerShell, Windows
+    # PowerShell, Command Prompt), WSL by name, SSH in config order, then whatever else; Developer *
+    # and Azure Cloud Shell hidden, not removed; newTabMenu with a separator between groups;
+    # Ctrl+Shift+1..9 bound to PROFILES, three per group (1-3 psmux/PowerShell/Windows PowerShell,
+    # 4-6 the first three distros, 7-9 the first three hosts), empty slots unbound.
+    grouped='{"profiles":{"list":[
+      {"guid":"{574e775e-4f2a-5b96-ac1e-a2962a402336}","name":"PowerShell","source":"Windows.Terminal.PowershellCore"},
+      {"guid":"{4e32b81b-1048-573a-93b5-97a765b27f69}","name":"Ubuntu-26.04","source":"Microsoft.WSL"},
+      {"guid":"{61c54bbd-c2c6-5271-96e7-009a87ff44bf}","name":"Windows PowerShell"},
+      {"guid":"{0caa0dad-35be-5f56-a8ff-afceeeaa6101}","name":"Command Prompt"},
+      {"guid":"{b453ae62-4e3d-5e58-b989-0a998ec441b8}","name":"Azure Cloud Shell","source":"Windows.Terminal.Azure"},
+      {"guid":"{01dd2430-8c3c-573c-be55-3bb966a856a1}","name":"Developer Command Prompt for VS 2022","source":"Windows.Terminal.VisualStudio"},
+      {"guid":"{a1111111-1111-1111-1111-111111111111}","name":"Ubuntu-24.04","source":"Windows.Terminal.Wsl"},
+      {"guid":"{c2222222-2222-2222-2222-222222222222}","name":"Git Bash"}]}}'
+    four='{"ssh_hosts":[{"name":"web","hostname":"a","os":"linux"},{"name":"bioptic","hostname":"b"},{"name":"pc","hostname":"c"},{"name":"pennit","hostname":"d"}]}'
+    g=$(printf '%s' "$grouped" | merge "$four")
+    jg() { printf '%s' "$g" | jq -e "$1" >/dev/null || fail "grouped: $2"; }
+    jg '[.profiles.list[].name] == ["psmux","PowerShell","Windows PowerShell","Command Prompt","Ubuntu-24.04","Ubuntu-26.04","SSH: web","SSH: bioptic","SSH: pc","SSH: pennit","Azure Cloud Shell","Developer Command Prompt for VS 2022","Git Bash"]' \
+        "profile order must be Windows group, WSL by name, SSH in config order, then the rest (got: $(printf '%s' "$g" | jq -c '[.profiles.list[].name]'))"
+    jg '[.profiles.list[] | select(.hidden == true) | .name] == ["Azure Cloud Shell","Developer Command Prompt for VS 2022"]' "Developer * and Azure Cloud Shell must be hidden, nothing else"
+    jg '[.newTabMenu[] | .type] == ["profile","profile","profile","profile","separator","profile","profile","separator","profile","profile","profile","profile","remainingProfiles"]' \
+        "newTabMenu must draw the three groups with separators and end with remainingProfiles (got: $(printf '%s' "$g" | jq -c '[.newTabMenu[].type]'))"
+    jg '(.profiles.list | map({(.guid): .name}) | add) as $n | [.newTabMenu[] | select(.type == "profile") | $n[.profile]] == ["psmux","PowerShell","Windows PowerShell","Command Prompt","Ubuntu-24.04","Ubuntu-26.04","SSH: web","SSH: bioptic","SSH: pc","SSH: pennit"]' \
+        "newTabMenu entries must reference the grouped profiles by guid, in order"
+    jg '(.profiles.list | map({(.guid): .name}) | add) as $n | (.actions | map(select(.id | test("^User.tab[1-9]$")) | {(.id): $n[.command.profile]}) | add) == {"User.tab1":"psmux","User.tab2":"PowerShell","User.tab3":"Windows PowerShell","User.tab4":"Ubuntu-24.04","User.tab5":"Ubuntu-26.04","User.tab7":"SSH: web","User.tab8":"SSH: bioptic","User.tab9":"SSH: pc"}' \
+        "Ctrl+Shift+1..9 actions must open the grouped profiles (got: $(printf '%s' "$g" | jq -c '[.actions[] | select(.id | test("^User.tab")) | .name]'))"
+    jg '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[1-9]$")) | "\(.keys)=\(.id)"] == ["ctrl+shift+1=User.tab1","ctrl+shift+2=User.tab2","ctrl+shift+3=User.tab3","ctrl+shift+4=User.tab4","ctrl+shift+5=User.tab5","ctrl+shift+6=null","ctrl+shift+7=User.tab7","ctrl+shift+8=User.tab8","ctrl+shift+9=User.tab9"]' \
+        "each Ctrl+Shift+<n> chord must be bound exactly once to User.tab<n>, 6 unbound with two distros (got: $(printf '%s' "$g" | jq -c '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$")) | .id]'))"
+    jg 'all(.actions[]; .id != "User.tab4" or .name != "Tab 4: Command Prompt")' "Command Prompt has no chord (three per group)"
+    [ "$(printf '%s' "$g" | merge "$four")" = "$g" ] || fail "grouped merge is not idempotent"
+    # a slot without a profile on this machine is unbound, never left on Terminal's position default
+    bare=$(: | merge '{}')
+    jq -e '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[2-9]$")) | .id] == [null,null,null,null,null,null,null,null]' <<<"$bare" >/dev/null ||
+        fail "bare machine: Ctrl+Shift+2..9 must be unbound when their profiles are absent (got: $(jq -c '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$")) | .id]' <<<"$bare"))"
+    jq -e 'any(.keybindings[]; .keys == "ctrl+shift+1" and .id == "User.tab1") and ([.newTabMenu[].type] == ["profile","remainingProfiles"])' <<<"$bare" >/dev/null ||
+        fail "bare machine: Ctrl+Shift+1 is psmux and the menu is psmux + remainingProfiles"
+    # the WSL-plus-two-hosts fixture above: 4 = the one distro, 5-6 unbound, 7-8 = the hosts, 9 unbound
+    jq -e '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[4-9]$")) | .id] == ["User.tab4",null,null,"User.tab7","User.tab8",null]' <<<"$out" >/dev/null ||
+        fail "one distro + two hosts: slots 4, 7, 8 bound and 5, 6, 9 unbound (got: $(jq -c '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$")) | .id]' <<<"$out"))"
+    pass
 
     # Alt+Enter is unbound so it reaches the CLIs as a newline; F11 keeps full
     # screen. A user's own null-id unbind on another key must survive.
