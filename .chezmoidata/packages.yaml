@@ -198,7 +198,10 @@ catalog:
     - id: powershell-core
       group: core
       winget: Microsoft.PowerShell
-      winget_args: "--scope machine"
+      # winget's default installer for it is the per-user MSIX; this takes the MSI, machine-wide for
+      # every user of the computer. scripts/lib/ps-common.ps1 keeps the same flags for the upgrade
+      # (WingetInstallerPin), or `dot upgrade` would be offered the MSIX and stop.
+      winget_args: "--scope machine --installer-type wix"
       choco_was: powershell-core
       migrate_risk: "PowerShell 7 cannot replace itself - run migrate-to-winget from Windows PowerShell (powershell.exe) to move it"
       note: >-

@@ -20,7 +20,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 yaml="$repo_root/.chezmoidata/packages.yaml"
 check_scope() {
     local id="$1"
-    awk -v id="    - id: $id\$" '$0 ~ id {f=1; next} /^    - id:/{f=0} f && /winget_args: "--scope machine"/{found=1} END{exit !found}' "$yaml" ||
+    awk -v id="    - id: $id\$" '$0 ~ id {f=1; next} /^    - id:/{f=0} f && /winget_args: "--scope machine[" ]/{found=1} END{exit !found}' "$yaml" ||
         fail "the $id catalog record must carry winget_args: \"--scope machine\""
 }
 for id in gum powershell-core vscode \
