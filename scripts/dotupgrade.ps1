@@ -307,6 +307,8 @@ if ($dockerStopped) {
     }
 }
 
+Resume-ClosedDesktopApp
+
 if ($dropDesktopShortcuts) {
     $removedShortcuts = @(Remove-NewDesktopShortcut -Before $shortcutsBefore)
     if ($removedShortcuts.Count -gt 0) {

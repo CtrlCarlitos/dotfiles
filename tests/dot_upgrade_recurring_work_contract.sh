@@ -77,6 +77,23 @@ Out 'docker-missing' (Resume-DockerDesktop -Path (Join-Path $State 'nothing.exe'
 $fake = Join-Path $State 'Docker Desktop.exe'
 Set-Content -LiteralPath $fake -Value 'x'
 Out 'docker-whatif' (Resume-DockerDesktop -Path $fake -WhatIf)
+
+# --- desktop apps closed for the upgrade, started again at the end ------------------------------------
+$appExe = Join-Path $State 'ollama app.exe'
+Set-Content -LiteralPath $appExe -Value 'x'
+$script:ClosedDesktopApp = @([pscustomobject]@{ Label = 'Ollama'; Path = $appExe; Service = '' })
+$said = (Resume-ClosedDesktopApp -WhatIf 6>&1 | ForEach-Object { "$_" }) -join '|'
+Out 'resume-whatif-starts-nothing' (-not ($said -match 'Started again'))
+Out 'resume-clears-the-list' (@($script:ClosedDesktopApp).Count -eq 0)
+$script:ClosedDesktopApp = @([pscustomobject]@{ Label = 'Ollama'; Path = $appExe; Service = '' })
+$env:DOT_NO_RESTART = '1'
+$said = (Resume-ClosedDesktopApp 6>&1 | ForEach-Object { "$_" }) -join '|'
+Out 'resume-opt-out' ($said -match 'Not restarting Ollama')
+Remove-Item Env:\DOT_NO_RESTART
+$script:ClosedDesktopApp = @([pscustomobject]@{ Label = 'ChatGPT / Codex'; Path = ''; Service = '' })
+$said = (Resume-ClosedDesktopApp 6>&1 | ForEach-Object { "$_" }) -join '|'
+Out 'resume-names-what-it-cannot-start' ($said -match 'open by hand: ChatGPT / Codex')
+Out 'resume-wired-ollama-launch' (@($script:AgentDesktopApp | Where-Object { $_.Label -eq 'Ollama' })[0].Launch -eq 'ollama app.exe')
 PSEOF
 out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Updater "$(winpath "$updater")" -Background "$(winpath "$repo_root/scripts/lib/ps-background.ps1")" -Skills "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" -Common "$(winpath "$common")" -State "$(winpath "$tmp/state")" 2>&1 | tr -d '\r')" || fail "the harness must run: $out"
 expect() { if printf '%s\n' "$out" | grep -Fxq "$1"; then pass; else fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700))"; fi; }
@@ -88,5 +105,11 @@ expect 'second-names-the-lag=True'
 expect 'new-version-adds=1'
 expect 'docker-missing=False'
 expect 'docker-whatif=False'
+expect 'resume-whatif-starts-nothing=True'
+expect 'resume-clears-the-list=True'
+expect 'resume-opt-out=True'
+expect 'resume-names-what-it-cannot-start=True'
+expect 'resume-wired-ollama-launch=True'
+if grep -Fq 'Resume-ClosedDesktopApp' "$repo_root/scripts/dotupgrade.ps1"; then pass; else fail "dotupgrade.ps1 must start the closed desktop apps again"; fi
 
 finish

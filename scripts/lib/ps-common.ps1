@@ -194,12 +194,12 @@ $script:NonSessionPathPattern = @{
 # Ollama's systray offers its own "restart to update" - closed here instead, like every other
 # app in this list, so winget upgrades it the same way regardless of what the tray offers.
 $script:AgentDesktopApp = @(
-    [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; UpgradeId = 'Anthropic.Claude' }
-    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)|\\AppData\\Local\\OpenAI\\Codex\\'; Service = 'CodexSandboxService.OpenAI.Codex'; UpgradeId = '9PLM9XGG6VKS' }
-    [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; UpgradeId = 'Google.Antigravity' }
-    [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; UpgradeId = '' }
-    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; UpgradeId = 'SST.OpenCodeDesktop' }
-    [pscustomobject]@{ Label = 'Ollama';           Path = '\\Programs\\Ollama\\';                              Service = ''; UpgradeId = 'Ollama.Ollama' }
+    [pscustomobject]@{ Label = 'Claude Desktop';   Path = '\\AnthropicClaude\\';                              Service = ''; Launch = ''; UpgradeId = 'Anthropic.Claude' }
+    [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)|\\AppData\\Local\\OpenAI\\Codex\\'; Service = 'CodexSandboxService.OpenAI.Codex'; Launch = ''; UpgradeId = '9PLM9XGG6VKS' }
+    [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; Launch = ''; UpgradeId = 'Google.Antigravity' }
+    [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; Launch = ''; UpgradeId = '' }
+    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; Launch = ''; UpgradeId = 'SST.OpenCodeDesktop' }
+    [pscustomobject]@{ Label = 'Ollama';           Path = '\\Programs\\Ollama\\';                              Service = ''; Launch = 'ollama app.exe'; UpgradeId = 'Ollama.Ollama' }
 )
 
 # winget ids of the apps with an upgrade pending, or $null when winget cannot say. Closing a
@@ -274,7 +274,18 @@ function Get-AgentDesktopApp {
             $svc = Get-Service -Name $app.Service -ErrorAction SilentlyContinue
             if ($svc -and "$($svc.Status)" -eq 'Running') { $service = $app.Service }
         }
-        if ($procs.Count -gt 0 -or $service) { [pscustomobject]@{ Label = $app.Label; Processes = $procs; Service = $service; UpgradeId = $app.UpgradeId } }
+        # What to start again after the upgrade: the catalog's exe name, else the process with a window.
+        # A Store app (\WindowsApps\) has no exe that can be started by path.
+        $launchPath = ''
+        foreach ($process in $procs) {
+            $path = $paths[[int]$process.Id]
+            if (-not $path -or $path -match '\\WindowsApps\\') { continue }
+            $hasWindow = $false
+            try { $hasWindow = ($process.MainWindowHandle -ne [IntPtr]::Zero) } catch { $hasWindow = $false }
+            if ($app.Launch) { if ((Split-Path -Leaf $path) -eq $app.Launch) { $launchPath = $path; break } }
+            elseif ($hasWindow) { $launchPath = $path; break }
+        }
+        if ($procs.Count -gt 0 -or $service) { [pscustomobject]@{ Label = $app.Label; Processes = $procs; Service = $service; UpgradeId = $app.UpgradeId; LaunchPath = $launchPath } }
     }
 }
 
@@ -625,7 +636,7 @@ function Invoke-LiveSessionStop {
     foreach ($a in $apps) {
         $what = @("$(@($a.Processes).Count) process(es)")
         if ($a.Service) { $what += "service $($a.Service)" }
-        $items += [pscustomobject]@{ Label = "$($a.Label) (desktop app, $($what -join ', '))"; Processes = @($a.Processes); Kind = 'desktop'; Service = $a.Service }
+        $items += [pscustomobject]@{ Label = "$($a.Label) (desktop app, $($what -join ', '))"; Processes = @($a.Processes); Kind = 'desktop'; Service = $a.Service; LaunchPath = $a.LaunchPath }
     }
     foreach ($o in $orphans) {
         $p = Get-Process -Id $o.Id -ErrorAction SilentlyContinue
@@ -666,6 +677,7 @@ function Invoke-LiveSessionStop {
                 if (Stop-AgentProcess -Process $p) { $stopped += $p }
             }
             $closedApps += ($i.Label -replace ' \(desktop app, .*$', '')
+            $script:ClosedDesktopApp += [pscustomobject]@{ Label = ($i.Label -replace ' \(desktop app, .*$', ''); Path = $i.LaunchPath; Service = $i.Service }
         } else {
             foreach ($p in $i.Processes) {
                 # Already gone: a session's child (Serena under Claude Code) dies with its parent's
@@ -694,7 +706,7 @@ function Invoke-LiveSessionStop {
         Write-Host "  Stopped $($stopped.Count) process(es); re-scanning." -ForegroundColor Green
     }
     if ($closedApps.Count -gt 0) {
-        Write-Host "  Closed $($closedApps -join ', ') for the upgrade - reopen when dot upgrade is done." -ForegroundColor Green
+        Write-Host "  Closed $($closedApps -join ', ') for the upgrade - started again when dot upgrade finishes." -ForegroundColor Green
     }
     return $stopped
 }
@@ -918,6 +930,11 @@ function Test-ChocoBoilerplateLine {
     if ($Line -match '^By upgrading, you accept licenses for the packages\.\s*$') { return $true }
     if ($Line -match '^Chocolatey upgraded \d+/\d+ packages\.\s*$') { return $true }
     if ($Line -match '^\s*See the log for details \(.+\)\.?\s*$') { return $true }
+    # NuGet's warning that a package's dependency constraint names the version being replaced
+    # (dotnet-desktopruntime 10.0.12 while dotnet-10.0-desktopruntime moves to 10.0.13): its own text
+    # says "if these packages are being updated this message may be ignored", and the same run goes
+    # on to upgrade them. A real failure is still shown by its own "failed" lines.
+    if ($Line -match '^\[NuGet\] One or more unresolved package dependency constraints detected') { return $true }
     return $false
 }
 function Invoke-ChocoUpgradeAll {
@@ -937,6 +954,15 @@ function Invoke-ChocoUpgradeAll {
     $packageLines = New-Object System.Collections.Generic.List[string]
     $footerLines = New-Object System.Collections.Generic.List[string]
     $allLines = New-Object System.Collections.Generic.List[string]
+    # What was installed before, so a package choco upgrades as a DEPENDENCY (no name|old|new line)
+    # still reports where it came from. Local inventory only; empty when choco cannot answer.
+    $versionBefore = @{}
+    try {
+        foreach ($row in @(& choco list --limit-output 2>$null)) {
+            $parts = "$row" -split '\|'
+            if ($parts.Count -ge 2 -and $parts[0]) { $versionBefore[$parts[0]] = $parts[1] }
+        }
+    } catch { $versionBefore = @{} }
     # Per-package time and a heartbeat, like the winget sweep: one chezmoi upgrade (a 15 MB zip) took
     # 1m39s of a dot upgrade (2026-10-11) and nothing said where. choco's own lines mark the phases:
     # "<name> v<ver> [Approved]" starts a package, "Download of ... completed." ends the download,
@@ -981,7 +1007,7 @@ function Invoke-ChocoUpgradeAll {
     if ($currentPackage -and -not $currentPackage.End) { $currentPackage.End = Get-DotTimingNow }
     Write-DotPackageTiming -Tool choco -Package $packageTimes -LogPath $LogPath
 
-    $summary = Get-ChocoUpgradeSummary -Lines $packageLines -FooterLines $footerLines
+    $summary = Get-ChocoUpgradeSummary -Lines $packageLines -FooterLines $footerLines -VersionBefore $versionBefore
     if ($summary.Upgraded.Count -gt 0) {
         Write-Host ("  Upgraded {0} of {1}: {2}" -f $summary.Upgraded.Count, $summary.Checked, ($summary.Upgraded -join ', ')) -ForegroundColor Green
     }
@@ -1005,7 +1031,7 @@ function Get-ChocoUpgradeSummary {
     # -FooterLines: choco's own closing "Upgraded:" list (` - name vX`). A package pulled in as
     # a DEPENDENCY (cmake.install with cmake) is upgraded without a `name|old|new|pinned` line,
     # so the pipe lines alone undercounted ("4 of 99" while choco said 5/100).
-    param([string[]]$Lines, [string[]]$FooterLines = @())
+    param([string[]]$Lines, [string[]]$FooterLines = @(), [hashtable]$VersionBefore = @{})
 
     $upgraded = @()
     $names = @()
@@ -1021,7 +1047,9 @@ function Get-ChocoUpgradeSummary {
     }
     foreach ($line in @($FooterLines)) {
         if ($line -match '^\s+-\s+(?<name>\S+)\s+v(?<version>\S+)\s*$' -and $names -notcontains $Matches['name']) {
-            $upgraded += ("{0} (-> {1})" -f $Matches['name'], $Matches['version'])
+            $from = ''
+            if ($VersionBefore.ContainsKey($Matches['name'])) { $from = [string]$VersionBefore[$Matches['name']] }
+            $upgraded += ("{0} ({1}-> {2})" -f $Matches['name'], $(if ($from) { "$from " } else { '' }), $Matches['version'])
             $names += $Matches['name']
         }
     }
@@ -1209,6 +1237,14 @@ function Invoke-WingetUpgradeAll {
     if (@($pending.Other).Count -gt 0) {
         $others = @($pending.Other | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
         Write-Host ("  Not upgradeable through winget (installed another way; its own updater handles it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
+        # Some have no updater of their own (PowerShell installed as an MSI stays on its version for
+        # good). winget's answer is a reinstall - from ANOTHER shell, since this one may be the app -
+        # and a reinstall can change the app's path, which breaks a profile or shortcut that names it.
+        $reinstallable = @($pending.Other | Where-Object { $_.Id } | ForEach-Object { "winget uninstall --id $($_.Id); winget install --id $($_.Id)" })
+        if ($reinstallable.Count -gt 0) {
+            Write-Host "    To put one under winget, from another shell: $($reinstallable -join '  |  ')" -ForegroundColor DarkGray
+            Write-Host "    (a reinstall can move the app: check terminal profiles and shortcuts that name its old path)" -ForegroundColor DarkGray
+        }
     }
     if ($pending.Blocked) { Write-Host "  $($pending.Blocked)" -ForegroundColor Yellow }
     if ($code -ne 0 -and $installed -eq 0 -and @($pending.Rows).Count -eq 0) {
@@ -1256,6 +1292,37 @@ function Get-DockerDesktopUpgrade {
     catch { Write-Verbose "docker desktop upgrade probe failed: $($_.Exception.Message)" }
     finally { $ErrorActionPreference = $previous }
     return ''
+}
+
+# The desktop apps this run closed (Invoke-LiveSessionStop), started again at the end of dot upgrade.
+# An elevated shell would start them ELEVATED, so each is launched through explorer.exe, which
+# runs it as the signed-in user. A service the app installs is started again directly. An app
+# with no launchable path (a Store app) is named so it can be opened by hand. DOT_NO_RESTART=1 skips.
+$script:ClosedDesktopApp = @()
+function Resume-ClosedDesktopApp {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    $closed = @($script:ClosedDesktopApp)
+    $script:ClosedDesktopApp = @()
+    if ($closed.Count -eq 0) { return }
+    if ($env:DOT_NO_RESTART -eq '1') {
+        Write-Host "  Not restarting $((@($closed | ForEach-Object { $_.Label })) -join ', ') (DOT_NO_RESTART=1)." -ForegroundColor Yellow
+        return
+    }
+    $started = @()
+    $byHand = @()
+    foreach ($app in $closed) {
+        if ($app.Service) { try { Start-Service -Name $app.Service -ErrorAction Stop } catch { Write-Verbose "service $($app.Service) start failed: $($_.Exception.Message)" } }
+        if ($app.Path -and (Test-Path -LiteralPath $app.Path)) {
+            if (-not $PSCmdlet.ShouldProcess($app.Label, 'Start')) { continue }
+            try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"{0}"' -f $app.Path) | Out-Null; $started += $app.Label }
+            catch { $byHand += $app.Label }
+        } elseif (-not $app.Service) {
+            $byHand += $app.Label
+        }
+    }
+    if ($started.Count -gt 0) { Write-Host "  Started again: $($started -join ', ')." -ForegroundColor Green }
+    if ($byHand.Count -gt 0) { Write-Host "  Could not start again from here - open by hand: $($byHand -join ', ')." -ForegroundColor Yellow }
 }
 
 # Start Docker Desktop again after `dot upgrade` stopped it for its installer. -Path: where it ran from
