@@ -138,6 +138,7 @@ payload="${archives[0]}.contents/dotfiles-backup-v1"
 [ -f "$payload/chezmoi/chezmoi.toml" ] || fail '[2] ChezMoi config missing from staging'
 [ -f "$payload/ssh/custom_signing_key" ] || fail '[2] non-id SSH key missing from staging'
 [ -f "$payload/ssh/nested/ignored" ] || fail '[2] nested SSH file missing from staging'
+[ ! -e "$payload/extra" ] || fail '[2] extra/ present without [data.backup].extra_dirs'
 printf '  ok: encrypted v1 archive contains allowlisted payload\n'
 
 # [3] A manifest for another format must not write any destination files.
@@ -484,5 +485,42 @@ rm -rf "$audit_home/.dot_backups"
 quiet_out="$(run_backup "$audit_home")"
 if printf '%s' "$quiet_out" | grep -Fq 'Audit log'; then fail '[19] audit size reported without DOTBACKUP_AUDIT=1'; fi
 echo "  ok: audit log size reported when captured"
+
+# --- [data.backup].extra_dirs ------------------------------------------------
+# [20] Captured, regenerable junk pruned, nested structure preserved; an entry
+# that doesn't start with "~/" is warned about, not fatal to the whole backup.
+extra_home="$tmp/home-extra"
+mkdir -p "$extra_home/.config/chezmoi" "$extra_home/.ssh" \
+    "$extra_home/projects/app/node_modules/pkg" "$extra_home/projects/app/src" \
+    "$extra_home/notes"
+printf '[data.backup]\n  extra_dirs = ["~/projects", "~/notes", "/etc/outside"]\n' > "$extra_home/.config/chezmoi/chezmoi.toml"
+printf 'keep\n' > "$extra_home/.ssh/custom_key"
+printf 'source code\n' > "$extra_home/projects/app/src/main.go"
+printf 'junk\n' > "$extra_home/projects/app/node_modules/pkg/index.js"
+printf 'a note\n' > "$extra_home/notes/todo.md"
+extra_backup_out="$(run_backup "$extra_home" 2>&1)"
+extra_payload="$(backup_payload "$extra_home")/extra"
+[ -f "$extra_payload/projects/app/src/main.go" ] || fail '[20] project file not captured'
+[ ! -e "$extra_payload/projects/app/node_modules" ] || fail '[20] node_modules must be pruned'
+[ -f "$extra_payload/notes/todo.md" ] || fail '[20] second extra_dirs entry not captured'
+printf '%s' "$extra_backup_out" | grep -q 'extra_dirs entry must start with "~/"' || fail "[20] out-of-home entry should warn, not fail (got: $extra_backup_out)"
+printf '%s' "$extra_backup_out" | grep -Fq 'Contains 2 file(s) from [data.backup] extra_dirs.' || fail "[20] extra file count not reported (got: $extra_backup_out)"
+echo "  ok: [data.backup] extra_dirs captured with junk pruned, unsafe entries warned not failed"
+
+# [21] extra/ restores 1:1 under $HOME; an existing destination file blocks the
+# whole restore, same check-everything-first contract as ssh/guardrail.
+extra_archive=("$extra_home"/.dot_backups/dotfiles-*.7z)
+extra_restore_home="$tmp/home-extra-restore"
+mkdir -p "$extra_restore_home"
+run_restore "$extra_restore_home" "${extra_archive[0]}" >/dev/null
+[ "$(<"$extra_restore_home/projects/app/src/main.go")" = 'source code' ] || fail '[21] extra file not restored'
+[ "$(<"$extra_restore_home/notes/todo.md")" = 'a note' ] || fail '[21] second extra_dirs entry not restored'
+extra_collide_home="$tmp/home-extra-collide"
+mkdir -p "$extra_collide_home/notes"
+printf 'keep\n' > "$extra_collide_home/notes/todo.md"
+run_restore "$extra_collide_home" "${extra_archive[0]}" >/dev/null 2>&1 && fail '[21] existing extra file was overwritten'
+[ "$(<"$extra_collide_home/notes/todo.md")" = 'keep' ] || fail '[21] extra collision changed file'
+[ ! -e "$extra_collide_home/.config/chezmoi/chezmoi.toml" ] || fail '[21] extra collision rejection wrote config first'
+echo "  ok: extra_dirs restores 1:1 under HOME; existing files block the whole restore"
 
 finish

@@ -470,6 +470,53 @@ if ($r.Code -ne 0) { Fail "[11] clean restore failed: $($r.Out)" }
 if ($r.Out.Contains('grant(s)')) { Fail "[11] no warning expected when there are no repo grants: $($r.Out)" }
 Write-Host '  ok: restore names repo grants that will not apply here'
 
+# --- [12] [data.backup].extra_dirs: captured, regenerable junk pruned, nested
+# structure preserved; an entry that doesn't start with "~/" is warned about,
+# not fatal to the whole backup. Parity with tests/dotbackup_restore.sh [20].
+$extraHome = Join-Path $Tmp 'home-extra'
+foreach ($d in @(
+    (Join-Path $extraHome '.config\chezmoi'),
+    (Join-Path $extraHome '.ssh'),
+    (Join-Path $extraHome 'projects\app\node_modules\pkg'),
+    (Join-Path $extraHome 'projects\app\src'),
+    (Join-Path $extraHome 'notes'))) {
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+}
+Set-Content -LiteralPath (Join-Path $extraHome '.config\chezmoi\chezmoi.toml') -Value "[data.backup]`n  extra_dirs = [`"~/projects`", `"~/notes`", `"/etc/outside`"]" -Encoding utf8
+Set-Content -LiteralPath (Join-Path $extraHome '.ssh\custom_signing_key') -Value 'private key' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $extraHome 'projects\app\src\main.go') -Value 'source code' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $extraHome 'projects\app\node_modules\pkg\index.js') -Value 'junk' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $extraHome 'notes\todo.md') -Value 'a note' -Encoding ascii
+Use-Home $extraHome
+$r = Invoke-Script51 $Backup
+if ($r.Code -ne 0) { Fail "[12] backup failed: $($r.Out)" }
+$extraArchive = Get-OnlyArchive $extraHome
+$extraPayload = Join-Path "$extraArchive.contents" 'dotfiles-backup-v1'
+if (-not (Test-Path -LiteralPath (Join-Path $extraPayload 'extra\projects\app\src\main.go'))) { Fail '[12] project file not captured' }
+if (Test-Path -LiteralPath (Join-Path $extraPayload 'extra\projects\app\node_modules')) { Fail '[12] node_modules must be pruned' }
+if (-not (Test-Path -LiteralPath (Join-Path $extraPayload 'extra\notes\todo.md'))) { Fail '[12] second extra_dirs entry not captured' }
+if ($r.Out -notmatch 'extra_dirs entry must start with .~/.') { Fail "[12] out-of-home entry should warn, not fail: $($r.Out)" }
+if ($r.Out -notmatch 'Contains 2 file\(s\) from \[data\.backup\] extra_dirs\.') { Fail "[12] extra file count not reported: $($r.Out)" }
+Write-Host '  ok: [data.backup] extra_dirs captured with junk pruned, unsafe entries warned not failed'
+
+# --- [13] extra\ restores 1:1 under USERPROFILE; an existing destination file
+# blocks the whole restore. Parity with tests/dotbackup_restore.sh [21].
+$extraRestoreHome = Join-Path $Tmp 'home-extra-restore'
+Use-Home $extraRestoreHome
+$r = Invoke-Script51 $Restore @('-Archive', $extraArchive)
+if ($r.Code -ne 0) { Fail "[13] restore failed: $($r.Out)" }
+if ([IO.File]::ReadAllText((Join-Path $extraRestoreHome 'projects\app\src\main.go')) -notmatch 'source code') { Fail '[13] extra file not restored' }
+if ([IO.File]::ReadAllText((Join-Path $extraRestoreHome 'notes\todo.md')) -notmatch 'a note') { Fail '[13] second extra_dirs entry not restored' }
+$extraCollideHome = Join-Path $Tmp 'home-extra-collide'
+Use-Home $extraCollideHome
+New-Item -ItemType Directory -Force -Path (Join-Path $extraCollideHome 'notes') | Out-Null
+Set-Content -LiteralPath (Join-Path $extraCollideHome 'notes\todo.md') -Value 'keep' -Encoding ascii
+$r = Invoke-Script51 $Restore @('-Archive', $extraArchive)
+if ($r.Code -eq 0) { Fail '[13] existing extra file was overwritten' }
+if ((Get-Content -LiteralPath (Join-Path $extraCollideHome 'notes\todo.md')) -ne 'keep') { Fail '[13] extra collision changed file' }
+if (Test-Path -LiteralPath (Join-Path $extraCollideHome '.config\chezmoi\chezmoi.toml')) { Fail '[13] extra collision rejection wrote config first' }
+Write-Host '  ok: extra_dirs restores 1:1 under USERPROFILE; existing files block the whole restore'
+
 Remove-Item Env:FAKE_7Z_LOG -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 Write-Host 'PASS: dotbackup_restore.ps1 (backup -> restore -> refuse round-trip under 5.1)'

@@ -28,6 +28,43 @@ if [ -d "$HOME/.ssh" ]; then
     done < <(find "$HOME/.ssh" -type f -print0)
 fi
 
+# [data.backup].extra_dirs (chezmoi.toml): opt-in, user-edited paths beyond
+# the required ~/.ssh and chezmoi.toml above - never read ambiently, always
+# through the config this backup is actually using (docs/invariants.md #5).
+# Archived under extra/<relative-to-HOME>/..., mirroring how ssh/ mirrors
+# ~/.ssh; dotrestore.sh walks it the same way, with no manifest indirection.
+# Regenerable junk is pruned - this is disaster recovery, not a cache backup.
+# Keep this denylist identical to dotbackup.ps1's $backupExcludeDirs.
+extra_count=0
+extra_dirs="$(chezmoi execute-template --config "$config" '{{ if hasKey . "backup" }}{{ range .backup.extra_dirs }}{{ . }} {{ end }}{{ end }}' 2>/dev/null || true)"
+for entry in $extra_dirs; do
+    # Matching the literal two characters "~/" from the TOML string, not a
+    # shell tilde to expand - the quotes are deliberate (shellcheck SC2088 is
+    # a false positive here; an unquoted ~/* undergoes real tilde expansion
+    # in a case pattern and silently stops matching anything).
+    # shellcheck disable=SC2088
+    case "$entry" in
+        '~/'*) extra_source="$HOME/${entry#'~/'}" ;;
+        *)
+            printf 'WARNING: [data.backup] extra_dirs entry must start with "~/" - skipping: %s\n' "$entry" >&2
+            continue
+            ;;
+    esac
+    [ -d "$extra_source" ] || continue
+    relative_root="${entry#'~/'}"
+    while IFS= read -r -d '' source; do
+        relative="${source#"$extra_source/"}"
+        destination="$root/extra/$relative_root/$relative"
+        mkdir -p "$(dirname "$destination")"
+        cp -p "$source" "$destination"
+        extra_count=$((extra_count + 1))
+    done < <(find "$extra_source" \
+        \( -name node_modules -o -name .venv -o -name venv -o -name __pycache__ \
+           -o -name .next -o -name dist -o -name build -o -name target \
+           -o -name .terraform -o -name .pytest_cache \) -prune \
+        -o -type f -print0)
+done
+
 # guardrail operator state (optional section, absent when guardrail was never
 # configured). Only what cannot be recreated: waivers.toml / night.toml hold
 # the approval mode and per-repo grants. operator-auth/ is the passkey
@@ -91,6 +128,9 @@ cat > "$root/RESTORE.md" <<EOF
   different OS: paths and remote_access values are machine-specific.
 - \`ssh/\` - every regular file from this machine's \`~/.ssh\`: private keys,
   .pub halves, config, known_hosts.
+- \`extra/\` - present only if \`[data.backup].extra_dirs\` is set: each
+  configured path, mirrored under \`extra/<path-relative-to-home>/\`, with
+  regenerable junk (node_modules, .venv, build caches, ...) left out.
 - \`guardrail/\` - present only if guardrail was configured: \`config/\`
   (waivers.toml, night.toml: approval mode and every per-repo grant),
   \`operator-auth/\` (passkey enrollment, same machine only) and \`audit/\`
@@ -137,6 +177,9 @@ fi
 
 printf 'Backup created: %s\n' "$archive"
 printf '  Contains %d private key file(s) from ~/.ssh. Treat this archive as key material.\n' "$keys"
+if [ -n "$extra_dirs" ]; then
+    printf '  Contains %d file(s) from [data.backup] extra_dirs.\n' "$extra_count"
+fi
 printf '  Contains %d guardrail operator file(s).\n' "$guardrail_count"
 if [ "$audit_segments" -gt 0 ]; then
     # Rotated segments pile up on a long-lived machine: say how big before it is handed around.

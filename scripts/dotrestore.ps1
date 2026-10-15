@@ -163,16 +163,21 @@ try {
         throw "Archive contains a reparse point: $($stagedReparsePoint.FullName)"
     }
 
-    # 'guardrail' is the one optional entry (absent in older archives and when
-    # guardrail was never configured); the other four are required.
+    # 'guardrail' and 'extra' are the two optional entries (absent in older
+    # archives, or when guardrail/[data.backup].extra_dirs was never set);
+    # the other four are required.
     $payloadEntries = @(Get-ChildItem -LiteralPath $payloadRoot -Force)
     $expectedPayloadEntries = 'manifest.json', 'RESTORE.md', 'chezmoi', 'ssh'
-    $payloadNames = @($payloadEntries.Name | Where-Object { $_ -ne 'guardrail' })
+    $payloadNames = @($payloadEntries.Name | Where-Object { $_ -ne 'guardrail' -and $_ -ne 'extra' })
     if ($payloadNames.Count -ne 4 -or (($payloadNames | Sort-Object) -join '|') -ne (($expectedPayloadEntries | Sort-Object) -join '|')) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
     $guardrailSource = Join-Path $payloadRoot 'guardrail'
     if ((Test-Path -LiteralPath $guardrailSource) -and -not (Test-Path -LiteralPath $guardrailSource -PathType Container)) {
+        throw 'Archive does not contain the dotfiles-backup-v1 layout.'
+    }
+    $extraSource = Join-Path $payloadRoot 'extra'
+    if ((Test-Path -LiteralPath $extraSource) -and -not (Test-Path -LiteralPath $extraSource -PathType Container)) {
         throw 'Archive does not contain the dotfiles-backup-v1 layout.'
     }
 
@@ -218,6 +223,25 @@ try {
                 throw "Refusing reparse-point destination: $destination"
             }
             throw "Refusing to overwrite existing SSH file: $destination"
+        }
+    }
+
+    # extra\ mirrors $HOME 1:1 (the same way ssh\ mirrors ~\.ssh): no manifest
+    # indirection needed, the archive's own tree is the restore list.
+    $extraFiles = @()
+    if (Test-Path -LiteralPath $extraSource -PathType Container) {
+        $extraFiles = @(Get-ChildItem -LiteralPath $extraSource -File -Recurse -Force)
+        foreach ($source in $extraFiles) {
+            $relative = $source.FullName.Substring($extraSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            $destination = Join-Path $env:USERPROFILE $relative
+            Test-DestinationParentsSafe -Destination $destination -HomeDir $env:USERPROFILE
+            $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+            if ($null -ne $destinationItem) {
+                if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    throw "Refusing reparse-point destination: $destination"
+                }
+                throw "Refusing to overwrite existing file: $destination"
+            }
         }
     }
 
@@ -279,6 +303,16 @@ try {
             }
             Write-Output "Cross-OS restore (source: $sourcePlatform, target: windows): normalized ACL on $($normalized.Count) key file(s)."
         }
+    }
+
+    if ($extraFiles.Count -gt 0) {
+        foreach ($source in $extraFiles) {
+            $relative = $source.FullName.Substring($extraSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            $destination = Join-Path $env:USERPROFILE $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $source.FullName -Destination $destination
+        }
+        Write-Output "Restored $($extraFiles.Count) file(s) from [data.backup] extra_dirs."
     }
 
     # guardrail operator state: user-only ACL (twin of the .sh 600/700), put
