@@ -28,4 +28,12 @@ for flag in $pin; do
     esac
 done
 case "$catalog" in *"--scope machine"*) pass ;; *) fail "PowerShell is installed machine-wide: winget_args must carry --scope machine" ;; esac
+
+# `--scope machine` ALONE still selects the Store package (MSIX) for PowerShell 7.6.x (found on a fresh
+# machine, 2026-10-14): a copy installed that way is "present" to the installer, so it must say what it is
+# and print the one-time fix, from Windows PowerShell.
+installer="$repo_root/run_onchange_install_packages.ps1.tmpl"
+require "$installer" "Get-AppxPackage -Name 'Microsoft.PowerShell'"
+require "$installer" 'PowerShell 7 is the per-user Store package here'
+require "$installer" 'ELEVATED Windows PowerShell (powershell.exe, not pwsh)'
 finish

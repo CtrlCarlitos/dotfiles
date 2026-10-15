@@ -1216,6 +1216,16 @@ if ($wingetPackages.Count -gt 0) {
                     Write-Host "  $wingetId is installed per-user but the catalog keeps it machine-wide (dot upgrade cannot upgrade a per-user copy)." -ForegroundColor Yellow
                     Write-Host "    One-time fix, from a NON-elevated terminal: winget uninstall --id $wingetId --exact  " -ForegroundColor Yellow
                 }
+                # PowerShell 7: `--scope machine` alone still selects winget's per-user Store package (MSIX);
+                # the catalog adds `--installer-type wix` for the machine-wide MSI. A copy installed before
+                # that is only "present" here, so say what it is and the one-time fix. From powershell.exe:
+                # pwsh cannot replace itself.
+                if ("$wingetScopeArgs" -match '--installer-type\s+wix' -and $wingetId -eq 'Microsoft.PowerShell' -and
+                    (Get-AppxPackage -Name 'Microsoft.PowerShell' -ErrorAction SilentlyContinue)) {
+                    Write-Host "  PowerShell 7 is the per-user Store package here, but the catalog keeps it as the machine-wide MSI (every user of the computer)." -ForegroundColor Yellow
+                    Write-Host "    One-time fix, from an ELEVATED Windows PowerShell (powershell.exe, not pwsh): winget uninstall --id Microsoft.PowerShell --exact; winget install --id Microsoft.PowerShell --exact --source winget $wingetScopeArgs" -ForegroundColor Yellow
+                    Write-Host "    Afterwards check terminal and editor profiles that name pwsh.exe by path (the MSI is C:\Program Files\PowerShell\7\pwsh.exe)." -ForegroundColor Yellow
+                }
                 continue
             }
             $wingetMissing += $wingetEntry
