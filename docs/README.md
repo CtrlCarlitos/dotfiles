@@ -21,6 +21,7 @@ are reference.
 - [Neovim Guide](nvim.md) — keymaps, plugins, clipboard
 - [Zsh, Tmux & Neovim Tutorial](tmux-nvim-tutorial.md) — the beginner on-ramp for all three
 - [Windows Setup](windows.md) — elevation, PowerShell profiles, `dot upgrade` on Windows, troubleshooting
+- [Install logs](logging.md) — `[data.logging]`: the live log of every install and `dot up`, and `verbose`
 - [Defender & build output](devtmp.md) — `dot devtmp`: one folder for Go/test output, the printed Defender exclusion, Dev Drive notes
 
 ## Agents and security

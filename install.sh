@@ -242,6 +242,49 @@ else
     echo "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
 fi
 
+# 1.7 [data.logging] (docs/logging.md): from here on - the chezmoi install and the whole apply -
+# output is tee'd to ~/.local/state/dotfiles/logs/install-<time>.log as it happens, so the install
+# can be followed from another terminal (tail -f) or read afterwards. Started AFTER the menu: gum's
+# screen needs the terminal itself. The environment (DOT_LOG=0|1) wins, then [data.logging] log in
+# chezmoi.toml, then on. POSIX twin of scripts/lib/logging.sh (this script is sh: a FIFO stands in
+# for bash's >(...)). Never fatal: any problem leaves the output as it was.
+install_log_flag() { # $1 = config key, $2 = default -> true|false
+    _ilf_cfg="$HOME/.config/chezmoi/chezmoi.toml"
+    _ilf_val=""
+    if [ -f "$_ilf_cfg" ]; then
+        _ilf_val="$(awk -v key="$1" '
+            /^[[:space:]]*\[data\.logging\][[:space:]]*$/ { on = 1; next }
+            on && /^[[:space:]]*\[/ { exit }
+            on {
+                line = $0
+                sub(/[[:space:]]*#.*$/, "", line)
+                if (line ~ "^[[:space:]]*" key "[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$") {
+                    sub(/^[^=]*=[[:space:]]*/, "", line); sub(/[[:space:]]*$/, "", line)
+                    print line; exit
+                }
+            }' "$_ilf_cfg" 2>/dev/null || true)"
+    fi
+    if [ -n "$_ilf_val" ]; then echo "$_ilf_val"; else echo "$2"; fi
+}
+start_install_log() {
+    case "$(printf '%s' "${DOT_LOG:-}" | tr '[:upper:]' '[:lower:]')" in
+        0 | false | no | off) return 0 ;;
+        1 | true | yes | on) ;;
+        *) [ "$(install_log_flag log true)" = true ] || return 0 ;;
+    esac
+    _il_dir="$HOME/.local/state/dotfiles/logs"
+    mkdir -p "$_il_dir" 2>/dev/null || return 0
+    INSTALL_LOG="$_il_dir/install-$(date +%Y%m%d-%H%M%S).log"
+    _il_tmp="$(mktemp -d 2>/dev/null)" || return 0
+    if ! mkfifo "$_il_tmp/log.fifo" 2>/dev/null; then rm -rf "$_il_tmp"; return 0; fi
+    tee -a "$INSTALL_LOG" <"$_il_tmp/log.fifo" &
+    # Opening the write end blocks until tee has the read end, so the FIFO can go right after.
+    exec >"$_il_tmp/log.fifo" 2>&1
+    rm -rf "$_il_tmp"
+    echo "Live log: $INSTALL_LOG (the apply's dot-up-*.log lands beside it)"
+}
+start_install_log
+
 # 2. Install Chezmoi if missing
 if ! command -v chezmoi >/dev/null 2>&1; then
   echo "Installing chezmoi..."

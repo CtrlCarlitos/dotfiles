@@ -84,6 +84,10 @@ cat >"$tmp/fixture.toml" <<'EOF'
     "editor.fontSize" = 15
     "editor.codeActionsOnSave" = { "source.fixAll.eslint" = "explicit" }
 
+[data.logging]
+  log = false
+  verbose = true
+
 [[data.accounts]]
   name = "Full Account"
   email = "full@example.com"

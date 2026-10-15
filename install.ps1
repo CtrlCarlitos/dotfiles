@@ -133,6 +133,37 @@ if (-not $IsAdmin) {
 }
 
 try {
+    # [data.logging] (docs/logging.md): this run's live transcript under ~\.local\state\dotfiles\logs,
+    # so the install can be followed from another terminal (Get-Content -Wait) or read afterwards.
+    # Inline twin of Resolve-DotFlag / Open-DotLog in scripts/lib/ps-installer-output.ps1 - a one-liner
+    # cannot include it. The environment (DOT_LOG=0|1) wins, then [data.logging] log in a restored
+    # chezmoi.toml, then on. Native installers below pipe through Out-Host: a transcript records only
+    # what PowerShell writes. The apply's own scripts keep their own log (dot-up-*).
+    $InstallLogOn = $true
+    $InstallLogConfig = Join-Path $env:USERPROFILE '.config\chezmoi\chezmoi.toml'
+    if (Test-Path -LiteralPath $InstallLogConfig) {
+        $inLogging = $false
+        foreach ($line in [IO.File]::ReadAllLines($InstallLogConfig)) {
+            if ($line -match '^\s*\[data\.logging\]\s*$') { $inLogging = $true; continue }
+            if ($inLogging -and $line -match '^\s*\[') { break }
+            if ($inLogging -and $line -match '^\s*log\s*=\s*(true|false)\s*(#.*)?$') { $InstallLogOn = ($Matches[1] -eq 'true') }
+        }
+    }
+    if ($env:DOT_LOG -match '^(?i:1|true|yes|on)$') { $InstallLogOn = $true }
+    if ($env:DOT_LOG -match '^(?i:0|false|no|off)$') { $InstallLogOn = $false }
+    $InstallLogOpen = $false
+    if ($InstallLogOn) {
+        try {
+            $InstallLogDir = Join-Path $env:USERPROFILE '.local\state\dotfiles\logs'
+            New-Item -ItemType Directory -Force -Path $InstallLogDir | Out-Null
+            $InstallLogPath = Join-Path $InstallLogDir ('install-{0}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+            Start-Transcript -LiteralPath $InstallLogPath -Force | Out-Null
+            $InstallLogOpen = $true
+            Write-Info "Live log: $InstallLogPath (the apply adds dot-up-*.log beside it)"
+        } catch {
+            Write-Host "[!] Could not start the install log - continuing without it: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
     # The official Chocolatey bootstrap is eval-based by design (its installer
     # script must run in this session to set env vars); PSSA suppression is
     # scoped to this wrapper so the rule stays live everywhere else.
@@ -181,9 +212,9 @@ try {
         Write-Info "Git not found. Installing via winget (Chocolatey if winget is missing)..."
         try {
             if (Get-Command winget -ErrorAction SilentlyContinue) {
-                winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+                winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Host
             } else {
-                choco install git -y --no-progress
+                choco install git -y --no-progress | Out-Host
             }
             Update-InstallerPath
             if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -284,22 +315,22 @@ try {
             $wingetFlags = @('--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--scope', 'machine')
             if (Get-Command winget -ErrorAction SilentlyContinue) {
                 if ($chezmoiPin) {
-                    winget install --id twpayne.chezmoi --version $chezmoiPin @wingetFlags
+                    winget install --id twpayne.chezmoi --version $chezmoiPin @wingetFlags | Out-Host
                     if ($LASTEXITCODE -ne 0) {
                         Write-Fail "chezmoi $chezmoiPin not installable via winget - falling back to latest."
-                        winget install --id twpayne.chezmoi @wingetFlags
+                        winget install --id twpayne.chezmoi @wingetFlags | Out-Host
                     }
                 } else {
-                    winget install --id twpayne.chezmoi @wingetFlags
+                    winget install --id twpayne.chezmoi @wingetFlags | Out-Host
                 }
             } elseif ($chezmoiPin) {
-                choco install chezmoi -y --no-progress --version $chezmoiPin
+                choco install chezmoi -y --no-progress --version $chezmoiPin | Out-Host
                 if ($LASTEXITCODE -ne 0 -or -not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
                     Write-Fail "chezmoi $chezmoiPin not installable via Chocolatey (package lag?) - falling back to latest."
-                    choco install chezmoi -y --no-progress
+                    choco install chezmoi -y --no-progress | Out-Host
                 }
             } else {
-                choco install chezmoi -y --no-progress
+                choco install chezmoi -y --no-progress | Out-Host
             }
             Update-InstallerPath
             if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
@@ -393,6 +424,7 @@ try {
         Write-Host ""
         Read-Host "Press Enter to exit..."
     }
+    if ($InstallLogOpen) { try { Stop-Transcript | Out-Null } catch { $null = $_ } }
 }
 
 # Every real failure above exits 1 explicitly; reaching here means success.
