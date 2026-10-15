@@ -29,7 +29,12 @@ $ErrorActionPreference = 'Stop'
 $script:chocoLines = @()
 $script:chocoExit = 0
 $script:chocoArgs = ''
-function choco { $script:chocoArgs = ($args -join ' '); $script:chocoLines | ForEach-Object { $_ }; $global:LASTEXITCODE = $script:chocoExit }
+$script:chocoInventory = @()
+function choco {
+    # `choco list` is the installed inventory taken before the sweep; anything else is the sweep
+    if ($args[0] -eq 'list') { $script:chocoInventory | ForEach-Object { $_ }; $global:LASTEXITCODE = 0; return }
+    $script:chocoArgs = ($args -join ' '); $script:chocoLines | ForEach-Object { $_ }; $global:LASTEXITCODE = $script:chocoExit
+}
 
 $log = Join-Path $LogDir 'upgrade.log'
 function Run([string[]]$ChocoArgs) {
@@ -55,6 +60,15 @@ Write-Output ('upgrade-hides-up-to-date=' + (-not ($script:out -match 'git\|')))
 $script:chocoLines = @('a|1|1|false', 'cmake|4.4.3|4.4.4|false', 'b|2|2|false', 'cmake.install v4.4.4 [Approved]', 'Chocolatey upgraded 2/3 packages.', 'Upgraded:', ' - cmake v4.4.4', ' - cmake.install v4.4.4')
 Run @('upgrade', 'all', '-y', '--no-progress')
 Write-Output ('dependency-counted=' + ($script:out -match 'Upgraded 2 of 3: cmake \(4\.4\.3 -> 4\.4\.4\), cmake\.install \(-> 4\.4\.4\)'))
+
+# --- the inventory taken before the sweep gives a dependency its old version; NuGet's constraint warning is hidden ---
+$script:chocoInventory = @('cmake|4.4.3', 'cmake.install|4.4.3')
+$script:chocoLines = @('a|1|1|false', 'cmake|4.4.3|4.4.4|false', "[NuGet] One or more unresolved package dependency constraints detected in the Chocolatey lib folder. All dependency constraints must be resolved. 'x 1 constraint: y'", 'cmake.install v4.4.4 [Approved]', 'Upgraded:', ' - cmake v4.4.4', ' - cmake.install v4.4.4')
+Run @('upgrade', 'all', '-y', '--no-progress')
+Write-Output ('dependency-old-version=' + ($script:out -match 'cmake\.install \(4\.4\.3 -> 4\.4\.4\)'))
+Write-Output ('nuget-constraint-hidden=' + (-not ($script:out -match 'unresolved package dependency')))
+Write-Output ('nuget-constraint-kept-in-log=' + ((Get-Content -Raw $log) -match 'unresolved package dependency'))
+$script:chocoInventory = @()
 
 # --- failure: tail of the output, exit code returned ---
 $script:chocoLines = @('a|1|1|false', 'pkg-x|1|2|false', 'ERROR: pkg-x failed to install', 'The install of pkg-x was NOT successful.')
@@ -89,6 +103,9 @@ expect 'upgrade-summary=True'
 expect 'chatter-stays-live=True'
 expect 'upgrade-hides-up-to-date=True'
 expect 'dependency-counted=True'
+expect 'dependency-old-version=True'
+expect 'nuget-constraint-hidden=True'
+expect 'nuget-constraint-kept-in-log=True'
 expect 'fail-exit=1'
 expect 'fail-warns=True'
 expect 'fail-shows-tail=True'

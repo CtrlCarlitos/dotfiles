@@ -351,9 +351,12 @@ does the session you are reading this in. `dot upgrade` scans for those processe
 Everything else (choco, winget, skills, Playwright, and the Claude Code
 binary itself) still upgrades, so a run with sessions open is safe, just
 incomplete: it ends with `Deferred (live sessions): ...`. Close the sessions
-and run `dot upgrade` again to pick those up. Expect to reopen apps as well:
-the sweep can replace the running Windows Terminal or Claude Code, and
-neither takes effect until restarted.
+and run `dot upgrade` again to pick those up. The desktop apps it closed for
+their upgrade (Ollama, Claude Desktop, Antigravity, OpenCode Desktop) are
+started again at the end, as you rather than elevated (`DOT_NO_RESTART=1`
+skips that); a Store app that cannot be started by path is named instead.
+Expect to reopen the rest yourself: the sweep can replace the running Windows
+Terminal or Claude Code, and neither takes effect until restarted.
 
 #### The offer to stop live sessions
 

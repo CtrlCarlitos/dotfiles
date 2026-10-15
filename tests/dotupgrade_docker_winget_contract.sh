@@ -86,6 +86,8 @@ $script:listing = $listingNoNote
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log -RunningNote 'Docker Desktop waits: it is running' }
 Write-Output ('other-listed=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop \(4\.93\.0 -> 4\.94\.0\), Microsoft Edge'))
 Write-Output ('other-not-pending=' + (-not ($script:out -match 'Still pending')))
+Write-Output ('other-reinstall-hint=' + ($script:out -match 'winget uninstall --id Docker\.DockerDesktop; winget install --id Docker\.DockerDesktop'))
+Write-Output ('other-path-warning=' + ($script:out -match 'a reinstall can move the app'))
 Write-Output ('other-not-nothing=' + (-not ($script:out -match 'Nothing to upgrade in winget')))
 Write-Output ('other-no-raw-blocked=' + (-not ($script:out -match 'have upgrades blocked')))
 $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @('Found Microsoft Edge') }
@@ -282,6 +284,8 @@ expect 'pending-note=True'
 expect 'pending-blocked=True'
 expect 'other-listed=True'
 expect 'other-not-pending=True'
+expect 'other-reinstall-hint=True'
+expect 'other-path-warning=True'
 expect 'other-not-nothing=True'
 expect 'other-no-raw-blocked=True'
 expect 'mixed-pending=True'
