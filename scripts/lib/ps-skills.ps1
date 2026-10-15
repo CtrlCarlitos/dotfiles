@@ -423,9 +423,35 @@ function Invoke-GuardrailInstallerProcess {
             $idx = [System.Threading.Tasks.Task]::WaitAny($tasks.ToArray(), $timeoutMs)
             if ($idx -lt 0) {
                 if ((Get-Date) -ge $deadline) {
-                    # Stop-Job cannot terminate a native child (Invoke-WithTimeout's own note); the
-                    # same taskkill /T reaches this process's native grandchildren too.
-                    try { & taskkill /PID $proc.Id /T /F | Out-Null } catch { Write-Verbose "guardrail timeout kill failed: $($_.Exception.Message)" }
+                    # Stop-Job cannot terminate a native child (Invoke-WithTimeout's own note), and plain
+                    # `taskkill /T` follows reused parent ids (tests/process_tree_reuse_contract.sh) -
+                    # ps-common.ps1's Stop-ProcessTree is the fix for that, but run_onchange templates are
+                    # rendered self-contained and never dot-source ps-common.ps1 (its own header says so), so
+                    # this repeats the same safety check locally: a child counts only when it started at or
+                    # after the process that is presumed to be its parent.
+                    try {
+                        $toKill = [System.Collections.Generic.List[int]]::new()
+                        $toKill.Add($proc.Id)
+                        $frontier = [System.Collections.Generic.Queue[int]]::new()
+                        $frontier.Enqueue($proc.Id)
+                        $parentStart = @{ $proc.Id = $proc.StartTime }
+                        while ($frontier.Count -gt 0) {
+                            $current = $frontier.Dequeue()
+                            $parentCreated = $parentStart[$current]
+                            if ($null -eq $parentCreated) { continue }
+                            foreach ($child in @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$current" -ErrorAction SilentlyContinue)) {
+                                $childId = [int]$child.ProcessId
+                                $childCreated = $child.CreationDate
+                                if ($null -eq $childCreated -or $childCreated -lt $parentCreated) { continue }
+                                $toKill.Add($childId)
+                                $parentStart[$childId] = $childCreated
+                                $frontier.Enqueue($childId)
+                            }
+                        }
+                        # Children first, the root last - same order Stop-ProcessTree uses.
+                        $toKill.Reverse()
+                        foreach ($pidToKill in $toKill) { Stop-Process -Id $pidToKill -Force -ErrorAction SilentlyContinue }
+                    } catch { Write-Verbose "guardrail timeout kill failed: $($_.Exception.Message)" }
                     Write-Host "  Warning: guardrail installer did not respond within ${TimeoutSeconds}s - it may be waiting on an approval prompt that never reached this console. Try 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
                     return -1
                 }
