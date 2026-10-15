@@ -144,12 +144,18 @@ try {
 
     # Machine+User PATH merged INTO the session's, never replacing it: a replace drops
     # session-only entries such as the gum dir Install-Gum prepends.
+    # SupportsShouldProcess: same shape as Update-SessionPath (scripts/lib/ps-common.ps1), which
+    # PSScriptAnalyzer's PSUseShouldProcessForStateChangingFunctions requires of an Update- verb.
     function Update-InstallerPath {
+        [CmdletBinding(SupportsShouldProcess)]
+        param()
         $entries = [System.Collections.Generic.List[string]]@($env:Path -split ';' | Where-Object { $_ })
         foreach ($entry in (([System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")) -split ';')) {
             if ($entry -and -not $entries.Contains($entry)) { $entries.Add($entry) }
         }
-        $env:Path = $entries -join ';'
+        if ($PSCmdlet.ShouldProcess('$env:Path', 'merge Machine+User registry entries')) {
+            $env:Path = $entries -join ';'
+        }
     }
 
     # 0.5 Chocolatey - only when winget is missing. winget is the primary manager and installs
