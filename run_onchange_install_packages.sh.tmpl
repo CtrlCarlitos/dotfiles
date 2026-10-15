@@ -1983,7 +1983,9 @@ else:
         json.dump(data, fh, indent=2, ensure_ascii=False, sort_keys=True)
         fh.write("\n")
     os.replace(tmp, path)
-    print("\033[0;34m\u25b8\033[0m VS Code settings: %d change(s), backup at .bak (%s)" % (len(changed), path))
+    # Named, not counted: "5 change(s)" on a WSL dot up (2026-10-14) was #344's font keys arriving
+    # through a config re-seed, and the count alone could not say so.
+    print("\033[0;34m\u25b8\033[0m VS Code settings: %d change(s) - %s; backup at .bak (%s)" % (len(changed), ", ".join(changed), path))
 PYEOF
     }
     if [ "$VSCODE_SETTINGS" = "true" ]; then
@@ -2253,6 +2255,9 @@ install_agent_toolkit() {
         # never sudo'd, and brew's user-writable prefix computes to no sudo.
 
         NPX_BIN="$(which npx)"
+        # Sub-marks: "agent toolkit 19s" on a WSL dot up (2026-10-14) against 6-8 s the days before,
+        # with nothing on the console to say which of the three steps it was.
+        dot_timing_mark 'agent toolkit: playwright'
         install_playwright_chromium
 
         # Only when missing: reinstalling `agent-browser@latest` every run is an upgrade (`dot up` never
@@ -2269,12 +2274,22 @@ install_agent_toolkit() {
             # discovers it before downloading another browser. Its output is shown only on
             # failure: on every WSL run it printed a "Linux detected..." warning and an
             # "Installing Chrome... already installed" pair that are not about this install.
+            dot_timing_mark 'agent toolkit: agent-browser install'
             ab_out="$(mktemp)"
             if ! net_timeout 600 "$AGENT_BROWSER_BIN" install >"$ab_out" 2>&1; then
                 cat "$ab_out" >&2
                 warn "agent-browser browser setup failed or timed out - continuing"
+            else
+                # A new Chrome build is the one thing in this step that takes real time (0.2 s when
+                # current): say so, like Playwright's "new build downloaded" line in dot upgrade.
+                # `|| true`: grep -o exits 1 with no match, which under set -e ended the installer.
+                ab_chrome="$(grep -oE 'Chrome [0-9][0-9.]+' "$ab_out" | head -n 1 || true)"
+                if [ -n "$ab_chrome" ] && ! grep -q 'already installed' "$ab_out"; then
+                    info "agent-browser: downloaded $ab_chrome"
+                fi
             fi
             rm -f "$ab_out"
+            dot_timing_mark 'agent toolkit: doctor'
             agent_browser_doctor "$AGENT_BROWSER_BIN" || warn "agent-browser verification failed - continuing"
         else
             warn "agent-browser command was not installed - skipping browser setup"

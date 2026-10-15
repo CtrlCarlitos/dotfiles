@@ -91,6 +91,7 @@ make_ab_stub() {
 {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '. "%s"\n' "$repo_root/scripts/lib/agent-skills.sh" # info/warn/net_timeout
+    printf '. "%s"\n' "$repo_root/scripts/lib/timing.sh"       # the block's sub-marks (the installer inlines it)
     # The installer's sudo-aware wrapper (npm_sudo is "" here, so it is net_timeout)
     printf '%s\n' 'sudo_net_timeout() { shift; net_timeout "$@"; }'
     cat "$tmp/block.sh"
@@ -143,6 +144,35 @@ else
     pass
 fi
 grep -Fq 'install' "$tmp/ab.log" || fail "sh twin: the quiet browser setup must still run"
+if grep -Fq 'agent-browser: downloaded' "$tmp/sh-quiet.log"; then fail "sh twin: a current Chrome must not be reported as downloaded"; else pass; fi
+# 1d. A new Chrome build is the one slow thing in this step (19 s on a WSL dot up, 2026-10-14,
+#     with nothing said): a setup whose output lacks "already installed" names what it fetched.
+cat >"$prefix/bin/agent-browser" <<'EOF'
+#!/bin/sh
+printf "%s\n" "$*" >> "${AB_LOG:?}"
+if [ "${1:-}" = install ]; then
+    printf '%s\n' 'Installing Chrome...' 'Downloading Chrome 156.0.8100.12 ...' 'Chrome 156.0.8100.12 installed'
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$prefix/bin/agent-browser"
+: >"$tmp/ab.log"
+sh_run "$tmp/sh-download.log"
+grep -Fq 'agent-browser: downloaded Chrome 156.0.8100.12' "$tmp/sh-download.log" ||
+    fail "sh twin: a fetched Chrome build must be named (got: $(grep -F agent-browser "$tmp/sh-download.log" | tr '\n' '|'))"
+if grep -Fq 'Downloading Chrome' "$tmp/sh-download.log"; then fail "sh twin: agent-browser's own chatter stays hidden on success"; else pass; fi
+# back to the quiet stub for the failure case below
+cat >"$prefix/bin/agent-browser" <<'EOF'
+#!/bin/sh
+printf "%s\n" "$*" >> "${AB_LOG:?}"
+if [ "${1:-}" = install ]; then
+    printf '%s\n' 'Linux detected. If browser fails to launch, run: agent-browser install --with-deps' 'Installing Chrome...' 'Chrome 155 is already installed'
+    exit "${AB_INSTALL_FAIL:-0}"
+fi
+exit 0
+EOF
+chmod +x "$prefix/bin/agent-browser"
 : >"$tmp/ab.log"
 AB_INSTALL_FAIL=1 sh_run "$tmp/sh-loud.log"
 grep -Fq 'Chrome 155 is already installed' "$tmp/sh-loud.log" ||
