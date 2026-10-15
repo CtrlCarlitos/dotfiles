@@ -83,6 +83,81 @@ function Initialize-InstallerOutput {
     $env:DOT_INSTALLER_LOG = Get-InstallerLogPath -Root $Root
 }
 
+# --- Live run logs and console verbosity ([data.logging], docs/logging.md) ------------------
+# A run's console is the only record of what happened, and it is gone once the window closes; it
+# cannot be watched from elsewhere either. With logging on (the default) every run keeps a
+# transcript under ~\.local\state\dotfiles\logs\, written as the run goes, so it can be followed
+# live (Get-Content -Wait) or read afterwards. A transcript records what PowerShell writes:
+# Write-Host lines, prompts and answers, the installer lines the filter above lets through
+# (install.log keeps the hidden ones), and native output piped through Out-Host.
+
+# One [data.logging] setting: the environment variable $Name for this run (1/true/yes/on or
+# 0/false/no/off), else `$Key = true|false` in chezmoi.toml, else $Default. Read at run time, not
+# rendered into the installer: a rendered value would change the run_onchange script's hash, so
+# turning verbose on would re-run the whole package install (the same reason
+# Test-DesktopShortcutsDisabled reads the file). A plain line scan: `chezmoi data` would resolve
+# its own config path (docs/invariants.md #5).
+function Resolve-DotFlag {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Key,
+        [bool]$Default,
+        [string]$ConfigPath = (Join-Path $HOME '.config\chezmoi\chezmoi.toml')
+    )
+    $value = [System.Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        if ($value.Trim() -match '^(?i:1|true|yes|on)$') { return $true }
+        if ($value.Trim() -match '^(?i:0|false|no|off)$') { return $false }
+    }
+    if (Test-Path -LiteralPath $ConfigPath) {
+        $inLogging = $false
+        foreach ($line in [IO.File]::ReadAllLines($ConfigPath)) {
+            if ($line -match '^\s*\[data\.logging\]\s*$') { $inLogging = $true; continue }
+            if ($inLogging -and $line -match '^\s*\[') { break }
+            if ($inLogging -and $line -match ('^\s*' + [regex]::Escape($Key) + '\s*=\s*(true|false)\s*(#.*)?$')) {
+                return ($Matches[1] -eq 'true')
+            }
+        }
+    }
+    return $Default
+}
+
+# Starts this run's transcript (<Name>-<yyyyMMdd-HHmmss>.log) and keeps the newest $Keep logs.
+# Returns its path, or '' when logging is off or the transcript could not start - a run never
+# fails over its log.
+function Open-DotLog {
+    param([Parameter(Mandatory)][string]$Name, [bool]$Enabled = $true, [string]$Root = $HOME, [int]$Keep = 20)
+    if (-not $Enabled) { return '' }
+    try {
+        $dir = Join-Path $Root '.local\state\dotfiles\logs'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $path = Join-Path $dir ('{0}-{1}.log' -f $Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        Start-Transcript -LiteralPath $path -Force | Out-Null
+        Get-ChildItem -LiteralPath $dir -Filter '*.log' -File | Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip $Keep | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "  Live log: $path" -ForegroundColor DarkGray
+        return $path
+    }
+    catch {
+        Write-Host "  Warning: could not start the run log - $($_.Exception.Message)" -ForegroundColor Yellow
+        return ''
+    }
+}
+
+function Close-DotLog {
+    try { Stop-Transcript | Out-Null } catch { $null = $_ }
+}
+
+# verbose = true: show what the console normally hides. Call after Initialize-InstallerOutput
+# (it sets the noise pattern this replaces with one that matches nothing).
+function Enable-DotVerbose {
+    param([bool]$Enabled)
+    if (-not $Enabled) { return }
+    $env:DOT_INSTALLER_NOISE = '(?!)'
+    $env:DOT_GUARDRAIL_VERBOSE = '1'
+    Write-Host "  Verbose output on ([data.logging] verbose or DOT_VERBOSE)" -ForegroundColor DarkGray
+}
+
 # Chocolatey prints its "pending system reboot" validation warning on EVERY install; hidden above,
 # said once here. Same sources Chocolatey reads (CBS, Windows Update, pending file renames).
 function Write-PendingRebootNote {

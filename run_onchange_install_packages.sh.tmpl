@@ -197,6 +197,11 @@ _sudo_net_timeout() {
 {{ include "scripts/lib/agent-skills.sh" }}
 {{ include "scripts/lib/timing.sh" }}
 {{ include "scripts/lib/vscode-wsl.sh" }}
+{{ include "scripts/lib/logging.sh" }}
+# [data.logging] (docs/logging.md): from here on this run is tee'd to its live log
+# (~/.local/state/dotfiles/logs/dot-up-*.log); verbose = the console hides nothing.
+dot_log_open dot-up
+dot_log_verbose
 
 #-------------------------------------------------------------------------------
 # add_apt_repo <name> <key_url> <deb_line> <pkg> - third-party apt repo + its

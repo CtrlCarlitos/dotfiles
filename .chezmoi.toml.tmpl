@@ -285,6 +285,24 @@
   #   path = "C:/dev/tmp"   # build/test output only; `dot devtmp` prints the rest
 {{- end }}
 {{- end }}
+{{- /* logging: install.ps1, install.sh and both package installers (`dot up`), every OS
+     (docs/logging.md). Always emitted with its defaults, so the two keys are visible and
+     survive every `chezmoi init`. */}}
+{{- $logOn := true }}
+{{- $logVerbose := false }}
+{{- if hasKey . "logging" }}
+{{-   if hasKey .logging "log" }}{{ $logOn = .logging.log }}{{ end }}
+{{-   if hasKey .logging "verbose" }}{{ $logVerbose = .logging.verbose }}{{ end }}
+{{- end }}
+
+  # Install logs (install.ps1, install.sh, `dot up`; docs/logging.md):
+  #   log     true: every run writes a full, live log to ~/.local/state/dotfiles/logs (newest 20 kept)
+  #   verbose true: the console also shows what it normally hides (installer noise,
+  #           guardrail status lines, apt and skills output)
+  # One run only, no edit: DOT_LOG=0 or 1, DOT_VERBOSE=1 (environment).
+  [data.logging]
+    log     = {{ $logOn }}
+    verbose = {{ $logVerbose }}
 {{ if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
 [[data.accounts]]
