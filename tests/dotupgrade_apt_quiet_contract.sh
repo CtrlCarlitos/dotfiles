@@ -20,10 +20,11 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 # sudo: runs its command; env: the real one (sudo env X=Y apt-get ...) resolves apt-get on PATH
 printf '#!/bin/sh\nexec "$@"\n' >"$tmp/bin/sudo"
-# apt-get: logs argv and its environment's DEBIAN_FRONTEND, prints dpkg's lines, exits $FAKE_APT_RC
+# apt-get: logs argv and its environment's DEBIAN_FRONTEND/NEEDRESTART_MODE, prints dpkg's lines,
+# exits $FAKE_APT_RC
 cat >"$tmp/bin/apt-get" <<'STUB'
 #!/bin/sh
-printf 'apt-get %s [DEBIAN_FRONTEND=%s]\n' "$*" "${DEBIAN_FRONTEND:-}" >>"${APT_LOG:?}"
+printf 'apt-get %s [DEBIAN_FRONTEND=%s] [NEEDRESTART_MODE=%s]\n' "$*" "${DEBIAN_FRONTEND:-}" "${NEEDRESTART_MODE:-}" >>"${APT_LOG:?}"
 printf '%s\n' '(Reading database ... 340961 files and directories currently installed.)' \
     'Preparing to unpack .../libx11-6_2%3a1.8.7-1ubuntu0.1_amd64.deb ...' 'Unpacking libx11-6:amd64 (2:1.8.7-1ubuntu0.1) over (2:1.8.7-1build1) ...' \
     'Setting up libx11-data (2:1.8.7-1ubuntu0.1) ...' 'Setting up libx11-6:amd64 (2:1.8.7-1ubuntu0.1) ...' 'Processing triggers for man-db (2.12.0-4build2) ...'
@@ -47,6 +48,7 @@ got="$(run -qq)"
 case "$got" in *'  apt: 2 package(s) upgraded.'*rc=0*) pass ;; *) fail "quiet: one summary line expected (got: $got)" ;; esac
 case "$got" in *Unpacking*|*'Setting up'*|*'Reading database'*) fail "quiet: dpkg's routine lines must not reach the console (got: $got)" ;; *) pass ;; esac
 grep -Fq '[DEBIAN_FRONTEND=noninteractive]' "$tmp/apt.log" || fail "quiet: apt must run with DEBIAN_FRONTEND=noninteractive (log: $(cat "$tmp/apt.log"))"
+grep -Fq '[NEEDRESTART_MODE=a]' "$tmp/apt.log" || fail "quiet: apt must run with NEEDRESTART_MODE=a (a captured run can't answer needrestart's own restart-services prompt; log: $(cat "$tmp/apt.log"))"
 grep -Fq -- '-o Dpkg::Options::=--force-confold' "$tmp/apt.log" || fail "quiet: a changed conffile must keep the installed copy (log: $(cat "$tmp/apt.log"))"
 grep -Fq -- '-qq -o Dpkg::Use-Pty=0' "$tmp/apt.log" || fail "quiet: the caller's flags and Dpkg::Use-Pty=0 must be passed (log: $(cat "$tmp/apt.log"))"
 grep -Eq 'upgrade -y( |$)' "$tmp/apt.log" || fail "quiet: it must still be 'upgrade -y' (log: $(cat "$tmp/apt.log"))"
@@ -60,6 +62,7 @@ got="$(DOT_APT_VERBOSE=1 run)"
 case "$got" in *'Unpacking libx11-6'*'Processing triggers'*rc=0*) pass ;; *) fail "verbose: dpkg's lines must stay on the terminal (got: $got)" ;; esac
 case "$got" in *'package(s) upgraded.'*) fail "verbose: no summary line (got: $got)" ;; *) pass ;; esac
 grep -Fq '[DEBIAN_FRONTEND=]' "$tmp/apt.log" || fail "verbose: apt stays interactive (log: $(cat "$tmp/apt.log"))"
+grep -Fq '[NEEDRESTART_MODE=]' "$tmp/apt.log" || fail "verbose: needrestart stays interactive too, same as debconf (log: $(cat "$tmp/apt.log"))"
 if grep -Fq 'force-confold' "$tmp/apt.log"; then fail "verbose: none of the non-interactive flags (log: $(cat "$tmp/apt.log"))"; else pass; fi
 
 # 4. wiring: the sweep calls the function with the quiet flags; the current tools share one line

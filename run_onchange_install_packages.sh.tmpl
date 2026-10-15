@@ -1784,6 +1784,10 @@ install_apt() {
     # duf (df replacement) - in the apt archive since Ubuntu 22.04 (jammy)
     $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "duf" true) "catalog" .catalog.packages) }} || true
 
+    # strace - seeing which syscall a wedged process is actually blocked in
+    # (no brew/winget package: macOS has dtrace/dtruss, a different tool; Windows has none)
+    $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "strace" true) "catalog" .catalog.packages) }} || true
+
     # tealdeer (tldr) - not in apt until Ubuntu 23.04 (lunar), so download the
     # official static binary directly for full compatibility with older/other
     # distros (confirmed via the GitHub releases API, no .deb published).

@@ -226,13 +226,22 @@ dot_timing_mark 'system packages'
 # answered, so apt runs non-interactively (DEBIAN_FRONTEND=noninteractive; a changed conffile
 # keeps the installed copy, --force-confold, as unattended-upgrades does). DOT_APT_VERBOSE=1
 # keeps everything on the terminal, prompts included.
+#
+# needrestart runs as its own dpkg hook, outside DEBIAN_FRONTEND entirely: upgrading a package
+# that owns a running service (openssh-server, here) makes it try its own interactive
+# "restart these services?" prompt. Nested under this captured command substitution it has no
+# real foreground terminal to read from, so the kernel SIGTTINs it and it sits stopped (`T` in
+# `ps`) forever rather than erroring or timing out - confirmed live, a WSL `dot upgrade --yes`
+# sat for 37m53s on 14 packages that took about a minute once `kill -CONT`'d by hand
+# (2026-10-14). NEEDRESTART_MODE=a tells it to restart services on its own, the same
+# unattended-upgrades-style default as the confold/confdef flags above.
 apt_upgrade_run() {
     local apt_q=("$@") out n
     if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
         sudo apt-get "${apt_q[@]}" upgrade -y
         return $?
     fi
-    if out="$(sudo env DEBIAN_FRONTEND=noninteractive apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+    if out="$(sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y 2>&1)"; then
         n="$(printf '%s\n' "$out" | grep -c '^Setting up ' || true)"
         [ "${n:-0}" -gt 0 ] && echo "  apt: $n package(s) upgraded."
