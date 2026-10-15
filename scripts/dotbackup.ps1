@@ -80,12 +80,12 @@ try {
     # regenerable junk - this is disaster recovery, not a cache backup. Keep
     # this list identical to dotbackup.sh's find -prune denylist.
     $backupExcludeDirs = @('node_modules', '.venv', 'venv', '__pycache__', '.next', 'dist', 'build', 'target', '.terraform', '.pytest_cache')
-    function Get-BackupExtraFiles {
+    function Get-BackupExtraFile {
         param([string]$Path)
         foreach ($item in (Get-ChildItem -LiteralPath $Path -Force)) {
             if ($item.PSIsContainer) {
                 if ($backupExcludeDirs -contains $item.Name) { continue }
-                Get-BackupExtraFiles -Path $item.FullName
+                Get-BackupExtraFile -Path $item.FullName
             }
             elseif (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 $item
@@ -108,7 +108,7 @@ try {
         $relativeRoot = ($entry.Substring(2) -replace '/', '\')
         $extraSource = Join-Path $env:USERPROFILE $relativeRoot
         if (-not (Test-Path -LiteralPath $extraSource -PathType Container)) { continue }
-        foreach ($item in (Get-BackupExtraFiles -Path $extraSource)) {
+        foreach ($item in (Get-BackupExtraFile -Path $extraSource)) {
             $relative = $item.FullName.Substring($extraSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
             $destination = Join-Path $extraRoot (Join-Path $relativeRoot $relative)
             New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
