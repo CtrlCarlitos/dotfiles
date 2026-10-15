@@ -48,7 +48,9 @@ Write-Output ('parse-none=' + @(ConvertFrom-WingetUpgradeTable -Lines @('No inst
 $script:sweep = @()
 $script:listing = @()
 $script:sweepExit = 0
+$script:wingetCalls = @()
 function winget {
+    $script:wingetCalls += ($args -join ' ')
     if ($args -contains '--all') { $script:sweep | ForEach-Object { $_ }; $global:LASTEXITCODE = $script:sweepExit }
     elseif ($args -contains '--id' -and $script:idProbe.Count -gt 0) { $script:idProbe[[string]$args[([array]::IndexOf($args, '--id') + 1)]] | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
     else { $script:listing | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
@@ -90,7 +92,24 @@ Write-Output ('other-reinstall-hint=' + ($script:out -match 'winget uninstall --
 Write-Output ('other-path-warning=' + ($script:out -match 'a reinstall can move the app'))
 Write-Output ('other-not-nothing=' + (-not ($script:out -match 'Nothing to upgrade in winget')))
 Write-Output ('other-no-raw-blocked=' + (-not ($script:out -match 'have upgrades blocked')))
+# PowerShell 7 is pinned to its machine-wide MSI: the upgrade takes the same flags as the install, and
+# from pwsh.exe itself the command is printed (it cannot replace the running pwsh) instead of run.
+$psRow = @('Name Id Version Available Source', '-----', 'PowerShell 7.6.6.0-x64 Microsoft.PowerShell 7.6.6.0 7.6.7.0 winget', '1 upgrades available.', '1 package(s) have upgrades blocked because newer versions use a different install technology than the current installation.')
+$script:idProbe = @{ 'Microsoft.PowerShell' = @($sentence) }
+$script:sweep = @($psRow)
+$script:listing = @($psRow | Where-Object { $_ -notmatch 'have upgrades blocked' })
+$script:wingetCalls = @()
+$null = Invoke-WingetPinnedUpgrade -Id 'Microsoft.PowerShell' -HostEdition 'Desktop'
+Write-Output ('pinned-desktop-runs=' + (@($script:wingetCalls | Where-Object { $_ -match '^upgrade --id Microsoft\.PowerShell --exact --scope machine --installer-type wix ' }).Count -eq 1))
+$script:wingetCalls = @()
+$printed = (Invoke-WingetPinnedUpgrade -Id 'Microsoft.PowerShell' -HostEdition 'Core' 6>&1 | Out-String)
+Write-Output ('pinned-core-runs-nothing=' + ($script:wingetCalls.Count -eq 0))
+Write-Output ('pinned-core-prints-command=' + ($printed -match 'from Windows PowerShell \(powershell\.exe\), run: winget upgrade --id Microsoft\.PowerShell --exact --scope machine --installer-type wix'))
+Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
+Write-Output ('pinned-not-a-reinstall=' + (-not ($script:out -match 'winget uninstall --id Microsoft\.PowerShell')))
 $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @('Found Microsoft Edge') }
+$script:sweep = @($real)
+$script:listing = $listingNoNote
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
 Write-Output ('mixed-pending=' + ($script:out -match 'Still pending in winget: Microsoft Edge'))
 Write-Output ('mixed-other=' + ($script:out -match 'Not upgradeable through winget .*Docker Desktop'))
@@ -285,6 +304,10 @@ expect 'pending-blocked=True'
 expect 'other-listed=True'
 expect 'other-not-pending=True'
 expect 'other-reinstall-hint=True'
+expect 'pinned-desktop-runs=True'
+expect 'pinned-core-runs-nothing=True'
+expect 'pinned-core-prints-command=True'
+expect 'pinned-not-a-reinstall=True'
 expect 'other-path-warning=True'
 expect 'other-not-nothing=True'
 expect 'other-no-raw-blocked=True'

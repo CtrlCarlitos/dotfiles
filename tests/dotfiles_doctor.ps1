@@ -248,6 +248,16 @@ try {
     if ($r.Out -notmatch '--bucket=entryState --key=') { Fail "[8] the re-entry command must be given: $($r.Out)" }
     New-Item -ItemType Directory -Force -Path (Join-Path $sdk 'cmdline-tools/latest/bin'), (Join-Path $sdk 'platform-tools') | Out-Null
     Set-Content (Join-Path $sdk 'cmdline-tools/latest/bin/sdkmanager.bat') '@echo off' -Encoding ascii
+    # An adb.exe on PATH that is not the SDK's (scrcpy bundles one) must not hide a missing
+    # platform-tools: that said "ok" on the 2026-10-14 fresh install with no SDK adb at all.
+    $scrcpy = Join-Path $h 'scrcpy'; New-Item -ItemType Directory -Force -Path $scrcpy | Out-Null
+    Set-Content (Join-Path $scrcpy 'adb.exe') 'stub' -Encoding ascii
+    $pathBeforeScrcpy = $env:PATH
+    $env:PATH = $scrcpy + [IO.Path]::PathSeparator + $env:PATH
+    $env:ANDROID_HOME = $sdk
+    $r = Invoke-Doctor $h
+    if ($r.Out -notmatch '(?m)^warn\s+mobile-dev\s+missing: adb') { Fail "[8] an adb on PATH outside the SDK must not count as the SDK's: $($r.Out)" }
+    $env:PATH = $pathBeforeScrcpy
     Set-Content (Join-Path $sdk 'platform-tools/adb.exe') 'stub' -Encoding ascii
     $env:ANDROID_HOME = $sdk
     $r = Invoke-Doctor $h

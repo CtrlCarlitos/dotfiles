@@ -443,7 +443,15 @@ Windows provides the host side of the setup:
 
 - **Windows Terminal**, configured by chezmoi. Details are in [Terminal Experience](terminal.md).
 - **VS Code**, with Remote - WSL / SSH / Containers.
-- **PowerShell 7** with a managed profile, for Windows-native work.
+- **PowerShell 7** with a managed profile, for Windows-native work. Installed as the
+  machine-wide MSI (`C:\Program Files\PowerShell\7\`, for every user of the computer),
+  not winget's default per-user Store package (`--scope machine` alone still selects the
+  Store package, so the catalog also passes `--installer-type wix`; a Store copy from before
+  that is reported by `dot up` with the one-time fix); `dot upgrade` upgrades it with the same
+  installer. From `pwsh` itself it prints the one command to run from Windows PowerShell,
+  because PowerShell cannot replace the copy that is running. To see which one you have:
+  `(Get-Command pwsh).Source` (the MSI is `C:\Program Files\PowerShell\7\pwsh.exe`; a path
+  under `WindowsApps` is the Store package) and `winget list --id Microsoft.PowerShell`.
 - **Git for Windows**, for Windows-side repos (including this one).
 
 ## Windows Terminal

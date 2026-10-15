@@ -118,6 +118,12 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 Add-DotTimingMark -Name 'startup'
 # Installer boilerplate is logged, not shown (scripts/lib/ps-installer-output.ps1).
 Initialize-InstallerOutput
+# [data.logging] (docs/logging.md): a live transcript of this run under ~\.local\state\dotfiles\logs,
+# and verbose = the console stops hiding installer noise and guardrail status lines. DOT_LOG /
+# DOT_VERBOSE in the environment override the config for one run. Read at run time (Resolve-DotFlag),
+# so changing them never re-triggers this run_onchange script.
+$null = Open-DotLog -Name 'dot-up' -Enabled (Resolve-DotFlag -Name 'DOT_LOG' -Key 'log' -Default $true)
+Enable-DotVerbose -Enabled (Resolve-DotFlag -Name 'DOT_VERBOSE' -Key 'verbose' -Default $false)
 # [data.upgrade] desktop_shortcuts = false: the installers this run starts drop shortcuts on
 # the Desktop as well (Geany, OBS, ShareX and Termius did, 2026-10-07). Snapshot now; the new
 # ones go just before "Package installation complete!".
@@ -579,7 +585,11 @@ function Install-MobileDev {
     # is one more answer up front, like the licenses/AVD questions - not a separate silent toggle.
     $whpxState = $null
     try { $whpxState = (Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop).State } catch { Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red }
-    $needWhpx = ($whpxState -and $whpxState -ne 'Enabled')
+    # $null test, not truthiness: DISM's FeatureState enum has Disabled = 0, so
+    # `$whpxState -and ...` was false exactly when WHPX was off - the question was never asked
+    # and the emulator ran unaccelerated (2026-10-14 fresh install). EnablePending = already
+    # enabled, waiting for the restart.
+    $needWhpx = ($null -ne $whpxState -and "$whpxState" -notin @('Enabled', 'EnablePending'))
     $acceptLicenses = $false
     $createAvd = $false
     $enableWhpx = $false
@@ -848,23 +858,79 @@ function Install-MobileDev {
 {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 {{ includeTemplate "winget-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 
-# WSL: no package manager owns it (catalog note on wsl2). Installed here only when missing; it
-# needs a reboot to finish, so this says so instead of continuing as if it were ready.
+# WSL: installed here only when missing (catalog note on wsl2); `dot upgrade` keeps it current
+# with `wsl --update`. It needs a restart to finish, so this says so instead of continuing as if
+# it were ready.
+#
+# Not `wsl --install --no-distribution`: on a fresh Windows 11 (10.0.26200, 2026-10-14) the
+# inbox wsl.exe stub failed with "Class not registered / Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG"
+# and this block still printed "WSL installed" - Docker Desktop then found WSL corrupted and
+# asked for a repair. The fix that worked there, and the one microsoft/WSL#12459 converges on,
+# is installing the WSL package itself. So: the two Windows features through DISM (no MSI, no
+# Store), then the package through winget (Microsoft.WSL, hash-verified; it lags `wsl --update`,
+# which the next `dot upgrade` closes), then `wsl --version` - which only the real package
+# answers - as the verdict, with `wsl --update --web-download` as the one fallback.
 # WSL_UTF8: wsl.exe writes UTF-16 otherwise, which PowerShell prints with a NUL between letters.
+function Test-WslPackage {
+    # Native exit code under Continue: stderr from a redirected native command is a terminating
+    # error under Stop on Windows PowerShell 5.1 (docs/invariants.md #12).
+    $ErrorActionPreference = 'Continue'
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
+    & wsl.exe --version *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+function Install-Wsl {
+    $ErrorActionPreference = 'Continue'
+    $restartNeeded = $false
+    foreach ($feature in @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')) {
+        $state = $null
+        try { $state = (Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction Stop).State }
+        catch { Write-Host "  Warning: could not read the Windows feature $feature - $_" -ForegroundColor Red; continue }
+        # String compare: FeatureState.Disabled is 0, so the enum itself is never truthy-safe.
+        if ("$state" -eq 'EnablePending') { $restartNeeded = $true; continue }
+        if ("$state" -eq 'Enabled') { continue }
+        Write-Host "  Enabling the Windows feature $feature..." -ForegroundColor Yellow
+        try {
+            $result = Enable-WindowsOptionalFeature -Online -FeatureName $feature -All -NoRestart -ErrorAction Stop
+            if ($result.RestartNeeded) { $restartNeeded = $true }
+        } catch {
+            Write-Host "  Warning: enabling $feature failed - $_" -ForegroundColor Red
+        }
+    }
+    if (-not (Test-WslPackage)) {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host "  Installing the WSL package (winget Microsoft.WSL)..." -ForegroundColor Yellow
+            Invoke-WithTimeout -Description "WSL package install" -Seconds 600 -Action {
+                winget install --id Microsoft.WSL --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+            }
+        }
+        if (-not (Test-WslPackage)) {
+            Write-Host "  WSL package still missing - trying WSL's own updater (wsl --update --web-download)..." -ForegroundColor Yellow
+            Invoke-WithTimeout -Description "wsl --update" -Seconds 600 -Action { $env:WSL_UTF8 = '1'; wsl.exe --update --web-download 2>&1 }
+        }
+    }
+    if (-not (Test-WslPackage)) {
+        Write-Host "  Warning: WSL is NOT installed - 'wsl --version' still fails." -ForegroundColor Red
+        Write-Host "    Fix: in an Administrator terminal run 'wsl.exe --update', restart Windows, then 'dot up'." -ForegroundColor Red
+        return
+    }
+    if ($restartNeeded) {
+        Write-Host "  WSL installed - restart Windows to finish, then: wsl.exe --install -d Ubuntu" -ForegroundColor Yellow
+    } else {
+        Write-Host "  WSL is ready - add a distro with: wsl.exe --install -d Ubuntu" -ForegroundColor Green
+    }
+}
 Add-DotTimingMark -Name 'WSL'
 $env:WSL_UTF8 = '1'
 $wslReady = $false
 if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
+    $wslPreviousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & wsl.exe --status *> $null
-    $wslReady = ($LASTEXITCODE -eq 0)
+    $wslReady = ($LASTEXITCODE -eq 0) -and (Test-WslPackage)
+    $ErrorActionPreference = $wslPreviousEap
 }
-if (-not $wslReady -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-    Write-Host "  Installing WSL (wsl --install --no-distribution)..." -ForegroundColor Yellow
-    & wsl.exe --install --no-distribution
-    Write-Host "  WSL installed - restart Windows to finish, then: wsl --install -d Ubuntu" -ForegroundColor Yellow
-} elseif (-not $wslReady) {
-    Write-Host "  Warning: wsl.exe not found - this Windows cannot install WSL from here" -ForegroundColor Red
-}
+if (-not $wslReady) { Install-Wsl }
 Remove-Item Env:\WSL_UTF8 -ErrorAction SilentlyContinue
 
 # Node.js (versions.node_major pin, #125) - a core fundamental (spec section 2). The npm-dependent groups
@@ -1156,6 +1222,16 @@ if ($wingetPackages.Count -gt 0) {
                     Write-Host "  $wingetId is installed per-user but the catalog keeps it machine-wide (dot upgrade cannot upgrade a per-user copy)." -ForegroundColor Yellow
                     Write-Host "    One-time fix, from a NON-elevated terminal: winget uninstall --id $wingetId --exact  " -ForegroundColor Yellow
                 }
+                # PowerShell 7: `--scope machine` alone still selects winget's per-user Store package (MSIX);
+                # the catalog adds `--installer-type wix` for the machine-wide MSI. A copy installed before
+                # that is only "present" here, so say what it is and the one-time fix. From powershell.exe:
+                # pwsh cannot replace itself.
+                if ("$wingetScopeArgs" -match '--installer-type\s+wix' -and $wingetId -eq 'Microsoft.PowerShell' -and
+                    (Get-AppxPackage -Name 'Microsoft.PowerShell' -ErrorAction SilentlyContinue)) {
+                    Write-Host "  PowerShell 7 is the per-user Store package here, but the catalog keeps it as the machine-wide MSI (every user of the computer)." -ForegroundColor Yellow
+                    Write-Host "    One-time fix, from an ELEVATED Windows PowerShell (powershell.exe, not pwsh): winget uninstall --id Microsoft.PowerShell --exact; winget install --id Microsoft.PowerShell --exact --source winget $wingetScopeArgs" -ForegroundColor Yellow
+                    Write-Host "    Afterwards check terminal and editor profiles that name pwsh.exe by path (the MSI is C:\Program Files\PowerShell\7\pwsh.exe)." -ForegroundColor Yellow
+                }
                 continue
             }
             $wingetMissing += $wingetEntry
@@ -1441,6 +1517,16 @@ if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
         $vsDefaults[$p.Name] = $p.Value
     }
 }
+
+# The winget batch above may have just installed VS Code, which adds its bin to the Machine PATH
+# this session never re-read: on a fresh machine `code` was "not installed" here, so the settings
+# and extensions silently waited for the second `dot up` (2026-10-14). Merge, not replace, so
+# session-only entries (%APPDATA%\npm, ~\.local\bin) survive.
+$vsSessionPath = [System.Collections.Generic.List[string]]@($env:Path -split ';' | Where-Object { $_ })
+foreach ($vsPathEntry in (([System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')) -split ';')) {
+    if ($vsPathEntry -and -not $vsSessionPath.Contains($vsPathEntry)) { $vsSessionPath.Add($vsPathEntry) }
+}
+$env:Path = $vsSessionPath -join ';'
 
 $vscodeSettings = "$env:APPDATA\Code\User\settings.json"
 $vsApply = $true
@@ -2837,6 +2923,33 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         } catch {
             Write-Host "  Warning: Failed to install Google Chrome - $_" -ForegroundColor Red
         }
+        # winget's Google.Chrome points at Google's unversioned enterprise MSI URL, so every new
+        # Chrome release fails winget's hash check ("Installer hash does not match; this cannot
+        # be overridden when running as admin") until the manifest catches up - both runs of the
+        # 2026-10-14 fresh install. Fallback: that same MSI straight from Google, installed only
+        # when its Authenticode signature is valid and Google's.
+        $chromeExe = Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'
+        if (-not (Test-Path -LiteralPath $chromeExe)) {
+            Write-Host "  winget could not install Chrome - falling back to Google's signed enterprise MSI..." -ForegroundColor Yellow
+            Invoke-WithTimeout -Description "Google Chrome MSI install" -Seconds 900 -Action {
+                $msi = Join-Path $env:TEMP 'googlechromestandaloneenterprise64.msi'
+                try {
+                    Invoke-WebRequest -Uri 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi' -OutFile $msi -UseBasicParsing -TimeoutSec 600
+                    $sig = Get-AuthenticodeSignature -LiteralPath $msi
+                    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Google LLC') {
+                        throw "signature check failed ($($sig.Status), $($sig.SignerCertificate.Subject))"
+                    }
+                    $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+                    if ($p.ExitCode -notin @(0, 3010)) { throw "msiexec exited with code $($p.ExitCode)" }
+                    'Google Chrome installed (enterprise MSI)'
+                } finally {
+                    Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if (-not (Test-Path -LiteralPath $chromeExe)) {
+                Write-Host "  Warning: Google Chrome is still not installed - install it from https://www.google.com/chrome/" -ForegroundColor Red
+            }
+        }
     }
 }
 {{- end }}
@@ -3026,8 +3139,15 @@ function Test-DockerEngineUp { return (Test-CommandSuccess -Executable 'docker' 
 function Get-DockerWslDistro {
     $distros = @()
     if (Get-Command wsl -ErrorAction SilentlyContinue) {
+        # A broken WSL prints its error on stdout and exits non-zero; without the exit-code check
+        # those lines were reported as distro names ("WSL Integration is off for: Class not
+        # registered, Error code: ..." - 2026-10-14 fresh install).
+        $ErrorActionPreference = 'Continue'
         try {
-            $distros = @((wsl --list --quiet 2>$null) | ForEach-Object { ($_ -replace "`0", "").Trim() } | Where-Object { $_ -and $_ -notin @("docker-desktop", "docker-desktop-data") })
+            $listed = @(wsl --list --quiet 2>$null)
+            if ($LASTEXITCODE -eq 0) {
+                $distros = @($listed | ForEach-Object { ($_ -replace "`0", "").Trim() } | Where-Object { $_ -and $_ -notin @("docker-desktop", "docker-desktop-data") })
+            }
         } catch { Write-Verbose "wsl --list probe failed: $($_.Exception.Message)" }
     }
     return $distros
@@ -3119,4 +3239,5 @@ Write-SshPostInstallNote
 # pending operator steps (see Invoke-GuardrailNextStep above) - the ACTION
 # NEEDED remedy is deliberately the last thing this run prints.
 Invoke-GuardrailNextStep
+Close-DotLog
 {{ end -}}
