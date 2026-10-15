@@ -1078,6 +1078,37 @@ function ConvertFrom-WingetUpgradeTable {
     return @($rows)
 }
 
+# The installer winget must use to UPGRADE a package whose catalog install is pinned. PowerShell 7
+# ships as an MSIX (winget's default) and as an MSI; the catalog installs the MSI with
+# `--scope machine --installer-type wix` (machine-wide, for every user of the computer), and a plain
+# `winget upgrade` then offers the MSIX and stops at "the install technology is different". The same
+# flags as the install make the upgrade take the MSI again. Keep it equal to winget_args in
+# .chezmoidata/packages.yaml (tests/winget_installer_pin_contract.sh holds the two together).
+$script:WingetInstallerPin = @{ 'Microsoft.PowerShell' = @('--scope', 'machine', '--installer-type', 'wix') }
+
+# PowerShell 7 cannot replace the pwsh.exe that is running this: from there the command is printed,
+# to run from Windows PowerShell (powershell.exe); from Windows PowerShell it is run. 'ok', 'failed'
+# or 'manual'.
+function Invoke-WingetPinnedUpgrade {
+    param([Parameter(Mandatory)][string]$Id, [string]$HostEdition = $PSVersionTable.PSEdition)
+    $pin = @($script:WingetInstallerPin[$Id])
+    $command = "winget upgrade --id $Id --exact $($pin -join ' ')"
+    if ($HostEdition -eq 'Core' -and $Id -eq 'Microsoft.PowerShell') {
+        Write-Host "    $Id has an upgrade that needs its machine-wide installer. PowerShell 7 cannot replace itself: from Windows PowerShell (powershell.exe), run: $command" -ForegroundColor Yellow
+        return 'manual'
+    }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $null = & winget upgrade --id $Id --exact @pin --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 }
+    finally { $ErrorActionPreference = $previous }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "    $Id upgrade with its pinned installer failed (exit $LASTEXITCODE) - run it yourself: $command" -ForegroundColor Red
+        return 'failed'
+    }
+    Write-Host "    $Id upgraded with its pinned installer ($($pin -join ' '))." -ForegroundColor Green
+    return 'ok'
+}
+
 # What winget still lists as upgradable, plus its "N package(s) have upgrades blocked" note
 # (those packages are not named anywhere in winget's output).
 function Get-WingetPendingUpgrade {
@@ -1240,7 +1271,12 @@ function Invoke-WingetUpgradeAll {
         # Some have no updater of their own (PowerShell installed as an MSI stays on its version for
         # good). winget's answer is a reinstall - from ANOTHER shell, since this one may be the app -
         # and a reinstall can change the app's path, which breaks a profile or shortcut that names it.
-        $reinstallable = @($pending.Other | Where-Object { $_.Id } | ForEach-Object { "winget uninstall --id $($_.Id); winget install --id $($_.Id)" })
+        # A package the catalog pins to an installer (PowerShell: the machine-wide MSI) is upgraded with
+        # that pin instead - winget's default for it is the MSIX, which is what "different technology" means.
+        foreach ($pinnedRow in @($pending.Other | Where-Object { $_.Id -and $script:WingetInstallerPin.ContainsKey($_.Id) })) {
+            $null = Invoke-WingetPinnedUpgrade -Id $pinnedRow.Id
+        }
+        $reinstallable = @($pending.Other | Where-Object { $_.Id -and -not $script:WingetInstallerPin.ContainsKey($_.Id) } | ForEach-Object { "winget uninstall --id $($_.Id); winget install --id $($_.Id)" })
         if ($reinstallable.Count -gt 0) {
             Write-Host "    To put one under winget, from another shell: $($reinstallable -join '  |  ')" -ForegroundColor DarkGray
             Write-Host "    (a reinstall can move the app: check terminal profiles and shortcuts that name its old path)" -ForegroundColor DarkGray
