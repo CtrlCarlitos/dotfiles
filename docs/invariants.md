@@ -532,6 +532,32 @@ fixture launchers.
 
 ---
 
+## 22. `DEBIAN_FRONTEND=noninteractive` does not silence `needrestart`
+
+They are two unrelated prompts. `DEBIAN_FRONTEND` only governs debconf
+(package-configuration questions); `needrestart` is a separate dpkg hook with its
+own interactive "restart these services?" prompt, fired whenever an upgraded
+package owns a currently-running service.
+
+**The incident.** `apt_upgrade_run` (`scripts/dotupgrade.sh`) captures apt's
+output into a variable so dpkg's routine lines never flood the console
+([invariant 21](#21-command--v-says-a-command-exists-not-what-its-first-call-costs)
+is a cousin of this one: a captured/backgrounded step has no way to show or
+answer a prompt). A WSL `dot upgrade --yes` upgrading `openssh-server` hit
+needrestart's prompt with no real foreground terminal to read from; the kernel
+`SIGTTIN`'d it and it sat in `T` (stopped) state forever - not retrying, not
+timing out, `ps` showing 0% CPU indefinitely. The run reported
+`system packages 37m53s` for 14 packages that took about a minute once resumed
+by hand (`sudo kill -CONT <pid>`) (2026-10-14).
+
+**Obey it.** Any apt invocation that captures output or otherwise cannot show an
+interactive prompt needs both: `DEBIAN_FRONTEND=noninteractive` for debconf *and*
+`NEEDRESTART_MODE=a` for needrestart. One without the other still hangs.
+`tests/dotupgrade_apt_quiet_contract.sh` asserts both are set in the quiet path
+and both are absent (apt stays fully interactive) under `DOT_APT_VERBOSE=1`.
+
+---
+
 ## Checking yourself
 
 ```sh

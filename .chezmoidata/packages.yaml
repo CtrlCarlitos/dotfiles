@@ -355,6 +355,10 @@ catalog:
       winget_args: "--scope machine"
       choco_was: shfmt
       note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
+    - id: strace
+      group: modern_cli
+      apt: strace
+      note: "Linux only - macOS has no equivalent packaged here (dtrace/dtruss are a different tool); no Windows package"
     - id: markdownlint-cli2
       group: modern_cli
       npm: markdownlint-cli2
