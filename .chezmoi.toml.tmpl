@@ -285,6 +285,25 @@
   #   path = "C:/dev/tmp"   # build/test output only; `dot devtmp` prints the rest
 {{- end }}
 {{- end }}
+
+{{/* backup: `dot backup` always captures ~/.ssh and this config (hardcoded in
+     scripts/dotbackup.{sh,ps1} - never configurable, they are required for
+     disaster recovery). extra_dirs is the opt-in, user-edited list of
+     anything else to capture; the hasKey branch below preserves whatever is
+     already here across `chezmoi init`, same mechanism as vscode_overrides
+     and upgrade above. Regenerable junk inside each one (node_modules,
+     .venv, build caches, ...) is pruned on backup - see
+     docs/backup-restore.md. */}}
+  # Extra directories `dot backup` captures, beyond the required ~/.ssh and
+  # ~/.config/chezmoi/chezmoi.toml (always included, never configurable).
+  # Add or remove paths freely - each must start with "~/". Regenerable
+  # junk inside them (node_modules, .venv, build caches, ...) is skipped.
+{{ if hasKey . "backup" }}
+{{ includeTemplate "toml-align" (replace "[backup" "[data.backup" (toToml (dict "backup" .backup))) | trimSuffix "\n" }}
+{{- else }}
+[data.backup]
+  extra_dirs = ["~/projects"]
+{{- end }}
 {{ if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
 [[data.accounts]]

@@ -32,6 +32,7 @@ An archive is a snapshot. After rotating or adding a key, take a new backup and 
 
 - `~/.config/chezmoi/chezmoi.toml`
 - Every regular file under `~/.ssh`, including non-standard private-key names, public keys, SSH config, known-host data, and signing data
+- Every path listed in `[data.backup].extra_dirs` (opt-in; see [Extra directories](#extra-directories) below)
 - A `manifest.json` describing the `dotfiles-backup-v1` archive format, creation time, and source platform
 - A `RESTORE.md` for humans (contents, same-OS and cross-OS restore steps; the restore scripts never read it)
 - A `guardrail/` section, only when guardrail is configured on the machine (see [Guardrail operator state](#guardrail-operator-state))
@@ -39,6 +40,19 @@ An archive is a snapshot. After rotating or adding a key, take a new backup and 
 Git configuration, VS Code state, application data, installed packages, caches, and installed tools are excluded. Chezmoi recreates managed configuration after recovery.
 
 Before continuing, install `7z` or `7zz` and ensure `chezmoi.toml` exists. The scripts prompt for the passphrase without echoing it and never put it on the command line. Store the passphrase in a password-manager secure note named `Dotfiles backup passphrase`; do not store it in ChezMoi configuration, shell history, or the archive.
+
+### Extra directories
+
+`~/.ssh` and `chezmoi.toml` are hardcoded — every backup captures them, and there is no setting to turn that off. Anything else goes in `[data.backup].extra_dirs` in `chezmoi.toml`:
+
+```toml
+[data.backup]
+  extra_dirs = ["~/projects"]
+```
+
+`chezmoi init` seeds this with `~/projects` on a fresh machine and preserves whatever you put there afterward — add paths, remove the default, empty the list, same mechanism as `[data.vscode_overrides]`. Every entry must start with `~/`; anything else is skipped with a warning rather than failing the whole backup. Inside each configured directory, regenerable junk is pruned before archiving — `node_modules`, `.venv`, `venv`, `__pycache__`, `.next`, `dist`, `build`, `target`, `.terraform`, `.pytest_cache` — because this is disaster recovery, not a package-cache backup. `.git` itself is kept: it's the one part of a repo that isn't trivially re-cloned (local commits, branches, and stashes that were never pushed).
+
+On restore, the archive's `extra/` entries are written back under `$HOME` exactly where they came from, with the same no-overwrite rule as `~/.ssh` — an existing file at the destination stops the whole restore rather than merging.
 
 ### Guardrail operator state
 

@@ -51,6 +51,12 @@ for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
             printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
             exit 1
         } ;;
+        # extra/: optional [data.backup].extra_dirs payload (absent in older
+        # archives, or when the backup machine never set any)
+        extra) [ -d "$entry" ] || {
+            printf 'ERROR: archive does not contain the dotfiles-backup-v1 layout\n' >&2
+            exit 1
+        } ;;
         # RESTORE.md: human-only orientation, optional (older archives lack it)
         RESTORE.md) ;;
         *)
@@ -181,6 +187,21 @@ if [ -d "$ssh_source" ]; then
     done < <(find "$ssh_source" -type f -print0)
 fi
 
+# extra/ mirrors $HOME 1:1 (the same way ssh/ mirrors $HOME/.ssh): no
+# manifest indirection needed, the archive's own tree is the restore list.
+extra_source="$root/extra"
+if [ -d "$extra_source" ]; then
+    while IFS= read -r -d '' source; do
+        relative="${source#"$extra_source/"}"
+        destination="$HOME/$relative"
+        reject_symlinked_parent "$destination"
+        if [ -e "$destination" ] || [ -L "$destination" ]; then
+            printf 'ERROR: refusing to overwrite existing file: %s\n' "$destination" >&2
+            exit 1
+        fi
+    done < <(find "$extra_source" -type f -print0)
+fi
+
 guardrail_source="$root/guardrail"
 skipped_auth=0
 if [ -d "$guardrail_source" ]; then
@@ -216,6 +237,18 @@ if [ -d "$ssh_source" ]; then
         # on them too).
         chmod 600 "$destination"
     done < <(find "$ssh_source" -type f -print0)
+fi
+
+extra_restored=0
+if [ -d "$extra_source" ]; then
+    while IFS= read -r -d '' source; do
+        relative="${source#"$extra_source/"}"
+        destination="$HOME/$relative"
+        mkdir -p "$(dirname "$destination")"
+        cp -p "$source" "$destination"
+        extra_restored=$((extra_restored + 1))
+    done < <(find "$extra_source" -type f -print0)
+    printf 'Restored %d file(s) from [data.backup] extra_dirs.\n' "$extra_restored"
 fi
 
 # guardrail operator state: owner-only (files 600, directories 700), restored

@@ -72,6 +72,51 @@ try {
             }
     }
 
+    # [data.backup].extra_dirs (chezmoi.toml): opt-in, user-edited paths beyond
+    # the required ~/.ssh and chezmoi.toml above - read through this config,
+    # never ambiently (docs/invariants.md #5). Archived under
+    # extra\<relative-to-HOME>\..., mirroring how ssh\ mirrors ~\.ssh;
+    # dotrestore.ps1 walks it the same way, no manifest indirection. Pruned:
+    # regenerable junk - this is disaster recovery, not a cache backup. Keep
+    # this list identical to dotbackup.sh's find -prune denylist.
+    $backupExcludeDirs = @('node_modules', '.venv', 'venv', '__pycache__', '.next', 'dist', 'build', 'target', '.terraform', '.pytest_cache')
+    function Get-BackupExtraFiles {
+        param([string]$Path)
+        foreach ($item in (Get-ChildItem -LiteralPath $Path -Force)) {
+            if ($item.PSIsContainer) {
+                if ($backupExcludeDirs -contains $item.Name) { continue }
+                Get-BackupExtraFiles -Path $item.FullName
+            }
+            elseif (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $item
+            }
+        }
+    }
+    $extraRoot = Join-Path $payloadRoot 'extra'
+    $extraCount = 0
+    # Piped on stdin, never as an argument: Windows PowerShell 5.1 strips the
+    # double quotes inside an argument passed to a native program
+    # (tests/ps_template_stdin_contract.sh).
+    $extraDirsTemplate = '{{ if hasKey . "backup" }}{{ range .backup.extra_dirs }}{{ . }} {{ end }}{{ end }}'
+    $extraDirsRaw = ($extraDirsTemplate | chezmoi execute-template --config $config 2>$null | Out-String)
+    $extraDirsConfigured = @($extraDirsRaw.Trim() -split ' ' | Where-Object { $_ })
+    foreach ($entry in $extraDirsConfigured) {
+        if (-not $entry.StartsWith('~/')) {
+            Write-Warning "[data.backup] extra_dirs entry must start with ""~/"" - skipping: $entry"
+            continue
+        }
+        $relativeRoot = ($entry.Substring(2) -replace '/', '\')
+        $extraSource = Join-Path $env:USERPROFILE $relativeRoot
+        if (-not (Test-Path -LiteralPath $extraSource -PathType Container)) { continue }
+        foreach ($item in (Get-BackupExtraFiles -Path $extraSource)) {
+            $relative = $item.FullName.Substring($extraSource.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            $destination = Join-Path $extraRoot (Join-Path $relativeRoot $relative)
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $item.FullName -Destination $destination
+            $extraCount++
+        }
+    }
+
     # guardrail operator state (optional section; twin of dotbackup.sh). Windows
     # splits it across three roots: %APPDATA%\guardrail (waivers.toml,
     # night.toml), %LOCALAPPDATA%\guardrail (audit log) and
@@ -151,6 +196,9 @@ try {
   different OS: paths and remote_access values are machine-specific.
 - ``ssh/`` - every regular file from this machine's ``~/.ssh``: private keys,
   .pub halves, config, known_hosts.
+- ``extra/`` - present only if ``[data.backup].extra_dirs`` is set: each
+  configured path, mirrored under ``extra/<path-relative-to-home>/``, with
+  regenerable junk (node_modules, .venv, build caches, ...) left out.
 - ``guardrail/`` - present only if guardrail was configured: ``config/``
   (waivers.toml, night.toml: approval mode and every per-repo grant),
   ``operator-auth/`` (passkey enrollment, same machine only) and ``audit/``
@@ -203,6 +251,9 @@ machines, and Host blocks reference the .pub.
 
     Write-Output "Backup created: $archive"
     Write-Output "  Contains $keyCount private key file(s) from ~/.ssh. Treat this archive as key material."
+    if ($extraDirsConfigured.Count -gt 0) {
+        Write-Output "  Contains $extraCount file(s) from [data.backup] extra_dirs."
+    }
     Write-Output "  Contains $guardrailCount guardrail operator file(s)."
     if ($auditSegments -gt 0) {
         # Rotated segments pile up on a long-lived machine: say how big before it is handed around.
