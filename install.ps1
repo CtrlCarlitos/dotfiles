@@ -87,7 +87,15 @@ $IsDevcontainer = ($env:DEVCONTAINER -eq 'true') -or ($env:REMOTE_CONTAINERS -eq
 # 0.1 Consent - ask before touching anything. Non-interactive environments
 # (matched above) auto-proceed without prompting.
 if (-not $IsNonInteractive) {
-    $proceed = Read-Host "This installer installs Chocolatey packages, chezmoi, and applies the CtrlCarlitos dotfiles. Proceed? (Y/n)"
+    # Say what actually happens (2026-10-14 fresh-install review): winget is the primary manager,
+    # the apply changes machine settings, and a first install needs a restart.
+    Write-Host "This installer (run as Administrator):"
+    Write-Host "  - installs Git and chezmoi with winget, then applies the CtrlCarlitos dotfiles;"
+    Write-Host "  - installs the package groups in ~\.config\chezmoi\chezmoi.toml (winget first, Chocolatey as fallback);"
+    Write-Host "  - may enable Windows features (WSL, Virtual Machine Platform) and set the CurrentUser execution policy to RemoteSigned;"
+    Write-Host "  - with the guardrail group on, registers agent hooks and a Microsoft Defender exclusion for guardrail.exe."
+    Write-Host "  A first install usually needs a Windows restart at the end."
+    $proceed = Read-Host "Proceed? (Y/n)"
     if ($proceed -eq 'n') {
         Write-Info "Aborted - nothing was installed. Re-run any time."
         exit 0
@@ -134,75 +142,129 @@ try {
         Invoke-Expression $InstallerText
     }
 
-    # 0.5 Install Chocolatey if missing (Required for everything else)
-    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-        Write-Info "Chocolatey not found. Installing..."
+    # Machine+User PATH merged INTO the session's, never replacing it: a replace drops
+    # session-only entries such as the gum dir Install-Gum prepends.
+    function Update-InstallerPath {
+        $entries = [System.Collections.Generic.List[string]]@($env:Path -split ';' | Where-Object { $_ })
+        foreach ($entry in (([System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")) -split ';')) {
+            if ($entry -and -not $entries.Contains($entry)) { $entries.Add($entry) }
+        }
+        $env:Path = $entries -join ';'
+    }
+
+    # 0.5 Chocolatey - only when winget is missing. winget is the primary manager and installs
+    # Git and chezmoi below; Chocolatey is their fallback here. The packages template bootstraps
+    # Chocolatey itself when a selected group needs it, so an unconditional bootstrap here only
+    # cost a fresh machine a minute for nothing (2026-10-14 review).
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue) -and -not (Get-Command choco -ErrorAction SilentlyContinue)) {
+        Write-Info "winget not found - installing Chocolatey as the fallback for Git and chezmoi..."
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
         # -TimeoutSec so a stalled fetch errors out instead of hanging the run
         # (WebClient.DownloadString has no timeout of its own).
         $chocoInstall = Invoke-RestMethod -Uri 'https://community.chocolatey.org/install.ps1' -UseBasicParsing -TimeoutSec 120
         Invoke-ChocoBootstrap $chocoInstall
-        
-        # Refresh env path logic
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-        
+        Update-InstallerPath
         if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
             throw "Chocolatey installation failed."
         }
     }
 
-    # 0.7 Interactive package menu - runs BEFORE `chezmoi init --apply` so the
-    # selection lands in the config ahead of the config template. The menu
-    # self-skips non-interactive or without gum; chezmoi's native config
-    # prompts are always the fallback. Spawned as a child process because
-    # select-packages.ps1 exits on completion and must not end this installer.
-    # In devcontainers: skipped entirely (see $IsDevcontainer above).
-    if (-not $IsDevcontainer) {
-        Install-Gum
-        $selectPackages = $null
-        if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'scripts\select-packages.ps1'))) {
-            $selectPackages = Join-Path $PSScriptRoot 'scripts\select-packages.ps1'
-        } elseif (Test-Path '.\scripts\select-packages.ps1') {
-            $selectPackages = (Resolve-Path '.\scripts\select-packages.ps1').Path
-        } elseif (Test-Path "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1") {
-            $selectPackages = "$env:USERPROFILE/.local/share/chezmoi/scripts/select-packages.ps1"
-        }
-        if ($selectPackages) {
-            try {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $selectPackages
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Info "Package menu exited with $LASTEXITCODE - continuing with chezmoi config prompts."
-                }
-            } catch {
-                Write-Info "Package menu could not run: $_ - continuing with chezmoi config prompts."
+    # 1. Git - first, because the source is cloned before anything else reads it.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Info "Git not found. Installing via winget (Chocolatey if winget is missing)..."
+        try {
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+            } else {
+                choco install git -y --no-progress
             }
-        } else {
-            Write-Info "Package menu script not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
+            Update-InstallerPath
+            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+                 Start-Sleep -Seconds 2
+                 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+                     throw "Git installation failed or PATH not updated."
+                 }
+            }
+        } catch {
+             Write-Fail "Failed to install Git. Please install manually."
+             exit 1
         }
-    } else {
-        Write-Info "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
     }
 
-    # 1. Install Chezmoi if missing
+    # 2. The source checkout, BEFORE chezmoi, the menu and the apply. Three reasons
+    # (2026-10-14 fresh-install review):
+    #   - the package menu (scripts/select-packages.ps1) is in the repo, so on a fresh one-liner
+    #     run it was never found and the gum menu docs/package-groups.md promises never showed;
+    #   - the chezmoi and gum pins (.chezmoi-version, .chezmoidata.yaml) are read from the
+    #     checkout, so a fresh machine now gets the pinned versions instead of latest;
+    #   - only this network step is retried. The old loop retried the whole
+    #     `chezmoi init --apply`, so any late failure (the doctor's exit 1, a guardrail error)
+    #     re-ran the entire package install - and its prompts - up to three times.
+    # Unauthenticated https on purpose: the repo is public (tests/installer_url_credentials_contract.sh).
+    $SourceDir = Join-Path $env:USERPROFILE '.local\share\chezmoi'
+    $SourceUrl = 'https://github.com/CtrlCarlitos/dotfiles.git'
+    $LocalSource = (Test-Path "chezmoi.toml") -or (Test-Path ".chezmoi.toml.tmpl")
+
+    # 5.1 promotes any line a native command writes to stderr into a terminating
+    # NativeCommandError under $ErrorActionPreference = Stop - and git writes its
+    # progress ("Cloning into...", FETCH_HEAD) to stderr. Drop EAP to Continue around
+    # each git call; the exit code is the real signal.
+    function Invoke-Git {
+        param([string[]]$Arguments)
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            # stderr lines arrive as ErrorRecords; print their text (a blank one would
+            # otherwise print as "System.Management.Automation.RemoteException").
+            & git @Arguments 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { "$_" } } | Out-Host
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        return ($global:LASTEXITCODE -eq 0)
+    }
+
+    if ($LocalSource) {
+        Write-Info "Using the local checkout at $((Get-Location).Path)"
+    } elseif (Test-Path (Join-Path $SourceDir '.git')) {
+        # Repo exists: refresh it BEFORE applying. Confirmed live: a rerun
+        # after a failed install silently reused the pre-fix clone, so
+        # freshly-merged template fixes never reached the machine.
+        # Fast-forward only - local commits/edits are respected; on failure
+        # (offline, diverged) warn and continue with the existing source.
+        Write-Info "Updating existing dotfiles clone..."
+        if (-not (Invoke-Git @('-C', $SourceDir, 'pull', '--ff-only'))) {
+            Write-Info "  clone update failed (offline? local changes?) - continuing with existing source"
+        }
+    } else {
+        Write-Info "Cloning the dotfiles into $SourceDir..."
+        $cloned = $false
+        for ($attempt = 1; $attempt -le 3 -and -not $cloned; $attempt++) {
+            if (Test-Path $SourceDir) { Remove-Item -LiteralPath $SourceDir -Recurse -Force -ErrorAction SilentlyContinue }
+            $cloned = Invoke-Git @('clone', '--branch', 'main', $SourceUrl, $SourceDir)
+            if (-not $cloned -and $attempt -lt 3) {
+                Write-Fail "clone failed (attempt $attempt of 3) - retrying in 5 seconds..."
+                Start-Sleep -Seconds 5
+            }
+        }
+        if (-not $cloned) {
+            Write-Fail "Could not clone $SourceUrl after 3 attempts. Check the network and re-run the installer."
+            exit 1
+        }
+    }
+    $PinRoot = if ($LocalSource) { (Get-Location).Path } else { $SourceDir }
+
+    # 3. chezmoi
     if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
         Write-Info "Chezmoi not found. Installing via winget (Chocolatey if winget is missing)..."
-        # Pin coherence (#133): deliberately install the SAME chezmoi CI
-        # tests - the repo's .chezmoi-version pin, read when a checkout is on
-        # disk (same lookup rule as the gum pin above; choco wants the bare
-        # semver, no leading v). On the bare one-liner run no pin file exists
-        # yet, so choco floats to latest - `doctor` flags the drift after the
-        # checkout lands. If the pinned version is missing from the community
-        # repo (package lag), fall back to latest rather than fail the install.
+        # Pin coherence (#133): install the SAME chezmoi CI tests - the repo's
+        # .chezmoi-version, now always on disk because the checkout comes first
+        # (choco wants the bare semver, no leading v). If the pinned version is
+        # missing from a repo (package lag), fall back to latest rather than fail.
         $chezmoiPin = $null
-        $chezmoiPinCandidates = @()
-        if ($PSScriptRoot) { $chezmoiPinCandidates += (Join-Path $PSScriptRoot '.chezmoi-version') }
-        $chezmoiPinCandidates += (Join-Path $env:USERPROFILE '.local\share\chezmoi\.chezmoi-version')
-        foreach ($chezmoiPinFile in $chezmoiPinCandidates) {
-            if (Test-Path $chezmoiPinFile) {
-                $chezmoiPin = ([IO.File]::ReadAllText($chezmoiPinFile)).Trim() -replace '^v', ''
-                break
-            }
+        $chezmoiPinFile = Join-Path $PinRoot '.chezmoi-version'
+        if (Test-Path $chezmoiPinFile) {
+            $chezmoiPin = ([IO.File]::ReadAllText($chezmoiPinFile)).Trim() -replace '^v', ''
         }
         try {
             # winget is the primary Windows manager (twpayne.chezmoi); `dot upgrade`'s winget sweep
@@ -233,8 +295,7 @@ try {
             } else {
                 choco install chezmoi -y --no-progress
             }
-            # Refresh env path for current session
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            Update-InstallerPath
             if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
                 throw "Chezmoi installation failed or path not updated."
             }
@@ -245,132 +306,78 @@ try {
         }
     }
 
-    # 1.5 Ensure Git is installed (Required for chezmoi init)
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Info "Git not found. Installing via winget (Chocolatey if winget is missing)..."
-        try {
-            if (Get-Command winget -ErrorAction SilentlyContinue) {
-                winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-            } else {
-                choco install git -y --no-progress
-            }
-            # Refresh path to find git
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-                 Start-Sleep -Seconds 2
-                 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-                     throw "Git installation failed or PATH not updated."
-                 }
-            }
-        } catch {
-             Write-Fail "Failed to install Git. Please install manually."
-             exit 1
+    # 4. Interactive package menu - after the checkout (the script lives there) and
+    # BEFORE `chezmoi init --apply`, so the selection lands in the config ahead of the
+    # config template. The menu self-skips non-interactive or without gum; chezmoi's
+    # native config prompts are always the fallback. Spawned as a child process because
+    # select-packages.ps1 exits on completion and must not end this installer.
+    # In devcontainers: skipped entirely (see $IsDevcontainer above).
+    if (-not $IsDevcontainer) {
+        # The gum pin from the checkout that now exists (the lookup at the top of this file
+        # ran before the clone, so on a one-liner run it fell back to the inline pin).
+        $gumYaml = Join-Path $PinRoot '.chezmoidata.yaml'
+        if (Test-Path $gumYaml) {
+            $gumMatch = Select-String -LiteralPath $gumYaml -Pattern '^\s{2}gum:\s*"?([^"]+)"?\s*$' | Select-Object -First 1
+            if ($gumMatch) { $gumVersion = $gumMatch.Matches[0].Groups[1].Value }
         }
-    }
-
-    # 2. Initialize & Apply
-    Write-Info "Applying dotfiles..."
-
-    function Invoke-ChezmoiWithRetry {
-        param([scriptblock]$Command)
-        $max_attempts = 3
-        $delay = 5
-        $attempt = 1
-        
-        while ($attempt -le $max_attempts) {
-            & $Command
-            if ($global:LASTEXITCODE -eq 0) {
-                return
+        Install-Gum
+        $selectPackages = Join-Path $PinRoot 'scripts\select-packages.ps1'
+        if (Test-Path $selectPackages) {
+            try {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $selectPackages
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Info "Package menu exited with $LASTEXITCODE - continuing with chezmoi config prompts."
+                }
+            } catch {
+                Write-Info "Package menu could not run: $_ - continuing with chezmoi config prompts."
             }
-            
-            Write-Fail "chezmoi operation failed (exit code $($global:LASTEXITCODE)). Attempt $attempt of $max_attempts."
-            if ($attempt -lt $max_attempts) {
-                Write-Info "Waiting $delay seconds before retrying..."
-                Start-Sleep -Seconds $delay
-            }
-            $attempt++
-        }
-        
-        throw "Chezmoi installation failed after $max_attempts attempts."
-    }
-
-    if (Test-Path "$env:USERPROFILE/.local/share/chezmoi/.git") {
-        # Repo exists: refresh it BEFORE applying. Confirmed live: a rerun
-        # after a failed install silently reused the pre-fix clone (no
-        # "Cloning into..." line), so freshly-merged template fixes never
-        # reached the machine and the identical failure replayed all 3
-        # retries. `chezmoi init --apply` alone does not pull. Fast-forward
-        # only - local commits/edits are respected; on failure (offline,
-        # diverged) warn and continue with the existing source.
-        Write-Info "Updating existing dotfiles clone..."
-        # 5.1 promotes any line a redirected native command writes to stderr
-        # into a terminating NativeCommandError under $ErrorActionPreference
-        # = Stop - and `git pull` writes its FETCH_HEAD progress to stderr
-        # exactly when there is something to fetch, so the 2>$null alone does
-        # NOT save the rerun path (same class as the extension loop in
-        # run_onchange_install_packages.ps1.tmpl). Drop EAP to Continue
-        # around the call; the exit code below is the real signal.
-        $previousErrorActionPreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = "Continue"
-            git -C "$env:USERPROFILE/.local/share/chezmoi" pull --ff-only 2>$null
-        } finally {
-            $ErrorActionPreference = $previousErrorActionPreference
-        }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Info "  clone update failed (offline? local changes?) - continuing with existing source"
-        }
-        # Run init (to ensure config exists/generates) and then apply
-        Invoke-ChezmoiWithRetry { chezmoi init --apply }
-    } else {
-        # Check if running locally (e.g. cloned repo)
-        if ((Test-Path "chezmoi.toml") -or (Test-Path ".chezmoi.toml.tmpl")) {
-            Invoke-ChezmoiWithRetry { chezmoi init --apply --source . }
         } else {
-            # Remote install. The repo is public: chezmoi clones it itself,
-            # unauthenticated.
-            #
-            # There is deliberately NO token-authenticated branch here. This
-            # used to clone an https URL with a bootstrap token interpolated
-            # into the userinfo position (before the host), and git persists a
-            # clone URL verbatim as remote.origin.url - so that token stayed
-            # in .git/config for as long as the checkout lived, which is
-            # exactly what docs/backup-restore.md's "do not embed a PAT in a
-            # clone URL" rule forbids. See the fuller note in install.sh; if a
-            # token is ever unavoidable, pass it as a one-shot
-            # `git -c credential.helper=...` BEFORE the subcommand, never
-            # `git clone -c ...`, which writes it into the new repo's config.
-            # tests/installer_url_credentials_contract.sh pins this.
-            Invoke-ChezmoiWithRetry { chezmoi init --apply --branch main CtrlCarlitos/dotfiles }
+            Write-Info "Package menu script not found at $selectPackages - chezmoi config prompts will collect preferences."
         }
+    } else {
+        Write-Info "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
     }
 
-    Write-Success "Done! Restart your terminal to see changes."
-    Write-Info "----------------------------------------------------------------"
-    Write-Info "To customize your setup (add accounts, toggle features):"
-    Write-Info "1. Edit $env:USERPROFILE\.config\chezmoi\chezmoi.toml"
-    Write-Info "2. Reference examples in $env:USERPROFILE\.local\share\chezmoi\docs\"
-    Write-Info "3. Run 'chezmoi apply'"
-    Write-Info "----------------------------------------------------------------"
-
-    # Reload profile for immediate effect (Parity with 'exec zsh')
-    if (Test-Path $PROFILE) {
-        Write-Info "Reloading PowerShell profile..."
-        # Cosmetic only (parity with 'exec zsh'). The profile may reference tools
-        # that are not on PATH in this session yet (CI runners, first install), and
-        # $ErrorActionPreference = Stop would turn that into a failed install after
-        # everything real has already succeeded - so never let the reload be fatal.
-        try {
-            . $PROFILE
-        } catch {
-            Write-Host "[!] Profile reload skipped (a new terminal will load it): $_" -ForegroundColor Yellow
-        }
-        # A native tool the profile invokes (starship/zoxide/direnv init) can leave
-        # $LASTEXITCODE non-zero without throwing; GitHub Actions then fails the
-        # step even though the install succeeded. The install's own result is
-        # what matters here, so clear it.
-        $global:LASTEXITCODE = 0
+    # 5. Apply - once. A failure here is reported, not retried: the apply is the whole package
+    # install, and `chezmoi apply` (or `dot up`) resumes it - run_onchange records nothing on failure.
+    Write-Info "Applying dotfiles..."
+    if ($LocalSource) {
+        chezmoi init --apply --source .
+    } else {
+        chezmoi init --apply
     }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "chezmoi init --apply failed (exit code $LASTEXITCODE). Scroll up for the first error, fix it, then re-run from an Administrator terminal: chezmoi apply"
+        exit 1
+    }
+
+    Write-Success "Done!"
+    Write-Info "----------------------------------------------------------------"
+    # One restart notice for everything the apply enabled (WSL and Virtual Machine Platform,
+    # WHPX, Docker Desktop) - the same three sources Chocolatey reads. Scattered per-step lines
+    # were easy to miss in an hour of output (2026-10-14).
+    $restartPending = $false
+    try {
+        $restartPending = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
+            (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
+            [bool](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)
+    } catch { $restartPending = $false }
+    if ($restartPending) {
+        Write-Host "[!] RESTART WINDOWS NOW - features enabled by this install (WSL, Virtual Machine Platform, WHPX) finish only after a restart." -ForegroundColor Yellow
+    }
+    Write-Info "Next:"
+    Write-Info "1. Open a NEW Administrator terminal (this one has a stale PATH and no profile)."
+    # The guardrail hook Claude Code runs before every tool call needs Git Bash, which a session
+    # started before Git was installed cannot find: every tool call was blocked until Claude Code
+    # was restarted (2026-10-14).
+    Write-Info "2. Restart any running agent (Claude Code, Codex, OpenCode, agy) - their hooks need the new PATH."
+    if (Test-Path (Join-Path $env:USERPROFILE '.local\bin\guardrail.exe')) {
+        Write-Info "3. Run 'guardrail setup' to enroll yourself - the install armed the agent planes without asking anyone."
+    }
+    Write-Info "Customize: edit $env:USERPROFILE\.config\chezmoi\chezmoi.toml (examples in $SourceDir\docs\), then run 'dot up'."
+    Write-Info "----------------------------------------------------------------"
+    # No profile reload here: dot-sourcing $PROFILE inside this script block defined nothing in the
+    # caller's session, and `exit` below ends it anyway - the new terminal is what loads it.
 
 } finally {
     # [Environment]::UserInteractive reflects the window station, not whether stdin is

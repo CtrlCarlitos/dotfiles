@@ -23,9 +23,33 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create a
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 require "$ps_t" "Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop"
 require "$ps_t" 'Enable it now? [y/N]'
-awk '/\$needWhpx = \(\$whpxState/{a=NR} /Read-Host "  Enable it now/{b=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
+awk '/\$needWhpx = \(/{a=NR} /Read-Host "  Enable it now/{b=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
     fail "installer: the WHPX question must be computed and asked before the JDK install, like the licenses/AVD questions"
 pass
+
+# EXECUTED: the WHPX test itself. DISM's FeatureState has Disabled = 0, so a truthiness test
+# (`$whpxState -and ...`) was false exactly when WHPX was off and the question was never asked
+# (2026-10-14 fresh install). Evaluate the real line against an enum with the same values.
+if command -v pwsh >/dev/null 2>&1; then
+    whpx_line="$(grep -E '^[[:space:]]*\$needWhpx = \(' "$ps_t" | head -1)"
+    # shellcheck disable=SC2016 # PowerShell code, expanded by pwsh
+    whpx_out="$(WHPX_LINE="$whpx_line" pwsh -NoProfile -Command '
+        Add-Type -TypeDefinition "public enum FakeFeatureState { Disabled = 0, DisablePending = 1, Enabled = 2, EnablePending = 3, DisabledWithPayloadRemoved = 6 }"
+        foreach ($s in @("Disabled", "DisabledWithPayloadRemoved", "Enabled", "EnablePending")) {
+            $whpxState = [FakeFeatureState]$s
+            Invoke-Expression $env:WHPX_LINE
+            "$s=$needWhpx"
+        }
+        $whpxState = $null
+        Invoke-Expression $env:WHPX_LINE
+        "null=$needWhpx"' 2>&1 | tr -d '\r' | tr '\n' ' ')"
+    case "$whpx_out" in
+        *"Disabled=True DisabledWithPayloadRemoved=True Enabled=False EnablePending=False null=False"*) pass ;;
+        *) fail "installer: \$needWhpx must be true for Disabled (enum 0) and false for Enabled/EnablePending/unknown - got: $whpx_out" ;;
+    esac
+else
+    skip "pwsh not available to execute the WHPX state test"
+fi
 
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
 

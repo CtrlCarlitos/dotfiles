@@ -93,10 +93,12 @@ $PAT="your_github_pat_here"; iex "& {$(irm -Headers @{Authorization="token $PAT"
 <details>
 <summary><strong>What does the installer actually do?</strong></summary>
 
-1. Installs `chezmoi` if missing
-2. Asks for consent, then shows the package-group menu (preset → 17 groups)
-3. Installs your selected packages and applies the configuration
-4. Generates git identities, SSH keys, shell profiles, and AI tool wiring
+1. Asks for consent (Windows: and checks it runs as Administrator)
+2. Installs git and `chezmoi` if missing (Windows: clones the repo first, so the menu and the version pins are on disk)
+3. Shows the package-group menu (preset → 17 groups)
+4. Installs your selected packages and applies the configuration
+5. Generates git identities, SSH config and agent wiring for the keys already in `~/.ssh` (create keys with [devprofile](docs/devprofile.md)), shell profiles, and AI tool wiring
+6. Windows: ends with one restart notice when the install enabled Windows features (WSL, WHPX) - a first install usually needs one
 
 Your selections persist in `~/.config/chezmoi/chezmoi.toml` — re-runs show the menu pre-checked (one Enter accepts).
 </details>

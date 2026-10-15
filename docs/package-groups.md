@@ -174,9 +174,11 @@ is LTS today, so a gating pin (`winget pin add --version <node_major>.*`) holds 
 as Linux/WSL (NodeSource's `node_<major>.x` repo) and macOS (`node@<major>`); `dot upgrade` keeps the
 pin in step with `versions.node_major`, so one bump there moves all three. The
 installer installs Chocolatey's list first, then winget's, from one `winget list` inventory;
-`dot upgrade` sweeps both (`choco upgrade all`, `winget upgrade --all`). WSL belongs to neither:
-the installer runs `wsl --install --no-distribution` when it is missing and `dot upgrade` runs
-`wsl --update`.
+`dot upgrade` sweeps both (`choco upgrade all`, `winget upgrade --all`). WSL is outside the
+catalog loop: when it is missing the installer enables its Windows features, installs the WSL
+package with winget (`Microsoft.WSL` - the inbox `wsl --install` stub failed with
+`REGDB_E_CLASSNOTREG` on a fresh Windows 11) and only reports success once `wsl --version`
+answers; `dot upgrade` runs `wsl --update`.
 
 A tool that moved keeps its old Chocolatey name in `choco_was`. An app Chocolatey installed cannot
 be adopted by winget ("install technology is different"), so an existing machine moves with
