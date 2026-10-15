@@ -2807,6 +2807,11 @@ function Invoke-GuardrailInstaller {
     if ($code -eq 3) {
         Write-Host "  Warning: agent-guardrails needs an operator action (not enrolled, no interactive terminal, approval daemon not running, or the last request was denied/expired) - the installed binary is current and keeps enforcing the current floor" -ForegroundColor Yellow
         Write-Host "    to finish the re-wiring: run 'guardrail setup' in an interactive terminal, complete the approval, then re-run chezmoi apply" -ForegroundColor Yellow
+    } elseif ($code -eq -1) {
+        # Invoke-GuardrailInstallerProcess's own timeout sentinel (confirmed live 2026-10-15): it
+        # already printed why and killed the process tree. "exited with code -1" would wrongly
+        # suggest the installer itself returned this.
+        throw "guardrail installer timed out and was killed - see the warning above"
     } elseif ($code -ne 0) {
         throw "guardrail installer exited with code $code"
     }

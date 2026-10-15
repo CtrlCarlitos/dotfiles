@@ -347,11 +347,23 @@ function Select-GuardrailConsoleLine {
 # broken half - the installer's keystrokes always reached it - and leaving it unset keeps it
 # attached to the real console exactly as `&` piping did, so a nested prompt still reads the
 # operator's keystrokes.
+#
+# -TimeoutSeconds guards against the installer itself hanging with nothing to read: confirmed live
+# (2026-10-15) that agent-guardrails' own install.ps1, registering planes on an already-installed
+# binary, can sit with zero CPU and zero bytes on either stream indefinitely - no prompt ever
+# reaches this process to filter or release, so the GRACE heuristic above never fires (there is no
+# partial line to release). Not Invoke-WithTimeout: that runs its Action as a job, which cannot
+# stream this function's own Write-Host calls live or keep the operator's keystrokes attached to a
+# nested prompt (both documented reasons this function exists at all). So the deadline lives here,
+# in the same WaitAny loop, and on expiry this kills the process tree the same way Invoke-WithTimeout
+# does (Stop-Job cannot reach a native grandchild; taskkill /T can) and returns -1, a sentinel the
+# caller (Invoke-GuardrailInstaller) never confuses with a real exit code.
 function Invoke-GuardrailInstallerProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$ArgumentList,
-        [Parameter(Mandatory)][string]$LogPath
+        [Parameter(Mandatory)][string]$LogPath,
+        [int]$TimeoutSeconds = 180
     )
     $script:GuardrailHidden = 0
     $graceMs = 200     # seconds-as-ms twin of guardrail_console_filter's $GRACE (0.2s)
@@ -374,6 +386,7 @@ function Invoke-GuardrailInstallerProcess {
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
     [void]$proc.Start()
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     # Same encoding PowerShell's own native-command capture would have decoded these bytes with -
     # this changes only the buffering/timing of what reaches the console, never the text.
@@ -401,11 +414,21 @@ function Invoke-GuardrailInstallerProcess {
             $taskIsOut = [System.Collections.Generic.List[bool]]::new()
             if (-not $outDone) { [void]$tasks.Add($outTask); [void]$taskIsOut.Add($true) }
             if (-not $errDone) { [void]$tasks.Add($errTask); [void]$taskIsOut.Add($false) }
-            # No pending fragment -> block indefinitely; otherwise wake after GRACE so a prompt from
-            # a writer that has gone quiet can be released (twin of the perl filter's select() timeout).
-            $timeoutMs = if ($line.Length -gt $shownLen) { $graceMs } else { -1 }
+            # No pending fragment -> wake at the deadline at the latest (never truly -1: an
+            # installer that never writes another byte, with no partial line to release, must
+            # still end the wait); otherwise wake after GRACE so a prompt from a writer that has
+            # gone quiet can be released (twin of the perl filter's select() timeout).
+            $remainingMs = [Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+            $timeoutMs = if ($line.Length -gt $shownLen) { [Math]::Min($graceMs, $remainingMs) } else { $remainingMs }
             $idx = [System.Threading.Tasks.Task]::WaitAny($tasks.ToArray(), $timeoutMs)
             if ($idx -lt 0) {
+                if ((Get-Date) -ge $deadline) {
+                    # Stop-Job cannot terminate a native child (Invoke-WithTimeout's own note); the
+                    # same taskkill /T reaches this process's native grandchildren too.
+                    try { & taskkill /PID $proc.Id /T /F | Out-Null } catch { Write-Verbose "guardrail timeout kill failed: $($_.Exception.Message)" }
+                    Write-Host "  Warning: guardrail installer did not respond within ${TimeoutSeconds}s - it may be waiting on an approval prompt that never reached this console. Try 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
+                    return -1
+                }
                 Write-Host -NoNewline $line.Substring($shownLen)
                 $shownLen = $line.Length
                 continue
