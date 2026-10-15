@@ -92,6 +92,16 @@ else
     printf 'note: chezmoi or jq not installed - the executed installer checks are skipped\n'
 fi
 
+# 4b. the agent toolkit names its three steps (19 s on a WSL dot up, 2026-10-14, unattributed)
+require "$tmpl" "dot_timing_mark 'agent toolkit: playwright'"
+require "$tmpl" "dot_timing_mark 'agent toolkit: agent-browser install'"
+require "$tmpl" "dot_timing_mark 'agent toolkit: doctor'"
+require "$tmpl" 'info "agent-browser: downloaded $ab_chrome"'
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" '"agent-browser: downloaded $($chrome.Matches[0].Value)"'
+# the VS Code settings line names what it changed, in both twins
+require "$tmpl" 'VS Code settings: %d change(s) - %s; backup at .bak (%s)" % (len(changed), ", ".join(changed), path)'
+require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'VS Code settings: $vsChanged change(s) - $($vsChangedKeys -join '"'"', '"'"') (backup: $vscodeSettings.bak)'
+
 # 5. the updater: NPM sub-marks, the Antigravity gate in both twins
 require "$ai_sh" "dot_timing_mark 'NPM: codex'"
 # the codex check's two npm calls are marked apart (6-8 s live against ~2.5 s isolated, 2026-10-13)

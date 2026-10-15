@@ -1532,19 +1532,21 @@ if (-not $vsApply) {
     try {
         $vsJson = ConvertFrom-JsonC (Get-Content $vscodeSettings -Raw)
         $vsChanged = 0
+        # Named, not counted (twin of the .sh): "5 change(s)" alone could not say they were #344's font keys.
+        $vsChangedKeys = @()
         foreach ($k in $vsForced.Keys) {
             # StrictMode-safe keyed access: dotted names must go through
             # PSObject.Properties (dotting navigates - confirmed live).
             $p = $vsJson.PSObject.Properties[$k]
             if ($null -eq $p -or $p.Value -ne $vsForced[$k]) {
                 $vsJson | Add-Member -MemberType NoteProperty -Name $k -Value $vsForced[$k] -Force
-                $vsChanged++
+                $vsChanged++; $vsChangedKeys += "$k (forced)"
             }
         }
         foreach ($k in $vsDefaults.Keys) {
             if ($null -eq $vsJson.PSObject.Properties[$k]) {
                 $vsJson | Add-Member -MemberType NoteProperty -Name $k -Value $vsDefaults[$k]
-                $vsChanged++
+                $vsChanged++; $vsChangedKeys += $k
             }
         }
         foreach ($k in $vsMerges.Keys) {
@@ -1556,20 +1558,20 @@ if (-not $vsApply) {
             foreach ($s in $vsMerges[$k].Keys) {
                 if ($null -eq $objProp.Value.PSObject.Properties[$s]) {
                     $objProp.Value | Add-Member -MemberType NoteProperty -Name $s -Value $vsMerges[$k][$s]
-                    $vsChanged++
+                    $vsChanged++; $vsChangedKeys += "$k.$s"
                 }
             }
         }
         foreach ($k in $vsUnset) {
             if ($null -ne $vsJson.PSObject.Properties[$k]) {
                 $vsJson.PSObject.Properties.Remove($k)
-                $vsChanged++
+                $vsChanged++; $vsChangedKeys += "$k (unset)"
             }
         }
         if ($vsChanged -gt 0) {
             Copy-Item $vscodeSettings "$vscodeSettings.bak" -Force -ErrorAction SilentlyContinue
             (ConvertTo-SortedJson $vsJson) + "`n" | Set-Content -Path $vscodeSettings -Encoding utf8
-            Write-Host "  VS Code settings: $vsChanged change(s) (backup: $vscodeSettings.bak)" -ForegroundColor Green
+            Write-Host "  VS Code settings: $vsChanged change(s) - $($vsChangedKeys -join ', ') (backup: $vscodeSettings.bak)" -ForegroundColor Green
         } else {
             Write-Host "  VS Code settings already at defaults" -ForegroundColor Green
         }
@@ -1667,6 +1669,11 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
                 Invoke-WithTimeout -Description "agent-browser browser setup" -Seconds 600 -Action {
                     $setupOutput = @(& $env:AGENT_BROWSER install 2>&1 | ForEach-Object { "$_" })
                     if ($LASTEXITCODE -ne 0) { $setupOutput; throw "exit $LASTEXITCODE" }
+                    # A new Chrome build is the one slow thing here: say so (twin of the .sh line).
+                    $chrome = ($setupOutput | Select-String -Pattern 'Chrome [0-9][0-9.]+' | Select-Object -First 1)
+                    if ($chrome -and -not (($setupOutput -join "`n") -match 'already installed')) {
+                        "agent-browser: downloaded $($chrome.Matches[0].Value)"
+                    }
                     if ($env:DOT_AB_VERSION -and $env:DOT_AB_STAMP) {
                         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:DOT_AB_STAMP) | Out-Null
                         [IO.File]::WriteAllText($env:DOT_AB_STAMP, $env:DOT_AB_VERSION)
