@@ -228,9 +228,12 @@ catalog:
     - id: wsl2
       group: core
       note: >-
-        Windows: no package manager. The installer runs `wsl --install
-        --no-distribution` when WSL is missing; `dot upgrade` runs `wsl
-        --update`, WSL's own updater (winget's Microsoft.WSL lags it). The old
+        Windows: not in the catalog loop. When WSL is missing the installer
+        enables its Windows features (DISM), installs the WSL package with
+        winget (Microsoft.WSL; the inbox `wsl --install` stub failed with
+        REGDB_E_CLASSNOTREG on a fresh Windows 11) and checks `wsl --version`;
+        `dot upgrade` runs `wsl --update`, WSL's own updater (winget's
+        Microsoft.WSL lags it). The old
         Chocolatey record is dropped with --skip-autouninstaller, which keeps
         WSL itself (scripts/migrate-to-winget.ps1).
     - id: npiperelay

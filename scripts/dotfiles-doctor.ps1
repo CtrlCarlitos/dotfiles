@@ -270,7 +270,11 @@ if (Test-Path -LiteralPath $config) {
         $mdSdkManager = @('cmdline-tools/latest/bin/sdkmanager.bat', 'cmdline-tools/latest/bin/sdkmanager') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if (-not $mdSdkManager) { $mdMissing += 'sdkmanager' }
         $mdAdb = @('platform-tools/adb.exe', 'platform-tools/adb') | ForEach-Object { Join-Path $mdSdk $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if (-not $mdAdb -and -not (Get-Command adb -ErrorAction SilentlyContinue)) { $mdMissing += 'adb' }
+        # The SDK's own adb only, never one found on PATH: scrcpy (mobile_dev installs it) bundles
+        # an adb.exe, so on 2026-10-14 this said "ok" while the SDK's platform-tools - and the
+        # emulator that ships beside them - had never been installed. (The .sh twin keeps PATH on
+        # purpose: its installer accepts an existing adb in WSL's adb mode.)
+        if (-not $mdAdb) { $mdMissing += 'adb' }
         if ($mdMissing.Count -gt 0) {
             Result 'warn' 'mobile-dev' ("missing: " + ($mdMissing -join ' ') + " (SDK: $mdSdk) - re-run the installer: chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1; dot up")
         } else {

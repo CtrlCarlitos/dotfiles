@@ -35,7 +35,13 @@ grep -Fq '@extra' "$ps_t" || fail "installer: winget_args must reach winget inst
 if grep -Fq '$chocoHave = if (' "$ps_t"; then fail "installer: assign the choco inventory set directly (an if-expression enumerates it)"; fi
 grep -Fq 'if (Get-Variable -Name chocoInstalled -ErrorAction SilentlyContinue) { $chocoHave = $chocoInstalled }' "$ps_t" ||
     fail "installer: the still-Chocolatey check must use the choco inventory set itself"
-grep -Fq 'wsl.exe --install --no-distribution' "$ps_t" || fail "installer: WSL must be installed when missing"
+# WSL when missing: the Windows features through DISM, then the real WSL package through winget
+# (the inbox `wsl --install --no-distribution` stub failed with REGDB_E_CLASSNOTREG on a fresh
+# Windows 11, 2026-10-14), judged by `wsl --version`, which only the real package answers.
+grep -Fq 'winget install --id Microsoft.WSL --exact --source winget' "$ps_t" || fail "installer: WSL must be installed when missing (winget Microsoft.WSL)"
+grep -Fq "@('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')" "$ps_t" || fail "installer: WSL's Windows features must be enabled"
+grep -Fq '& wsl.exe --version' "$ps_t" || fail "installer: WSL success must be judged by wsl --version"
+if grep -Fq 'wsl.exe --install --no-distribution' "$ps_t"; then fail "installer: the inbox wsl --install stub is not a WSL installer (REGDB_E_CLASSNOTREG)"; fi
 grep -Fq 'wsl.exe --update' "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: WSL must be updated with wsl --update"
 grep -Fq "\$wingetHold += 'Anthropic.Claude'" "$repo_root/scripts/dotupgrade.ps1" || fail "dotupgrade.ps1: Claude Desktop must be held while claude.exe runs"
 grep -Fq 'winget install --id twpayne.chezmoi' "$repo_root/install.ps1" || fail "install.ps1: chezmoi must come from winget"
