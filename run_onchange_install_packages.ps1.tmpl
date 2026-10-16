@@ -146,7 +146,12 @@ function Invoke-WithTimeout {
         # Collect job output and RETURN it instead of streaming to the host -
         # for callers that use the result (the batched choco inventory below),
         # not just the side effect. Streaming callers see zero behavior change.
-        [switch]$NoStream
+        [switch]$NoStream,
+        # Prints a progress line on this cadence while NoStream hides the job's own
+        # (often noisy) output - confirmed live: a 20-minute NoStream step with no
+        # output at all is indistinguishable from a hang. 0 (default) = no heartbeat,
+        # same as before for every existing caller.
+        [int]$HeartbeatSeconds = 0
     )
     $jobStarted = Get-Date
     # -InitializationScript: a job is a fresh process and does not inherit the
@@ -155,11 +160,17 @@ function Invoke-WithTimeout {
     # The same applies to the console encoding set above (a job is a fresh process).
     $job = Start-Job -InitializationScript { $ProgressPreference = 'SilentlyContinue'; try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { $null = $_ } } -ScriptBlock $Action
     $deadline = $jobStarted.AddSeconds($Seconds)
+    $nextHeartbeat = if ($HeartbeatSeconds -gt 0) { $jobStarted.AddSeconds($HeartbeatSeconds) } else { [datetime]::MaxValue }
     $collected = @()
     while ($job.State -eq 'Running' -and (Get-Date) -lt $deadline) {
         $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
         if (-not $NoStream) { $out | ForEach-Object { Write-Host "    $_" } }
         $collected += $out
+        if ((Get-Date) -ge $nextHeartbeat) {
+            $elapsed = [int]((Get-Date) - $jobStarted).TotalSeconds
+            Write-Host "    ... $Description still running (${elapsed}s elapsed, ${Seconds}s cap)" -ForegroundColor DarkGray
+            $nextHeartbeat = $nextHeartbeat.AddSeconds($HeartbeatSeconds)
+        }
         Start-Sleep -Milliseconds 500
     }
     $out = @(Receive-Job $job -ErrorAction SilentlyContinue)
@@ -1676,13 +1687,16 @@ Add-DotTimingMark -Name 'agent toolkit'
 # products live in vendor groups per the spec's placement rule. act joins
 # the choco $packages list above under this same gate.)
 
-# Ollama - installer downloads a large (~700MB+) setup with no timeout of its own
+# Ollama - installer downloads a large (~700MB+) setup with no timeout of its own.
+# Confirmed live: it can stall on the download for the full timeout window with an open
+# connection but near-zero progress; NoStream hides its own output to avoid the ~700-line
+# `\r`-redraw flood below, which made 20 minutes of total silence read as a hang. Heartbeat
+# every 30s makes a healthy-but-slow download visibly different from a stuck one. Capped at
+# 600s (same budget as Playwright Chromium below) rather than 1200s - long enough for a real
+# download, short enough that a genuine stall surfaces well inside this step's own patience.
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Host "  Installing Ollama..." -ForegroundColor Yellow
-    # The upstream installer redraws its own download percentage with `\r`; captured through a
-    # job each tick becomes a separate Write-Host line (confirmed live: 700+ lines). -NoStream and
-    # keep only its ">>> ..." status lines, same treatment as Playwright Chromium below.
-    $ollamaOut = @(Invoke-WithTimeout -Description "Ollama install" -Seconds 1200 -NoStream -Action {
+    $ollamaOut = @(Invoke-WithTimeout -Description "Ollama install" -Seconds 600 -NoStream -HeartbeatSeconds 30 -Action {
         & powershell -NoProfile -c "`$ProgressPreference = 'SilentlyContinue'; irm https://ollama.com/install.ps1 | iex" 2>&1 | ForEach-Object { "$_" }
         "__exit=$LASTEXITCODE"
     })
