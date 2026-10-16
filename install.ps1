@@ -132,6 +132,29 @@ if (-not $IsAdmin) {
     exit
 }
 
+# Set CurrentUser execution policy directly via the registry, not Set-ExecutionPolicy -
+# that cmdlet's module can fail to auto-load inside certain non-interactive invocations.
+# The chezmoi-managed run_once script that normally handles this (same technique, a
+# direct registry write) confirmed live to never actually run across two real wipes on
+# this machine - root cause not yet understood, so do it here too, idempotently, as a
+# guaranteed path: this way the user's own PowerShell profile loads on the very next
+# terminal even if everything after this point fails (e.g. the apply itself).
+try {
+    $execPolicyKeyPath = "HKCU:\Software\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell"
+    if (-not (Test-Path $execPolicyKeyPath)) {
+        New-Item -Path $execPolicyKeyPath -Force -ErrorAction Stop | Out-Null
+    }
+    Set-ItemProperty -Path $execPolicyKeyPath -Name "ExecutionPolicy" -Value "RemoteSigned" -Type String -Force -ErrorAction Stop
+} catch {
+    Write-Host "[!] Could not set the CurrentUser execution policy - $_" -ForegroundColor Yellow
+}
+
+# Lets the finally block tell a failure apart from success at the final prompt: the
+# blank "Press Enter to exit..." looked identical either way, confirmed live to read
+# as a hang after chezmoi init --apply failed. Set immediately before every exit 1 below -
+# every real failure exits 1 explicitly (see the comment at the end of this file).
+$script:InstallFailed = $false
+
 try {
     # [data.logging] (docs/logging.md): this run's live transcript under ~\.local\state\dotfiles\logs,
     # so the install can be followed from another terminal (Get-Content -Wait) or read afterwards.
@@ -225,6 +248,7 @@ try {
             }
         } catch {
              Write-Fail "Failed to install Git. Please install manually."
+             $script:InstallFailed = $true
              exit 1
         }
     }
@@ -286,6 +310,7 @@ try {
         }
         if (-not $cloned) {
             Write-Fail "Could not clone $SourceUrl after 3 attempts. Check the network and re-run the installer."
+            $script:InstallFailed = $true
             exit 1
         }
     }
@@ -339,6 +364,7 @@ try {
         } catch {
             Write-Fail "Failed to install chezmoi: $_"
             Write-Host "Please install manually: winget install --id twpayne.chezmoi --exact"
+            $script:InstallFailed = $true
             exit 1
         }
     }
@@ -385,6 +411,7 @@ try {
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "chezmoi init --apply failed (exit code $LASTEXITCODE). Scroll up for the first error, fix it, then re-run from an Administrator terminal: chezmoi apply"
+        $script:InstallFailed = $true
         exit 1
     }
 
@@ -422,7 +449,12 @@ try {
     # present. Also guard on $IsNonInteractive so this can't hang the same way.
     if ([Environment]::UserInteractive -and -not $IsNonInteractive) {
         Write-Host ""
-        Read-Host "Press Enter to exit..."
+        if ($script:InstallFailed) {
+            Write-Host "[!] Installation FAILED - scroll up for the error." -ForegroundColor Red
+            Read-Host "Press Enter to close this window"
+        } else {
+            Read-Host "Press Enter to exit..."
+        }
     }
     if ($InstallLogOpen) { try { Stop-Transcript | Out-Null } catch { $null = $_ } }
 }
