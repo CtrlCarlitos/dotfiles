@@ -12,10 +12,10 @@
 # everything under custom/); chezmoi must not prune files it did not ship.
 [".oh-my-zsh"]
   type            = "archive"
-  url             = "https://github.com/ohmyzsh/ohmyzsh/archive/42a4ccb1b14dbeffe81259105a5243b4f4cb618e.tar.gz"
+  url             = "https://github.com/ohmyzsh/ohmyzsh/archive/964ddf789b022b6958b27d02d7fa54f552de21e9.tar.gz"
   exact           = false
   stripComponents = 1
-  checksum.sha256 = "998e4d222ede178e5019dde77756a4473ba91546d1cb29017f0d1ea4fd9cc5d0"
+  checksum.sha256 = "89ccb57b3328f0df303d557bef54cc7d0efb6f22f016552943ef3e15273e0588"
 
 [".oh-my-zsh/custom/plugins/zsh-autosuggestions"]
   type            = "archive"
@@ -33,10 +33,10 @@
 
 [".oh-my-zsh/custom/plugins/zsh-completions"]
   type            = "archive"
-  url             = "https://github.com/zsh-users/zsh-completions/archive/6661b4b68173784ba31ef10ce4b5cb1c9ecfdcac.tar.gz"
+  url             = "https://github.com/zsh-users/zsh-completions/archive/989b23277ab33e8d5e82df6aed936e846db9d8b8.tar.gz"
   exact           = true
   stripComponents = 1
-  checksum.sha256 = "e88acd5322c23b690331a7e28fa6a40acd2d966a8fab2f1d63cba6ec526ba9df"
+  checksum.sha256 = "5930d81617f5cca0937383dd354c7c78efda44375c9a8808a238c8671be11c77"
 
 [".oh-my-zsh/custom/plugins/zsh-history-substring-search"]
   type            = "archive"
