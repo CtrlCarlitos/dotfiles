@@ -19,6 +19,66 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ci="$repo_root/.github/workflows/ci.yml"
 [ -f "$ci" ] || { fail "$ci missing"; finish; }
 
+# Keep the ruleset's historical check name while avoiding macos-latest's constrained
+# ARM64 pool. The full-install workflow has no required check-name compatibility to
+# preserve, so it can name the Intel runner directly.
+grep -Fq "runs-on: \${{ matrix.os == 'macos-latest' && 'macos-15-intel' || matrix.os }}" "$ci" ||
+    fail "test-unix must route the macos-latest check name to macos-15-intel"
+grep -Fq 'runs-on: macos-15-intel' "$repo_root/.github/workflows/full-install-test.yml" ||
+    fail "full-install-macos must use macos-15-intel"
+
+mac_verify_has_user_path() {
+    local workflow="$1" verify line path_ready=''
+    verify="$(awk '
+        /^  full-install-macos:/ { in_job = 1; next }
+        in_job && /^  [A-Za-z0-9_-]+:/ { exit }
+        in_job && /^      - name: Verify real installs landed$/ { in_step = 1; next }
+        in_step && /^      - / { exit }
+        in_step && /^        run: \|$/ { in_run = 1; next }
+        in_run { print }
+    ' "$workflow")"
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in
+            'export PATH="$HOME/.local/bin:$PATH"') path_ready=1 ;;
+            'for cmd in git chezmoi'*) [ -n "$path_ready" ] && return 0 ;;
+        esac
+    done <<<"$verify"
+    return 1
+}
+
+if mac_verify_has_user_path "$repo_root/.github/workflows/full-install-test.yml"; then
+    pass
+else
+    fail "full-install-macos must add user-local binaries to PATH inside its verification step"
+fi
+
+wrong_step="$XDG_STATE_HOME/full-install-path-in-wrong-step.yml"
+awk '
+    /export PATH="\$HOME\/.local\/bin:\$PATH"/ { next }
+    /^      - name: Verify real installs landed$/ {
+        print "      - name: Export user PATH in the wrong step"
+        print "        run: export PATH=\"$HOME/.local/bin:$PATH\""
+    }
+    { print }
+' "$repo_root/.github/workflows/full-install-test.yml" > "$wrong_step"
+if mac_verify_has_user_path "$wrong_step"; then
+    fail "the PATH contract must reject an export outside the verification step"
+else
+    pass
+fi
+
+commented_export="$XDG_STATE_HOME/full-install-path-commented-out.yml"
+awk '
+    /export PATH="\$HOME\/.local\/bin:\$PATH"/ { sub(/export PATH=/, "# export PATH=") }
+    { print }
+' "$repo_root/.github/workflows/full-install-test.yml" > "$commented_export"
+if mac_verify_has_user_path "$commented_export"; then
+    fail "the PATH contract must reject a commented-out export"
+else
+    pass
+fi
+
 # One line per job: key <TAB> name <TAB> if <TAB> matrix os list.
 jobs_tsv() {
     awk '

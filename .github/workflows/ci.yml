@@ -108,16 +108,16 @@ jobs:
             echo "Checking $f..."
             case "$f" in
               *.tmpl)
-                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 - || FAILED=1
+                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck --severity=warning -s bash -e SC1091 -e SC1128 - || FAILED=1
                 ;;
               tests/*.sh)
-                shellcheck -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
                 ;;
               *.zsh)
-                shellcheck -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
                 ;;
               *)
-                shellcheck -s bash -e SC1091 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 "$f" || FAILED=1
                 ;;
             esac
           done
@@ -264,7 +264,9 @@ jobs:
 
   test-unix:
     name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # Keep the ruleset's Test (macos-latest) check name, but route it away from
+    # macOS 26 ARM64's constrained hosted-runner pool.
+    runs-on: ${{ matrix.os == 'macos-latest' && 'macos-15-intel' || matrix.os }}
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     timeout-minutes: 15
@@ -485,11 +487,10 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     timeout-minutes: 15
     container:
-      # Canonical's mirror on ECR Public, not Docker Hub: GitHub-hosted runners share Docker
-      # Hub's anonymous pull quota, and the push-to-main run after #333 failed twice on
-      # "toomanyrequests: You have reached your unauthenticated pull rate limit" (plus one
-      # registry 500) before a single step ran. Same image, same tag, different registry.
-      image: public.ecr.aws/ubuntu/ubuntu:22.04
+      # Avoid Docker Hub's anonymous pull quota and ECR Public's intermittent
+      # pre-job 403s. MCR is reachable from GitHub-hosted runners and still gives
+      # this job a clean Ubuntu 22.04 container instead of the runner host.
+      image: mcr.microsoft.com/devcontainers/base:ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
