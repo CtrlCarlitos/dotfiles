@@ -284,6 +284,7 @@ jobs:
 
       - name: Verify real installs landed
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           FAILED=0
           check() {
             if command -v "$1" &>/dev/null; then
