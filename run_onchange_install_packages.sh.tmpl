@@ -1752,18 +1752,17 @@ install_apt() {
     $SUDO apt install -y {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "modern_cli" "ids" (dict "direnv" true) "catalog" .catalog.packages) }} || true
 
     # Lazygit
-    if ! command -v lazygit &>/dev/null; then
-        info "Installing lazygit..."
-        # `|| true` inside the substitution - a rate-limited API response
-        # must warn-and-continue, not abort the run (#114).
-        LAZYGIT_VERSION=$(curl -s --max-time 30 "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*' || true)
-        if [[ -n "$LAZYGIT_VERSION" ]] && net_timeout 180 curl -fLo "$WORK/lazygit.tar.gz" "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"; then
-            tar -xzf "$WORK/lazygit.tar.gz" -C "$WORK" lazygit && $SUDO install "$WORK/lazygit" /usr/local/bin
-        else
-            warn "lazygit download failed, timed out, or version lookup failed - continuing"
-        fi
-        rm -f "$WORK/lazygit" "$WORK/lazygit.tar.gz"
-    fi
+    case "$(uname -m)" in
+        x86_64|amd64)
+            install_release_binary lazygit "https://github.com/jesseduffield/lazygit/releases/download/v{{ .versions.lazygit_version }}/lazygit_{{ .versions.lazygit_version }}_linux_x86_64.tar.gz" \
+                {{ .versions.lazygit_sha256_x86_64 }} lazygit
+            ;;
+        aarch64|arm64)
+            install_release_binary lazygit "https://github.com/jesseduffield/lazygit/releases/download/v{{ .versions.lazygit_version }}/lazygit_{{ .versions.lazygit_version }}_linux_arm64.tar.gz" \
+                {{ .versions.lazygit_sha256_aarch64 }} lazygit
+            ;;
+        *) warn "lazygit: unsupported architecture $(uname -m) - skipping" ;;
+    esac
 
     # Gum (Bubble Gum for shell scripts)
     if ! command -v gum &>/dev/null; then

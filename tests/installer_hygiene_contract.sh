@@ -110,6 +110,22 @@ require "$ai_sh" 'OpenCode installer download failed - continuing'
     fail "$ai_sh: stale Claude installer URL - the installer template uses claude.ai/install.sh (#114)"
 require "$ai_sh" '!= /usr*'
 
+# 10. Lazygit uses the same pinned, checksum-verified release path as the other
+#     Linux tarballs. Resolving /releases/latest through the unauthenticated API
+#     made the required full-install check fail under GitHub's rate limit.
+data="$repo_root/.chezmoidata.yaml"
+require "$data" 'lazygit_version:'
+require "$data" 'lazygit_sha256_x86_64:'
+require "$data" 'lazygit_sha256_aarch64:'
+require "$sh_installer" '{{ .versions.lazygit_version }}'
+require "$sh_installer" '{{ .versions.lazygit_sha256_x86_64 }}'
+require "$sh_installer" '{{ .versions.lazygit_sha256_aarch64 }}'
+require "$sh_installer" 'install_release_binary lazygit'
+require "$sh_installer" 'linux_x86_64.tar.gz'
+require "$sh_installer" 'linux_arm64.tar.gz'
+forbid "$sh_installer" 'api.github.com/repos/jesseduffield/lazygit/releases/latest'
+forbid "$sh_installer" 'releases/latest/download/lazygit_'
+
 # --- EXECUTED (v2, #135): the single-flight guard and the apt-repo chain -----
 #
 # 1. Single-flight: the rendered mutex block, run twice - free it must enter,
