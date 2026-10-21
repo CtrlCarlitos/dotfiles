@@ -19,6 +19,14 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ci="$repo_root/.github/workflows/ci.yml"
 [ -f "$ci" ] || { fail "$ci missing"; finish; }
 
+# Keep the ruleset's historical check name while avoiding macos-latest's constrained
+# ARM64 pool. The full-install workflow has no required check-name compatibility to
+# preserve, so it can name the Intel runner directly.
+grep -Fq "runs-on: \${{ matrix.os == 'macos-latest' && 'macos-15-intel' || matrix.os }}" "$ci" ||
+    fail "test-unix must route the macos-latest check name to macos-15-intel"
+grep -Fq 'runs-on: macos-15-intel' "$repo_root/.github/workflows/full-install-test.yml" ||
+    fail "full-install-macos must use macos-15-intel"
+
 # One line per job: key <TAB> name <TAB> if <TAB> matrix os list.
 jobs_tsv() {
     awk '

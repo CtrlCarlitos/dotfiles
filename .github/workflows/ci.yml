@@ -264,7 +264,9 @@ jobs:
 
   test-unix:
     name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # Keep the ruleset's Test (macos-latest) check name, but route it away from
+    # macOS 26 ARM64's constrained hosted-runner pool.
+    runs-on: ${{ matrix.os == 'macos-latest' && 'macos-15-intel' || matrix.os }}
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     timeout-minutes: 15
