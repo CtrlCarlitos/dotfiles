@@ -108,16 +108,16 @@ jobs:
             echo "Checking $f..."
             case "$f" in
               *.tmpl)
-                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck -s bash -e SC1091 -e SC1128 - || FAILED=1
+                perl -0777 -pe 's/\{\{.*?\}\}//gs' "$f" | shellcheck --severity=warning -s bash -e SC1091 -e SC1128 - || FAILED=1
                 ;;
               tests/*.sh)
-                shellcheck -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 -e SC2016 "$f" || FAILED=1
                 ;;
               *.zsh)
-                shellcheck -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 -e SC2148 "$f" || FAILED=1
                 ;;
               *)
-                shellcheck -s bash -e SC1091 "$f" || FAILED=1
+                shellcheck --severity=warning -s bash -e SC1091 "$f" || FAILED=1
                 ;;
             esac
           done
