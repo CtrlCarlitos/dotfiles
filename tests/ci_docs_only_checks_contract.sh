@@ -28,7 +28,7 @@ grep -Fq 'runs-on: macos-15-intel' "$repo_root/.github/workflows/full-install-te
     fail "full-install-macos must use macos-15-intel"
 
 mac_verify_has_user_path() {
-    local workflow="$1" verify
+    local workflow="$1" verify line path_ready=''
     verify="$(awk '
         /^  full-install-macos:/ { in_job = 1; next }
         in_job && /^  [A-Za-z0-9_-]+:/ { exit }
@@ -37,10 +37,14 @@ mac_verify_has_user_path() {
         in_step && /^        run: \|$/ { in_run = 1; next }
         in_run { print }
     ' "$workflow")"
-    case "$verify" in
-        *'export PATH="$HOME/.local/bin:$PATH"'*'for cmd in git chezmoi'*) return 0 ;;
-        *) return 1 ;;
-    esac
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in
+            'export PATH="$HOME/.local/bin:$PATH"') path_ready=1 ;;
+            'for cmd in git chezmoi'*) [ -n "$path_ready" ] && return 0 ;;
+        esac
+    done <<<"$verify"
+    return 1
 }
 
 if mac_verify_has_user_path "$repo_root/.github/workflows/full-install-test.yml"; then
@@ -60,6 +64,17 @@ awk '
 ' "$repo_root/.github/workflows/full-install-test.yml" > "$wrong_step"
 if mac_verify_has_user_path "$wrong_step"; then
     fail "the PATH contract must reject an export outside the verification step"
+else
+    pass
+fi
+
+commented_export="$_lib_state/full-install-path-commented-out.yml"
+awk '
+    /export PATH="\$HOME\/.local\/bin:\$PATH"/ { sub(/export PATH=/, "# export PATH=") }
+    { print }
+' "$repo_root/.github/workflows/full-install-test.yml" > "$commented_export"
+if mac_verify_has_user_path "$commented_export"; then
+    fail "the PATH contract must reject a commented-out export"
 else
     pass
 fi
