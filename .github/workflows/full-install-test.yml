@@ -263,7 +263,9 @@ jobs:
     name: Full Install (macOS)
     needs: check-schedule
     if: needs.check-schedule.outputs.should_run == 'true'
-    runs-on: macos-latest
+    # macos-latest is macOS 26 ARM64, whose hosted pool can fail to acquire a
+    # runner. The GA Intel image keeps this scheduled coverage reliable.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
