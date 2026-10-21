@@ -485,11 +485,10 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     timeout-minutes: 15
     container:
-      # Canonical's mirror on ECR Public, not Docker Hub: GitHub-hosted runners share Docker
-      # Hub's anonymous pull quota, and the push-to-main run after #333 failed twice on
-      # "toomanyrequests: You have reached your unauthenticated pull rate limit" (plus one
-      # registry 500) before a single step ran. Same image, same tag, different registry.
-      image: public.ecr.aws/ubuntu/ubuntu:22.04
+      # Avoid Docker Hub's anonymous pull quota and ECR Public's intermittent
+      # pre-job 403s. MCR is reachable from GitHub-hosted runners and still gives
+      # this job a clean Ubuntu 22.04 container instead of the runner host.
+      image: mcr.microsoft.com/devcontainers/base:ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

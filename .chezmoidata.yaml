@@ -126,6 +126,11 @@ versions:
   vale_version: "3.24.0"
   vale_sha256_x86_64: "867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214"
   vale_sha256_aarch64: "104cbd349279e50c4cb40adb70adf345d93cc4a3a0191f9e68bdccb97086b582"
+  # The Linux full-install check must not depend on GitHub's unauthenticated
+  # releases API. Pin the exact asset and verify it before installation.
+  lazygit_version: "0.66.2"
+  lazygit_sha256_x86_64: "158efc9ddfa1241fab5fb3526bb442c8dc6c4b1904d73213b9e4e93e03c52034"
+  lazygit_sha256_aarch64: "79a3161eeb642f0473e23db6341f7baabd4a5933e921a9c1167c5d5c765c41a4"
 
 guardrail:
   version: v0.23.36-dev
