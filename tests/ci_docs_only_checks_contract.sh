@@ -53,7 +53,7 @@ else
     fail "full-install-macos must add user-local binaries to PATH inside its verification step"
 fi
 
-wrong_step="$_lib_state/full-install-path-in-wrong-step.yml"
+wrong_step="$XDG_STATE_HOME/full-install-path-in-wrong-step.yml"
 awk '
     /export PATH="\$HOME\/.local\/bin:\$PATH"/ { next }
     /^      - name: Verify real installs landed$/ {
@@ -68,7 +68,7 @@ else
     pass
 fi
 
-commented_export="$_lib_state/full-install-path-commented-out.yml"
+commented_export="$XDG_STATE_HOME/full-install-path-commented-out.yml"
 awk '
     /export PATH="\$HOME\/.local\/bin:\$PATH"/ { sub(/export PATH=/, "# export PATH=") }
     { print }
