@@ -27,6 +27,12 @@ grep -Fq "runs-on: \${{ matrix.os == 'macos-latest' && 'macos-15-intel' || matri
 grep -Fq 'runs-on: macos-15-intel' "$repo_root/.github/workflows/full-install-test.yml" ||
     fail "full-install-macos must use macos-15-intel"
 
+mac_job="$(awk '/^  full-install-macos:/{found=1} found{print}' "$repo_root/.github/workflows/full-install-test.yml")"
+case "$mac_job" in
+    *'export PATH="$HOME/.local/bin:$PATH"'*'for cmd in git chezmoi'*) pass ;;
+    *) fail "full-install-macos must add user-local binaries to PATH before verification" ;;
+esac
+
 # One line per job: key <TAB> name <TAB> if <TAB> matrix os list.
 jobs_tsv() {
     awk '
