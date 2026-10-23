@@ -8,3 +8,7 @@
 # resolving-merge-conflicts: removed from mattpocock/skills on 2026-09-24 (the CLI quietly
 # installs 10 of the 11 names we asked for; the local copy would never update again).
 resolving-merge-conflicts mattpocock/skills
+
+# redesign-existing-projects: upstream folded it into design-taste-frontend on 2026-10-19
+# (Leonxlnx/taste-skill 825e306, "one skill"); every install since failed it once per agent.
+redesign-existing-projects Leonxlnx/taste-skill
