@@ -477,7 +477,10 @@ function Invoke-MobileDevTool {
                 if ($ProgressDir) {
                     $stageDir = Join-Path $ProgressDir '.temp'
                     if (Test-Path -LiteralPath $stageDir) {
-                        $bytes = (Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        # Summed by hand: on Windows PowerShell 5.1 an empty pipeline makes Measure-Object
+                        # emit nothing, and .Sum on $null is fatal under StrictMode (killed a VM run).
+                        $bytes = 0
+                        Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $bytes += $_.Length }
                         if ($bytes) { $staged = ', {0} MB staged' -f [math]::Round($bytes / 1MB) }
                     }
                 }

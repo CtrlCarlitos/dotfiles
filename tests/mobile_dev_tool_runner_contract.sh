@@ -91,6 +91,27 @@ EOF2
 out2="$(pwsh -NoProfile -File "$(winpath "$tmp/harness2.ps1")" -Timing "$(winpath "$repo_root/scripts/lib/ps-timing.ps1")" -Fn "$(winpath "$tmp/fn.ps1")" -Dir "$(winpath "$tmp")" -Ext "$ext" 2>&1 | tr -d '\r' || true)"
 case "$out2" in *'got:yes-please'*) pass ;; *) fail "the StdIn answers must reach the tool (output: $out2)" ;; esac
 
+# A VM run died on its first heartbeat: sdkmanager had created .temp but staged nothing yet, and
+# on Windows PowerShell 5.1 `(... | Measure-Object -Sum).Sum` over an empty pipeline is a fatal
+# PropertyNotFound under the template's StrictMode. Run that case the way the template runs:
+# StrictMode on, under powershell.exe when present (pwsh 7 does not reproduce it).
+cat >"$tmp/harness3.ps1" <<'EOF2'
+param([string]$Timing, [string]$Fn, [string]$Dir, [string]$Ext)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. $Timing
+. $Fn
+$sdk = Join-Path $Dir 'empty-sdk'
+New-Item -ItemType Directory -Force -Path (Join-Path $sdk '.temp') | Out-Null
+$rc = Invoke-MobileDevTool -Path (Join-Path $Dir "slow.$Ext") -ToolArguments @('a') -FailureLabel 'empty-stage' -ProgressDir $sdk -HeartbeatSeconds 1
+"EMPTY-RC=$rc"
+EOF2
+ps_host=pwsh
+command -v powershell.exe >/dev/null 2>&1 && ps_host=powershell.exe
+out3="$("$ps_host" -NoProfile -ExecutionPolicy Bypass -File "$(winpath "$tmp/harness3.ps1")" -Timing "$(winpath "$repo_root/scripts/lib/ps-timing.ps1")" -Fn "$(winpath "$tmp/fn.ps1")" -Dir "$(winpath "$tmp")" -Ext "$ext" 2>&1 | tr -d '\r' || true)"
+case "$out3" in *'empty-stage still running'*EMPTY-RC=0*) pass ;; *) fail "a heartbeat over an empty .temp must not throw under StrictMode ($ps_host output: $out3)" ;; esac
+case "$out3" in *'MB staged'*) fail "an empty .temp must not report a staged size (output: $out3)" ;; *) pass ;; esac
+
 # the old shape must not come back
 forbid "$template" '| Out-String)'" 2>&1"
 finish
