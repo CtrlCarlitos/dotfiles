@@ -18,13 +18,11 @@ clickable link, here).
 `Install-MobileDev` (in `run_onchange_install_packages.ps1.tmpl`) installs a
 standalone JDK 17+, the Android SDK command-line tools, platform-tools, the
 emulator, a default Pixel-like AVD, and scrcpy, then adds a Windows Firewall
-rule scoped to the WSL vEthernet subnet for the ADB bridge. It enables
-Windows Hypervisor Platform (WHPX) when it is disabled without asking -
-`mobile_dev` itself, off by default, is the consent, and without WHPX the
-emulator is unaccelerated to the point of being unusable, the same reasoning
-that already makes WSL/`VirtualMachinePlatform` unconditional elsewhere in
-this script. Needs a restart to take effect; `dot up` says so and keeps
-going rather than waiting on you.
+rule scoped to the WSL vEthernet subnet for the ADB bridge. It asks nothing:
+`mobile_dev = true` in `chezmoi.toml` is your consent to the Android SDK
+licenses, the multi-GB system-image download and enabling Windows Hypervisor
+Platform (WHPX) when it is disabled (WHPX needs a restart). Each step says what
+it is doing as it starts. To opt out, set `mobile_dev = false`.
 
 The ADB server itself is never started or registered as a service - run it
 yourself, each session, before using Maestro/agent-device from WSL:
@@ -38,10 +36,9 @@ repo never automates it (design doc section 3.3). The Firewall rule only
 allows that server's port 5037 from the WSL vEthernet subnet, never a
 LAN-wide opening.
 
-**If you decline a prompt** (the SDK licenses or the system-image
-download), `Install-MobileDev` tells you to accept next time - but
-`run_onchange_install_packages.ps1.tmpl` only re-runs when its own
-rendered content changes, not on every `dot up`. To force it to run again:
+**If a step fails** (a download, the licenses, the AVD), re-running `dot up`
+is not enough: `run_onchange_install_packages.ps1.tmpl` only re-runs when its
+own rendered content changes. To force it to run again:
 
 ```
 chezmoi state delete --bucket=entryState --key="$($HOME -replace '\\','/')/install_packages.ps1"

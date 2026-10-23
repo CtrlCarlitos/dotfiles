@@ -29,6 +29,12 @@ if grep -Fq 'Enable it now? [y/N]' "$ps_t"; then
 fi
 awk '/\$needWhpx = \(/{a=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{b=NR} /Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
     fail "installer: \$needWhpx must be computed before the JDK install, and WHPX enabled before sdkmanager runs"
+
+# No questions (2026-10-23 VM run): `mobile_dev = true` is the consent to the SDK licenses, the
+# system image and WHPX. Three [y/N] prompts after the config already opted in were friction, and
+# a prompt left unanswered stalls an otherwise unattended install.
+awk '/^function Install-MobileDev \{/ {on=1} on {print} on && /^\}/ {exit}' "$ps_t" | grep -q 'Read-Host' &&
+    fail "installer: Install-MobileDev must not prompt - mobile_dev = true in chezmoi.toml is the consent"
 pass
 
 # EXECUTED: the WHPX test itself. DISM's FeatureState has Disabled = 0, so a truthiness test
@@ -88,10 +94,9 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'LASTEXITCODE'
 # (e.g. after a reboot in NAT mode), not just checked for existing by name.
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Get-NetFirewallAddressFilter'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Set-NetFirewallRule'
-# the real re-entry point after declining a prompt (run_onchange only
-# re-runs on a rendered-content change, not on every `dot up`) is
-# documented and used in the skip messages, not a misleading "just re-run".
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" '--bucket=entryState --key='
+# the real re-entry point after a failed step (run_onchange only re-runs on a
+# rendered-content change, not on every `dot up`) is documented, not a
+# misleading "just re-run".
 require "$repo_root/docs/mobile-development.md" '--bucket=entryState --key='
 # no scheduled task either - the "no new always-on service" constraint
 # covers more than just Windows Services.

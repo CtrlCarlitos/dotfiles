@@ -584,14 +584,12 @@ function Install-MobileDev {
     $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
     $systemImage = 'system-images;android-34;default;x86_64'
 
-    # Every question is asked HERE, before the first download, so the long part
-    # of the run (JDK, SDK tools, a multi-GB system image) goes unattended and a
-    # prompt left unanswered can never stall it half way. #336's explicit
-    # caution: nothing accepts Google's licenses silently on the user's behalf.
-    # Gated on Test-Path, like Install-Node's version check: once adb, the
-    # emulator and the AVD exist this is skipped on every later `dot up` - no
-    # separate re-prompt or re-download bookkeeping. The marks keep the time
-    # spent waiting for answers out of the sections around them.
+    # No questions: `mobile_dev = true` in chezmoi.toml IS the consent to the Android SDK licenses,
+    # the multi-GB system image and enabling WHPX (owner's call, 2026-10-23 VM run - three
+    # [y/N] prompts for a group the config already opted into was friction, not consent; this
+    # reverses #336's per-step confirmation). Each step still says what it is about to do.
+    # Gated on Test-Path, like Install-Node's version check: once adb, the emulator and the AVD
+    # exist (and WHPX is on) each step is skipped on every later `dot up`.
     $needPackages = (-not (Test-Path $adbPath)) -or (-not (Test-Path $emulatorPath))
     $needAvd = -not (Test-Path $avdDir)
     # WHPX (design doc section 3.3): Microsoft's current recommended accelerator for the Android
@@ -600,27 +598,13 @@ function Install-MobileDev {
     $whpxState = $null
     try { $whpxState = (Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop).State } catch { Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red }
     # $null test, not truthiness: DISM's FeatureState enum has Disabled = 0, so
-    # `$whpxState -and ...` was false exactly when WHPX was off - the question was never asked
+    # `$whpxState -and ...` was false exactly when WHPX was off - the step never ran
     # and the emulator ran unaccelerated (2026-10-14 fresh install). EnablePending = already
     # enabled, waiting for the restart.
     $needWhpx = ($null -ne $whpxState -and "$whpxState" -notin @('Enabled', 'EnablePending'))
-    $acceptLicenses = $false
-    $createAvd = $false
-    if ($needPackages -or $needAvd) {
-        Add-DotTimingMark -Name 'your answers'
-        if ($needPackages) {
-            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
-            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
-            $acceptLicenses = ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y')
-        }
-        # The system image sits behind the licenses: asked only when they were
-        # accepted above, or (packages already present) as its own consent.
-        if ($needAvd -and ($acceptLicenses -or -not $needPackages)) {
-            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)$(if (-not $needPackages) { ' and accepts the Android SDK licenses it needs' })." -ForegroundColor Cyan
-            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
-            $createAvd = ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y')
-            if ($createAvd) { $acceptLicenses = $true }
-        }
+    $acceptLicenses = ($needPackages -or $needAvd)
+    if ($acceptLicenses) {
+        Write-Host "  mobile_dev = true: accepting the Android SDK licenses$(if ($needAvd) { " and downloading the multi-GB system image for the default AVD ($avdName)" }). Set mobile_dev = false in chezmoi.toml to opt out." -ForegroundColor Cyan
     }
     # WHPX is not asked (unlike the licenses/AVD above): mobile_dev itself, an opt-in group off by
     # default, is the consent - without WHPX the emulator is unaccelerated to the point of being
@@ -732,9 +716,8 @@ function Install-MobileDev {
         if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
         Add-MobileDevMachinePath -Paths $toolPaths
 
-        # The answers were collected up front (see $acceptLicenses/$createAvd
-        # above); the licenses are accepted ONCE here for everything below. The
-        # y feed covers every license sdkmanager can ask for.
+        # The licenses are accepted ONCE here for everything below (see
+        # $acceptLicenses above). The y feed covers every license sdkmanager can ask for.
         if ($acceptLicenses) {
             Add-DotTimingMark -Name 'mobile_dev: SDK packages'
             $yesFeed = (@('y') * 20) -join "`n"
@@ -743,13 +726,6 @@ function Install-MobileDev {
             if ($needPackages) {
                 Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' -ProgressDir $androidHome | Out-Null
             }
-        } elseif ($needPackages) {
-            # run_onchange only re-runs when its OWN rendered content changes
-            # (a template/version-pin edit, not a blanket "every dot up") -
-            # "just re-run dot up" would not actually re-enter this block.
-            # The documented, real re-entry point: clear chezmoi's recorded
-            # script hash so the next apply re-runs this script in full.
-            Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
         }
 
         # A prior adb (from a manual install) and the SDK's own adb can be
@@ -771,20 +747,15 @@ function Install-MobileDev {
         # A default Pixel-like AVD, scripting what Android Studio's wizard
         # used to do (design doc section 3.4). AOSP over Google APIs/Play
         # Store (design doc section 5: lighter, sufficient for most Expo app
-        # testing). Whether to create it was answered up front; the licenses
-        # were accepted by the single --licenses run above.
+        # testing). The licenses were accepted by the single --licenses run above.
         # avdmanager create avd -n <name> -k <image> -d <device>
         if ((Test-Path $avdManagerPath) -and $needAvd) {
-            if ($createAvd) {
-                Add-DotTimingMark -Name 'mobile_dev: system image'
-                Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
-                # avdmanager asks whether to create a custom hardware
-                # profile; "no" keeps the device profile's own default.
-                Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
-            } else {
-                Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
-            }
+            Add-DotTimingMark -Name 'mobile_dev: system image'
+            Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
+            Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
+            # avdmanager asks whether to create a custom hardware
+            # profile; "no" keeps the device profile's own default.
+            Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
         }
     }
 
