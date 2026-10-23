@@ -73,11 +73,19 @@ require "$repo_root/docs/backup-restore.md" 'Do not embed a PAT in a clone URL'
 
 # Both installers must still have a working unauthenticated bootstrap - this
 # contract must not be satisfiable by deleting the clone entirely.
-require "$sh_installer" 'chezmoi init --apply --branch main CtrlCarlitos/dotfiles'
+# DOTFILES_BRANCH picks the branch, main by default (tries a fix on a fresh machine before merge).
+require "$sh_installer" 'chezmoi init --apply --branch "${DOTFILES_BRANCH:-main}" CtrlCarlitos/dotfiles'
 # install.ps1 clones first (git, unauthenticated https) so the package menu and the pins are on
 # disk before chezmoi runs, then applies once from that checkout (2026-10-14 fresh-install fix).
 require "$ps1_installer" "\$SourceUrl = 'https://github.com/CtrlCarlitos/dotfiles.git'"
-require "$ps1_installer" "@('clone', '--branch', 'main', \$SourceUrl, \$SourceDir)"
+require "$ps1_installer" "@('clone', '--branch', \$SourceBranch, \$SourceUrl, \$SourceDir)"
+require "$ps1_installer" "\$SourceBranch = if (\$env:DOTFILES_BRANCH) { \$env:DOTFILES_BRANCH } else { 'main' }"
 require "$ps1_installer" 'chezmoi init --apply'
+# The elevated relaunch re-downloads install.ps1 with a fresh environment: the branch must ride
+# along in both the URL and the command, or a non-admin start silently installs main.
+# shellcheck disable=SC2016  # PowerShell text matched literally, never expanded.
+require "$ps1_installer" 'dotfiles/$InstallerRef/install.ps1'
+# shellcheck disable=SC2016
+require "$ps1_installer" '$cmd = "`$env:DOTFILES_BRANCH='
 
 finish
