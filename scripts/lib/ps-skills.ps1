@@ -872,6 +872,41 @@ function Invoke-OpenCodeSuperpowersRefresh {
     return $ok
 }
 
+# Add $Spec to opencode.json's `plugin` array, creating the file when it is missing or empty. Other
+# keys are kept. Both writes are BOM-less UTF-8: PS 5.1's `Set-Content -Encoding utf8` prepends a
+# BOM, and guardrail's config merge (Go) refuses BOM'd JSON. The file is read as bytes with any BOM
+# stripped, because Serena's registration writes it earlier in the same install through
+# PowerShell's own writers. Content that does not parse warns and stays untouched - never clobber a
+# config we cannot read.
+#
+# The key is probed through PSObject.Properties: the installer runs under Set-StrictMode -Version
+# Latest, where reading $json.plugin off a file without the key throws. Serena's file never has
+# one, so on a fresh Windows install the catch below used to report a parse failure and the plugin
+# never landed (VM run, 2026-10-23). Twin of the sh installer's `.plugin // []` jq merge.
+function Add-OpenCodePluginSpec {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Spec)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $raw = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllBytes($Path) } else { $null }
+    $text = if ($raw) { $utf8.GetString($raw).TrimStart([char]0xFEFF) } else { '' }
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        [IO.File]::WriteAllLines($Path, (@{ plugin = @($Spec) } | ConvertTo-Json), $utf8)
+        return
+    }
+    try {
+        $json = $text | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
+        return
+    }
+    # @(if ...), not if { @(...) }: an if statement's output is enumerated, so a one-entry list
+    # would come back as a bare string and `+ $Spec` would concatenate the two.
+    $plugins = @(if ($json.PSObject.Properties['plugin']) { $json.plugin })
+    if ($plugins -notcontains $Spec) {
+        $json | Add-Member -MemberType NoteProperty -Name plugin -Value @($plugins + $Spec) -Force
+    }
+    [IO.File]::WriteAllLines($Path, ($json | ConvertTo-Json -Depth 10), $utf8)
+}
+
 # $true when a COMPLETE Playwright Chromium build is in its browser cache (PLAYWRIGHT_BROWSERS_PATH
 # unless it is the literal "0", else %LOCALAPPDATA%\ms-playwright - ~\.cache\ms-playwright where
 # LOCALAPPDATA is unset). Playwright marks a finished download with an INSTALLATION_COMPLETE file;

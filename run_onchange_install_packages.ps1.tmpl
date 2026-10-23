@@ -2124,41 +2124,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         Invoke-Quietly -Description "Failed to install Superpowers for OpenCode" -Action { npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$ocConfigDir" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null }
         }
 
-        # Both writes below must be BOM-less UTF-8: PS 5.1's
-        # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
-        # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
-        # "invalid character (the BOM's first byte) looking for beginning of value" failed
-        # every Windows CI run's opencode wiring while the BOM-less Linux
-        # side merged fine. Same WriteAllLines idiom as the mp-code-review
-        # patcher below.
-        # Read as bytes + strip any BOM before parsing: this file is written
-        # by several tools in the same install (Serena's registration runs
-        # earlier and uses PowerShell's own writers), and a BOM'd or empty
-        # file made the old bare `Get-Content | ConvertFrom-Json` throw -
-        # the catch then skipped wiring superpowers entirely on fresh
-        # installs (confirmed live: "Could not parse existing opencode.json"
-        # on a fresh Windows box, plugin key never landed). Unparseable
-        # non-empty content still warns with the reason and leaves the file
-        # alone - never clobber a config we can't read.
-        $ocRaw = if (Test-Path $ocConfig) { [IO.File]::ReadAllBytes($ocConfig) } else { $null }
-        $ocText = if ($ocRaw) { [Text.UTF8Encoding]::new($false).GetString($ocRaw).TrimStart([char]0xFEFF) } else { '' }
-        if ([string]::IsNullOrWhiteSpace($ocText)) {
-            $ocNew = @{ plugin = @($ocPluginSpec) } | ConvertTo-Json
-            [System.IO.File]::WriteAllLines($ocConfig, $ocNew, (New-Object System.Text.UTF8Encoding($false)))
-        } else {
-            try {
-                $ocJson = $ocText | ConvertFrom-Json -ErrorAction Stop
-                if (-not $ocJson.plugin) {
-                    $ocJson | Add-Member -MemberType NoteProperty -Name plugin -Value @($ocPluginSpec) -Force
-                } elseif ($ocJson.plugin -notcontains $ocPluginSpec) {
-                    $ocJson.plugin = @($ocJson.plugin) + $ocPluginSpec
-                }
-                $ocMerged = $ocJson | ConvertTo-Json -Depth 10
-                [System.IO.File]::WriteAllLines($ocConfig, $ocMerged, (New-Object System.Text.UTF8Encoding($false)))
-            } catch {
-                Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
-            }
-        }
+        # Add-OpenCodePluginSpec (scripts/lib/ps-skills.ps1, inlined above): BOM-less, StrictMode-safe
+        # merge into the opencode.json Serena may already have written.
+        Add-OpenCodePluginSpec -Path $ocConfig -Spec $ocPluginSpec
     }
 }
 {{- end }}
