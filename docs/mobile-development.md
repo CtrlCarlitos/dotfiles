@@ -86,13 +86,11 @@ Windows-side ADB server through the bridge below. Two cases change that:
 - If an `adb` is already on `PATH` (a distro package, say), the installer
   leaves it alone and installs nothing.
 - Downloading `platform-tools` means accepting Google's Android SDK
-  licenses. The installer asks first - before any of the group's downloads
-  start, so you can answer and walk away - and only in an interactive run.
-  A non-interactive `dot up` skips the licenses and the download, and its
-  warning tells you how to re-run from a terminal
-  (`chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`). See
-  "Keeping it current" under Linux and macOS for what `dot upgrade` and
-  `dot doctor` do about the group afterwards; both apply to WSL too.
+  licenses. The installer does not ask: `mobile_dev = true` in
+  `chezmoi.toml` is your consent, so an unattended `dot up` installs it too,
+  and says what it is accepting as it does. Set `mobile_dev = false` to opt
+  out. See "Keeping it current" under Linux and macOS for what `dot upgrade`
+  and `dot doctor` do about the group afterwards; both apply to WSL too.
 
 `dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
 templating involved - it is a plain file applied identically everywhere) and
@@ -156,14 +154,11 @@ The installer warns when it finds two different `adb` builds, because
 mismatched versions kill each other's server.
 
 The system image is several GB. Downloading it, `platform-tools` and the
-emulator means accepting Google's Android SDK licenses, so the installer
-asks first - before the JDK, Maestro, agent-device or command-line tools
-start downloading, so the whole group then runs unattended - and only in an
-interactive run. The wait for your answer is its own line in the closing
-`Timings` summary (`Android licenses`), not booked against the downloads.
-A non-interactive `dot up` still installs the command-line tools, then
-skips the licenses and everything behind them with a warning. To finish
-from a terminal, run
+emulator means accepting Google's Android SDK licenses. The installer does
+not ask: `mobile_dev = true` in `chezmoi.toml` is your consent, as on
+Windows, so the whole group runs unattended, with or without a terminal, and
+says what it is accepting as it does. Set `mobile_dev = false` to opt out.
+If a step fails, re-run the installer in full with
 `chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`.
 
 ### Keeping it current
