@@ -235,7 +235,7 @@ done
 [ -n "$out" ] && [ -n "$url" ] || exit 22
 case "$url" in
     */install.sh)
-        printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nif [ "${GUARDRAIL_INSTALLER_NEXT:-0}" = 1 ]; then\n    echo "next: run guardrail setup"\nfi\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
+        printf '#!/bin/sh\nif ! IFS= read -r l; then l="<eof>"; fi\nprintf "stdin-read=%%s\\n" "$l" >> "${GUARDRAIL_STDIN_LOG:-/dev/null}"\nprintf "%%s\\n" "$*" >> "${GUARDRAIL_LOG:?}"\nif [ "${GUARDRAIL_INSTALLER_NEXT:-0}" = 1 ]; then\n    echo "next: run guardrail setup"\nfi\nexit ${GUARDRAIL_INSTALLER_RC:-0}\n' >"$out"
         ;;
     */SHA256SUMS)
         sum="$(sha256sum "$(dirname "$out")/install.sh" | cut -d' ' -f1)"
@@ -384,6 +384,18 @@ rm -f "$ghome/.local/bin/guardrail"
 : >"$gtmp/installer.log"
 gh_run true "$gtmp/inst-enabled.log"
 g_assert_ran_with enabled "$gtmp/installer.log"
+
+# Setup runs unattended: the installer gets /dev/null, never the caller's stdin. A terminal
+# there made guardrail's prompt approval mode ask "Approve ...? [y/N]" mid-install instead of
+# arming (fresh-VM run, 2026-10-23). The harness feeds a "y" the installer must not read.
+: >"$gtmp/installer.log"
+: >"$gtmp/installer-stdin.log"
+echo y | GUARDRAIL_STDIN_LOG="$gtmp/installer-stdin.log" gh_run true "$gtmp/inst-stdin.log"
+if grep -Fqx 'stdin-read=<eof>' "$gtmp/installer-stdin.log"; then
+    pass
+else
+    fail "the guardrail installer must run with stdin closed; it read: $(cat "$gtmp/installer-stdin.log")"
+fi
 
 # Non-zero installer exit FAILS the installer's run (unlike the updater).
 : >"$gtmp/installer.log"
