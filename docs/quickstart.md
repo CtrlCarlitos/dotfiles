@@ -160,3 +160,4 @@ Read these when you need them, not now:
 - [Backup & Restore](backup-restore.md) — encrypted portable backups
 - [Versioning & releases](versioning.md) — what `dot version` reports, tags, the changelog
 - [Invariants](invariants.md) — read this before changing templates, ignores or tests
+- [Lab VM validation](vm.md) — validating an install, `dot up` or `dot upgrade` in a Hyper-V lab VM (`Follow docs/vm.md.`)
