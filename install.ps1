@@ -297,7 +297,10 @@ try {
         # Fast-forward only - local commits/edits are respected; on failure
         # (offline, diverged) warn and continue with the existing source.
         Write-Info "Updating existing dotfiles clone..."
-        if ($env:DOTFILES_BRANCH -and ((& git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null) -ne $SourceBranch)) {
+        # Read before the `if`: a `2>` inside an if condition is PSScriptAnalyzer's
+        # PSPossibleIncorrectUsageOfRedirectionOperator (it fails CI's lint).
+        $currentBranch = (& git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null)
+        if ($env:DOTFILES_BRANCH -and $currentBranch -ne $SourceBranch) {
             # `git switch <b>` creates the local branch from origin/<b> on its own once fetched
             if (-not ((Invoke-Git @('-C', $SourceDir, 'fetch', 'origin', $SourceBranch)) -and (Invoke-Git @('-C', $SourceDir, 'switch', $SourceBranch)))) {
                 Write-Info "  could not switch the clone to $SourceBranch (local changes?) - continuing on the current branch"
