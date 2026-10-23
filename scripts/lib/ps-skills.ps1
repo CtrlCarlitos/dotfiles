@@ -343,10 +343,13 @@ function Select-GuardrailConsoleLine {
 # (Write-GuardrailFilteredLine), so the noise reduction is unchanged. The full byte stream still
 # lands in -LogPath, byte for byte, exactly as Tee-Object did.
 #
-# Standard input is deliberately left alone (RedirectStandardInput is never set): it was never the
-# broken half - the installer's keystrokes always reached it - and leaving it unset keeps it
-# attached to the real console exactly as `&` piping did, so a nested prompt still reads the
-# operator's keystrokes.
+# Standard input is redirected and closed at once, so setup runs unattended. Left on the console,
+# guardrail's prompt approval mode (its default) saw a terminal and asked "Approve ...? [y/N]" on
+# the console itself, bypassing these pipes, instead of arming - half an hour into a fresh one-liner
+# install, until the deadline below killed it and aborted the apply (VM run, 2026-10-23). With no
+# terminal, setup follows the exit-code contract in the installer's guardrail section: nobody
+# enrolled -> arm and exit 0 (ADR-0030 bootstrap); an enrolled operator -> exit 3 and the
+# end-of-apply ACTION NEEDED remedy. Same as the sh twin's `</dev/null`.
 #
 # -TimeoutSeconds guards against the installer itself hanging with nothing to read: confirmed live
 # (2026-10-15) that agent-guardrails' own install.ps1, registering planes on an already-installed
@@ -379,6 +382,7 @@ function Invoke-GuardrailInstallerProcess {
     # path, a version tag, "enabled"/"disabled" - never free text, so doubling an embedded quote is
     # the only escape this needs).
     $psi.Arguments = ($ArgumentList | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -386,6 +390,7 @@ function Invoke-GuardrailInstallerProcess {
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
     [void]$proc.Start()
+    $proc.StandardInput.Close()
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     # Same encoding PowerShell's own native-command capture would have decoded these bytes with -
@@ -452,7 +457,7 @@ function Invoke-GuardrailInstallerProcess {
                         $toKill.Reverse()
                         foreach ($pidToKill in $toKill) { Stop-Process -Id $pidToKill -Force -ErrorAction SilentlyContinue }
                     } catch { Write-Verbose "guardrail timeout kill failed: $($_.Exception.Message)" }
-                    Write-Host "  Warning: guardrail installer did not respond within ${TimeoutSeconds}s - it may be waiting on an approval prompt that never reached this console. Try 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
+                    Write-Host "  Warning: guardrail installer did not finish within ${TimeoutSeconds}s and was stopped (full output: $LogPath). Run 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
                     return -1
                 }
                 Write-Host -NoNewline $line.Substring($shownLen)

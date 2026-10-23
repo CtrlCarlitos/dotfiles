@@ -2813,7 +2813,8 @@ function Invoke-GuardrailInstaller {
     # request denied/expired) - warn with the remedy and continue: the binary
     # is installed and current and the existing wiring keeps enforcing, so
     # failing the run buys nothing; Invoke-GuardrailNextStep below ends the
-    # run with the ACTION NEEDED block when steps are pending. Any other
+    # run with the ACTION NEEDED block when steps are pending. A timeout (-1)
+    # is handled the same way. Any other
     # non-zero (failed download/checksum/install/verify, genuine setup
     # failure, usage) fails this script so chezmoi surfaces it and re-runs
     # next apply - the sh twin's set -e contract. The installer's own output
@@ -2823,9 +2824,11 @@ function Invoke-GuardrailInstaller {
         Write-Host "    to finish the re-wiring: run 'guardrail setup' in an interactive terminal, complete the approval, then re-run chezmoi apply" -ForegroundColor Yellow
     } elseif ($code -eq -1) {
         # Invoke-GuardrailInstallerProcess's own timeout sentinel (confirmed live 2026-10-15): it
-        # already printed why and killed the process tree. "exited with code -1" would wrongly
-        # suggest the installer itself returned this.
-        throw "guardrail installer timed out and was killed - see the warning above"
+        # already printed why and killed the process tree. Warn and continue, like exit 3: throwing
+        # here aborted the whole apply - every later section, the remaining dotfiles and the
+        # run_after scripts - over one step whose remedy is `guardrail setup` (VM run, 2026-10-23).
+        # Invoke-GuardrailNextStep still ends the run with ACTION NEEDED while planes are unwired.
+        Write-Host "  Continuing the apply without guardrail's plane wiring (see the warning above)." -ForegroundColor Yellow
     } elseif ($code -ne 0) {
         throw "guardrail installer exited with code $code"
     }
