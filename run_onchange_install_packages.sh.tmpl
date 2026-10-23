@@ -1203,28 +1203,16 @@ install_agent_guardrails() {
     local code=0
     local log="$HOME/.local/state/guardrail/apply.log"
     mkdir -p "$(dirname "$log")"
-    # Terminal line discipline is snapshotted around the call and restored
-    # unconditionally. The installer can stop on an approval prompt
-    # ("Approve register guardrail on planes ...? [y/N]") and reads the answer
-    # from the terminal, but its stdout here is a PIPE (tee + the console
-    # filter), so an isatty(stdout) check inside it sees "not interactive".
-    # A tool that turns echo off to read one key and keys its restore path off
-    # that check leaves the terminal with echo off: the keystrokes still reach
-    # the prompt and the apply runs to completion, yet nothing the operator
-    # types is visible, which is indistinguishable from a hung terminal and
-    # cost a real session a terminal restart. `stty -g` round-trips the whole
-    # mode set, so this repairs whatever the installer left behind without
-    # having to know what it changed. Guards: no-op when stdin is not a
-    # terminal (CI, chezmoi apply under a pipe), and every call is tolerant -
-    # a failed probe must never fail the apply.
-    local tty_state=""
-    if [ -t 0 ] && [ -r /dev/tty ]; then
-        tty_state="$(stty -g </dev/tty 2>/dev/null || true)"
-    fi
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
-    if [ -n "$tty_state" ]; then
-        stty "$tty_state" </dev/tty 2>/dev/null || true
-    fi
+    # stdin is /dev/null: setup runs unattended. With a terminal on stdin,
+    # guardrail's prompt approval mode (the default) asks
+    # "Approve ...? [y/N]" instead of arming, half an hour into an unattended
+    # install - the Windows twin waited on that prompt until its deadline
+    # killed it and the apply aborted (VM run, 2026-10-23). Without one,
+    # setup does what this section's exit-code contract describes: nobody
+    # enrolled -> it arms the planes and exits 0 (ADR-0030 bootstrap); an
+    # enrolled operator -> exit 3, the warning below, and the ACTION NEEDED
+    # remedy from guardrail_next_steps at the end of the apply.
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" </dev/null 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
     rm -rf "$tmp"
     case "$code" in
         0) ;;

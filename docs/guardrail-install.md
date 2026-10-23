@@ -27,13 +27,17 @@ exit-code 3 handling and the allow-baseline recipe._
   3. Run the downloaded file, never piped into a shell:
      - Unix: `sh install.sh --version <pin> --state enabled|disabled`
      - Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Version <pin> -State enabled|disabled`
-- The installer's output streams through untouched: `guardrail setup` prints a
-  WebAuthn approval URL and waits for your passkey.
+- The installer runs with stdin closed (Unix `</dev/null`; Windows redirects and closes
+  it), so `guardrail setup` never stops the apply to ask. With a terminal on stdin,
+  guardrail's default `prompt` approval mode asks `Approve ...? [y/N]` instead of arming;
+  a fresh one-liner install sat on that prompt until the Windows deadline killed it.
+  Without one it arms (no operator enrolled, below) or exits 3 (an enrolled operator).
+  Its output streams to the console and the apply log.
 
 | Consumer | Installer exits 3 (operator action pending) | Installer exits any other non-zero |
 |---|---|---|
 | `run_onchange_install_packages.sh.tmpl` | warning with the remedy; the apply carries on | the script fails, so `chezmoi apply` fails and the next apply runs it again |
-| `run_onchange_install_packages.ps1.tmpl` | warning with the remedy; the apply carries on | the script throws, with the same effect |
+| `run_onchange_install_packages.ps1.tmpl` | warning with the remedy; the apply carries on (also when the installer is still running after 180 s and is stopped) | the script throws, with the same effect |
 | `scripts/update_ai_tools.sh` / `.ps1` | a warning | a warning; the updater carries on with the remaining tools |
 
 Exit 3 means only "operator action pending" (not enrolled, no interactive terminal,
