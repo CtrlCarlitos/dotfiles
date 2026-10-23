@@ -22,7 +22,7 @@ skills without the whole thing.
   `vercel-labs/skills` (`find-skills`), `vercel-labs/agent-browser`
   (`agent-browser`), `CtrlCarlitos/skills` (`skill-creator`, our fork, and
   `code-search`, two separate adds), `Leonxlnx/taste-skill`
-  (`design-taste-frontend`, `redesign-existing-projects`).
+  (`design-taste-frontend`).
 - **Agents**: Claude Code, OpenCode and Codex through the `skills` CLI
   (`.chezmoidata/agents.yaml` `skills.agents`); Antigravity CLI by copying the
   verified Claude copy; generated commands for OpenCode only.
@@ -318,6 +318,18 @@ npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-tast
 Overlap, accepted on purpose: `design-taste-frontend` fires on the same work
 as `anthropics/frontend-design`, which stays installed. If they double-trigger
 in practice, drop one; nothing else depends on either.
+
+**2026-10-19: one skill.** Upstream folded `redesign-existing-projects` into
+`design-taste-frontend` ("Clean up the repo: one skill", `825e306`), so the
+installers now ask for `design-taste-frontend` alone:
+
+```sh
+npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend -a claude-code opencode codex -g -y --copy
+```
+
+The old name is in `scripts/retired-agent-skills.txt`, which removes the stale
+copy from machines that installed it. Asking for it after the change failed it
+once per agent on every run and kept the source from ever counting as up to date.
 
 Considered from the same repo and left out:
 

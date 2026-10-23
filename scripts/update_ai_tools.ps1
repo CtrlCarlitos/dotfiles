@@ -245,9 +245,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  skill-creator update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
-    # taste skills (Leonxlnx/taste-skill) - design-taste-frontend (new-page visual direction) + redesign-existing-projects (audit + fix existing UI)
-    Invoke-SkillsSource -Label 'taste skills' -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
-        npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>$null | Out-Null
+    # taste skill (Leonxlnx/taste-skill) - design-taste-frontend; upstream folded redesign-existing-projects into it (2026-10-19)
+    Invoke-SkillsSource -Label 'taste skills' -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend -a $skAgents -g -y --copy 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  taste skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
