@@ -26,10 +26,17 @@ mkdir -p "$bin" "$home"
 
 # Everything install.sh checks for before reaching the chezmoi step (the
 # 7zz stub keeps the p7zip-full apt install out of the picture).
-for c in git curl gpg wget 7zz; do
+for c in curl gpg wget 7zz; do
     printf '#!/bin/sh\nexit 0\n' >"$bin/$c"
     chmod +x "$bin/$c"
 done
+# git: install.sh clones the source before chezmoi runs (step 1.3) - a clone leaves a .git behind
+cat >"$bin/git" <<'EOF'
+#!/bin/sh
+if [ "$1" = clone ]; then for a; do d="$a"; done; mkdir -p "$d/.git"; fi
+exit 0
+EOF
+chmod +x "$bin/git"
 
 run_install() { # $1 = destination for combined output; writes the exit code to $rc
     local out_file="$1"

@@ -73,11 +73,16 @@ require "$repo_root/docs/backup-restore.md" 'Do not embed a PAT in a clone URL'
 
 # Both installers must still have a working unauthenticated bootstrap - this
 # contract must not be satisfiable by deleting the clone entirely.
-require "$sh_installer" 'chezmoi init --apply --branch main CtrlCarlitos/dotfiles'
+# Both clone first (git, unauthenticated https) so the package menu and the pins are on disk
+# before chezmoi runs, then apply once from that checkout (install.ps1 2026-10-14, install.sh
+# 2026-10-23); DOTFILES_BRANCH picks the branch, main by default.
+require "$sh_installer" 'SOURCE_URL="https://github.com/CtrlCarlitos/dotfiles.git"'
+require "$sh_installer" 'git clone --branch "$SOURCE_BRANCH" "$SOURCE_URL" "$SOURCE_DIR"'
+require "$sh_installer" 'chezmoi init --apply'
 # install.ps1 clones first (git, unauthenticated https) so the package menu and the pins are on
 # disk before chezmoi runs, then applies once from that checkout (2026-10-14 fresh-install fix).
 require "$ps1_installer" "\$SourceUrl = 'https://github.com/CtrlCarlitos/dotfiles.git'"
-require "$ps1_installer" "@('clone', '--branch', 'main', \$SourceUrl, \$SourceDir)"
+require "$ps1_installer" "@('clone', '--branch', \$SourceBranch, \$SourceUrl, \$SourceDir)"
 require "$ps1_installer" 'chezmoi init --apply'
 
 finish

@@ -3245,6 +3245,12 @@ main() {
     # Quiet apt (see quiet_apt_enable in scripts/lib/agent-skills.sh): only now that the package
     # manager is known, so `command -v apt` checks on other systems are never fooled by it.
     if [ "$PKG_MANAGER" = apt ]; then quiet_apt_enable; fi
+    # A leftover apt stuck on a debconf dialog would hold the lock for the whole run (see
+    # apt_lock_preflight): stop here with the fix instead of failing every apt call after a wait.
+    if [ "$PKG_MANAGER" = apt ] && ! apt_lock_preflight; then
+        error "Stopping - the package system is locked by a process that will not finish."
+        exit 1
+    fi
 
     # The npm sudo decision, computed ONCE for the whole run (#124): sudo
     # only for the system-owned /usr prefix - a user-managed npm (nvm,

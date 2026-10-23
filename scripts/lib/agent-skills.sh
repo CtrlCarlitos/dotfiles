@@ -395,13 +395,32 @@ agent_browser_doctor() {
 # sudo command, passes through untouched. Done with functions so none of the ~40 call sites
 # (pinned by tests/package_catalog_contract.sh) has to change, and
 # with NO pipe, so prompts, sudo's password request and exit codes behave exactly as before.
-# DOT_APT_VERBOSE=1 leaves apt alone. Call it only once the package manager is known to be apt.
+# Call it only once the package manager is known to be apt.
+#
+# Two things are NOT optional, so DOT_APT_VERBOSE=1 (which only brings apt's output back to the
+# terminal) keeps them:
+#   - installs run non-interactively: DEBIAN_FRONTEND=noninteractive through `env` (sudo resets
+#     the environment), keeping a changed conffile (confdef/confold) and needrestart's auto mode -
+#     dotupgrade.sh's apt_upgrade_run does the same for upgrades. A fresh Ubuntu 26.04 VM
+#     (2026-10-23) stopped on iperf3's "Start Iperf3 as a daemon automatically?" debconf dialog;
+#     Ctrl+C killed the installer but left that sudo/apt/whiptail behind holding the dpkg lock,
+#     and the next two runs did nothing but "Waiting for cache lock". Quiet mode would have been
+#     worse: stdout goes to apt.log there, so the dialog would have hung with nothing on screen.
+#   - install and update wait for the dpkg lock a bounded time (DOT_APT_LOCK_TIMEOUT seconds,
+#     default 600) instead of apt-get's default of failing at once - first boot's
+#     unattended-upgrades holds it legitimately - or apt's of waiting forever.
 #-------------------------------------------------------------------------------
 _qapt_rewrite() {
     QAPT_ARGS=("$@")
     QAPT_CAPTURE=0
+    local quiet=() lockwait=(-o "DPkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}")
+    if [ "${QAPT_VERBOSE:-}" != 1 ]; then quiet=(-qq); QAPT_CAPTURE=1; fi
     case "$1:${2:-}" in
-        apt:install | apt:update | apt-get:install | apt-get:update) QAPT_ARGS=(apt-get -qq "${@:2}"); QAPT_CAPTURE=1 ;;
+        apt:install | apt-get:install)
+            QAPT_ARGS=(env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get ${quiet[@]+"${quiet[@]}"} "${lockwait[@]}"
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "${@:2}") ;;
+        apt:update | apt-get:update) QAPT_ARGS=(apt-get ${quiet[@]+"${quiet[@]}"} "${lockwait[@]}" "${@:2}") ;;
+        *) QAPT_CAPTURE=0 ;;
     esac
 }
 
@@ -435,7 +454,7 @@ _qapt_run() {
 }
 
 quiet_apt_enable() {
-    [ "${DOT_APT_VERBOSE:-}" != 1 ] || return 0
+    QAPT_VERBOSE="${DOT_APT_VERBOSE:-}" # decided once, like the shims themselves
     # shellcheck disable=SC2317  # defined here, called by the installer's own commands
     sudo() {
         if [ "${1:-}" = apt ] || [ "${1:-}" = apt-get ]; then
@@ -449,7 +468,31 @@ quiet_apt_enable() {
     apt() { _qapt_rewrite apt "$@"; _qapt_run "${QAPT_ARGS[@]}"; }
     # shellcheck disable=SC2317
     apt-get() { _qapt_rewrite apt-get "$@"; _qapt_run "${QAPT_ARGS[@]}"; }
-    info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it; ~/.local/state/dotfiles/apt.log keeps it); errors are always shown."
+    [ "$QAPT_VERBOSE" = 1 ] ||
+        info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it; ~/.local/state/dotfiles/apt.log keeps it); errors are always shown."
+}
+
+# apt_lock_preflight - before the first apt call, name whoever holds the package system instead
+# of letting apt print "Waiting for cache lock ... held by process N" until someone gives up
+# (two whole runs of it on 2026-10-23 - see quiet_apt_enable). A package manager that is merely
+# busy (first boot's unattended-upgrades) is reported and waited for by the bounded lock timeout;
+# one sitting under a debconf dialog (whiptail/dialog) is a leftover of an interrupted run that
+# will never finish, so this prints how to clear it and returns 1 for the caller to stop.
+# Processes are found by name (pgrep -x matches the 15-char comm, hence unattended-upgr): the
+# lock files themselves are root-only, and nothing has prompted for sudo yet.
+apt_lock_preflight() {
+    local holders dialogs pid etime
+    # unattended-upgrade-shutdown shares the comm but only idles until shutdown - never a holder
+    holders="$(pgrep -a -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' 2>/dev/null | grep -v 'unattended-upgrade-shutdown')" || return 0
+    warn "Another package manager is running - apt waits for it (up to ${DOT_APT_LOCK_TIMEOUT:-600}s per call):"
+    while read -r pid _; do
+        etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+        printf '    %s (running %s)\n' "$(grep -E "^$pid " <<<"$holders")" "${etime:-?}" >&2
+    done <<<"$holders"
+    dialogs="$(pgrep -x 'whiptail|dialog' 2>/dev/null)" || return 0
+    warn "...and it is stuck on a debconf question no one can see (left behind by an interrupted run?) - it will never finish."
+    warn "Clear it, then re-run:  sudo kill $(printf '%s\n' "$holders" | cut -d' ' -f1 | tr '\n' ' ')$(printf '%s' "$dialogs" | tr '\n' ' ' | sed 's/ $//') && sudo dpkg --configure -a"
+    return 1
 }
 
 #-------------------------------------------------------------------------------
@@ -798,7 +841,7 @@ github_tool_install() {
     # shellcheck disable=SC2086  # $run_as is "sudo", "dot_sudo" or empty (root): word-split on purpose
     case "$asset" in
         *.deb)
-            $run_as dpkg -i "$asset" >/dev/null || $run_as apt-get install -f -y >/dev/null || rc=1
+            $run_as env DEBIAN_FRONTEND=noninteractive dpkg -i "$asset" >/dev/null || $run_as apt-get install -f -y >/dev/null || rc=1
             ;;
         *.zip)
             if ! command -v unzip >/dev/null 2>&1; then

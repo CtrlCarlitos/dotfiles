@@ -41,11 +41,17 @@ run() {
 }
 nl='
 '
+# What an install becomes (apt-get, non-interactive, bounded lock wait, keep changed conffiles) - as
+# sudo sees it (`env` carries the variables past sudo's env_reset) and as apt-get itself sees it.
+opts='-o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold'
+ENV='env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a'
+I="apt-get -qq $opts install"
+U='apt-get -qq -o DPkg::Lock::Timeout=600 update'
 
 # --- every install and update goes to apt-get -qq, through sudo or as root --------------------------
 out="$(run 'quiet_apt_enable; sudo apt install -y git curl; sudo apt-get install -y gpg; sudo apt update -y; apt install -y wget; apt-get update')"
-want="sudo apt-get -qq install -y git curl${nl}apt-get -qq install -y git curl${nl}sudo apt-get -qq install -y gpg${nl}apt-get -qq install -y gpg${nl}sudo apt-get -qq update -y${nl}apt-get -qq update -y${nl}apt-get -qq install -y wget${nl}apt-get -qq update"
-[ "$out" = "$want" ] || fail "install/update must become apt-get -qq, with sudo kept (got: $(printf '%s' "$out" | tr '\n' '|'))"
+want="sudo $ENV $I -y git curl${nl}$I -y git curl${nl}sudo $ENV $I -y gpg${nl}$I -y gpg${nl}sudo $U -y${nl}$U -y${nl}$I -y wget${nl}$U"
+[ "$out" = "$want" ] || fail "install must become non-interactive apt-get -qq and update apt-get -qq, both with a lock timeout and sudo kept (got: $(printf '%s' "$out" | tr '\n' '|'))"
 pass
 
 # --- everything else passes through untouched ------------------------------------------------------
@@ -56,7 +62,7 @@ pass
 
 # --- the argument shapes the installer really uses -----------------------------------------------------
 out="$(run 'quiet_apt_enable; sudo apt install -f -y; sudo apt install -y ./pkg.deb')"
-want="sudo apt-get -qq install -f -y${nl}apt-get -qq install -f -y${nl}sudo apt-get -qq install -y ./pkg.deb${nl}apt-get -qq install -y ./pkg.deb"
+want="sudo $ENV $I -f -y${nl}$I -f -y${nl}sudo $ENV $I -y ./pkg.deb${nl}$I -y ./pkg.deb"
 [ "$out" = "$want" ] || fail "install -f -y and a local .deb path must keep their arguments (got: $(printf '%s' "$out" | tr '\n' '|'))"
 pass
 
@@ -106,7 +112,7 @@ out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" PATH="$tmp/bin:$PATH" bash "$t
 grep -Fxq 'E: on stderr' "$tmp/stderr" || fail "stderr must pass through live even when stdout is captured (got: $(tr '\n' '|' <"$tmp/stderr"))"
 grep -Fq 'Selecting previously unselected package libxt-dev.' "$state/dotfiles/apt.log" 2>/dev/null \
     || fail "the captured dpkg output must land in \$XDG_STATE_HOME/dotfiles/apt.log (got: $(tr '\n' '|' <"$state/dotfiles/apt.log" 2>/dev/null))"
-grep -Eq '^=== [0-9T:-]+ .*apt-get -qq install -y libxt-dev' "$state/dotfiles/apt.log" 2>/dev/null \
+grep -Eq '^=== [0-9T:-]+ .*DEBIAN_FRONTEND=noninteractive .*apt-get -qq .*install -y libxt-dev' "$state/dotfiles/apt.log" 2>/dev/null \
     || fail "every captured call must start with a dated header naming the command (got: $(tr '\n' '|' <"$state/dotfiles/apt.log" 2>/dev/null))"
 pass
 out="$(CALLS="$tmp/calls" XDG_STATE_HOME="$state" FAKE_EXIT=100 PATH="$tmp/bin:$PATH" bash "$tmp/snippet.sh" 2>/dev/null)"
@@ -135,10 +141,15 @@ EOF
     chmod +x "$tmp/bin/$t"
 done
 
-# --- off switch, and nothing is defined before the call ----------------------------------------------------
+# --- verbose drops only the quieting, and nothing is defined before the call --------------------------------
+# DOT_APT_VERBOSE=1 used to leave apt alone entirely - and [data.logging] verbose = true sets it, so
+# a fresh Ubuntu 26.04 VM (2026-10-23) stopped on iperf3's debconf dialog, and Ctrl+C left that apt
+# holding the dpkg lock for the next two runs. Verbose shows apt's output; it never lets apt ask.
 out="$(run 'DOT_APT_VERBOSE=1 quiet_apt_enable; sudo apt install -y git; apt update')"
-want="sudo apt install -y git${nl}apt install -y git${nl}apt update"
-[ "$out" = "$want" ] || fail "DOT_APT_VERBOSE=1 must leave apt alone (got: $(printf '%s' "$out" | tr '\n' '|'))"
+want="sudo $ENV apt-get $opts install -y git${nl}apt-get $opts install -y git${nl}apt-get -o DPkg::Lock::Timeout=600 update"
+[ "$out" = "$want" ] || fail "DOT_APT_VERBOSE=1 must keep installs non-interactive and lock-bounded, without -qq (got: $(printf '%s' "$out" | tr '\n' '|'))"
+out="$(run 'export DOT_APT_LOCK_TIMEOUT=30; quiet_apt_enable; apt-get update')"
+[ "$out" = "apt-get -qq -o DPkg::Lock::Timeout=30 update" ] || fail "DOT_APT_LOCK_TIMEOUT must set the lock wait (got: $out)"
 out="$(run 'sudo apt install -y git')"
 want="sudo apt install -y git${nl}apt install -y git"
 [ "$out" = "$want" ] || fail "before quiet_apt_enable nothing may change (got: $(printf '%s' "$out" | tr '\n' '|'))"
@@ -147,6 +158,46 @@ case "$(cat "$tmp/types")" in
     "file file file" | "file  file" | " file " | "file file ") ;;
     *) fail "the library must not define apt/sudo/apt-get until quiet_apt_enable runs, so macOS' command -v apt stays honest (got: $(cat "$tmp/types"))" ;;
 esac
+pass
+
+# --- apt_lock_preflight: name the holder; stop only for one stuck on a debconf dialog ----------------------
+# The 2026-10-23 incident, replayed with a fake pgrep/ps: runs 2 and 3 printed "Waiting for cache lock"
+# for minutes behind an apt from run 1 that sat under an invisible whiptail. unattended-upgrade-shutdown
+# shares unattended-upgrade's 15-char comm but only idles until shutdown, so it is never a holder.
+cat >"$tmp/bin/pgrep" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *whiptail*) out="${FAKE_DIALOGS:-}" ;;
+    *) out="${FAKE_HOLDERS:-}" ;;
+esac
+[ -n "$out" ] || exit 1
+printf '%s\n' "$out"
+EOF
+printf '#!/bin/sh\necho " 16:04"\n' >"$tmp/bin/ps"
+chmod +x "$tmp/bin/pgrep" "$tmp/bin/ps"
+preflight() { # env assignments as arguments; prints "rc=N" after the combined output
+    env PATH="$tmp/bin:$PATH" "$@" bash -c '. "$1"; rc=0; apt_lock_preflight || rc=$?; echo "rc=$rc"' _ "$repo_root/scripts/lib/agent-skills.sh" 2>&1
+}
+idle='1276 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal'
+stuck='12942 apt install -y net-tools iperf3'
+out="$(preflight FAKE_HOLDERS="$idle")"
+[ "$out" = "rc=0" ] || fail "an idle unattended-upgrade-shutdown is not a lock holder (got: $(printf '%s' "$out" | tr '\n' '|'))"
+out="$(preflight FAKE_HOLDERS="$stuck")"
+case "$out" in
+    *'12942 apt install -y net-tools iperf3 (running 16:04)'*rc=0) ;;
+    *) fail "a busy package manager is named with its age and waited for, not fatal (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+out="$(preflight FAKE_HOLDERS="$idle
+$stuck" FAKE_DIALOGS=12988)"
+case "$out" in
+    *'stuck on a debconf question'*'sudo kill 12942 12988 && sudo dpkg --configure -a'*rc=1) ;;
+    *) fail "an apt under a debconf dialog must stop the run with the exact clean-up command (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+case "$out" in *1276*) fail "the clean-up command must not kill unattended-upgrade-shutdown (got: $(printf '%s' "$out" | tr '\n' '|'))" ;; esac
+pass
+tpl_call="$(grep -n '! apt_lock_preflight' "$repo_root/run_onchange_install_packages.sh.tmpl" | head -1 | cut -d: -f1)"
+qa_call="$(awk '!/^[[:space:]]*#/ && /quiet_apt_enable/ { print NR; exit }' "$repo_root/run_onchange_install_packages.sh.tmpl")"
+{ [ -n "$tpl_call" ] && [ "$tpl_call" -gt "$qa_call" ]; } || fail "the installer must run apt_lock_preflight right after quiet_apt_enable, before any apt call"
 pass
 
 # --- wiring: enabled only once apt is the known package manager --------------------------------------------
