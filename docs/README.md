@@ -44,6 +44,7 @@ are reference.
 - [Remote Agent Sessions](remote-agent-sessions.md) — tmux/psmux across desk and phone: canonical keys, detach/attach, recovery
 - [Remote Access](remote-access.md) — `dot remote`: scripted SSH/RDP/tmux plumbing and the optional Cloudflare Access browser path
 - [Testing the dotfiles](testing.md) — the per-platform verify/fix playbook, plus how the test suite and CI run
+- [Lab VM validation](vm.md) — the agent prompt for Hyper-V lab VMs: hostname-based tracking issue, run records, handoff (`Follow docs/vm.md.`)
 - [Config Example](chezmoi.toml.example) — complete annotated `chezmoi.toml`
 - [Invariants](invariants.md) — the expensive lessons; read before changing templates, ignores or tests
 

@@ -14,3 +14,9 @@
 Use ripgrep (`rg -n`, narrow with `--glob`) and read the hit at its line
 range. `git grep <pattern> <ref>` for anything about a tag or commit that is
 not checked out.
+
+## Lab VM validation
+
+`docs/vm.md` is the prompt for validating these dotfiles inside a Hyper-V lab
+VM. It runs only when the user explicitly invokes it (`Follow docs/vm.md.`).
+Reading this file or the docs does not start it.

@@ -1,7 +1,10 @@
 # Testing the dotfiles, per platform
 
 The playbook a coding agent (or a human) follows to verify — and, where safe,
-fix — that this repo installs and applies cleanly on a given platform. Four
+fix — that this repo installs and applies cleanly on a given platform. In a
+Hyper-V lab VM, [Lab VM validation](vm.md) wraps this playbook: one prompt
+that finds the machine's tracking issue from its hostname and carries the run
+history across checkpoint restores. Four
 older per-platform guides (2026-09-11) said the same things four times; this
 page is the shared core plus one delta section per platform.
 
@@ -41,7 +44,13 @@ group on the matching `[data.packages]` toggle, so "what ran?" is answered by
    manual `git config` edits can modify files chezmoi owns. Re-run
    `chezmoi status` after any side step and resolve drift before concluding.
 8. **Before pushing: stop and confirm with the user.** Show the diff and
-   findings first.
+   findings first. The one standing exception is a workflow the user
+   explicitly invokes that grants publishing authority itself, such as
+   [Lab VM validation](vm.md) (`Follow docs/vm.md.`). Invoking it is that
+   confirmation, but only for what it names: commits and pushes to the task
+   branch, its PR, and the machine's tracking issue. Force-pushes, merges,
+   other destructive steps and changes to an established requirement still
+   need their own confirmation.
 
 ## Procedure (every platform)
 
