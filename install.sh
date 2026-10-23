@@ -375,10 +375,7 @@ else
      # `git clone -c ...`, which writes the value into the new repo's config
      # and recreates this bug. tests/installer_url_credentials_contract.sh
      # pins all of that.
-     #
-     # DOTFILES_BRANCH (default main) installs another branch - how a fix is tried on a fresh
-     # machine before it is merged (install.ps1's twin; an existing clone is not switched here).
-     run_chezmoi_with_retry chezmoi init --apply --branch "${DOTFILES_BRANCH:-main}" CtrlCarlitos/dotfiles
+     run_chezmoi_with_retry chezmoi init --apply --branch main CtrlCarlitos/dotfiles
   fi
 fi
 
