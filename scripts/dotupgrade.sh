@@ -228,31 +228,62 @@ dot_timing_mark 'system packages'
 # keeps everything on the terminal, prompts included.
 #
 # A dpkg hook (needrestart's own "restart these services?" prompt when upgrading a package that
-# owns a running service, e.g. openssh-server, is the one this was first diagnosed from - a WSL
-# `dot upgrade --yes` sat for 37m53s on 14 packages that took about a minute once `kill -CONT`'d
-# by hand, 2026-10-14) can try its own prompt outside DEBIAN_FRONTEND entirely. NEEDRESTART_MODE=a
-# tells it to restart services on its own, the same unattended-upgrades-style default as the
-# confold/confdef flags above - but something in the chain reading a terminal while backgrounded
-# does not need needrestart specifically: confirmed live (issue #431 Run 7, Ubuntu 26.04 desktop,
-# needrestart not even installed there) via `strace -p` on the stopped child: SIGTTIN, same
-# symptom, different trigger. The structural fix is the same either way: this used to capture
-# output via `out="$(... 2>&1)"`, a command substitution - an extra subshell/pipe layer around a
-# `sudo` call that itself allocates its own pty (`use_pty`), nested exactly the way `ps`/`strace`
-# showed the stopped process's controlling terminal was not the one it ended up reading. The
-# installer's own quiet-apt path (`_qapt_run`, lib/agent-skills.sh) avoids this entirely with a
-# plain file redirect instead of a command substitution; this does the same.
+# owns a running service) can try its own prompt outside DEBIAN_FRONTEND entirely - the original
+# diagnosis (a WSL `dot upgrade --yes` that sat for 37m53s on 14 packages, 2026-10-14).
+# NEEDRESTART_MODE=a tells it to restart services on its own, the same unattended-upgrades-style
+# default as the confold/confdef flags above.
+#
+# That is not the whole story: confirmed live (issue #431 Run 7, Ubuntu 26.04 desktop, needrestart
+# not even installed there) the identical symptom - a grandchild apt-get stuck in `ps` state T -
+# recurs with no needrestart involved at all. `strace -p` on the stopped pid showed SIGTTIN;
+# moments later its process group matched the controlling pty's foreground group exactly, with no
+# other apparent change - proving the mismatch at the instant of the stop was a one-time race, not
+# a persistent misconfiguration. sudo's own pty allocation (`use_pty`) creates a new pty for the
+# privileged command and must install that command's process group as its foreground group before
+# anything in that command tries to read it; a descendant that gets there first loses the race and
+# takes one stray SIGTTIN. Nothing else here ever notices or resumes a stopped grandchild - this
+# script is not an interactive shell, so there is no job-control loop watching for one - so without
+# help it sits stopped forever. `sudo kill -CONT <pid>` by hand let the exact same transaction
+# finish normally seconds later. apt_resume_stopped is that CONT, automated: a background loop,
+# running only while the privileged apt-get call below is in flight, that continues any apt/dpkg
+# process it finds stopped. (An earlier fix here replaced a command-substitution output capture
+# with the plain file redirect below, matching the installer's own `_qapt_run` - a reasonable
+# hardening on its own, but not sufficient by itself: the race is in sudo's pty setup, upstream of
+# how this script captures output, so it reproduced with either capture method.)
+#-------------------------------------------------------------------------------
+apt_resume_stopped() {
+    # Closes all three streams (invariant: a background job started from a function must close
+    # both, or its caller's command substitution - here, catching this function's own `echo $!` -
+    # blocks until the BACKGROUND loop exits too, since it would otherwise still hold the
+    # inherited pipe open for up to the 30-minute cap below, not just for the echo).
+    (
+        local i=0 pid stat
+        while [ "$i" -lt 6000 ]; do
+            for pid in $(pgrep -x 'apt|apt-get|dpkg' 2>/dev/null); do
+                stat="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+                case "$stat" in T*) sudo kill -CONT "$pid" 2>/dev/null ;; esac
+            done
+            sleep 0.3
+            i=$((i + 1))
+        done
+    ) </dev/null >/dev/null 2>&1 &
+    echo $!
+}
 apt_upgrade_run() {
-    local apt_q=("$@") out n
+    local apt_q=("$@") out n watcher rc=0
+    watcher="$(apt_resume_stopped)"
     if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
-        sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" upgrade -y
-        return $?
+        sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" upgrade -y || rc=$?
+        kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+        return "$rc"
     fi
     out="$(mktemp 2>/dev/null)" || out=""
     if [ -z "$out" ]; then
         sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
             -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
-            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y
-        return $?
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y || rc=$?
+        kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+        return "$rc"
     fi
     # shellcheck disable=SC2024  # the redirect targets $out, already owned by this
     # (unprivileged) user via mktemp - only the command itself needs root, which sudo grants
@@ -265,6 +296,7 @@ apt_upgrade_run() {
         cat "$out"
         echo "  apt upgrade failed - continuing with the rest of the sweep."
     fi
+    kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
     rm -f "$out"
     return 0
 }
