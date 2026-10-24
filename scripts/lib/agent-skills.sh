@@ -349,16 +349,34 @@ install_maestro() {
 # a one-line summary plus one line per warn/fail check, instead of the ~3 KB JSON blob it
 # used to dump on every run. Output that is not the expected JSON (or no jq) is printed
 # raw, never dropped. Returns doctor's own exit status.
+#
+# Under agent_browser_sandbox_workaround's --no-sandbox, doctor runs with --quick: its live
+# launch probe ignores ~/.agent-browser/config.json, and AGENT_BROWSER_ARGS and --args with it
+# (agent-browser 0.39.2), so on a restricted kernel it failed with "No usable sandbox!" on
+# every run while `agent-browser open` launched Chrome fine (issue #431 Run 8, clean Ubuntu
+# 26.04 checkpoint). The skip is said on its own line.
 #-------------------------------------------------------------------------------
 agent_browser_doctor() {
-    local out rc=0
-    out="$(net_timeout 60 "$1" doctor --json 2>&1)" || rc=$?
+    local out rc=0 quick=""
+    agent_browser_no_sandbox_set && quick=1
+    out="$(net_timeout 60 "$1" doctor --json ${quick:+--quick} 2>&1)" || rc=$?
     if command -v jq &>/dev/null && printf '%s' "$out" | jq -e '.summary' >/dev/null 2>&1; then
         printf '%s' "$out" | jq -b -r '"agent-browser doctor: \(.summary.pass // 0) pass, \(.summary.warn // 0) warn, \(.summary.fail // 0) fail", (.checks[]? | select(.status == "warn" or .status == "fail") | "  \(.status): \(.message)" + (if .fix then " (fix: \(.fix))" else "" end))'
     else
         printf '%s\n' "$out"
     fi
+    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox in ~/.agent-browser/config.json this kernel needs)"
     return "$rc"
+}
+
+# agent_browser_no_sandbox_set - 0 when the kernel restricts unprivileged user namespaces AND
+# ~/.agent-browser/config.json passes --no-sandbox (what agent_browser_sandbox_workaround sets).
+# A user's own args without it keep doctor's full launch test, so a real failure still shows.
+agent_browser_no_sandbox_set() {
+    local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
+    [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 1
+    command -v jq &>/dev/null || return 1
+    jq -b -e '(.args // "") | tostring | contains("--no-sandbox")' "$HOME/.agent-browser/config.json" >/dev/null 2>&1
 }
 
 #-------------------------------------------------------------------------------

@@ -81,4 +81,37 @@ out5="$(PATH="$emptybin" HOME="$h5" AGENT_BROWSER_APPARMOR_PROC="$procfile5" \
 case "$out5" in *'jq unavailable'*) ;; *) fail "no jq: must warn (got: $out5)" ;; esac
 [ -e "$h5/.agent-browser/config.json" ] && fail "no jq: must not write a config it never validated" || pass
 
+# agent_browser_doctor: doctor's live launch probe ignores config.json's args (agent-browser
+# 0.39.2, issue #431 Run 8), so under the workaround it must run --quick and say so; anywhere
+# else the full launch test stays.
+#   6. restricted + config passes --no-sandbox - --quick, skip line printed;
+#   7. restricted + the user's own args without it - full doctor;
+#   8. unrestricted + --no-sandbox in config - full doctor.
+ab="$tmp/agent-browser"
+cat >"$ab" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >"${AB_ARGS:?}"
+printf '%s\n' '{"summary":{"pass":11,"warn":0,"fail":0},"checks":[]}'
+EOF
+chmod +x "$ab"
+doctor() { # $1 = proc content, $2 = config.json content; prints doctor's output
+    local home="$tmp/dhome" procfile="$tmp/apparmor_doctor"
+    rm -rf "$home"; mkdir -p "$home/.agent-browser"
+    printf '%s' "$1" >"$procfile"
+    printf '%s\n' "$2" >"$home/.agent-browser/config.json"
+    HOME="$home" AGENT_BROWSER_APPARMOR_PROC="$procfile" AB_ARGS="$tmp/ab.args" \
+        bash -c '. "$1"; agent_browser_doctor "$2"' _ "$repo_root/scripts/lib/agent-skills.sh" "$ab" 2>&1
+}
+
+out6="$(doctor 1 '{"args": "--no-sandbox"}')" || fail "restricted + --no-sandbox: doctor must succeed (got: $out6)"
+grep -qx 'doctor --json --quick' "$tmp/ab.args" || fail "restricted + --no-sandbox: doctor must run --quick (args: $(cat "$tmp/ab.args"))"
+case "$out6" in *'skipped: doctor'*'launch test'*) pass ;; *) fail "restricted + --no-sandbox: the skipped launch test must be said (got: $out6)" ;; esac
+
+doctor 1 '{"args": "--disable-gpu"}' >/dev/null
+grep -qx 'doctor --json' "$tmp/ab.args" && pass || fail "restricted + other args: the full launch test must run (args: $(cat "$tmp/ab.args"))"
+
+out8="$(doctor 0 '{"args": "--no-sandbox"}')"
+grep -qx 'doctor --json' "$tmp/ab.args" || fail "unrestricted: the full launch test must run (args: $(cat "$tmp/ab.args"))"
+case "$out8" in *skipped*) fail "unrestricted: nothing was skipped, so nothing may say so (got: $out8)" ;; *) pass ;; esac
+
 finish
