@@ -37,8 +37,9 @@ install_step="$(awk '/^\$psReadLine = Get-Module -ListAvailable PSReadLine/{f=1}
 [ -n "$install_step" ] || fail "$tmpl: could not locate the PSReadLine install-step logic"
 
 harness="$(mktemp -d)"
+printf '%s\n' "$install_step" >"$harness/step.ps1"
 cat >"$harness/run.ps1" <<'PSEOF'
-param([string]$FakeVersion, [string]$Step)
+param([string]$FakeVersion, [string]$StepFile)
 function Get-Module {
     param([switch]$ListAvailable, [string]$Name)
     if ($ListAvailable -and $FakeVersion) { [pscustomobject]@{ Version = [version]$FakeVersion } }
@@ -46,14 +47,14 @@ function Get-Module {
 function Install-Module { Write-Output 'INSTALL-MODULE-CALLED' }
 function Install-PackageProvider { Write-Output 'INSTALL-PACKAGEPROVIDER-CALLED' }
 function Get-PackageProvider { $null }
-Invoke-Expression $Step
+. $StepFile
 PSEOF
-old_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.0.0' -Step "$install_step" 2>&1)"
+old_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.0.0' -StepFile "$harness/step.ps1" 2>&1)"
 case "$old_out" in
     *'INSTALL-MODULE-CALLED'*) pass ;;
     *) fail "an old (2.0.0) PSReadLine must trigger Install-Module (got: $old_out)" ;;
 esac
-new_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.4.5' -Step "$install_step" 2>&1)"
+new_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.4.5' -StepFile "$harness/step.ps1" 2>&1)"
 case "$new_out" in
     *'INSTALL-MODULE-CALLED'*) fail "an already-modern (2.4.5) PSReadLine must not reinstall (got: $new_out)" ;;
     *) pass ;;
