@@ -227,29 +227,45 @@ dot_timing_mark 'system packages'
 # keeps the installed copy, --force-confold, as unattended-upgrades does). DOT_APT_VERBOSE=1
 # keeps everything on the terminal, prompts included.
 #
-# needrestart runs as its own dpkg hook, outside DEBIAN_FRONTEND entirely: upgrading a package
-# that owns a running service (openssh-server, here) makes it try its own interactive
-# "restart these services?" prompt. Nested under this captured command substitution it has no
-# real foreground terminal to read from, so the kernel SIGTTINs it and it sits stopped (`T` in
-# `ps`) forever rather than erroring or timing out - confirmed live, a WSL `dot upgrade --yes`
-# sat for 37m53s on 14 packages that took about a minute once `kill -CONT`'d by hand
-# (2026-10-14). NEEDRESTART_MODE=a tells it to restart services on its own, the same
-# unattended-upgrades-style default as the confold/confdef flags above.
+# A dpkg hook (needrestart's own "restart these services?" prompt when upgrading a package that
+# owns a running service, e.g. openssh-server, is the one this was first diagnosed from - a WSL
+# `dot upgrade --yes` sat for 37m53s on 14 packages that took about a minute once `kill -CONT`'d
+# by hand, 2026-10-14) can try its own prompt outside DEBIAN_FRONTEND entirely. NEEDRESTART_MODE=a
+# tells it to restart services on its own, the same unattended-upgrades-style default as the
+# confold/confdef flags above - but something in the chain reading a terminal while backgrounded
+# does not need needrestart specifically: confirmed live (issue #431 Run 7, Ubuntu 26.04 desktop,
+# needrestart not even installed there) via `strace -p` on the stopped child: SIGTTIN, same
+# symptom, different trigger. The structural fix is the same either way: this used to capture
+# output via `out="$(... 2>&1)"`, a command substitution - an extra subshell/pipe layer around a
+# `sudo` call that itself allocates its own pty (`use_pty`), nested exactly the way `ps`/`strace`
+# showed the stopped process's controlling terminal was not the one it ended up reading. The
+# installer's own quiet-apt path (`_qapt_run`, lib/agent-skills.sh) avoids this entirely with a
+# plain file redirect instead of a command substitution; this does the same.
 apt_upgrade_run() {
     local apt_q=("$@") out n
     if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
         sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" upgrade -y
         return $?
     fi
-    if out="$(sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+    out="$(mktemp 2>/dev/null)" || out=""
+    if [ -z "$out" ]; then
+        sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+            -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y
+        return $?
+    fi
+    # shellcheck disable=SC2024  # the redirect targets $out, already owned by this
+    # (unprivileged) user via mktemp - only the command itself needs root, which sudo grants
+    if sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
         -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
-        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y 2>&1)"; then
-        n="$(printf '%s\n' "$out" | grep -c '^Setting up ' || true)"
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y >"$out" 2>&1; then
+        n="$(grep -c '^Setting up ' "$out" || true)"
         [ "${n:-0}" -gt 0 ] && echo "  apt: $n package(s) upgraded."
     else
-        printf '%s\n' "$out"
+        cat "$out"
         echo "  apt upgrade failed - continuing with the rest of the sweep."
     fi
+    rm -f "$out"
     return 0
 }
 # apt_sudo_prime - prime sudo's credential cache (and time its own prompt as "sudo password",
