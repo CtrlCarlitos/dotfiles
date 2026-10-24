@@ -195,6 +195,8 @@ esac
 
 if command -v pwsh >/dev/null 2>&1 && { command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; }; then
     py="$(command -v python3 || command -v python)"
+    "$py" -c 'import fcntl, pty, termios' >/dev/null 2>&1 ||
+        skip "fcntl/pty/termios are POSIX-only - not available on this python (native Windows)"
     ps_tmp="$(mktemp -d)"
     ps_bin="$ps_tmp/bin"
     mkdir -p "$ps_bin"
