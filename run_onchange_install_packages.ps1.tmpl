@@ -1816,10 +1816,12 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         }
         # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
         # per-machine override [data.agents.serena] open_dashboard = true in
-        # chezmoi.toml). serena init regenerates the file with Serena's default
-        # (true), so only this one line is re-asserted; nothing else is touched.
-        # Same for the interface: empty means the platform default, which on
-        # Windows is the native app with one tray icon per instance.
+        # chezmoi.toml). serena init regenerates the file with Serena's own
+        # default - which, as shipped, is the KEY WITH NO VALUE (not the literal
+        # "true" this comment used to claim), and Serena treats an unset value
+        # as "open" - so only this one line is re-asserted; nothing else is
+        # touched. Same for the interface: empty means the platform default,
+        # which on Windows is the native app with one tray icon per instance.
         Add-DotTimingMark -Name 'Serena: config'
         $serenaCfg = "$env:USERPROFILE\.serena\serena_config.yml"
         $serenaOpen = '{{ .agents.serena.open_dashboard }}'
@@ -1828,7 +1830,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             try {
                 $serenaLines = [IO.File]::ReadAllLines($serenaCfg)
                 $serenaNew = @($serenaLines | ForEach-Object {
-                    $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)\s*$', "web_dashboard_open_on_launch: $serenaOpen" `
+                    $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)?\s*$', "web_dashboard_open_on_launch: $serenaOpen" `
                        -replace '^web_dashboard_interface:.*$', "web_dashboard_interface: $serenaIface"
                 })
                 if (($serenaNew -join "`n") -ne ($serenaLines -join "`n")) {
