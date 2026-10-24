@@ -18,13 +18,17 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sdkmanager'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'HypervisorPlatform'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create avd'
 
-# WHPX (2026-10-11): asked up front like the licenses/AVD questions, and actually run on a
-# yes - not just a warning telling the operator to run the command himself.
+# WHPX (2026-10-23): enabled unconditionally when mobile_dev needs it, never asked - mobile_dev
+# itself, off by default, is the consent (2026-10-11: a warning telling the operator to run the
+# command himself went unactioned for releases; an unaccelerated emulator is worse than asking,
+# and asking is worse than just doing it for a group already opted into).
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 require "$ps_t" "Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop"
-require "$ps_t" 'Enable it now? [y/N]'
-awk '/\$needWhpx = \(/{a=NR} /Read-Host "  Enable it now/{b=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
-    fail "installer: the WHPX question must be computed and asked before the JDK install, like the licenses/AVD questions"
+if grep -Fq 'Enable it now? [y/N]' "$ps_t"; then
+    fail "installer: WHPX must not ask for confirmation - mobile_dev itself is the consent"
+fi
+awk '/\$needWhpx = \(/{a=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{b=NR} /Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
+    fail "installer: \$needWhpx must be computed before the JDK install, and WHPX enabled before sdkmanager runs"
 pass
 
 # EXECUTED: the WHPX test itself. DISM's FeatureState has Disabled = 0, so a truthiness test

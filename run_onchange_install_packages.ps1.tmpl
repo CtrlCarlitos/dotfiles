@@ -595,8 +595,8 @@ function Install-MobileDev {
     $needPackages = (-not (Test-Path $adbPath)) -or (-not (Test-Path $emulatorPath))
     $needAvd = -not (Test-Path $avdDir)
     # WHPX (design doc section 3.3): Microsoft's current recommended accelerator for the Android
-    # emulator on Windows. Checked here too (not just inline below) so declining or accepting it
-    # is one more answer up front, like the licenses/AVD questions - not a separate silent toggle.
+    # emulator on Windows. Computed here, acted on below ($needWhpx, no prompt - see the note
+    # just above the JDK install).
     $whpxState = $null
     try { $whpxState = (Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop).State } catch { Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red }
     # $null test, not truthiness: DISM's FeatureState enum has Disabled = 0, so
@@ -606,8 +606,7 @@ function Install-MobileDev {
     $needWhpx = ($null -ne $whpxState -and "$whpxState" -notin @('Enabled', 'EnablePending'))
     $acceptLicenses = $false
     $createAvd = $false
-    $enableWhpx = $false
-    if ($needPackages -or $needAvd -or $needWhpx) {
+    if ($needPackages -or $needAvd) {
         Add-DotTimingMark -Name 'your answers'
         if ($needPackages) {
             Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
@@ -622,12 +621,12 @@ function Install-MobileDev {
             $createAvd = ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y')
             if ($createAvd) { $acceptLicenses = $true }
         }
-        if ($needWhpx) {
-            Write-Host "  mobile_dev wants Windows Hypervisor Platform (WHPX) enabled - the Android emulator has no hardware acceleration without it. Enabling it changes what else can virtualize on this machine and needs a restart." -ForegroundColor Cyan
-            $whpxConfirm = Read-Host "  Enable it now? [y/N]"
-            $enableWhpx = ($whpxConfirm -eq 'y' -or $whpxConfirm -eq 'Y')
-        }
     }
+    # WHPX is not asked (unlike the licenses/AVD above): mobile_dev itself, an opt-in group off by
+    # default, is the consent - without WHPX the emulator is unaccelerated to the point of being
+    # unusable (docs/mobile-development.md), so declining would just mean re-nagging on every
+    # later `dot up` for a group the operator already chose. Acted on below, same as WSL/
+    # VirtualMachinePlatform's unconditional enablement elsewhere in this script.
     Add-DotTimingMark -Name 'mobile_dev: JDK'
 
     $jdkMajor = {{ .versions.jdk_version }}
@@ -702,21 +701,15 @@ function Install-MobileDev {
             Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
         }
     }
-    # WHPX: asked up front with the licenses/AVD questions above ($needWhpx/$enableWhpx) - this
-    # is where that answer is acted on. Still the operator's own informed yes/no every run it
-    # stays disabled (2026-10-11: a warning telling Carlos to run the command himself went
-    # unactioned for releases; asking and running it on a yes is the same consent, less friction).
+    # WHPX: enabled unconditionally for mobile_dev, not asked (2026-10-11: a warning telling
+    # Carlos to run the command himself went unactioned for releases; silently shipping an
+    # unaccelerated emulator is worse, see the note above $needWhpx).
     if ($needWhpx) {
-        if ($enableWhpx) {
-            try {
-                $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
-                Write-Host "  Windows Hypervisor Platform (WHPX) enabled - restart when convenient for the Android emulator to use it." -ForegroundColor Yellow
-            } catch {
-                Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "  Windows Hypervisor Platform (WHPX) is not enabled - the Android emulator has no hardware acceleration without it." -ForegroundColor Yellow
-            Write-Host "    Enable it yourself, then restart: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart" -ForegroundColor Yellow
+        try {
+            $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
+            Write-Host "  Windows Hypervisor Platform (WHPX) enabled for the Android emulator's hardware acceleration - restart when convenient." -ForegroundColor Yellow
+        } catch {
+            Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_ - the Android emulator will be unaccelerated." -ForegroundColor Red
         }
     }
 

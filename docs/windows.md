@@ -291,9 +291,28 @@ It prints the size before and after and restarts nothing. `-Yes` skips the quest
 most out of it. `Optimize-VHD` is in the Hyper-V PowerShell module, a Windows feature: the installer
 (`dev_desktop`) enables only that module (`Microsoft-Hyper-V-Management-PowerShell`) when the cmdlet is
 missing, never the Hyper-V platform (Docker runs on WSL 2). Windows Home has no such feature through
-normal means and uses diskpart there instead; the installer's fallback note points at a community DISM
-workaround ([HimDek's gist](https://gist.github.com/HimDek/6edde284203a620745fad3f762be603b)) for anyone
-who wants the real `Optimize-VHD` module on Home anyway. `tests/docker_compact_contract.sh` runs the flow
+normal means (`Enable-WindowsOptionalFeature` fails: "The Microsoft-Hyper-V-Management-PowerShell feature
+name is unknown") and uses diskpart there instead. A community DISM workaround
+([HimDek's gist](https://gist.github.com/HimDek/6edde284203a620745fad3f762be603b)) registers the
+underlying Hyper-V service packages and enables the platform itself; once that's done the module becomes a
+normal feature name and the installer's existing fallback (above) is what turns it on - no separate step.
+Verified by hand on Windows 11 Home `10.0.26300.9711` (2026-10-23), from an elevated PowerShell (the gist's
+own script is a `.bat`; its `for /f` loop and `%i`/`%%i` doubling are cmd.exe syntax and fail as-is in
+PowerShell):
+
+```powershell
+Get-ChildItem "$env:SystemRoot\servicing\Packages\*Hyper-V*.mum" | ForEach-Object {
+    dism /online /norestart /add-package:"$($_.FullName)"
+}
+Dism /online /enable-feature /featurename:Microsoft-Hyper-V -All /LimitAccess /ALL
+```
+
+Then restart. Expect several packages to fail with `0x8007371b` or `0x800f0916` - older `.mum` versions
+already in `CbsInstallStateUninstallRequested` (superseded by a newer one added earlier in the same loop) -
+harmless as long as the final `enable-feature` call reports success and a restart pending. After the
+restart: Hyper-V Manager, `Optimize-VHD` and WSL2/Docker Desktop (`docker ps`, `wsl --status`) all kept
+working. This is never run by the installer itself, on Home or elsewhere - an operator decision, by hand,
+every time. `tests/docker_compact_contract.sh` runs the flow
 against fakes. First real run (2026-10-06, after
 removing ~300 `vsc-*` dev-container images and `docker builder prune`): 158.2 GB -> 63.5 GB in about five
 minutes, through `Optimize-VHD` with only the Hyper-V PowerShell module enabled.
