@@ -1930,6 +1930,11 @@ for k in EXCLUDE:
     if k in UNSET:
         UNSET.remove(k)
 DEFAULTS.update(EXTRA)
+# FORCED always wins over UNSET for the same key. An existing machine's
+# chezmoi.toml can carry both for a key that moved into the forced tier
+# (docs/vscode.md has a worked example) - without this, the merge below
+# would force it, then immediately unset it again, every run.
+UNSET = [k for k in UNSET if k not in FORCED]
 
 path = sys.argv[1]
 text = ""
