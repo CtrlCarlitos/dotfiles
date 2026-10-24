@@ -238,10 +238,11 @@ dot_timing_mark 'system packages'
 apt_upgrade_run() {
     local apt_q=("$@") out n
     if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
-        sudo apt-get "${apt_q[@]}" upgrade -y
+        sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" upgrade -y
         return $?
     fi
     if out="$(sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+        -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y 2>&1)"; then
         n="$(printf '%s\n' "$out" | grep -c '^Setting up ' || true)"
         [ "${n:-0}" -gt 0 ] && echo "  apt: $n package(s) upgraded."
@@ -273,47 +274,58 @@ case "$NET_CHOICE:$(uname -s)" in
         ;;
     *:Linux)
         if command -v apt-get &>/dev/null; then
-            echo "  Upgrading apt packages..."
-            # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
-            # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
-            apt_q=(-qq)
-            if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
-            apt_sudo_prime
-            if sudo apt-get "${apt_q[@]}" update; then
-                # The password was just typed (or cached): keep it alive for the rest of the run -
-                # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
-                # (lib/agent-skills.sh, 2026-10-11).
-                dot_sudo_keepalive
-                if dock_docker_running; then
-                    dock_pending="$(dock_pending_linux | tr '\n' ' ')"
-                    if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
-                        # Kept running: hold the Docker packages out of THIS run (released at exit,
-                        # and only the holds taken here), so nothing restarts Docker under you.
-                        # shellcheck disable=SC2086  # the package list is word-split on purpose
-                        dock_hold $dock_pending
-                        trap dock_unhold EXIT
-                        echo "  Docker packages held back for this run: ${dock_pending% }"
+            # A leftover apt/dpkg stuck under a debconf dialog, or - net_timeout_tty's own
+            # documented trade-off - an orphan left stopped (state T) by an earlier timed-out
+            # step, holds the dpkg lock indefinitely: without this check, the apt-get calls below
+            # just failed and the whole system-packages section was skipped with no explanation.
+            # Confirmed live: a cancelled `dot upgrade` left exactly this chain behind (sudo ->
+            # apt-get -> a stopped apt-get child), and the next `dot upgrade` ran straight into
+            # it with nothing but silent "not upgraded" (issue #431).
+            if ! apt_lock_preflight; then
+                echo "  Skipping system packages - the package system is locked by a process that will not finish (see above for how to clear it)."
+            else
+                echo "  Upgrading apt packages..."
+                # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
+                # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
+                apt_q=(-qq)
+                if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
+                apt_sudo_prime
+                if sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" update; then
+                    # The password was just typed (or cached): keep it alive for the rest of the run -
+                    # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
+                    # (lib/agent-skills.sh, 2026-10-11).
+                    dot_sudo_keepalive
+                    if dock_docker_running; then
+                        dock_pending="$(dock_pending_linux | tr '\n' ' ')"
+                        if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
+                            # Kept running: hold the Docker packages out of THIS run (released at exit,
+                            # and only the holds taken here), so nothing restarts Docker under you.
+                            # shellcheck disable=SC2086  # the package list is word-split on purpose
+                            dock_hold $dock_pending
+                            trap dock_unhold EXIT
+                            echo "  Docker packages held back for this run: ${dock_pending% }"
+                        fi
                     fi
+                    apt_list="$(apt-get -s upgrade 2>/dev/null | awk '/^Inst / { print $2 }' | tr '\n' ' ')" || apt_list=""
+                    if [ -n "${apt_list// /}" ]; then
+                        echo "  apt: upgrading $(wc -w <<<"$apt_list") package(s): ${apt_list% }"
+                    else
+                        echo "  apt: nothing to upgrade"
+                    fi
+                    apt_upgrade_run "${apt_q[@]}"
+                    dock_unhold
+                    # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
+                    # them only when missing: this is where they get upgraded (github_tool_sync,
+                    # lib/agent-skills.sh). The closing note then names only what still lags.
+                    # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
+                    # moves them): reinstalled at the pin when the installed version differs
+                    # (release_tool_pins_upgrade, lib/agent-skills.sh). The tools that are current
+                    # share one line (tool_current_flush); any with news keeps its own.
+                    tool_current_collect
+                    for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
+                    release_tool_pins_upgrade sudo
+                    tool_current_flush 'GitHub-release tools'
                 fi
-                apt_list="$(apt-get -s upgrade 2>/dev/null | awk '/^Inst / { print $2 }' | tr '\n' ' ')" || apt_list=""
-                if [ -n "${apt_list// /}" ]; then
-                    echo "  apt: upgrading $(wc -w <<<"$apt_list") package(s): ${apt_list% }"
-                else
-                    echo "  apt: nothing to upgrade"
-                fi
-                apt_upgrade_run "${apt_q[@]}"
-                dock_unhold
-                # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
-                # them only when missing: this is where they get upgraded (github_tool_sync,
-                # lib/agent-skills.sh). The closing note then names only what still lags.
-                # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
-                # moves them): reinstalled at the pin when the installed version differs
-                # (release_tool_pins_upgrade, lib/agent-skills.sh). The tools that are current
-                # share one line (tool_current_flush); any with news keeps its own.
-                tool_current_collect
-                for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
-                release_tool_pins_upgrade sudo
-                tool_current_flush 'GitHub-release tools'
             fi
         else
             echo "  apt-get not found - skipping system packages."

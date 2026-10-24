@@ -254,7 +254,7 @@ du="$repo_root/scripts/dotupgrade.sh"
 grep -Fq 'lib/docker-vscode.sh' "$du" || fail "dotupgrade.sh must source lib/docker-vscode.sh"
 # Linux: the pending check happens AFTER `apt-get update` and BEFORE `apt-get upgrade`, a decline
 # holds the packages, and the hold is always released
-upd="$(grep -n 'sudo apt-get "${apt_q\[@\]}" update' "$du" | head -1 | cut -d: -f1)"
+upd="$(grep -n 'sudo apt-get "${apt_q\[@\]}".*update' "$du" | head -1 | cut -d: -f1)"
 gate="$(grep -n 'dock_gate "${dock_pending% }"' "$du" | head -1 | cut -d: -f1)"
 # the upgrade runs through apt_upgrade_run (its call site, not the function above the sweep)
 upg="$(grep -n '^ *apt_upgrade_run "${apt_q\[@\]}"' "$du" | head -1 | cut -d: -f1)"

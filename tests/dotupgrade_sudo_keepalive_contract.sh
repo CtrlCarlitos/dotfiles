@@ -43,7 +43,7 @@ fi
 pass
 
 # Started once in dotupgrade.sh, after the first sudo (apt-get update) succeeded.
-awk '/if sudo apt-get "\$\{apt_q\[@\]\}" update; then/ {a=NR} /dot_sudo_keepalive/ {if (!b) b=NR} END {exit !(a && b && a<b)}' "$du" ||
+awk '/if sudo apt-get "\$\{apt_q\[@\]\}".*update; then/ {a=NR} /dot_sudo_keepalive/ {if (!b) b=NR} END {exit !(a && b && a<b)}' "$du" ||
     fail "dotupgrade.sh: dot_sudo_keepalive must start right after the apt update's sudo succeeded"
 [ "$(grep -c 'dot_sudo_keepalive' "$du")" -le 2 ] || fail "dotupgrade.sh: the keep-alive is started once"
 
