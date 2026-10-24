@@ -362,6 +362,41 @@ agent_browser_doctor() {
 }
 
 #-------------------------------------------------------------------------------
+# agent_browser_sandbox_workaround - Ubuntu 23.10+ (confirmed live on 26.04,
+# issue #431 Run 4/Run 5) restricts unprivileged user namespaces via AppArmor
+# by default, so Chrome's own sandboxed launch refuses to start at all:
+# "No usable sandbox!" (zygote_host_impl_linux.cc), exiting before it ever
+# writes DevToolsActivePort - `agent-browser doctor --json`'s own
+# "launch.launch" check fails with exactly this on a plain VM, no sandbox
+# hardening of ours involved. agent-browser documents its own escape hatch for
+# this exact case ("required in containers, VMs, and some Linux setups"):
+# --args "--no-sandbox", read from ~/.agent-browser/config.json (the first of
+# its own three config-precedence sources) - set once here so every future
+# invocation picks it up, not just this run's install/doctor calls. Checked
+# against the actual kernel policy, not a distro/version guess, so a future
+# release that changes the default is still handled correctly either way.
+# Never overwrites an `args` key that is already there - a user's own choice
+# wins, even if that means the restriction stays unworked-around.
+# AGENT_BROWSER_APPARMOR_PROC overrides the proc path checked (tests only).
+#-------------------------------------------------------------------------------
+agent_browser_sandbox_workaround() {
+    local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
+    [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 0
+    if ! command -v jq &>/dev/null; then
+        warn "jq unavailable - could not set agent-browser's --no-sandbox workaround for this VM/container's restricted AppArmor policy"
+        return 0
+    fi
+    local cfg="$HOME/.agent-browser/config.json"
+    mkdir -p "$(dirname "$cfg")"
+    if [ -f "$cfg" ]; then
+        jq -e '.args' "$cfg" >/dev/null 2>&1 && return 0
+        jq '.args = "--no-sandbox"' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    else
+        jq -n '{args: "--no-sandbox"}' >"$cfg"
+    fi
+}
+
+#-------------------------------------------------------------------------------
 # skills_up_to_date <owner/repo> <skill>... - 0 when this source need not be
 # fetched again, 1 when it must be (or when anything is unknown).
 #
