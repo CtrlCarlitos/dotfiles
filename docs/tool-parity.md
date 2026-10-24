@@ -96,7 +96,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `git` | core | `git` | `git` | — | `Git.Git` | — |  |
 | `curl` | core | `curl` | `curl` | — | `cURL.cURL` | — |  |
-| `wget` | core | `wget` | `wget` | — | `JernejSimoncic.Wget` | — |  |
+| `wget` | core | `wget` | `wget` | — | — | `wget` | winget (JernejSimoncic.Wget) 1.21.4's manifest hash no longer matches eternallybored.org's hosted installer - reproduced on two independent installs (2026-10-24); winget also refuses to override a hash mismatch while elevated. Move back to winget once upstream's manifest is corrected. |
 | `jq` | core | `jq` | `jq` | — | `jqlang.jq` | — |  |
 | `fzf` | core | `fzf` | `fzf` | — | `junegunn.fzf` | — |  |
 | `zsh` | core | `zsh` | `zsh` | — | — | — |  |
