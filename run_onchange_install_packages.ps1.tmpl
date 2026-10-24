@@ -836,6 +836,30 @@ function Install-MobileDev {
 {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 {{ includeTemplate "winget-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 
+# PSReadLine >= 2.2 brings Predictive IntelliSense (the greyed-out suggestion
+# typed from command history); pwsh 7.2+ ships it and turns it on by default
+# (Documents/PowerShell/Microsoft.PowerShell_profile.ps1 needs nothing extra),
+# but Windows PowerShell 5.1 bundles the ancient 2.0.0 forever and has no path
+# to a newer one without this. -Scope CurrentUser: no elevation, and 5.1's own
+# console host auto-loads the newest available version in preference to the
+# bundled one (verified directly, 2026-10-24) - the WindowsPowerShell profile
+# only has to ask Set-PSReadLineOption for it (already does, guarded).
+Add-DotTimingMark -Name 'PSReadLine'
+$psReadLine = Get-Module -ListAvailable PSReadLine | Sort-Object Version -Descending | Select-Object -First 1
+if (-not $psReadLine -or $psReadLine.Version -lt [version]'2.2.0') {
+    Write-Host "  Installing a modern PSReadLine (Predictive IntelliSense for Windows PowerShell 5.1)..." -ForegroundColor Yellow
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
+        }
+        Install-Module -Name PSReadLine -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+        Write-Host "  PSReadLine upgraded - restart Windows PowerShell to pick it up." -ForegroundColor Green
+    } catch {
+        Write-Host "  Warning: could not install a modern PSReadLine - $_ - continuing" -ForegroundColor Red
+    }
+}
+
 # WSL: installed here only when missing (catalog note on wsl2); `dot upgrade` keeps it current
 # with `wsl --update`. It needs a restart to finish, so this says so instead of continuing as if
 # it were ready.
