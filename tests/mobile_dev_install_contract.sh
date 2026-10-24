@@ -38,6 +38,8 @@ tmpl="$repo_root/run_onchange_install_packages.sh.tmpl"
 
 . "$repo_root/tests/lib.sh"
 
+command -v zip >/dev/null 2>&1 || skip 'zip not installed (fixture needed)'
+
 [ -f "$tmpl" ] || { fail "$tmpl missing"; finish; }
 
 # --- Structure: the function exists and is wired at the established gate ---
