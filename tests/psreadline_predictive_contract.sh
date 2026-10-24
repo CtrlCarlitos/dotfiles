@@ -20,10 +20,21 @@ profile="$repo_root/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1
 
 . "$repo_root/tests/lib.sh"
 
+# This file is eol=crlf (git ls-files --eol): every awk anchor below reads it from a materialized
+# LF-only copy, not piped through `tr`, so an awk `{exit}` that stops reading mid-file can never
+# SIGPIPE an upstream `tr` still writing (pipefail turned that into a false failure on Linux CI,
+# 2026-10-24, where GNU awk's $ also does not tolerate the \r a Windows awk silently strips).
+lf_tmpl="$(mktemp)"
+trap 'rm -f "$lf_tmpl"' EXIT
+tr -d '\r' <"$tmpl" >"$lf_tmpl"
+
 # 1. Wiring: the installer's $core block carries the install step, and the profile carries the
 #    opt-in Set-PSReadLineOption call, each guarded.
-awk '/^\{\{- if \$core \}\}/{f=1} f{print} f&&/^\{\{- end \}\}/{exit}' "$tmpl" | grep -Fq "Install-Module -Name PSReadLine -Scope CurrentUser" ||
-    fail "$tmpl: the \$core block must install a modern PSReadLine (-Scope CurrentUser)"
+core_block="$(awk '/^\{\{- if \$core \}\}/{f=1} f{print} f&&/^\{\{- end \}\}/{exit}' "$lf_tmpl")"
+case "$core_block" in
+    *'Install-Module -Name PSReadLine -Scope CurrentUser'*) : ;;
+    *) fail "$tmpl: the \$core block must install a modern PSReadLine (-Scope CurrentUser)" ;;
+esac
 grep -Fq "lt [version]'2.2.0'" "$tmpl" || fail "$tmpl: must skip the install once PSReadLine is already >=2.2.0"
 grep -Fq 'Set-PSReadLineOption -PredictionSource History' "$profile" || fail "$profile: must set PredictionSource"
 grep -Fq "ge [version]'2.2.0'" "$profile" || fail "$profile: must guard on a modern PSReadLine before calling it"
@@ -33,7 +44,7 @@ command -v pwsh >/dev/null 2>&1 || { printf 'SKIP (executed part needs PowerShel
 
 # 2. Executed: the extracted install-step logic, against a PSReadLine that is and is not modern
 #    enough, by shadowing Get-Module - no real module is installed or touched.
-install_step="$(awk '/^\$psReadLine = Get-Module -ListAvailable PSReadLine/{f=1} f{print} f&&/^\}$/{exit}' "$tmpl")"
+install_step="$(awk '/^\$psReadLine = Get-Module -ListAvailable PSReadLine/{f=1} f{print} f&&/^\}$/{exit}' "$lf_tmpl")"
 [ -n "$install_step" ] || fail "$tmpl: could not locate the PSReadLine install-step logic"
 
 harness="$(mktemp -d)"
