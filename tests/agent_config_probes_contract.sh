@@ -21,6 +21,10 @@ ps_lib="$repo_root/scripts/lib/ps-skills.ps1"
 ps_tmpl="$repo_root/run_onchange_install_packages.ps1.tmpl"
 
 command -v jq >/dev/null 2>&1 || skip 'jq not installed'
+# jq ships inside /usr/bin on Linux/macOS/WSL (where the fixed PATH below already looks), but a
+# Windows winget/choco install puts it somewhere else entirely - a sandboxed run here otherwise
+# "can't find jq", falls back to the fake CLI, and every probe below looks broken (2026-10-24).
+jq_dir="$(dirname -- "$(command -v jq)")"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -43,7 +47,7 @@ chmod +x "$tmp/bin"/*
 run() { # <home> <fn...> -> stdout + "rc=N"
     local h="$1"; shift
     : >"$tmp/cli.log"
-    HOME="$h" PATH="$tmp/bin:/usr/bin:/bin" CLI_LOG="$tmp/cli.log" \
+    HOME="$h" PATH="$tmp/bin:/usr/bin:/bin:$jq_dir" CLI_LOG="$tmp/cli.log" \
         bash -c 'set -uo pipefail; . "$1"; shift; "$@"; echo "rc=$?"' _ "$lib" "$@" 2>&1
 }
 
@@ -119,7 +123,7 @@ if command -v chezmoi >/dev/null 2>&1; then
     for b in maestro agent-device; do printf '#!/bin/sh\nexit 0\n' >"$tmp/bin/$b"; chmod +x "$tmp/bin/$b"; done
     run_claude() { # <home>
         : >"$tmp/cli.log"
-        HOME="$1" PATH="$tmp/bin:/usr/bin:/bin" CLI_LOG="$tmp/cli.log" \
+        HOME="$1" PATH="$tmp/bin:/usr/bin:/bin:$jq_dir" CLI_LOG="$tmp/cli.log" \
             bash -c 'set -uo pipefail; . "$1"; . "$2"; configure_claude_attribution() { :; }; install_claude_cli' _ "$lib" "$tmp/claude-fn.sh" 2>&1
     }
     # maestro and agent-device both registered in the fixture for this case
