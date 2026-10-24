@@ -121,4 +121,60 @@ else
     pass
 fi
 
+# 5. Static: npm_upgrade_once must not read the global npm_sudo decision at all.
+#    Every call site reaches it from INSIDE the pkg_manager dispatch (install_node's
+#    only callers are install_apt itself and two apt-gated callers) - i.e. before
+#    main() ever reaches the npm_sudo="$SUDO" line check #4 validates, regardless
+#    of ordering further down the file. Check #4 above only verifies that line's
+#    position relative to the dispatch; it does not see that something INSIDE the
+#    dispatch reads the decision before it exists. Under `set -u` this killed
+#    every `dot up`/install that reached Node on an apt machine - fresh or not -
+#    with "npm_sudo: unbound variable" (2026-10-23 fresh Ubuntu VM, found
+#    validating #438, which introduced this - the exact regression #4's own test
+#    was meant to catch, from the opposite direction).
+hits="$(code_only "$tmpl" | awk '/^npm_upgrade_once\(\) \{/{f=1} f{print} f && /^}/{exit}' | grep -n '\$npm_sudo' || true)"
+if [ -n "$hits" ]; then
+    fail "npm_upgrade_once reads the global \$npm_sudo, which is unset at every one of its call sites: $hits"
+else
+    pass
+fi
+
+# 6. Executed: with the global npm_sudo decision deliberately left UNSET (as it
+#    always is at every real call site) and a user-managed npm (nvm-shaped: not
+#    under /usr) on PATH, npm_upgrade_once must run to completion under `set -u`
+#    without sudo - the crash from #5, and the user-managed-npm safety #438's own
+#    fix (main()'s npm_sudo="$SUDO" / drop-for-non-/usr) was meant to preserve.
+command -v chezmoi >/dev/null 2>&1 || skip 'chezmoi not installed (render needed for the executed check)'
+tmp2="$(mktemp -d)"
+trap 'rm -rf "$tmp2"' EXIT
+render_to "$tmp2/installer.sh" sh '{"core":true}'
+awk '/^npm_upgrade_once\(\) \{/{f=1} f{print} f && /^}/{exit}' "$tmp2/installer.sh" >"$tmp2/fn.sh"
+grep -q 'npm_upgrade_once() {' "$tmp2/fn.sh" || { fail "npm_upgrade_once not found in the rendered installer"; finish; }
+
+mkdir -p "$tmp2/userbin"
+cat >"$tmp2/userbin/npm" <<'EOF'
+#!/bin/sh
+case "$1" in
+    -v) echo 1.0.0 ;;
+    view) echo 2.0.0 ;;
+    install) echo "ran" >>"${NPM_LOG:?}" ;;
+esac
+EOF
+chmod +x "$tmp2/userbin/npm"
+cat >"$tmp2/stub_sudo" <<'EOF'
+#!/bin/sh
+echo "sudo $*" >>"${SUDO_LOG:?}"
+"$@"
+EOF
+chmod +x "$tmp2/stub_sudo"
+
+: >"$tmp2/npm.log"; : >"$tmp2/sudo.log"
+out="$(SUDO="$tmp2/stub_sudo" NPM_LOG="$tmp2/npm.log" SUDO_LOG="$tmp2/sudo.log" PATH="$tmp2/userbin:/usr/bin:/bin" \
+    bash -c 'set -euo pipefail; info() { :; }; . "$1"; npm_upgrade_once' _ "$tmp2/fn.sh" 2>&1)" || fail "npm_upgrade_once crashed with npm_sudo unset and a user-managed npm on PATH: $out"
+pass
+grep -Fxq 'ran' "$tmp2/npm.log" 2>/dev/null || fail "npm_upgrade_once with npm_sudo unset did not run npm install at all: $out"
+pass
+[ -s "$tmp2/sudo.log" ] && fail "npm_upgrade_once sudo'd a user-managed (non-/usr) npm: $(cat "$tmp2/sudo.log")"
+pass
+
 finish
