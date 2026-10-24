@@ -56,14 +56,27 @@ function Get-Module {
     if ($ListAvailable -and $FakeVersion) { [pscustomobject]@{ Version = [version]$FakeVersion } }
 }
 function Install-Module { Write-Output 'INSTALL-MODULE-CALLED' }
-function Install-PackageProvider { Write-Output 'INSTALL-PACKAGEPROVIDER-CALLED' }
-function Get-PackageProvider { $null }
+# Write-Host, not Write-Output: the step pipes both of these into Where-Object / Out-Null.
+function Install-PackageProvider { Write-Host 'INSTALL-PACKAGEPROVIDER-CALLED' }
+# Windows PowerShell 5.1's Get-PackageProvider -Name bootstraps a missing provider, behind a
+# "Would you like PackageManagement to automatically download and install 'nuget' now?" prompt,
+# unless -ListAvailable (or -ForceBootstrap) is given. A clean LAB-AGT-WIN-PRO run stopped on that
+# prompt (2026-10-24, #430). NuGet is absent here either way.
+function Get-PackageProvider {
+    param([switch]$ListAvailable, [switch]$ForceBootstrap, [string]$Name)
+    if (-not $ListAvailable -and -not $ForceBootstrap) { Write-Host 'GET-PACKAGEPROVIDER-PROMPTED' }
+}
 . $StepFile
 PSEOF
 old_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.0.0' -StepFile "$harness/step.ps1" 2>&1)"
 case "$old_out" in
     *'INSTALL-MODULE-CALLED'*) pass ;;
     *) fail "an old (2.0.0) PSReadLine must trigger Install-Module (got: $old_out)" ;;
+esac
+case "$old_out" in
+    *'GET-PACKAGEPROVIDER-PROMPTED'*) fail "the NuGet presence check must not bootstrap (and prompt): use Get-PackageProvider -ListAvailable (got: $old_out)" ;;
+    *'INSTALL-PACKAGEPROVIDER-CALLED'*) pass ;;
+    *) fail "a missing NuGet provider must be installed unattended by Install-PackageProvider -Force (got: $old_out)" ;;
 esac
 new_out="$(pwsh -NoProfile -File "$harness/run.ps1" -FakeVersion '2.4.5' -StepFile "$harness/step.ps1" 2>&1)"
 case "$new_out" in

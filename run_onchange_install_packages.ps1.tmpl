@@ -850,7 +850,9 @@ if (-not $psReadLine -or $psReadLine.Version -lt [version]'2.2.0') {
     Write-Host "  Installing a modern PSReadLine (Predictive IntelliSense for Windows PowerShell 5.1)..." -ForegroundColor Yellow
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
+        # -ListAvailable only looks: without it, 5.1's Get-PackageProvider -Name bootstraps a missing
+        # NuGet behind an interactive "install 'nuget' now?" prompt that stalled a clean run (#430).
+        if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
             Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
         }
         Install-Module -Name PSReadLine -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
