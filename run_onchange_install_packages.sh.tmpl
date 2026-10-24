@@ -1016,10 +1016,25 @@ install_mobile_dev() {
 # repeat was a no-op costing 3-15s), and only when the registry has something newer:
 # an npm that is already current used to be reinstalled on every run. An unreachable
 # registry answers empty, which falls through to the install as before.
+#
+# Decides sudo locally instead of reading the global $npm_sudo (#124's "computed
+# ONCE for the whole run" decision, set in main() right after the pkg_manager
+# dispatch): every call site reaches here FROM INSIDE that same dispatch
+# (install_node's only callers are install_apt itself and two apt-gated
+# callers), so $npm_sudo is always still unset here under `set -u` - "line
+# NNNN: npm_sudo: unbound variable", killing the run on the very first
+# `dot up`/install on any machine where npm exists (fresh-installed by
+# install_node moments earlier, or already present) (2026-10-23 fresh Ubuntu
+# VM, found while validating #438 itself). $SUDO alone would fix the crash but
+# unconditionally sudo a user-managed npm (nvm, homebrew) reached via apt's
+# PATH - the exact bug #124 introduced npm_sudo to prevent - so this repeats
+# just the /usr-prefix test instead.
 npm_upgrade_once() {
     [ -z "${NPM_UPGRADED:-}" ] && command -v npm &>/dev/null || return 0
     NPM_UPGRADED=1
-    local current latest
+    local current latest npm_path sudo_cmd=""
+    npm_path="$(command -v npm)"
+    [[ "$npm_path" == /usr* ]] && sudo_cmd="$SUDO"
     current="$(npm -v 2>/dev/null)" || current=""
     latest="$(npm view npm version 2>/dev/null)" || latest=""
     if [ -n "$latest" ] && [ "$latest" = "$current" ]; then
@@ -1027,7 +1042,7 @@ npm_upgrade_once() {
         return 0
     fi
     info "Upgrading npm to latest..."
-    $npm_sudo npm install -g npm@latest --fund=false 2>/dev/null || true
+    $sudo_cmd npm install -g npm@latest --fund=false 2>/dev/null || true
 }
 
 # install_release_binary <name> <tarball-url> <sha256> <path-in-archive> - one binary from a
