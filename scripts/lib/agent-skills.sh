@@ -139,6 +139,41 @@ net_timeout_tty() {
 }
 
 #-------------------------------------------------------------------------------
+# apt_resume_stopped - start a background watcher that sends SIGCONT to any
+# apt/apt-get/dpkg process it finds stopped (`ps` state T), and print its pid;
+# the caller kills it once its privileged apt call returns. sudo's `use_pty`
+# races the new pty's foreground-group assignment against the command it runs,
+# and a descendant that loses takes one stray SIGTTIN/SIGTTOU and sits stopped
+# forever - nothing in a non-interactive script resumes it (issue #431 Run 7,
+# diagnosed with strace; the full account is above apt_upgrade_run in
+# scripts/dotupgrade.sh). The installer's `sudo npx playwright install-deps`
+# showed the same shape on WSL and again on a clean Ubuntu 26.04 checkpoint
+# (Run 8): every package configured, no End-Date in history.log, the 300 s
+# budget spent. `sudo -n`: the watcher runs with no terminal, so an expired
+# credential must fail quietly instead of prompting on /dev/tty from the
+# background. Capped at 30 minutes in case the caller never stops it.
+# tests/dotupgrade_apt_resume_stopped_contract.sh executes it.
+#-------------------------------------------------------------------------------
+apt_resume_stopped() {
+    # Closes all three streams (invariant: a background job started from a function must close
+    # both, or its caller's command substitution - here, catching this function's own `echo $!` -
+    # blocks until the BACKGROUND loop exits too, since it would otherwise still hold the
+    # inherited pipe open for up to the 30-minute cap below, not just for the echo).
+    (
+        local i=0 pid stat
+        while [ "$i" -lt 6000 ]; do
+            for pid in $(pgrep -x 'apt|apt-get|dpkg' 2>/dev/null); do
+                stat="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+                case "$stat" in T*) sudo -n kill -CONT "$pid" 2>/dev/null ;; esac
+            done
+            sleep 0.3
+            i=$((i + 1))
+        done
+    ) </dev/null >/dev/null 2>&1 &
+    echo $!
+}
+
+#-------------------------------------------------------------------------------
 # mcp_add_quiet <agent label> <server> <retry-hint> <cmd...> - an agent CLI's
 # `mcp add`, quiet on success. The CLIs' own lines reached the terminal raw on
 # the 2026-10-11 WSL `dot up` - "Added stdio MCP server maestro with command:

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# apt_resume_stopped (scripts/dotupgrade.sh), EXECUTED.
+# apt_resume_stopped (scripts/lib/agent-skills.sh, used by scripts/dotupgrade.sh and the
+# installer's Playwright install-deps), EXECUTED.
 #
 # sudo's own pty allocation (use_pty) races the new pty's foreground-process-group assignment
 # against the exec of the privileged apt-get it runs: a descendant can lose that race and take
@@ -28,7 +29,7 @@ set -euo pipefail
 # nothing left to be background relative to, and a single deliberate STOP/CONT behaves as intended.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
-du="$repo_root/scripts/dotupgrade.sh"
+lib="$repo_root/scripts/lib/agent-skills.sh"
 
 case "${OSTYPE:-}" in msys* | cygwin* | win32) skip 'needs a Linux userland (/proc/self/comm, pgrep -x)' ;; esac
 command -v pgrep >/dev/null 2>&1 || skip 'pgrep not installed'
@@ -45,16 +46,17 @@ trap cleanup EXIT
 
 # The function, extracted verbatim.
 fn="$tmp/apt-resume-stopped.sh"
-awk '/^apt_resume_stopped\(\) \{/ {f=1} f {print} f && /^\}$/ {exit}' "$du" >"$fn"
+awk '/^apt_resume_stopped\(\) \{/ {f=1} f {print} f && /^\}$/ {exit}' "$lib" >"$fn"
 grep -q '^apt_resume_stopped() {' "$fn" ||
-    fail "dotupgrade.sh: apt_resume_stopped() not found (the watcher must be a function the test can run)"
+    fail "agent-skills.sh: apt_resume_stopped() not found (the watcher must be a function the test can run)"
 
 harness="$tmp/harness.sh"
 {
     printf '%s\n' '#!/usr/bin/env bash'
-    # sudo: a plain passthrough - the test owns the fake process, so no real privilege is needed
-    # to CONT it; this isolates the watcher's own logic from sudo's real behavior (covered live).
-    printf '%s\n' 'sudo() { "$@"; }'
+    # sudo: a plain passthrough (dropping the watcher's -n) - the test owns the fake process, so
+    # no real privilege is needed to CONT it; this isolates the watcher's own logic from sudo's
+    # real behavior (covered live).
+    printf '%s\n' 'sudo() { [ "$1" = -n ] && shift; "$@"; }'
     cat "$fn"
     printf '%s\n' 'apt_resume_stopped'
 } >"$harness"
