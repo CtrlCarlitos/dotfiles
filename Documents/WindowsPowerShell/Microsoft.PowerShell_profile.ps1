@@ -246,6 +246,24 @@ function wsl {
     wsl.exe --cd ~ @args
 }
 
+# Predictive IntelliSense (the greyed-out suggestion typed from command
+# history) comes for free in pwsh 7.2+ - its own default PSReadLine (>=2.2)
+# turns PredictionSource on by itself. Windows PowerShell 5.1 ships the
+# ancient 2.0.0 forever and never turns this on even once a newer PSReadLine
+# is later installed into the user's own module path (`Install-Module
+# PSReadLine -Scope CurrentUser`, which 5.1's console host auto-loads in
+# preference to the bundled one - verified directly, 2026-10-24) - it still
+# has to be asked for here. Guarded: an old/absent PSReadLine has no
+# -PredictionSource parameter at all. try/catch, not a $Host.UI check: that
+# property reads true in hosts (this profile sourced non-interactively by
+# this repo's own tooling, among others) where the feature still throws
+# "doesn't support virtual terminal processing or it's redirected" -
+# verified directly, 2026-10-24.
+if ((Get-Module PSReadLine) -and (Get-Module PSReadLine).Version -ge [version]'2.2.0') {
+    try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView -ErrorAction Stop }
+    catch { Write-Verbose "PSReadLine prediction not enabled: $($_.Exception.Message)" }
+}
+
 # Path-like tokens autocd (twin of the PowerShell 7 profile's block,
 # interactive via PSReadLine): PowerShell parses a bare token like
 # ~\.local\share\chezmoi as a MODULE spec - "The module '~' could not be
