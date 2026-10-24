@@ -80,7 +80,7 @@ if grep -Eq -- '--speed-limit [0-9]+' "$tmp/curl.log" && grep -Eq -- '--speed-ti
 else
     fail "install: the download must be stall-guarded (curl saw: $(/bin/cat "$tmp/curl.log"))"
 fi
-grep -Eq '^sudo dpkg -i .*git-delta_0.20.1_amd64.deb$' "$tmp/tool.log" || fail "install: dpkg -i through the given sudo (log: $(/bin/cat "$tmp/tool.log"))"
+grep -Eq '^sudo env DEBIAN_FRONTEND=noninteractive dpkg -i .*git-delta_0.20.1_amd64.deb$' "$tmp/tool.log" || fail "install: dpkg -i non-interactive through the given sudo (log: $(/bin/cat "$tmp/tool.log"))"
 
 # B. install, delta present: nothing, silently
 set_tool delta 0.19.2
@@ -93,7 +93,7 @@ set_tool delta 0.19.2
 got="$(FAKE_LATEST=0.20.1 run delta sudo upgrade)"
 case "$got" in *'delta upgraded to 0.20.1'*rc=0*) pass ;; *) fail "upgrade: must report the new version (got: $got)" ;; esac
 grep -Fq 'git-delta_0.20.1_amd64.deb' "$tmp/curl.log" || fail "upgrade: must download the newest release"
-grep -Eq '^sudo dpkg -i ' "$tmp/tool.log" || fail "upgrade: dpkg -i through sudo (log: $(/bin/cat "$tmp/tool.log"))"
+grep -Eq '^sudo env DEBIAN_FRONTEND=noninteractive dpkg -i ' "$tmp/tool.log" || fail "upgrade: dpkg -i through sudo (log: $(/bin/cat "$tmp/tool.log"))"
 
 # D. upgrade, dust current: reported current, no download; the dust URL shape is v-prefixed
 set_tool dust 1.2.6
