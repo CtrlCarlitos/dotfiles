@@ -87,4 +87,38 @@ pass
 grep -Fxq 'root_rc=0 root_out=ran:three sudo_calls=0' <<<"$out" || fail "an empty sudo argument (root, user-managed npm) must run the command bare, no sudo at all: $out"
 pass
 
+# 3. Static: $SUDO/$npm_sudo (the function names) must never be spliced directly
+#    into a string handed to a NEW `bash -c` - that shell has no function table,
+#    so the exact same class of bug resurfaces one level up from net_timeout:
+#    the act installer composed `| ${SUDO} bash -s -- ...` into a variable, then
+#    ran `bash -c "$act_script"`, and died with the identical signature -
+#    "bash: line 1: dot_sudo: command not found", curl's pipe reader gone before
+#    its first byte (2026-10-23 fresh Ubuntu VM). The fix primes dot_sudo_prime
+#    in the CURRENT shell, then splices the literal `sudo` binary instead.
+hits="$(code_only "$tmpl" | grep -nE '="[^"]*\$\{(SUDO|npm_sudo)\}[^"]*"$' || true)"
+if [ -n "$hits" ]; then
+    fail "a sudo function name (\$SUDO/\$npm_sudo) is spliced into a string for bash -c: $(printf '%s' "$hits" | head -3)"
+else
+    pass
+fi
+
+# 4. Static: the npm sudo decision must run AFTER the pkg_manager dispatch, not
+#    before - install_apt/install_brew are what install Node in the first place
+#    (install_node). Computing the decision earlier found no npm at all on a
+#    machine with none preinstalled (`command -v npm` empty), so npm_sudo
+#    silently ended up "" - no warning either, since that warning is gated on a
+#    non-empty NPM_BIN - and every npm -g site below (agent-device,
+#    markdownlint-cli2, Playwright deps, agent-browser, Codex) ran unprivileged
+#    against the root-owned /usr/lib/node_modules and failed EACCES, four real
+#    installs lost silently in one run (2026-10-23 fresh Ubuntu VM).
+dispatch_line="$(grep -n 'apt)  install_apt ;;' "$tmpl" | head -1 | cut -d: -f1)"
+decision_line="$(grep -nE '^[[:space:]]*npm_sudo="\$SUDO"[[:space:]]*$' "$tmpl" | head -1 | cut -d: -f1)"
+if [ -z "$dispatch_line" ] || [ -z "$decision_line" ]; then
+    fail "could not locate the pkg_manager dispatch or the npm sudo decision to order-check"
+elif [ "$decision_line" -lt "$dispatch_line" ]; then
+    fail "the npm sudo decision (line $decision_line) runs before the pkg_manager dispatch (line $dispatch_line) - Node/npm is not installed yet"
+else
+    pass
+fi
+
 finish
