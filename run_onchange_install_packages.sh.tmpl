@@ -2376,9 +2376,26 @@ install_agent_toolkit() {
                 info "Installing act (local GitHub Actions runner)..."
                 # Compose the fetched script in a variable instead of splicing
                 # $SUDO in through quote-juggling (SC2027): same result - the
-                # script is single-quoted shell, with $SUDO expanded once, and
-                # an empty SUDO just leaves a harmless extra space for bash -c.
-                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${SUDO} bash -s -- -b /usr/local/bin"
+                # script is single-quoted shell, with the real sudo binary
+                # (never $SUDO/dot_sudo - see below) expanded once, and an
+                # empty act_sudo just leaves a harmless extra space for bash -c.
+                #
+                # dot_sudo is a shell function, not a file (docs/invariants.md
+                # #17): bash -c "$act_script" below starts a brand-new bash
+                # with no functions inherited, so splicing ${SUDO} (="dot_sudo")
+                # into the string failed every time on a non-root machine -
+                # "bash: line 1: dot_sudo: command not found", the pipe's
+                # reader gone before curl's first byte landed ("curl: (23)
+                # Failure writing output"). Prime through the function here
+                # (same shell), then splice the real `sudo` binary into the
+                # string instead - the exact pattern sudo_net_timeout already
+                # uses for net_timeout (2026-10-23 fresh Ubuntu VM).
+                local act_sudo=""
+                if [ -n "$SUDO" ]; then
+                    dot_sudo_prime || return 1
+                    act_sudo="sudo"
+                fi
+                local act_script="curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | ${act_sudo} bash -s -- -b /usr/local/bin"
                 net_timeout 180 bash -c "$act_script" || warn "act install failed or timed out"
             fi
             ;;
@@ -3252,17 +3269,6 @@ main() {
         exit 1
     fi
 
-    # The npm sudo decision, computed ONCE for the whole run (#124): sudo
-    # only for the system-owned /usr prefix - a user-managed npm (nvm,
-    # homebrew) must never be sudo'd (root-owned files under nvm). brew's
-    # prefix is user-writable, so the same test drops sudo there.
-    NPM_BIN="$(command -v npm || true)"
-    npm_sudo="$SUDO"
-    if [[ -z "$NPM_BIN" || "$NPM_BIN" != /usr* ]]; then
-        [[ -n "$NPM_BIN" ]] && warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
-        npm_sudo=""
-    fi
-
     # Where the time of a `dot up` goes (scripts/lib/timing.sh): one mark per section of main,
     # one "Timings (dot up, ...)" line at the end - a WSL apply took 3m28s with nothing saying which part.
     dot_timing_mark "$pkg_manager packages"
@@ -3271,6 +3277,26 @@ main() {
         brew) install_brew ;;
         *)    warn "Skipping package installation (unsupported manager: $pkg_manager)" ;;
     esac
+
+    # The npm sudo decision, computed ONCE for the whole run (#124): sudo
+    # only for the system-owned /usr prefix - a user-managed npm (nvm,
+    # homebrew) must never be sudo'd (root-owned files under nvm). brew's
+    # prefix is user-writable, so the same test drops sudo there.
+    #
+    # AFTER install_apt/install_brew, not before (2026-10-23 fresh Ubuntu VM): Node/npm is
+    # installed inside install_apt (install_node), so computing this decision before the
+    # dispatch finds no npm at all on a machine with no preexisting Node - `command -v npm`
+    # comes back empty, and the resulting npm_sudo="" (dropped, no warning: the warning itself
+    # is gated on a non-empty NPM_BIN) then silently applies to every npm-global site below
+    # (agent-device, markdownlint-cli2, Playwright deps, agent-browser, Codex), all of which
+    # run unprivileged against the root-owned /usr/lib/node_modules and fail EACCES - four
+    # real installs lost in one run, no error that pointed here.
+    NPM_BIN="$(command -v npm || true)"
+    npm_sudo="$SUDO"
+    if [[ -z "$NPM_BIN" || "$NPM_BIN" != /usr* ]]; then
+        [[ -n "$NPM_BIN" ]] && warn "Detected user-managed npm at $NPM_BIN. Dropping sudo."
+        npm_sudo=""
+    fi
 
 {{- if $modern_cli }}
 
