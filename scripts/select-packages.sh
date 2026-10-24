@@ -33,6 +33,25 @@ set -euo pipefail
 info() { printf '▸ %s\n' "$1"; }
 warn() { printf '⚠ %s\n' "$1" >&2; }
 
+# gum_choose ARGS... - `gum choose`, with the controlling terminal's mode saved
+# before and restored after. Reading gum's selection means capturing its
+# stdout via $(...), which makes stdout a pipe; a gum build that keys its own
+# raw/no-echo/no-signal cleanup off an isatty(stdout) check then never
+# restores the terminal it put into that mode to read keystrokes - confirmed
+# independently for a different TUI by the guardrail fix (issue #431, PR
+# #435's 822e6b9/de87da7) and suspected here for this exact menu (issue #431
+# Run 4: a later prompt looked hung because echo/signals were left off, not
+# because anything was stuck). Save/restore unconditionally, regardless of
+# gum's own exit code, so a future gum fixing this itself changes nothing.
+gum_choose() {
+    local out rc=0 tty_state
+    tty_state="$(stty -g 2>/dev/null)" || tty_state=""
+    out="$(gum choose "$@")" || rc=$?
+    [ -n "$tty_state" ] && stty "$tty_state" 2>/dev/null
+    printf '%s' "$out"
+    return "$rc"
+}
+
 CONFIG_FILE="$HOME/.config/chezmoi/chezmoi.toml"
 
 # Preset → pre-check sets (spec §3). Presets are NOT persisted.
@@ -102,7 +121,7 @@ if has_packages_section; then
         precheck+=("$key")
     done <<<"$(existing_true_keys)"
 else
-    preset="$(gum choose \
+    preset="$(gum_choose \
         --header "Preset? minimal=core only | standard=recommended | full=everything | custom=hand-pick" \
         "minimal" "standard" "full" "custom")" || {
         warn "preset prompt canceled - config unchanged"
@@ -123,7 +142,7 @@ if [ "${#precheck[@]}" -gt 0 ] && [ -n "${precheck[0]:-}" ]; then
     menu_args+=(--selected "$comma_list")
 fi
 
-if ! chosen_raw="$(gum choose "${menu_args[@]}" "${PKG_GROUPS[@]}")"; then
+if ! chosen_raw="$(gum_choose "${menu_args[@]}" "${PKG_GROUPS[@]}")"; then
     # gum exits non-zero on cancel/empty selection ("nothing selected") —
     # that's an abort, not a hard failure: leave the config untouched.
     warn "menu canceled - config unchanged"
