@@ -75,6 +75,18 @@ unset RA_SSHD_CONFIG
 printf 'AuthorizedKeysFile .ssh/authorized_keys\n' > "$scratch/sshd_config.fixture"
 printf '[data.remote_access.ssh]\nlogin_keys = []\n' > "$scratch/contract.toml"
 
+# ra_desktop_detected falls through to the REAL /usr/share/{xsessions,wayland-sessions}
+# and real display-manager unit files unless overridden - unlike every other signal it
+# checks, those two are not test-seamed, so a test RUNNER that is itself a desktop
+# install (not just the fixture's target host) detects its own session files and takes
+# the xrdp branch even for a fixture meant to simulate a headless server. Confirmed live
+# on a real Ubuntu Desktop VM: a "server" fixture's `setup` ran into the strict
+# no-apt-get-calls-expected stub below (issue #431 Run 6). Pinned to guaranteed-absent
+# paths for the WHOLE file - the desktop scenarios (24/25) never reach this code path at
+# all, since their `systemctl get-default` stub already answers `graphical.target` first.
+export RA_DESKTOP_SESSION_DIRS="$scratch/no-xsessions $scratch/no-wayland-sessions"
+export RA_DESKTOP_DM_UNITS="$scratch/no-display-manager.service"
+
 # ra_stub DIR NAME BODY: write NAME into DIR as an executable stub whose
 # script is BODY. The body lands in a heredoc, so callers escape \$ for
 # anything that must expand at stub runtime, and quote paths that must
@@ -458,6 +470,25 @@ pass
 # ---------------------------------------------------------------------------
 # Generation and cross-OS publication were removed. Authoritative local
 # key behavior is exercised by ssh_authorization_test.py.
+
+# 22b. ra_desktop_detected's RA_DESKTOP_SESSION_DIRS/RA_DESKTOP_DM_UNITS seam
+#      itself: overridden to absent paths it must report no desktop (what
+#      every "server" scenario below relies on); overridden to a directory
+#      that DOES hold a session file it must report a desktop present - so
+#      the seam is proven both ways, not just assumed from the defaults
+#      being unset at the top of this file.
+rc=0
+ra_call ra_desktop_detected 2>&1 || rc=$?
+[ "$rc" -eq 1 ] ||
+    fail "ra_desktop_detected must report no desktop when its session dirs/dm units are overridden to absent paths (got $rc)"
+pass
+mkdir -p "$scratch/has-wayland-sessions"
+touch "$scratch/has-wayland-sessions/ubuntu.desktop"
+rc=0
+RA_DESKTOP_SESSION_DIRS="$scratch/no-xsessions $scratch/has-wayland-sessions" ra_call ra_desktop_detected 2>&1 || rc=$?
+[ "$rc" -eq 0 ] ||
+    fail "ra_desktop_detected must report a desktop when an overridden session dir holds a session file (got $rc)"
+pass
 
 # 23-27. setup (spec §6). The stubs record every mutating call into
 # $scratch/calls (one quoted-argv line per invocation); the systemctl stub
