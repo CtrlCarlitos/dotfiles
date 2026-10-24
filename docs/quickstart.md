@@ -20,6 +20,10 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main
 iex "& {$(irm https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1)}"
 ```
 
+To try a branch before it is merged, set `DOTFILES_BRANCH` and fetch that branch's installer:
+`DOTFILES_BRANCH=<branch> sh -c "$(curl -fsLS https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/<branch>/install.sh)"`
+(PowerShell: `$env:DOTFILES_BRANCH='<branch>'` first).
+
 You confirm once, then a menu appears. Pick what you want, press Enter, and the
 packages install and the dotfiles apply.
 

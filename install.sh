@@ -375,8 +375,15 @@ else
      # `git clone -c ...`, which writes the value into the new repo's config
      # and recreates this bug. tests/installer_url_credentials_contract.sh
      # pins all of that.
-     run_chezmoi_with_retry chezmoi init --apply --branch main CtrlCarlitos/dotfiles
+     #
+     # DOTFILES_BRANCH (default main) installs another branch - how a fix is tried on a fresh
+     # machine before it is merged (install.ps1's twin; an existing clone is not switched here).
+     run_chezmoi_with_retry chezmoi init --apply --branch "${DOTFILES_BRANCH:-main}" CtrlCarlitos/dotfiles
   fi
+fi
+# The exact revision this run applied, for the log (twin of install.ps1's "Dotfiles source:").
+if src_rev="$(git -C "$HOME/.local/share/chezmoi" rev-parse --short HEAD 2>/dev/null)"; then
+  echo "Dotfiles source: $(git -C "$HOME/.local/share/chezmoi" rev-parse --abbrev-ref HEAD 2>/dev/null) @ $src_rev"
 fi
 
 # 3. Post-Install Checks (Devcontainer specific)

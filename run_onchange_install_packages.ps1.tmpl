@@ -477,7 +477,10 @@ function Invoke-MobileDevTool {
                 if ($ProgressDir) {
                     $stageDir = Join-Path $ProgressDir '.temp'
                     if (Test-Path -LiteralPath $stageDir) {
-                        $bytes = (Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        # Summed by hand: on Windows PowerShell 5.1 an empty pipeline makes Measure-Object
+                        # emit nothing, and .Sum on $null is fatal under StrictMode (killed a VM run).
+                        $bytes = 0
+                        Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $bytes += $_.Length }
                         if ($bytes) { $staged = ', {0} MB staged' -f [math]::Round($bytes / 1MB) }
                     }
                 }
@@ -581,50 +584,33 @@ function Install-MobileDev {
     $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
     $systemImage = 'system-images;android-34;default;x86_64'
 
-    # Every question is asked HERE, before the first download, so the long part
-    # of the run (JDK, SDK tools, a multi-GB system image) goes unattended and a
-    # prompt left unanswered can never stall it half way. #336's explicit
-    # caution: nothing accepts Google's licenses silently on the user's behalf.
-    # Gated on Test-Path, like Install-Node's version check: once adb, the
-    # emulator and the AVD exist this is skipped on every later `dot up` - no
-    # separate re-prompt or re-download bookkeeping. The marks keep the time
-    # spent waiting for answers out of the sections around them.
+    # No questions: `mobile_dev = true` in chezmoi.toml IS the consent to the Android SDK licenses,
+    # the multi-GB system image and enabling WHPX (owner's call, 2026-10-23 VM run - three
+    # [y/N] prompts for a group the config already opted into was friction, not consent; this
+    # reverses #336's per-step confirmation). Each step still says what it is about to do.
+    # Gated on Test-Path, like Install-Node's version check: once adb, the emulator and the AVD
+    # exist (and WHPX is on) each step is skipped on every later `dot up`.
     $needPackages = (-not (Test-Path $adbPath)) -or (-not (Test-Path $emulatorPath))
     $needAvd = -not (Test-Path $avdDir)
     # WHPX (design doc section 3.3): Microsoft's current recommended accelerator for the Android
-    # emulator on Windows. Checked here too (not just inline below) so declining or accepting it
-    # is one more answer up front, like the licenses/AVD questions - not a separate silent toggle.
+    # emulator on Windows. Computed here, acted on below ($needWhpx, no prompt - see the note
+    # just above the JDK install).
     $whpxState = $null
     try { $whpxState = (Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop).State } catch { Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red }
     # $null test, not truthiness: DISM's FeatureState enum has Disabled = 0, so
-    # `$whpxState -and ...` was false exactly when WHPX was off - the question was never asked
+    # `$whpxState -and ...` was false exactly when WHPX was off - the step never ran
     # and the emulator ran unaccelerated (2026-10-14 fresh install). EnablePending = already
     # enabled, waiting for the restart.
     $needWhpx = ($null -ne $whpxState -and "$whpxState" -notin @('Enabled', 'EnablePending'))
-    $acceptLicenses = $false
-    $createAvd = $false
-    $enableWhpx = $false
-    if ($needPackages -or $needAvd -or $needWhpx) {
-        Add-DotTimingMark -Name 'your answers'
-        if ($needPackages) {
-            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
-            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
-            $acceptLicenses = ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y')
-        }
-        # The system image sits behind the licenses: asked only when they were
-        # accepted above, or (packages already present) as its own consent.
-        if ($needAvd -and ($acceptLicenses -or -not $needPackages)) {
-            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)$(if (-not $needPackages) { ' and accepts the Android SDK licenses it needs' })." -ForegroundColor Cyan
-            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
-            $createAvd = ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y')
-            if ($createAvd) { $acceptLicenses = $true }
-        }
-        if ($needWhpx) {
-            Write-Host "  mobile_dev wants Windows Hypervisor Platform (WHPX) enabled - the Android emulator has no hardware acceleration without it. Enabling it changes what else can virtualize on this machine and needs a restart." -ForegroundColor Cyan
-            $whpxConfirm = Read-Host "  Enable it now? [y/N]"
-            $enableWhpx = ($whpxConfirm -eq 'y' -or $whpxConfirm -eq 'Y')
-        }
+    $acceptLicenses = ($needPackages -or $needAvd)
+    if ($acceptLicenses) {
+        Write-Host "  mobile_dev = true: accepting the Android SDK licenses$(if ($needAvd) { " and downloading the multi-GB system image for the default AVD ($avdName)" }). Set mobile_dev = false in chezmoi.toml to opt out." -ForegroundColor Cyan
     }
+    # WHPX is not asked (unlike the licenses/AVD above): mobile_dev itself, an opt-in group off by
+    # default, is the consent - without WHPX the emulator is unaccelerated to the point of being
+    # unusable (docs/mobile-development.md), so declining would just mean re-nagging on every
+    # later `dot up` for a group the operator already chose. Acted on below, same as WSL/
+    # VirtualMachinePlatform's unconditional enablement elsewhere in this script.
     Add-DotTimingMark -Name 'mobile_dev: JDK'
 
     $jdkMajor = {{ .versions.jdk_version }}
@@ -699,21 +685,15 @@ function Install-MobileDev {
             Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
         }
     }
-    # WHPX: asked up front with the licenses/AVD questions above ($needWhpx/$enableWhpx) - this
-    # is where that answer is acted on. Still the operator's own informed yes/no every run it
-    # stays disabled (2026-10-11: a warning telling Carlos to run the command himself went
-    # unactioned for releases; asking and running it on a yes is the same consent, less friction).
+    # WHPX: enabled unconditionally for mobile_dev, not asked (2026-10-11: a warning telling
+    # Carlos to run the command himself went unactioned for releases; silently shipping an
+    # unaccelerated emulator is worse, see the note above $needWhpx).
     if ($needWhpx) {
-        if ($enableWhpx) {
-            try {
-                $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
-                Write-Host "  Windows Hypervisor Platform (WHPX) enabled - restart when convenient for the Android emulator to use it." -ForegroundColor Yellow
-            } catch {
-                Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "  Windows Hypervisor Platform (WHPX) is not enabled - the Android emulator has no hardware acceleration without it." -ForegroundColor Yellow
-            Write-Host "    Enable it yourself, then restart: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart" -ForegroundColor Yellow
+        try {
+            $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
+            Write-Host "  Windows Hypervisor Platform (WHPX) enabled for the Android emulator's hardware acceleration - restart when convenient." -ForegroundColor Yellow
+        } catch {
+            Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_ - the Android emulator will be unaccelerated." -ForegroundColor Red
         }
     }
 
@@ -736,9 +716,8 @@ function Install-MobileDev {
         if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
         Add-MobileDevMachinePath -Paths $toolPaths
 
-        # The answers were collected up front (see $acceptLicenses/$createAvd
-        # above); the licenses are accepted ONCE here for everything below. The
-        # y feed covers every license sdkmanager can ask for.
+        # The licenses are accepted ONCE here for everything below (see
+        # $acceptLicenses above). The y feed covers every license sdkmanager can ask for.
         if ($acceptLicenses) {
             Add-DotTimingMark -Name 'mobile_dev: SDK packages'
             $yesFeed = (@('y') * 20) -join "`n"
@@ -747,13 +726,6 @@ function Install-MobileDev {
             if ($needPackages) {
                 Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' -ProgressDir $androidHome | Out-Null
             }
-        } elseif ($needPackages) {
-            # run_onchange only re-runs when its OWN rendered content changes
-            # (a template/version-pin edit, not a blanket "every dot up") -
-            # "just re-run dot up" would not actually re-enter this block.
-            # The documented, real re-entry point: clear chezmoi's recorded
-            # script hash so the next apply re-runs this script in full.
-            Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
         }
 
         # A prior adb (from a manual install) and the SDK's own adb can be
@@ -775,20 +747,15 @@ function Install-MobileDev {
         # A default Pixel-like AVD, scripting what Android Studio's wizard
         # used to do (design doc section 3.4). AOSP over Google APIs/Play
         # Store (design doc section 5: lighter, sufficient for most Expo app
-        # testing). Whether to create it was answered up front; the licenses
-        # were accepted by the single --licenses run above.
+        # testing). The licenses were accepted by the single --licenses run above.
         # avdmanager create avd -n <name> -k <image> -d <device>
         if ((Test-Path $avdManagerPath) -and $needAvd) {
-            if ($createAvd) {
-                Add-DotTimingMark -Name 'mobile_dev: system image'
-                Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
-                # avdmanager asks whether to create a custom hardware
-                # profile; "no" keeps the device profile's own default.
-                Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
-            } else {
-                Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
-            }
+            Add-DotTimingMark -Name 'mobile_dev: system image'
+            Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
+            Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
+            # avdmanager asks whether to create a custom hardware
+            # profile; "no" keeps the device profile's own default.
+            Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
         }
     }
 
@@ -2163,41 +2130,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         Invoke-Quietly -Description "Failed to install Superpowers for OpenCode" -Action { npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$ocConfigDir" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null }
         }
 
-        # Both writes below must be BOM-less UTF-8: PS 5.1's
-        # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
-        # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
-        # "invalid character (the BOM's first byte) looking for beginning of value" failed
-        # every Windows CI run's opencode wiring while the BOM-less Linux
-        # side merged fine. Same WriteAllLines idiom as the mp-code-review
-        # patcher below.
-        # Read as bytes + strip any BOM before parsing: this file is written
-        # by several tools in the same install (Serena's registration runs
-        # earlier and uses PowerShell's own writers), and a BOM'd or empty
-        # file made the old bare `Get-Content | ConvertFrom-Json` throw -
-        # the catch then skipped wiring superpowers entirely on fresh
-        # installs (confirmed live: "Could not parse existing opencode.json"
-        # on a fresh Windows box, plugin key never landed). Unparseable
-        # non-empty content still warns with the reason and leaves the file
-        # alone - never clobber a config we can't read.
-        $ocRaw = if (Test-Path $ocConfig) { [IO.File]::ReadAllBytes($ocConfig) } else { $null }
-        $ocText = if ($ocRaw) { [Text.UTF8Encoding]::new($false).GetString($ocRaw).TrimStart([char]0xFEFF) } else { '' }
-        if ([string]::IsNullOrWhiteSpace($ocText)) {
-            $ocNew = @{ plugin = @($ocPluginSpec) } | ConvertTo-Json
-            [System.IO.File]::WriteAllLines($ocConfig, $ocNew, (New-Object System.Text.UTF8Encoding($false)))
-        } else {
-            try {
-                $ocJson = $ocText | ConvertFrom-Json -ErrorAction Stop
-                if (-not $ocJson.plugin) {
-                    $ocJson | Add-Member -MemberType NoteProperty -Name plugin -Value @($ocPluginSpec) -Force
-                } elseif ($ocJson.plugin -notcontains $ocPluginSpec) {
-                    $ocJson.plugin = @($ocJson.plugin) + $ocPluginSpec
-                }
-                $ocMerged = $ocJson | ConvertTo-Json -Depth 10
-                [System.IO.File]::WriteAllLines($ocConfig, $ocMerged, (New-Object System.Text.UTF8Encoding($false)))
-            } catch {
-                Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
-            }
-        }
+        # Add-OpenCodePluginSpec (scripts/lib/ps-skills.ps1, inlined above): BOM-less, StrictMode-safe
+        # merge into the opencode.json Serena may already have written.
+        Add-OpenCodePluginSpec -Path $ocConfig -Spec $ocPluginSpec
     }
 }
 {{- end }}
@@ -2552,16 +2487,15 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         }) -contains '__SKILLS_OK__'
     }
 
-    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend (new-page
-    # visual direction behind tunable dials + anti-slop checklist) and
-    # redesign-existing-projects (audit + targeted fixes for existing UI).
-    # Chosen 2026-09-24 for function, not popularity; presets, image-gen,
-    # GPT/Stitch variants and v1 left out (docs/skills-install-strategy.md).
-    Invoke-SkillsSource -Label "taste skills" -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
-        Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
+    # taste skill (Leonxlnx/taste-skill, MIT): design-taste-frontend (visual
+    # direction behind tunable dials + anti-slop checklist). Chosen 2026-09-24
+    # for function, not popularity (docs/skills-install-strategy.md); upstream
+    # folded redesign-existing-projects into it on 2026-10-19.
+    Invoke-SkillsSource -Label "taste skills" -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend') -Agents $skAgents -Install {
+        Write-Host "  Installing taste skill (design-taste-frontend)..." -ForegroundColor Yellow
         @(Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -NoStream -Action {
             $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-            npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
+            npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
             '__SKILLS_OK__'
         }) -contains '__SKILLS_OK__'
@@ -2813,7 +2747,8 @@ function Invoke-GuardrailInstaller {
     # request denied/expired) - warn with the remedy and continue: the binary
     # is installed and current and the existing wiring keeps enforcing, so
     # failing the run buys nothing; Invoke-GuardrailNextStep below ends the
-    # run with the ACTION NEEDED block when steps are pending. Any other
+    # run with the ACTION NEEDED block when steps are pending. A timeout (-1)
+    # is handled the same way. Any other
     # non-zero (failed download/checksum/install/verify, genuine setup
     # failure, usage) fails this script so chezmoi surfaces it and re-runs
     # next apply - the sh twin's set -e contract. The installer's own output
@@ -2823,9 +2758,11 @@ function Invoke-GuardrailInstaller {
         Write-Host "    to finish the re-wiring: run 'guardrail setup' in an interactive terminal, complete the approval, then re-run chezmoi apply" -ForegroundColor Yellow
     } elseif ($code -eq -1) {
         # Invoke-GuardrailInstallerProcess's own timeout sentinel (confirmed live 2026-10-15): it
-        # already printed why and killed the process tree. "exited with code -1" would wrongly
-        # suggest the installer itself returned this.
-        throw "guardrail installer timed out and was killed - see the warning above"
+        # already printed why and killed the process tree. Warn and continue, like exit 3: throwing
+        # here aborted the whole apply - every later section, the remaining dotfiles and the
+        # run_after scripts - over one step whose remedy is `guardrail setup` (VM run, 2026-10-23).
+        # Invoke-GuardrailNextStep still ends the run with ACTION NEEDED while planes are unwired.
+        Write-Host "  Continuing the apply without guardrail's plane wiring (see the warning above)." -ForegroundColor Yellow
     } elseif ($code -ne 0) {
         throw "guardrail installer exited with code $code"
     }

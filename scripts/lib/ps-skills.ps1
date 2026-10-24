@@ -343,10 +343,13 @@ function Select-GuardrailConsoleLine {
 # (Write-GuardrailFilteredLine), so the noise reduction is unchanged. The full byte stream still
 # lands in -LogPath, byte for byte, exactly as Tee-Object did.
 #
-# Standard input is deliberately left alone (RedirectStandardInput is never set): it was never the
-# broken half - the installer's keystrokes always reached it - and leaving it unset keeps it
-# attached to the real console exactly as `&` piping did, so a nested prompt still reads the
-# operator's keystrokes.
+# Standard input is redirected and closed at once, so setup runs unattended. Left on the console,
+# guardrail's prompt approval mode (its default) saw a terminal and asked "Approve ...? [y/N]" on
+# the console itself, bypassing these pipes, instead of arming - half an hour into a fresh one-liner
+# install, until the deadline below killed it and aborted the apply (VM run, 2026-10-23). With no
+# terminal, setup follows the exit-code contract in the installer's guardrail section: nobody
+# enrolled -> arm and exit 0 (ADR-0030 bootstrap); an enrolled operator -> exit 3 and the
+# end-of-apply ACTION NEEDED remedy. Same as the sh twin's `</dev/null`.
 #
 # -TimeoutSeconds guards against the installer itself hanging with nothing to read: confirmed live
 # (2026-10-15) that agent-guardrails' own install.ps1, registering planes on an already-installed
@@ -379,6 +382,7 @@ function Invoke-GuardrailInstallerProcess {
     # path, a version tag, "enabled"/"disabled" - never free text, so doubling an embedded quote is
     # the only escape this needs).
     $psi.Arguments = ($ArgumentList | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -386,6 +390,7 @@ function Invoke-GuardrailInstallerProcess {
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
     [void]$proc.Start()
+    $proc.StandardInput.Close()
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     # Same encoding PowerShell's own native-command capture would have decoded these bytes with -
@@ -452,7 +457,7 @@ function Invoke-GuardrailInstallerProcess {
                         $toKill.Reverse()
                         foreach ($pidToKill in $toKill) { Stop-Process -Id $pidToKill -Force -ErrorAction SilentlyContinue }
                     } catch { Write-Verbose "guardrail timeout kill failed: $($_.Exception.Message)" }
-                    Write-Host "  Warning: guardrail installer did not respond within ${TimeoutSeconds}s - it may be waiting on an approval prompt that never reached this console. Try 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
+                    Write-Host "  Warning: guardrail installer did not finish within ${TimeoutSeconds}s and was stopped (full output: $LogPath). Run 'guardrail setup' in an interactive terminal, then re-run chezmoi apply." -ForegroundColor Red
                     return -1
                 }
                 Write-Host -NoNewline $line.Substring($shownLen)
@@ -865,6 +870,41 @@ function Invoke-OpenCodeSuperpowersRefresh {
         }
     }
     return $ok
+}
+
+# Add $Spec to opencode.json's `plugin` array, creating the file when it is missing or empty. Other
+# keys are kept. Both writes are BOM-less UTF-8: PS 5.1's `Set-Content -Encoding utf8` prepends a
+# BOM, and guardrail's config merge (Go) refuses BOM'd JSON. The file is read as bytes with any BOM
+# stripped, because Serena's registration writes it earlier in the same install through
+# PowerShell's own writers. Content that does not parse warns and stays untouched - never clobber a
+# config we cannot read.
+#
+# The key is probed through PSObject.Properties: the installer runs under Set-StrictMode -Version
+# Latest, where reading $json.plugin off a file without the key throws. Serena's file never has
+# one, so on a fresh Windows install the catch below used to report a parse failure and the plugin
+# never landed (VM run, 2026-10-23). Twin of the sh installer's `.plugin // []` jq merge.
+function Add-OpenCodePluginSpec {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Spec)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $raw = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllBytes($Path) } else { $null }
+    $text = if ($raw) { $utf8.GetString($raw).TrimStart([char]0xFEFF) } else { '' }
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        [IO.File]::WriteAllLines($Path, (@{ plugin = @($Spec) } | ConvertTo-Json), $utf8)
+        return
+    }
+    try {
+        $json = $text | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
+        return
+    }
+    # @(if ...), not if { @(...) }: an if statement's output is enumerated, so a one-entry list
+    # would come back as a bare string and `+ $Spec` would concatenate the two.
+    $plugins = @(if ($json.PSObject.Properties['plugin']) { $json.plugin })
+    if ($plugins -notcontains $Spec) {
+        $json | Add-Member -MemberType NoteProperty -Name plugin -Value @($plugins + $Spec) -Force
+    }
+    [IO.File]::WriteAllLines($Path, ($json | ConvertTo-Json -Depth 10), $utf8)
 }
 
 # $true when a COMPLETE Playwright Chromium build is in its browser cache (PLAYWRIGHT_BROWSERS_PATH

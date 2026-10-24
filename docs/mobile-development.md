@@ -18,11 +18,11 @@ clickable link, here).
 `Install-MobileDev` (in `run_onchange_install_packages.ps1.tmpl`) installs a
 standalone JDK 17+, the Android SDK command-line tools, platform-tools, the
 emulator, a default Pixel-like AVD, and scrcpy, then adds a Windows Firewall
-rule scoped to the WSL vEthernet subnet for the ADB bridge. It asks for
-explicit confirmation - up front, alongside the Android SDK licenses and the
-system-image download - before enabling Windows Hypervisor Platform (WHPX)
-when it is disabled; declining leaves the Android emulator without hardware
-acceleration and re-asks on the next `dot up`.
+rule scoped to the WSL vEthernet subnet for the ADB bridge. It asks nothing:
+`mobile_dev = true` in `chezmoi.toml` is your consent to the Android SDK
+licenses, the multi-GB system-image download and enabling Windows Hypervisor
+Platform (WHPX) when it is disabled (WHPX needs a restart). Each step says what
+it is doing as it starts. To opt out, set `mobile_dev = false`.
 
 The ADB server itself is never started or registered as a service - run it
 yourself, each session, before using Maestro/agent-device from WSL:
@@ -36,10 +36,9 @@ repo never automates it (design doc section 3.3). The Firewall rule only
 allows that server's port 5037 from the WSL vEthernet subnet, never a
 LAN-wide opening.
 
-**If you decline a prompt** (the SDK licenses or the system-image
-download), `Install-MobileDev` tells you to accept next time - but
-`run_onchange_install_packages.ps1.tmpl` only re-runs when its own
-rendered content changes, not on every `dot up`. To force it to run again:
+**If a step fails** (a download, the licenses, the AVD), re-running `dot up`
+is not enough: `run_onchange_install_packages.ps1.tmpl` only re-runs when its
+own rendered content changes. To force it to run again:
 
 ```
 chezmoi state delete --bucket=entryState --key="$($HOME -replace '\\','/')/install_packages.ps1"
@@ -86,13 +85,11 @@ Windows-side ADB server through the bridge below. Two cases change that:
 - If an `adb` is already on `PATH` (a distro package, say), the installer
   leaves it alone and installs nothing.
 - Downloading `platform-tools` means accepting Google's Android SDK
-  licenses. The installer asks first - before any of the group's downloads
-  start, so you can answer and walk away - and only in an interactive run.
-  A non-interactive `dot up` skips the licenses and the download, and its
-  warning tells you how to re-run from a terminal
-  (`chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`). See
-  "Keeping it current" under Linux and macOS for what `dot upgrade` and
-  `dot doctor` do about the group afterwards; both apply to WSL too.
+  licenses. The installer does not ask: `mobile_dev = true` in
+  `chezmoi.toml` is your consent, so an unattended `dot up` installs it too,
+  and says what it is accepting as it does. Set `mobile_dev = false` to opt
+  out. See "Keeping it current" under Linux and macOS for what `dot upgrade`
+  and `dot doctor` do about the group afterwards; both apply to WSL too.
 
 `dot_zshrc` provides that bridge: it detects WSL automatically (no chezmoi
 templating involved - it is a plain file applied identically everywhere) and
@@ -156,14 +153,11 @@ The installer warns when it finds two different `adb` builds, because
 mismatched versions kill each other's server.
 
 The system image is several GB. Downloading it, `platform-tools` and the
-emulator means accepting Google's Android SDK licenses, so the installer
-asks first - before the JDK, Maestro, agent-device or command-line tools
-start downloading, so the whole group then runs unattended - and only in an
-interactive run. The wait for your answer is its own line in the closing
-`Timings` summary (`Android licenses`), not booked against the downloads.
-A non-interactive `dot up` still installs the command-line tools, then
-skips the licenses and everything behind them with a warning. To finish
-from a terminal, run
+emulator means accepting Google's Android SDK licenses. The installer does
+not ask: `mobile_dev = true` in `chezmoi.toml` is your consent, as on
+Windows, so the whole group runs unattended, with or without a terminal, and
+says what it is accepting as it does. Set `mobile_dev = false` to opt out.
+If a step fails, re-run the installer in full with
 `chezmoi state delete --bucket=entryState --key=$HOME/install_packages.sh && dot up`.
 
 ### Keeping it current

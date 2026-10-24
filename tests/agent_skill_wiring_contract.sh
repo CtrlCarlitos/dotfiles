@@ -35,7 +35,7 @@ required_skills=(
     improve-codebase-architecture prototype research grilling handoff teach
     writing-for-agents pr retro mp-code-review frontend-design
     find-skills agent-browser skill-creator
-    design-taste-frontend redesign-existing-projects
+    design-taste-frontend
     code-search
 )
 scope="${AGENT_SKILL_WIRING_SCOPE:-all}"
