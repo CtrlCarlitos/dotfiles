@@ -160,7 +160,8 @@ case "$(cat "$tmp/types")" in
 esac
 pass
 
-# --- apt_lock_preflight: name the holder; stop only for one stuck on a debconf dialog ----------------------
+# --- apt_lock_preflight: name the holder; stop for one stuck on a debconf dialog OR one that is
+# just plain stopped (state T, an orphan left by a timed-out step - issue #431 Run 2) -------------
 # The 2026-10-23 incident, replayed with a fake pgrep/ps: runs 2 and 3 printed "Waiting for cache lock"
 # for minutes behind an apt from run 1 that sat under an invisible whiptail. unattended-upgrade-shutdown
 # shares unattended-upgrade's 15-char comm but only idles until shutdown, so it is never a holder.
@@ -173,7 +174,17 @@ esac
 [ -n "$out" ] || exit 1
 printf '%s\n' "$out"
 EOF
-printf '#!/bin/sh\necho " 16:04"\n' >"$tmp/bin/ps"
+cat >"$tmp/bin/ps" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *stat=*)
+        pid="${*##*-p }"; pid="${pid%% *}"
+        for p in ${FAKE_STOPPED:-}; do [ "$p" = "$pid" ] && { echo " T"; exit 0; }; done
+        echo " S"
+        ;;
+    *) echo " 16:04" ;;
+esac
+EOF
 chmod +x "$tmp/bin/pgrep" "$tmp/bin/ps"
 preflight() { # env assignments as arguments; prints "rc=N" after the combined output
     env PATH="$tmp/bin:$PATH" "$@" bash -c '. "$1"; rc=0; apt_lock_preflight || rc=$?; echo "rc=$rc"' _ "$repo_root/scripts/lib/agent-skills.sh" 2>&1
@@ -195,9 +206,40 @@ case "$out" in
 esac
 case "$out" in *1276*) fail "the clean-up command must not kill unattended-upgrade-shutdown (got: $(printf '%s' "$out" | tr '\n' '|'))" ;; esac
 pass
-tpl_call="$(grep -n '! apt_lock_preflight' "$repo_root/run_onchange_install_packages.sh.tmpl" | head -1 | cut -d: -f1)"
-qa_call="$(awk '!/^[[:space:]]*#/ && /quiet_apt_enable/ { print NR; exit }' "$repo_root/run_onchange_install_packages.sh.tmpl")"
-{ [ -n "$tpl_call" ] && [ "$tpl_call" -gt "$qa_call" ]; } || fail "the installer must run apt_lock_preflight right after quiet_apt_enable, before any apt call"
+# A holder that is merely busy (state S, not T) and under no dialog: still not fatal.
+out="$(preflight FAKE_HOLDERS="$stuck")"
+case "$out" in
+    *rc=0) ;;
+    *) fail "a running (state S), undialoged holder must not stop the run (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+# A holder that is STOPPED (state T) with no dialog in sight: net_timeout_tty's --foreground only
+# ever signals its direct child, never a descendant left orphaned by the timeout (apt_lock_preflight's
+# own comment) - this is the Playwright-orphan shape from issue #431 Run 2, and must be just as fatal
+# as the debconf-dialog case, with the same clean-up command (no dialog pid to append this time).
+out="$(preflight FAKE_HOLDERS="$stuck" FAKE_STOPPED=12942)"
+case "$out" in
+    *'stopped (state T)'*'sudo kill 12942 && sudo dpkg --configure -a'*rc=1) ;;
+    *) fail "a stopped (state T) holder with no dialog must stop the run with the clean-up command (got: $(printf '%s' "$out" | tr '\n' '|'))" ;;
+esac
+pass
+# Call-site ordering: a call's LINE NUMBER is not its execution order here - the playwright-site
+# call lives inside install_agent_toolkit(), a function defined (and thus textually earlier in the
+# file) before main() itself, even though it runs AFTER main()'s own top-of-run call. So pick, for
+# each anchor, the nearest apt_lock_preflight call strictly AFTER it - not just the first by line.
+tpl="$repo_root/run_onchange_install_packages.sh.tmpl"
+tpl_calls="$(grep -n '! apt_lock_preflight' "$tpl" | cut -d: -f1)"
+qa_call="$(awk '!/^[[:space:]]*#/ && /quiet_apt_enable/ { print NR; exit }' "$tpl")"
+after_qa="$(awk -v n="$qa_call" '$1>n{print;exit}' <<<"$tpl_calls")"
+[ -n "$after_qa" ] || fail "the installer must run apt_lock_preflight right after quiet_apt_enable, before any apt call"
+pass
+# A second call, right after install_playwright_chromium: that step's own sudo_net_timeout_tty is
+# exactly where a Playwright-orphaned apt-get (issue #431 Run 2) would be created, and every apt
+# call downstream of it (desktop apps, mobile_dev's scrcpy, OpenCode Desktop) needs the same guard,
+# not just the one before install_apt/install_brew.
+[ "$(wc -l <<<"$tpl_calls")" -ge 2 ] || fail "apt_lock_preflight must also be re-checked after install_playwright_chromium, not only once at the top"
+pw_call="$(awk '!/^[[:space:]]*#/ && /install_playwright_chromium$/ { print NR; exit }' "$tpl")"
+after_pw="$(awk -v n="$pw_call" '$1>n{print;exit}' <<<"$tpl_calls")"
+[ -n "$after_pw" ] || fail "the second apt_lock_preflight call must come after install_playwright_chromium runs"
 pass
 
 # --- wiring: enabled only once apt is the known package manager --------------------------------------------

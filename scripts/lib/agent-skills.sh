@@ -472,26 +472,40 @@ quiet_apt_enable() {
         info "apt install/update output is quiet (DOT_APT_VERBOSE=1 shows it; ~/.local/state/dotfiles/apt.log keeps it); errors are always shown."
 }
 
-# apt_lock_preflight - before the first apt call, name whoever holds the package system instead
+# apt_lock_preflight - before an apt call, name whoever holds the package system instead
 # of letting apt print "Waiting for cache lock ... held by process N" until someone gives up
 # (two whole runs of it on 2026-10-23 - see quiet_apt_enable). A package manager that is merely
-# busy (first boot's unattended-upgrades) is reported and waited for by the bounded lock timeout;
-# one sitting under a debconf dialog (whiptail/dialog) is a leftover of an interrupted run that
-# will never finish, so this prints how to clear it and returns 1 for the caller to stop.
+# busy (first boot's unattended-upgrades) is reported and waited for by the bounded lock timeout.
+# Two shapes never finish on their own, so both stop the run with the same recovery line:
+# one sitting under a debconf dialog (whiptail/dialog, left behind by an interrupted run), and
+# one that is just plain STOPPED (ps state T) - net_timeout_tty's --foreground only ever signals
+# its direct child, not that child's own descendants (its own documented trade-off), so a chain
+# like sudo -> npx -> playwright -> apt-get can leave the apt-get grandchild alive, reparented to
+# init/systemd, in state T, after `timeout` already reported 124/137 (issue #431 Run 2 - confirmed
+# live, worked around by hand, never fixed here before). A merely-busy holder is never in state T.
 # Processes are found by name (pgrep -x matches the 15-char comm, hence unattended-upgr): the
 # lock files themselves are root-only, and nothing has prompted for sudo yet.
 apt_lock_preflight() {
-    local holders dialogs pid etime
+    local holders dialogs pid etime stat stopped=""
     # unattended-upgrade-shutdown shares the comm but only idles until shutdown - never a holder
     holders="$(pgrep -a -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' 2>/dev/null | grep -v 'unattended-upgrade-shutdown')" || return 0
     warn "Another package manager is running - apt waits for it (up to ${DOT_APT_LOCK_TIMEOUT:-600}s per call):"
     while read -r pid _; do
         etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+        stat="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
         printf '    %s (running %s)\n' "$(grep -E "^$pid " <<<"$holders")" "${etime:-?}" >&2
+        [[ "$stat" == T* ]] && stopped="$stopped $pid"
     done <<<"$holders"
-    dialogs="$(pgrep -x 'whiptail|dialog' 2>/dev/null)" || return 0
-    warn "...and it is stuck on a debconf question no one can see (left behind by an interrupted run?) - it will never finish."
-    warn "Clear it, then re-run:  sudo kill $(printf '%s\n' "$holders" | cut -d' ' -f1 | tr '\n' ' ')$(printf '%s' "$dialogs" | tr '\n' ' ' | sed 's/ $//') && sudo dpkg --configure -a"
+    dialogs="$(pgrep -x 'whiptail|dialog' 2>/dev/null)" || true
+    [[ -n "$dialogs" || -n "$stopped" ]] || return 0
+    if [[ -n "$dialogs" ]]; then
+        warn "...and it is stuck on a debconf question no one can see (left behind by an interrupted run?) - it will never finish."
+    else
+        warn "...and it is stopped (state T), not merely busy - an orphan left behind by an earlier timed-out step - it will never finish."
+    fi
+    local kill_pids
+    kill_pids="$({ printf '%s\n' "$holders" | cut -d' ' -f1; printf '%s\n' "$dialogs"; } | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')"
+    warn "Clear it, then re-run:  sudo kill $kill_pids && sudo dpkg --configure -a"
     return 1
 }
 

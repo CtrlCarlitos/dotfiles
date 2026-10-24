@@ -2268,6 +2268,18 @@ install_agent_toolkit() {
         dot_timing_mark 'agent toolkit: playwright'
         install_playwright_chromium
 
+        # install-deps just ran under sudo_net_timeout_tty: --foreground only ever signals its
+        # direct child (sudo), never descendants a timeout leaves orphaned (apt_lock_preflight's
+        # own comment), so a chain like sudo -> npx -> playwright -> apt-get can leave apt-get
+        # alive, stopped, holding the lock - every apt call below (desktop apps, mobile_dev's
+        # scrcpy, OpenCode Desktop) would otherwise wait out its own bounded timeout and fail
+        # anyway (issue #431 Run 2). Re-check right where the orphan would have been created,
+        # with the same stop-and-explain behavior as the first check above.
+        if [ "$PKG_MANAGER" = apt ] && ! apt_lock_preflight; then
+            error "Stopping - the package system is locked by a process that will not finish."
+            exit 1
+        fi
+
         # Only when missing: reinstalling `agent-browser@latest` every run is an upgrade (`dot up` never
         # upgrades; `dot upgrade` does it, and skips it when already current).
         AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
