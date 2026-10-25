@@ -32,6 +32,7 @@ playwright_chromium_installed() { return 1; }
 # A real background process stands in for the watcher, so "stopped" is observable.
 apt_resume_stopped() {
     log watcher-start
+    [ -z "${WATCHER_SAYS:-}" ] || printf '%s\n' "$WATCHER_SAYS" >"$1"
     if [ "${WATCHER_GONE:-0}" = 1 ]; then echo 999999; return; fi
     sleep 300 </dev/null >/dev/null 2>&1 &
     echo $! >"$WATCHER_PID"
@@ -71,6 +72,18 @@ done
 # 2. A watcher that already exited: kill fails, the run goes on.
 got="$(PKG_MANAGER=apt WATCHER_GONE=1 run)"
 case "$got" in *'download end '*) pass ;; *) fail "a vanished watcher must not end the run under set -e (calls: $got)" ;; esac
+
+# 2b. What the watcher recorded (issue #431 Run 10: no run had evidence of which process sat
+# stopped) reaches the output, prefixed, in both modes.
+for v in 0 1; do
+    PKG_MANAGER=apt DOT_APT_VERBOSE=$v WATCHER_SAYS='20:10:16 resumed stopped: 4242 1 4242 4242 T do_signal_stop sudo' run >/dev/null
+    grep -q '^  install-deps watcher: 20:10:16 resumed stopped: 4242 .* sudo$' "$tmp/out" ||
+        fail "DOT_APT_VERBOSE=$v: the watcher's log must be printed after install-deps (out: $(cat "$tmp/out"))"
+done
+pass
+PKG_MANAGER=apt run >/dev/null
+grep -q 'install-deps watcher' "$tmp/out" && fail "an empty watcher log must print nothing (out: $(cat "$tmp/out"))"
+pass
 
 # 3. brew: no install-deps, no watcher.
 got="$(PKG_MANAGER=brew run)"

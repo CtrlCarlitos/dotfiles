@@ -152,25 +152,65 @@ net_timeout_tty() {
 # budget spent. `sudo -n`: the watcher runs with no terminal, so an expired
 # credential must fail quietly instead of prompting on /dev/tty from the
 # background. Capped at 30 minutes in case the caller never stops it.
-# tests/dotupgrade_apt_resume_stopped_contract.sh executes it.
+#
+# Not only apt-named processes: Run 10 (clean checkpoint, this watcher in
+# place) had install-deps' apt-get finish - End-Date written - and the chain
+# above it (sudo -> npx -> node -> sh) still sat out the 300 s. A stopped
+# process anywhere under the calling script ($$) is continued too, whatever
+# its name. Optional arguments, for evidence no run had so far: <log> gets one
+# line per process resumed (first time only) and, after <snapshot-secs>, one
+# dump of every process under the caller - `ps` columns and comm only, never
+# argv. tests/dotupgrade_apt_resume_stopped_contract.sh executes it.
 #-------------------------------------------------------------------------------
 apt_resume_stopped() {
+    local log="${1:-/dev/null}" snap_after="${2:-0}" root=$$
     # Closes all three streams (invariant: a background job started from a function must close
     # both, or its caller's command substitution - here, catching this function's own `echo $!` -
     # blocks until the BACKGROUND loop exits too, since it would otherwise still hold the
     # inherited pipe open for up to the 30-minute cap below, not just for the echo).
     (
-        local i=0 pid stat
+        local i=0 pid line seen=" " snapped=""
         while [ "$i" -lt 6000 ]; do
-            for pid in $(pgrep -x 'apt|apt-get|dpkg' 2>/dev/null); do
-                stat="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
-                case "$stat" in T*) sudo -n kill -CONT "$pid" 2>/dev/null ;; esac
-            done
+            while read -r pid line; do
+                [ -n "$pid" ] || continue
+                kill -CONT "$pid" 2>/dev/null || sudo -n kill -CONT "$pid" 2>/dev/null
+                case "$seen" in *" $pid "*) ;; *)
+                    seen="$seen$pid "
+                    printf '%s resumed stopped: %s %s\n' "$(date +%T)" "$pid" "$line" >>"$log" ;;
+                esac
+            done < <(_apt_watch_ps "$root" stopped)
+            if [ -z "$snapped" ] && [ "$snap_after" -gt 0 ] && [ $((i * 3)) -ge $((snap_after * 10)) ]; then
+                snapped=1
+                {
+                    printf '%s still running after %ss (PID PPID PGID TPGID STAT WCHAN COMMAND):\n' "$(date +%T)" "$snap_after"
+                    _apt_watch_ps "$root" all
+                } >>"$log"
+            fi
             sleep 0.3
             i=$((i + 1))
         done
     ) </dev/null >/dev/null 2>&1 &
     echo $!
+}
+
+# _apt_watch_ps <root pid> stopped|all - apt_resume_stopped's process listing, one
+# `PID PPID PGID TPGID STAT WCHAN COMMAND` line each: `stopped` = state T and either
+# apt-named or under <root>; `all` = every process under <root>, whatever its state.
+_apt_watch_ps() {
+    ps -eo pid=,ppid=,pgid=,tpgid=,stat=,wchan:24=,comm= 2>/dev/null | awk -v root="$1" -v mode="$2" '
+        { n++; pid[n] = $1; pp[$1] = $2; st[$1] = $5; c = $7
+          for (k = 8; k <= NF; k++) c = c " " $k
+          cm[$1] = c; row[$1] = $1 " " $2 " " $3 " " $4 " " $5 " " $6 " " c }
+        END {
+            for (j = 1; j <= n; j++) {
+                p = pid[j]; under = 0
+                for (q = pp[p]; q != "" && q > 1 && hops < 64; q = pp[q]) { hops++; if (q == root) { under = 1; break } }
+                hops = 0
+                if (mode == "all") { if (under) print row[p]; continue }
+                if (st[p] !~ /^T/) continue
+                if (under || cm[p] == "apt" || cm[p] == "apt-get" || cm[p] == "dpkg") print row[p]
+            }
+        }'
 }
 
 #-------------------------------------------------------------------------------

@@ -44,9 +44,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The function, extracted verbatim.
+# The functions, extracted verbatim (the watcher and its ps listing).
 fn="$tmp/apt-resume-stopped.sh"
-awk '/^apt_resume_stopped\(\) \{/ {f=1} f {print} f && /^\}$/ {exit}' "$lib" >"$fn"
+for name in apt_resume_stopped _apt_watch_ps; do
+    awk -v n="$name" '$0 ~ "^" n "\\(\\) \\{" {f=1} f {print} f && /^\}$/ {exit}' "$lib" >>"$fn"
+done
+grep -q '^_apt_watch_ps() {' "$fn" ||
+    fail "agent-skills.sh: _apt_watch_ps() not found"
 grep -q '^apt_resume_stopped() {' "$fn" ||
     fail "agent-skills.sh: apt_resume_stopped() not found (the watcher must be a function the test can run)"
 
@@ -100,5 +104,65 @@ pass
 
 kill "$watcher" 2>/dev/null
 wait "$watcher" 2>/dev/null || true
+watcher=""
+
+# Run 10: install-deps' apt-get finished (End-Date written) and the chain above it - sudo ->
+# npx -> node -> sh - still sat out the 300 s budget. A stopped process UNDER the calling script
+# is continued whatever its name; one outside it, not apt-named, is left alone. The log records
+# each resume and, after the snapshot delay, every process under the caller.
+log="$tmp/watch.log"
+harness2="$tmp/harness2.sh"
+{
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'sudo() { [ "$1" = -n ] && shift; "$@"; }'
+    cat "$fn"
+    # the "node": a child of this harness (the watcher's $$), renamed, under setsid as above
+    printf '%s\n' 'setsid bash -c '"'"'echo -n node >/proc/self/comm 2>/dev/null || true; sleep 300 & wait'"'"' </dev/null >/dev/null 2>&1 &'
+    printf '%s\n' 'echo $! >"$1"'
+    printf '%s\n' 'apt_resume_stopped "$2" 1 >"$3"'
+    printf '%s\n' 'sleep 30' # the caller stays alive while the test checks
+} >"$harness2"
+bash "$harness2" "$tmp/under.pid" "$log" "$tmp/watcher2.pid" </dev/null >/dev/null 2>&1 &
+harness2_pid=$!
+setsid bash -c 'echo -n node >/proc/self/comm 2>/dev/null || true; sleep 300 & wait' </dev/null >/dev/null 2>&1 &
+outside_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -s "$tmp/under.pid" ] && [ -s "$tmp/watcher2.pid" ] && break
+    sleep 0.2
+done
+under_pid="$(cat "$tmp/under.pid" 2>/dev/null || true)"
+watcher="$(cat "$tmp/watcher2.pid" 2>/dev/null || true)"
+[ -n "$under_pid" ] && [ -n "$watcher" ] || fail "setup: harness2 never recorded its node/watcher pids"
+cleanup2() { kill -KILL "$under_pid" "$outside_pid" "$harness2_pid" 2>/dev/null; cleanup; }
+trap cleanup2 EXIT
+sleep 0.3 # let the renames land before the comm check
+for p in "$under_pid" "$outside_pid"; do
+    comm="$(command ps -o comm= -p "$p" 2>/dev/null | tr -d ' ')"
+    [ "$comm" = node ] || fail "setup: pid $p's comm is '$comm', not node"
+done
+kill -STOP "$under_pid" "$outside_pid"
+
+resumed=""
+for _ in $(seq 1 20); do
+    stat="$(command ps -o stat= -p "$under_pid" 2>/dev/null | tr -d ' ')"
+    case "$stat" in T*) ;; *) resumed=1; break ;; esac
+    sleep 0.3
+done
+[ -n "$resumed" ] ||
+    fail "apt_resume_stopped never continued a stopped process under its caller that is not apt-named (last stat: $stat)"
+pass
+
+sleep 1 # several more polling cycles, and past the 1 s snapshot
+stat="$(command ps -o stat= -p "$outside_pid" 2>/dev/null | tr -d ' ')"
+case "$stat" in T*) pass ;; *) fail "apt_resume_stopped continued a non-apt process outside its caller (stat: $stat)" ;; esac
+
+grep -q "resumed stopped: $under_pid .* node\$" "$log" ||
+    fail "the watcher log has no 'resumed stopped' line for pid $under_pid: $(cat "$log")"
+[ "$(grep -c 'resumed stopped:' "$log")" = 1 ] ||
+    fail "the watcher log should name each resumed process once: $(cat "$log")"
+grep -q "resumed stopped: $outside_pid " "$log" && fail "the watcher log names the outside process"
+grep -q 'still running after 1s' "$log" || fail "the watcher log has no snapshot after 1 s: $(cat "$log")"
+grep -qE "^$under_pid [0-9]+ .* node\$" "$log" || fail "the snapshot does not list the node under the caller: $(cat "$log")"
+pass
 
 finish
