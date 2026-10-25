@@ -135,7 +135,7 @@ if command -v chezmoi >/dev/null; then
     geany_here=$(chezmoi execute-template --config "$tmp/chezmoi.toml" \
         '{{ if stat (joinPath (env "ProgramFiles") "Geany") }}yes{{ end }}')
     for p in $win_desktop; do
-        [ -n "$geany_here" ] && [ "$p" != "${p#*geany}" -o "$p" != "${p#*gtk-3.0}" ] && continue
+        case "$p" in *geany* | *gtk-3.0*) [ -n "$geany_here" ] && continue ;; esac
         grep -Fxq "$p" "$tmp/win-managed.txt" && fail "windows: dev_desktop not selected, yet $p is managed"
     done
 fi
