@@ -63,4 +63,18 @@ got="$(run net_timeout_tty 1 bash -c 'trap "" TERM; sleep 20')"
 grep -Fq 'timed out after 1s' "$tmp/err" || fail "net_timeout_tty: must report the timeout (stderr: $(tr '\n' '|' <"$tmp/err"))"
 if grep -q 'Killed' "$tmp/err"; then fail "net_timeout_tty: no raw 'Killed' line (stderr: $(tr '\n' '|' <"$tmp/err"))"; else pass; fi
 
+# The terminal's mode survives a SIGKILL-escalated timeout (issue #431 Run 10): sudo's use_pty
+# sets the operator's terminal raw and restores it only on a clean exit, so a sudo that `-k`
+# SIGKILLs left echo off for the rest of the session. Executed in a real pty (`script`).
+if command -v script >/dev/null 2>&1; then
+    cat >"$tmp/pty.sh" <<'PTY'
+. "$1"
+NET_TIMEOUT_KILL_AFTER=1 net_timeout_tty 1 bash -c 'trap "" TERM; stty raw -echo; sleep 20' 2>/dev/null || true
+stty -a | tr ' ' '\n' | grep -xE -- '-?(echo|icanon)' | tr '\n' ' '
+PTY
+    got="$(script -qec "bash '$tmp/pty.sh' '$lib'" /dev/null </dev/null | tr -d '\r')"
+    case " $got " in *' echo '*) ;; *) fail "net_timeout_tty: the terminal must get its echo back after a SIGKILLed command (got: $got)" ;; esac
+    case " $got " in *' icanon '*) pass ;; *) fail "net_timeout_tty: the terminal must get icanon back after a SIGKILLed command (got: $got)" ;; esac
+fi
+
 finish
