@@ -157,11 +157,17 @@ AppData/Roaming/geany/**
 # the target is absent - which CREATES the file. On a machine that never
 # installed the tool, applying still manufactured a config for it. Same shape
 # as the VS Code User-dir guards above: only manage these where the tool's
-# config dir already exists, so a headless server never gets a stray one.
-{{- if not (stat (joinPath .chezmoi.homeDir ".codex")) }}
+# config dir already exists, or where this apply installs the tool
+# (chatgpt_cli / opencode_cli selected), so a headless server never gets a
+# stray one. The dir alone is not enough: it appears only when the package
+# installer runs, after this file was rendered, so a fresh machine kept
+# Codex's keymap and OpenCode's theme off until its second `dot up`.
+{{- $selected := dict }}
+{{- if hasKey . "packages" }}{{ $selected = .packages }}{{ end }}
+{{- if not (or (stat (joinPath .chezmoi.homeDir ".codex")) (get $selected "chatgpt_cli")) }}
 .codex/**
 {{- end }}
-{{- if not (stat (joinPath .chezmoi.homeDir ".config/opencode")) }}
+{{- if not (or (stat (joinPath .chezmoi.homeDir ".config/opencode")) (get $selected "opencode_cli")) }}
 .config/opencode/**
 {{- end }}
 
