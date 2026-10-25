@@ -62,9 +62,14 @@ $env:OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT = 'false'
 # you actually type `choco`. The first call imports the module globally,
 # removes this shim, and forwards to the real exe - after that, `choco` and
 # `refreshenv` behave stock. Until the first call there is no choco tab
-# completion and no refreshenv; that is the trade.
+# completion and no refreshenv; that is the trade. The variable is named
+# $ChocolateyProfile on purpose: Chocolatey's setup (the install and every
+# `choco upgrade chocolatey`) appends its eager block to $PROFILE unless that
+# exact string is already in the file, and the appended block made the next
+# `dot up` ask "has changed since chezmoi last wrote it?".
 #-------------------------------------------------------------------------------
-if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+if (Test-Path $ChocolateyProfile) {
     function choco {
         Remove-Item function:choco -ErrorAction SilentlyContinue
         Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -Global
