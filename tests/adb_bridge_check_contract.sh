@@ -44,24 +44,21 @@ fi
 pass
 
 # --- the template renders only for mobile_dev ---------------------------------------------------
-# An empty --config: --override-data merges into the host's own chezmoi.toml otherwise (invariant 10).
+# lib.sh's render: an empty config and --source the repo, so neither the host's chezmoi.toml
+# (invariant 10) nor a missing ~/.local/share/chezmoi (the {{ include }}) shapes the result.
 if command -v chezmoi >/dev/null 2>&1; then
-    empty_dir="$(mktemp -d)"   # BSD mktemp has no --suffix, and chezmoi picks the format from the extension
-    empty_config="$empty_dir/chezmoi.toml"
-    : >"$empty_config"
-    render() { (cd "$repo_root" && chezmoi --config "$empty_config" execute-template --override-data "$1" <"$tmpl" 2>&1 | tr -d '\r'); }
-    on="$(render '{"chezmoi":{"os":"windows"},"packages":{"mobile_dev":true}}')"
+    adb_render() { render --override-data "$1" --file "$tmpl" 2>&1 | tr -d '\r'; }
+    on="$(adb_render '{"chezmoi":{"os":"windows"},"packages":{"mobile_dev":true}}' || true)"
     case "$on" in
         *'function Sync-DotAdbBridgeRule'*'Sync-DotAdbBridgeRule'*) pass ;;
         *) fail "mobile_dev=true must render the lib and the call (got: $(printf '%s' "$on" | head -c 400))" ;;
     esac
     for data in '{"chezmoi":{"os":"windows"},"packages":{"mobile_dev":false}}' '{"chezmoi":{"os":"windows"},"packages":{}}'; do
-        got="$(render "$data")"
+        got="$(adb_render "$data" || printf 'RENDER FAILED')"
         if [ -z "$(printf '%s' "$got" | tr -d '[:space:]')" ]; then pass; else
             fail "$data must render nothing, so chezmoi skips the script (got: $(printf '%s' "$got" | head -c 200))"
         fi
     done
-    rm -rf "$empty_dir"
 else
     printf 'note: chezmoi not on PATH - the render checks did not run\n'
 fi
