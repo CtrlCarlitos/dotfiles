@@ -2737,6 +2737,26 @@ install_chatgpt_cli() {
     fi
 }
 
+# keeping_zshrc <cmd...> - run a vendor installer, then put back the ~/.zshrc chezmoi wrote.
+# agy's install.sh appends "# Added by Antigravity CLI installer" + `export PATH=~/.local/bin:$PATH`
+# to ~/.bashrc, ~/.zshrc and ~/.profile (issue #431 Run 10). ~/.zshrc is chezmoi-managed and
+# already puts ~/.local/bin on PATH, and chezmoi writes it before this script runs, so the edit is
+# drift: the next `dot up`'s plain `chezmoi apply` stops at ".zshrc has changed since chezmoi last
+# wrote it?" and waits for an answer. ~/.bashrc and ~/.profile are not managed and keep the line.
+# Returns the command's status. tests/agy_install_keeps_zshrc_contract.sh executes it.
+keeping_zshrc() {
+    local keep="" rc=0
+    if [ -f "$HOME/.zshrc" ]; then
+        keep="$(mktemp)" && cp -p "$HOME/.zshrc" "$keep" || keep=""
+    fi
+    "$@" || rc=$?
+    if [ -n "$keep" ]; then
+        cmp -s "$keep" "$HOME/.zshrc" || cp -p "$keep" "$HOME/.zshrc" || true
+        rm -f "$keep"
+    fi
+    return "$rc"
+}
+
 install_antigravity_cli() {
     # Antigravity CLI (agy) - official install script, no apt package.
     # Google retired standalone Gemini Code Assist for individuals in
@@ -2750,7 +2770,7 @@ install_antigravity_cli() {
             # Node/npm prerequisite), so this section works standalone.
             if ! command -v agy &>/dev/null; then
                  info "Installing Antigravity CLI (agy)..."
-                 net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
+                 keeping_zshrc net_timeout 300 bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || warn "Antigravity CLI installer failed or timed out - continuing"
             fi
             ;;
         brew)
