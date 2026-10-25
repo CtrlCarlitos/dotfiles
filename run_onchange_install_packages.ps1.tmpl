@@ -1430,12 +1430,24 @@ Add-DotTimingMark -Name 'fonts'
 if ($wtSettings) {
     try {
         $wtJson = ConvertFrom-JsonC (Get-Content $wtSettings -Raw)
-        if (-not $wtJson.profiles) { $wtJson | Add-Member -MemberType NoteProperty -Name profiles -Value ([PSCustomObject]@{}) -Force }
-        if (-not $wtJson.profiles.defaults) { $wtJson.profiles | Add-Member -MemberType NoteProperty -Name defaults -Value ([PSCustomObject]@{}) -Force }
-        if (-not $wtJson.profiles.defaults.font) { $wtJson.profiles.defaults | Add-Member -MemberType NoteProperty -Name font -Value ([PSCustomObject]@{}) -Force }
-        if ($wtJson.profiles.defaults.font.face -ne $desiredFont) {
+        # StrictMode-safe: probe PSObject.Properties, never dot into a name that may be missing.
+        # modify_settings.json leaves profiles.defaults.font out until the Meslo files exist, so
+        # on a fresh install the font is absent here, and `$x.font` threw PropertyNotFoundStrict
+        # into the catch below as "Could not parse" (#434 Run 6).
+        # Another shape (the legacy "profiles": [ ... ] array) is left alone, not replaced.
+        $wtNode = $wtJson
+        foreach ($key in 'profiles', 'defaults', 'font') {
+            $prop = $wtNode.PSObject.Properties[$key]
+            if ($null -eq $prop -or $null -eq $prop.Value) {
+                $wtNode | Add-Member -MemberType NoteProperty -Name $key -Value ([PSCustomObject]@{}) -Force
+            }
+            $wtNode = $wtNode.$key
+            if ($wtNode -isnot [PSCustomObject]) { $wtNode = $null; break }
+        }
+        $faceProp = if ($null -ne $wtNode) { $wtNode.PSObject.Properties['face'] }
+        if ($null -ne $wtNode -and ($null -eq $faceProp -or $faceProp.Value -ne $desiredFont)) {
             Copy-Item $wtSettings "$wtSettings.bak" -Force -ErrorAction SilentlyContinue
-            $wtJson.profiles.defaults.font | Add-Member -MemberType NoteProperty -Name face -Value $desiredFont -Force
+            $wtNode | Add-Member -MemberType NoteProperty -Name face -Value $desiredFont -Force
             $wtJson | ConvertTo-Json -Depth 10 | Set-Content -Path $wtSettings -Encoding utf8
             Write-Host "  Set Windows Terminal default font to $desiredFont (backup: $wtSettings.bak)" -ForegroundColor Green
         }
