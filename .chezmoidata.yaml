@@ -102,16 +102,16 @@ versions:
   android_commandlinetools_sha256_linux: "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
   android_commandlinetools_sha256_mac_x86_64: "c5a6378ab5cf7e0d5701921405115befff13e9ff7417fb588389338f8bd050f3"
   android_commandlinetools_sha256_mac_arm64: "835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e"
-  antigravity_hub: "2.24.0-5780333019398144"
+  antigravity_hub: "2.26.0-6546645232517120"
   gum: "2.0.1"
-  powershell: "7.6.7"
+  powershell: "7.6.8"
   # Pinned rather than read from the release's own hashes.sha256: that file is
   # UTF-16LE with a BOM, CRLF line endings and a binary-mode `*` before the
   # name - three parsing hazards in a verification step that must not be
   # clever. Pinning the digest is what .chezmoiexternal.toml already does for
   # every archive. scripts/update-versions.sh refreshes all three together.
-  powershell_sha256_x64: "6896f9e3a6b0a354bf470835a96da76d2f801cd50dcf047ad7c4563bf93bf431"
-  powershell_sha256_arm64: "ba465efdfb0984c1c5dc5ed9eb0b79a7e91a1b52c45f99377058c0659b84d3f1"
+  powershell_sha256_x64: "59112e38ad83350e4f6dc0195953c66b5926792f300ca2e7691b8242e7a16e7f"
+  powershell_sha256_arm64: "3179e07fd98f026d39c730ebcb7626d071aac3351b171dda13f9f38d99efcef0"
   claude_install_sh: "https://claude.ai/install.sh"
   claude_install_ps1: "https://claude.ai/install.ps1"
   maestro_version: "2.11.0"
@@ -123,9 +123,9 @@ versions:
   lychee_version: "0.24.2"
   lychee_sha256_x86_64: "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a"
   lychee_sha256_aarch64: "91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c"
-  vale_version: "3.24.0"
-  vale_sha256_x86_64: "867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214"
-  vale_sha256_aarch64: "104cbd349279e50c4cb40adb70adf345d93cc4a3a0191f9e68bdccb97086b582"
+  vale_version: "3.25.1"
+  vale_sha256_x86_64: "4bf5c5176b682b1da0830f471584d3494f1c2e27ee3029e1ad6f6661d4962182"
+  vale_sha256_aarch64: "2a69755b68118c612c455fc0c5ea1b9438519aa1c852e3fb303b3ad97141bbb0"
   # The Linux full-install check must not depend on GitHub's unauthenticated
   # releases API. Pin the exact asset and verify it before installation.
   lazygit_version: "0.66.2"
