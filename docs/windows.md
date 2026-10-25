@@ -133,7 +133,9 @@ was degraded (2026-10-11), and nothing printed while its installer downloaded. T
   `Get-NetFirewallRule`) to learn that nothing had changed. The adapter and its subnet now come from .NET and the
   rule from `netsh`, about 0.3 s together. The rule is still created and updated with the NetSecurity cmdlets,
   and whenever the cheap read cannot say "already current" (no rule, another subnet, or a Windows whose `netsh`
-  labels are not English) (`scripts/lib/ps-adb-bridge.ps1`; `tests/adb_bridge_check_contract.sh`).
+  labels are not English) (`scripts/lib/ps-adb-bridge.ps1`; `tests/adb_bridge_check_contract.sh`). It runs on
+  every apply from `run_after_mobile-dev-adb-bridge.ps1.tmpl`, not from the installer: the installer reruns only
+  on a content change, so a first install, which has no WSL adapter until after the restart, never got the rule.
 - **Where the whole `dot up` goes.** A 3m10s run printed `Timings (dot up, 1m38s)`: the installer's clock began
   at its first section mark, after the checks and the Node.js step, and nothing timed the pull, the init or the
   apply. `dot up` now ends with `dot up took 3m10s: pull 4s, init 0s, apply 3m05s`, and the installer's clock

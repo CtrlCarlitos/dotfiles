@@ -111,7 +111,6 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-heartbeat.ps1" }}
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
 {{ include "scripts/lib/ps-npm-registry.ps1" }}
-{{ include "scripts/lib/ps-adb-bridge.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
 # The clock starts here, so the total is the whole installer and what ran before the first section
 # (the checks and the Node.js step used to sit ahead of the first mark, unmeasured).
@@ -789,45 +788,9 @@ function Install-MobileDev {
         }
     }
 
-    # ADB bridge Firewall rule (design doc section 3.3). The ADB server
-    # itself (`adb -a -P 5037 nodaemon server`) stays a manual, per-session
-    # command Carlos runs himself - the single most important constraint in
-    # this plan is that nothing here starts or registers it as a service.
-    # This only scopes the Firewall rule `adb -a` needs to the WSL vEthernet
-    # subnet, never a LAN-wide opening (#336's explicit caution). Wrapped in
-    # try/catch so a Firewall service that is off, or managed by Group
-    # Policy, never aborts the rest of the installer.
-    # Read cheaply first (scripts/lib/ps-adb-bridge.ps1): .NET for the adapter and its subnet, netsh for the
-    # rule. The rule is only touched with the NetSecurity cmdlets when it is missing or points elsewhere.
-    $wslNet = Get-DotWslSubnet
-    if ($wslNet.Found -and $wslNet.Subnet) {
-        $wslSubnet = $wslNet.Subnet
-        if ((Get-DotFirewallRuleRemoteIp -DisplayName 'mobile_dev: ADB bridge (WSL only)') -ne $wslSubnet) {
-            try {
-                $existingRule = Get-NetFirewallRule -Name 'MobileDevAdbBridge' -ErrorAction SilentlyContinue
-                if (-not $existingRule) {
-                    New-NetFirewallRule -Name 'MobileDevAdbBridge' -DisplayName 'mobile_dev: ADB bridge (WSL only)' `
-                        -Direction Inbound -Protocol TCP -LocalPort 5037 `
-                        -RemoteAddress $wslSubnet -Action Allow | Out-Null
-                } else {
-                    # WSL's subnet can change across a reboot (NAT mode
-                    # especially) - a rule left pointing at the old subnet is
-                    # exactly the "silently half-working bridge" Review Focus
-                    # item 5 warns about.
-                    $existingFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
-                    if (($existingFilter.RemoteAddress -join ',') -ne $wslSubnet) {
-                        Set-NetFirewallRule -Name 'MobileDevAdbBridge' -RemoteAddress $wslSubnet
-                    }
-                }
-            } catch {
-                Write-Host "  Warning: could not create/update the ADB bridge Firewall rule - $_" -ForegroundColor Red
-            }
-        }
-    } elseif ($wslNet.Found) {
-        Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
-    } else {
-        Write-Host "  Warning: no WSL vEthernet adapter found - skipping the ADB bridge Firewall rule (install/start WSL first)." -ForegroundColor Red
-    }
+    # The ADB bridge Firewall rule is run_after_mobile-dev-adb-bridge.ps1.tmpl's job, on every apply:
+    # this script reruns only when its content changes, and on a first install the WSL adapter the rule
+    # is scoped to does not exist until after the restart (#434 Run 7, #430 Run 11).
 }
 
 {{- if $core }}

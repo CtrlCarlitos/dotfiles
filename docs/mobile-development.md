@@ -17,8 +17,13 @@ clickable link, here).
 
 `Install-MobileDev` (in `run_onchange_install_packages.ps1.tmpl`) installs a
 standalone JDK 17+, the Android SDK command-line tools, platform-tools, the
-emulator, a default Pixel-like AVD, and scrcpy, then adds a Windows Firewall
-rule scoped to the WSL vEthernet subnet for the ADB bridge. It asks nothing:
+emulator, a default Pixel-like AVD, and scrcpy. A Windows Firewall rule for
+the ADB bridge, scoped to the WSL vEthernet subnet, is kept by
+`run_after_mobile-dev-adb-bridge.ps1.tmpl` on every `dot up`. That adapter
+exists only while WSL runs (a distro or Docker Desktop), and its subnet changes
+from one WSL start to the next. So after the first install's restart, start
+WSL and run `dot up` once to add the rule; later runs re-scope it when the
+subnet moves. The installer asks nothing:
 `mobile_dev = true` in `chezmoi.toml` is your consent to the Android SDK
 licenses, the multi-GB system-image download and enabling Windows Hypervisor
 Platform (WHPX) when it is disabled (WHPX needs a restart). Each step says what

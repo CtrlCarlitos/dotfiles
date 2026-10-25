@@ -1,0 +1,16 @@
+{{ if eq .chezmoi.os "windows" -}}
+{{- $mobile_dev := false -}}
+{{- if hasKey . "packages" }}{{ if hasKey .packages "mobile_dev" }}{{ $mobile_dev = .packages.mobile_dev }}{{ end }}{{ end -}}
+{{- if $mobile_dev -}}
+# Runs after EVERY chezmoi apply when mobile_dev is on: keeps the ADB bridge Firewall rule scoped to
+# the live WSL vEthernet subnet. It used to sit in run_onchange_install_packages.ps1.tmpl, which reruns
+# only when its content changes. The adapter exists only while WSL's VM runs, and a first install has
+# none until after the restart, so the installer skipped the rule and the post-restart `dot up` had
+# nothing to rerun: no rule, ever, until an unrelated installer change (#434 Run 7; the in-apply race in
+# #430 Run 11). The subnet also changes from one WSL start to the next. The check is about 0.3 s
+# (.NET + netsh, scripts/lib/ps-adb-bridge.ps1) and writes only when the rule is missing or points at
+# another subnet. tests/adb_bridge_check_contract.sh executes it.
+{{ include "scripts/lib/ps-adb-bridge.ps1" }}
+Sync-DotAdbBridgeRule
+{{ end -}}
+{{ end -}}

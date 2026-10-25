@@ -307,6 +307,7 @@ run_onchange_install_packages.*       # Platform installers (17-group gated)
 run_onchange_generate_identities.*    # Git identity + SSH key generation
 run_onchange_sync_pwsh_profiles.ps1.tmpl   # OneDrive-redirected profile sync (Windows)
 run_after_dotfiles-doctor.*           # dot doctor health check on every apply
+run_after_mobile-dev-adb-bridge.ps1.tmpl   # mobile_dev's WSL-only ADB Firewall rule, every apply (Windows)
 run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
 .chezmoi.toml.tmpl                    # Config template (17 promptBoolOnce groups)
 .chezmoidata.yaml + .chezmoidata/     # Curated data: VS Code baseline, package catalog, agents.yaml

@@ -63,8 +63,12 @@ fi
 
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
 
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-NetFirewallRule'
+# The ADB bridge rule lives in scripts/lib/ps-adb-bridge.ps1, run on every apply by
+# run_after_mobile-dev-adb-bridge.ps1.tmpl (tests/adb_bridge_check_contract.sh executes it).
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'New-NetFirewallRule'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-Service'
+forbid "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'New-Service'
+forbid "$repo_root/run_after_mobile-dev-adb-bridge.ps1.tmpl" 'New-Service'
 require "$repo_root/docs/mobile-development.md" 'adb -a -P 5037 nodaemon server'
 
 # Fix pass (final-review findings, 2026-10-10):
@@ -92,8 +96,8 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'function Invoke-Mob
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'LASTEXITCODE'
 # the Firewall rule's RemoteAddress is corrected if the WSL subnet changed
 # (e.g. after a reboot in NAT mode), not just checked for existing by name.
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Get-NetFirewallAddressFilter'
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Set-NetFirewallRule'
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'Get-NetFirewallAddressFilter'
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'Set-NetFirewallRule'
 # the real re-entry point after a failed step (run_onchange only re-runs on a
 # rendered-content change, not on every `dot up`) is documented, not a
 # misleading "just re-run".
@@ -101,6 +105,7 @@ require "$repo_root/docs/mobile-development.md" '--bucket=entryState --key='
 # no scheduled task either - the "no new always-on service" constraint
 # covers more than just Windows Services.
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Register-ScheduledTask'
+forbid "$repo_root/run_after_mobile-dev-adb-bridge.ps1.tmpl" 'Register-ScheduledTask'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-ScheduledTask'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sc.exe create'
 # the Windows Firewall "Allow access" dialog for adb.exe can silently widen
