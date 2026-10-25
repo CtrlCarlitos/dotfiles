@@ -48,6 +48,11 @@ The package managers' boilerplate lines that `dot up` hides stay in `~/.local/st
   questions and their answers, the package-manager lines the console shows). A native tool that
   writes straight to the console is not in it; `install.ps1` pipes its winget and Chocolatey
   installs through `Out-Host` so they are.
+  Windows PowerShell 5.1's transcript also records a native tool's stderr that the script captured
+  or discarded (`2>&1` into a variable, `*> $null`), as a `NativeCommandError` block the console
+  never showed. `dot-up-*.log` has two of these: `wsl.exe --status` / `--version` on a box without
+  WSL yet, and the mobile_dev JDK probe's whole `java -XshowSettings:properties` dump. They are
+  not failures; the console and the parsed result are unaffected (verified on 5.1, 2026-10-24).
 
 ## verbose
 
