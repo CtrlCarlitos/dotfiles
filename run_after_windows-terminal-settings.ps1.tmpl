@@ -1,0 +1,25 @@
+{{ if eq .chezmoi.os "windows" -}}
+{{- $path := joinPath .chezmoi.homeDir "AppData" "Local" "Packages" "Microsoft.WindowsTerminal_8wekyb3d8bbwe" "LocalState" "settings.json" -}}
+# Runs after EVERY chezmoi apply: the Windows Terminal merge once more, now that the package
+# installer has run. chezmoi applies modify_settings.json in its file pass, BEFORE
+# run_onchange_install_packages.ps1.tmpl, so on a fresh install that merge saw neither pwsh
+# (PowerShell 7 stayed unstyled) nor the Meslo font (#430 Run 7). This script's template is
+# rendered when it runs, after the installer, so the same merge
+# (.chezmoitemplates/windows-terminal-settings.json) sees both. It writes only on a difference,
+# so a settled machine is left alone, and never creates the file (modify_settings.json does).
+#
+# Base64, not a here-string: the merge carries non-ASCII profile icons (and the path can carry a
+# non-ASCII user name), and Windows PowerShell 5.1 reads a BOM-less script as Windows-1252
+# (docs/invariants.md #16). -cne: -ne ignores case.
+{{- if stat $path }}
+{{- $ctx := dict "stdin" (include $path) -}}
+{{- if hasKey . "ssh_hosts" }}{{ $_ := set $ctx "ssh_hosts" .ssh_hosts }}{{ end }}
+
+$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{{ $path | b64enc }}'))
+$want = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{{ includeTemplate "windows-terminal-settings.json" $ctx | b64enc }}'))
+if ((Test-Path -LiteralPath $path) -and ([IO.File]::ReadAllText($path) -cne $want)) {
+    [IO.File]::WriteAllText($path, $want, (New-Object Text.UTF8Encoding $false))
+    Write-Host "  Windows Terminal settings merged again after the package install (pwsh, font)" -ForegroundColor Green
+}
+{{- end }}
+{{ end -}}

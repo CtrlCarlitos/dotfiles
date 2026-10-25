@@ -14,7 +14,7 @@ box. Windows Terminal and Ghostty keep Catppuccin Mocha's own background.
 
 | Surface | Managed by | How |
 |---|---|---|
-| Windows Terminal | `AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/modify_settings.json` | modify-template: merges into `settings.json` |
+| Windows Terminal | `.chezmoitemplates/windows-terminal-settings.json`, via `AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/modify_settings.json` and `run_after_windows-terminal-settings.ps1.tmpl` | modify-template: merges into `settings.json`; the run_after script merges again once the package installer has added PowerShell 7 and the Meslo font, so a fresh install comes out styled |
 | Ghostty (macOS, Linux desktop) | `dot_config/ghostty/config.tmpl` | owned file (Ghostty never rewrites it) |
 | VS Code terminal: settings | `run_onchange_install_packages.{ps1,sh}.tmpl` | installer VS Code step, see [VS Code](vscode.md) |
 | VS Code terminal: keys | `.chezmoitemplates/vscode-keybindings.json`, via `modify_keybindings.json` in `AppData/Roaming/Code/User` (Windows), `Library/Application Support/Code/User` (macOS), `dot_config/Code/User` (Linux desktop) | modify-template: merges into `keybindings.json`, only where VS Code's User folder exists |

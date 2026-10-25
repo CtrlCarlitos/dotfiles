@@ -75,7 +75,7 @@ subsequent `dot up` hit chezmoi's *"changed since chezmoi last wrote it"* prompt
 
 | File | Rewritten by |
 |---|---|
-| `AppData/.../LocalState/modify_settings.json` | Windows Terminal |
+| `AppData/.../LocalState/modify_settings.json` (+ `run_after_windows-terminal-settings.ps1.tmpl`, same merge after the installer) | Windows Terminal |
 | `dot_config/opencode/modify_tui.json` | OpenCode |
 | `dot_codex/modify_config.toml` | Codex |
 | `*/modify_keybindings.json` | VS Code |

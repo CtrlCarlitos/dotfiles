@@ -6,7 +6,14 @@ set -euo pipefail
 # (owning the whole file made every apply hit the "changed since chezmoi last
 # wrote it" prompt, confirmed live). Pinned behaviors:
 #   - user/Terminal-owned keys and profiles survive a merge
-#   - styled profiles are updated only if present, never created
+#   - styled profiles are updated only if present, never created - except PowerShell 7's,
+#     created when pwsh.exe is installed (Terminal adds it only on its next launch, so a
+#     fresh install's merge never saw it, #430 Run 7)
+#   - the Meslo font is forced only once its files are installed (forcing a missing face
+#     made Terminal pop "font not available" mid-install)
+#   - run_after_windows-terminal-settings.ps1.tmpl repeats the same merge at the END of
+#     every apply, after the package installer added pwsh and the font, and writes only
+#     when the result differs (byte-identical to the modify_ output: no ping-pong)
 #   - the WSL profile gets the Nerd Font back (WSL's fragment forces Ubuntu Mono)
 #   - one "SSH: <name>" profile per [[data.ssh_hosts]], GUID from the name,
 #     and a removed host loses its profile
@@ -33,10 +40,21 @@ if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     : >"$tmp/chezmoi.toml"
+    # The merge probes the machine for pwsh.exe and the Meslo font through ProgramW6432, WINDIR
+    # and LOCALAPPDATA; these fixtures stand in for them. Default: font installed, no pwsh.
+    mkdir -p "$tmp/pf" "$tmp/pf7/PowerShell/7" "$tmp/win/Fonts" "$tmp/nofont/Fonts" "$tmp/lad" \
+        "$tmp/ladfont/Microsoft/Windows/Fonts"
+    : >"$tmp/pf7/PowerShell/7/pwsh.exe"
+    : >"$tmp/win/Fonts/MesloLGSNerdFontMono-Regular.ttf"
+    : >"$tmp/ladfont/Microsoft/Windows/Fonts/MesloLGSNerdFontMono-Regular.ttf"
+    wt_pf="$tmp/pf" wt_win="$tmp/win" wt_lad="$tmp/lad"
     merge() {  # $1 = override data; stdin = current settings.json
-        chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
+        ProgramW6432="$wt_pf" WINDIR="$wt_win" LOCALAPPDATA="$wt_lad" \
+            chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
             --with-stdin --file "$tmpl" --override-data "$1"
     }
+    grep -Fq '{{- includeTemplate "windows-terminal-settings.json"' "$tmpl" ||
+        fail "modify_settings.json must includeTemplate the shared windows-terminal-settings.json"
     hosts='{"ssh_hosts":[{"name":"mac1","hostname":"a","os":"mac"},{"name":"box","hostname":"b","os":"linux"},{"name":"nohost"}]}'
     wsl='{4e32b81b-1048-573a-93b5-97a765b27f69}'
 
@@ -132,6 +150,76 @@ JSON
     jq -e '([.newTabMenu[].type] == ["profile","remainingProfiles"]) and ([.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$"))] == [])' <<<"$bare" >/dev/null ||
         fail "bare machine: the menu is psmux + remainingProfiles and no chord entry is written"
     pass
+
+    # The font is forced only once installed: a missing face pops "font not available" in a
+    # running Terminal. Machine-wide (WINDIR\Fonts) or per-user (LOCALAPPDATA) both count.
+    wsl_in='{"profiles":{"list":[{"guid":"{4e32b81b-1048-573a-93b5-97a765b27f69}","name":"Ubuntu-24.04","source":"Microsoft.WSL","font":{"face":"Ubuntu Mono"}}]}}'
+    nf=$(printf '%s' "$wsl_in" | wt_win="$tmp/nofont" merge '{}')
+    printf '%s' "$nf" | jq -e '(.profiles.defaults | has("font") | not) and .profiles.defaults.colorScheme == "Catppuccin Mocha"
+        and (.profiles.list[] | select(.source == "Microsoft.WSL") | .font.face == "Ubuntu Mono" and .tabColor == "#FAB387")' >/dev/null ||
+        fail "no Meslo installed: the font must not be forced (everything else still is)"
+    [ "$(printf '%s' "$nf" | wt_win="$tmp/nofont" merge '{}')" = "$nf" ] || fail "font-less merge is not idempotent"
+    : | wt_win="$tmp/nofont" wt_lad="$tmp/ladfont" merge '{}' | jq -e '.profiles.defaults.font.face == "MesloLGS Nerd Font Mono"' >/dev/null ||
+        fail "a per-user Meslo install (LOCALAPPDATA\\Microsoft\\Windows\\Fonts) must count as installed"
+
+    # pwsh.exe installed: the PowerShell 7 profile is created (Terminal's own guid and source, so
+    # its generator merges into it), styled, first in the list and the menu - never duplicated.
+    ps7='{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+    p7=$(: | wt_pf="$tmp/pf7" merge '{}')
+    printf '%s' "$p7" | jq -e --arg g "$ps7" '.profiles.list[0] | .guid == $g and .name == "PowerShell"
+        and .source == "Windows.Terminal.PowershellCore" and .tabColor == "#89B4FA" and .hidden == false' >/dev/null ||
+        fail "pwsh.exe installed: PowerShell 7 must be created first, with Terminal's guid/source and the blue tab"
+    printf '%s' "$p7" | jq -e --arg g "$ps7" '.newTabMenu[0].profile == $g' >/dev/null || fail "pwsh.exe installed: PowerShell 7 must open the menu"
+    [ "$(printf '%s' "$p7" | wt_pf="$tmp/pf7" merge '{}')" = "$p7" ] || fail "PowerShell 7 creation is not idempotent"
+    printf '%s' "$grouped" | wt_pf="$tmp/pf7" merge "$four" | jq -e --arg g "$ps7" '[.profiles.list[] | select(.guid == $g)] | length == 1' >/dev/null ||
+        fail "pwsh.exe installed and PowerShell 7 already listed: it must not be duplicated"
+
+    # The end-of-apply pass: renders the same merge from the live file, decodes it (base64 - the
+    # profile icons are not ASCII, and Windows PowerShell 5.1 reads a BOM-less script as
+    # Windows-1252) and writes only on a difference.
+    ra="$repo_root/run_after_windows-terminal-settings.ps1.tmpl"
+    [ -f "$ra" ] || fail "run_after_windows-terminal-settings.ps1.tmpl missing (the end-of-apply merge)"
+    grep -Fq 'includeTemplate "windows-terminal-settings.json"' "$ra" || fail "$ra must includeTemplate the shared merge"
+    grep -Fq 'b64enc' "$ra" || fail "$ra must carry the merge base64-encoded (non-ASCII icons, 5.1 reads ANSI)"
+    home="$tmp/home"; live="$home/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
+    mkdir -p "$(dirname "$live")"
+    # Git Bash converts paths in the environment for a native chezmoi, not inside JSON.
+    home_native="$home"; command -v cygpath >/dev/null 2>&1 && home_native="$(cygpath -m "$home")"
+    render_ra() {  # $1 = os
+        ProgramW6432="$tmp/pf7" WINDIR="$wt_win" LOCALAPPDATA="$wt_lad" \
+            chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"homeDir\":\"$home_native\"},\"ssh_hosts\":[{\"name\":\"mac1\",\"hostname\":\"a\",\"os\":\"mac\"}]}" <"$ra"
+    }
+    [ -z "$(render_ra linux | tr -d '[:space:]')" ] || fail "$ra must render empty off Windows"
+    printf '%s' "$wsl_in" >"$live"
+    want_live=$(printf '%s' "$wsl_in" | wt_pf="$tmp/pf7" merge '{"ssh_hosts":[{"name":"mac1","hostname":"a","os":"mac"}]}')
+    if command -v pwsh >/dev/null 2>&1; then
+        render_ra windows >"$tmp/ra.ps1"
+        pwsh -NoProfile -File "$tmp/ra.ps1" >/dev/null 2>&1 || fail "$ra: the rendered script failed"
+        [ "$(cat "$live")" = "$want_live" ] || fail "$ra must write exactly the modify_ merge of the live file (no ping-pong)"
+        printf '%s' "$want_live" | jq -e --arg g "$ps7" 'any(.profiles.list[]; .guid == $g) and any(.profiles.list[]; .name == "SSH: mac1" and .icon == "🍎")' >/dev/null ||
+            fail "$ra: PowerShell 7 and the SSH profile (with its non-ASCII icon) must come through"
+        render_ra windows >"$tmp/ra2.ps1"
+        touch -t 200101010000 "$live"; touch "$tmp/stamp"
+        pwsh -NoProfile -File "$tmp/ra2.ps1" >/dev/null 2>&1 || fail "$ra: the second run failed"
+        [ -z "$(find "$live" -newer "$tmp/stamp")" ] || fail "$ra rewrote an already-merged file (it must write only on a difference)"
+        rm -f "$live"; render_ra windows >"$tmp/ra3.ps1"
+        pwsh -NoProfile -File "$tmp/ra3.ps1" >/dev/null 2>&1 || fail "$ra must skip quietly when Terminal never created settings.json"
+        [ ! -e "$live" ] || fail "$ra must not create settings.json (the modify_ target owns first creation)"
+    else
+        printf 'SKIP (end-of-apply run needs PowerShell): pwsh not installed\n'
+    fi
+
+    # End-to-end: a real apply of a scratch source with the shared template (docs/invariants.md #4).
+    mkdir -p "$tmp/wtsrc/.chezmoitemplates" "$tmp/wtdest"
+    cp "$repo_root/.chezmoitemplates/windows-terminal-settings.json" "$tmp/wtsrc/.chezmoitemplates/"
+    cp "$tmpl" "$tmp/wtsrc/modify_wt.json"
+    printf '{}' >"$tmp/wtdest/wt.json"
+    ProgramW6432="$tmp/pf7" WINDIR="$wt_win" LOCALAPPDATA="$wt_lad" \
+        chezmoi --source "$tmp/wtsrc" --destination "$tmp/wtdest" --config "$tmp/chezmoi.toml" --no-tty apply --force >/dev/null 2>&1 ||
+        fail "applying the Terminal modify-template from a scratch source failed"
+    jq -e --arg g "$ps7" '.profiles.list[0].guid == $g and .profiles.defaults.font.face == "MesloLGS Nerd Font Mono"' "$tmp/wtdest/wt.json" >/dev/null ||
+        fail "scratch apply: expected PowerShell 7 first and the Meslo font forced"
 
     # Alt+Enter is unbound so it reaches the CLIs as a newline; F11 keeps full
     # screen. A user's own null-id unbind on another key must survive.
