@@ -12,10 +12,10 @@
 # everything under custom/); chezmoi must not prune files it did not ship.
 [".oh-my-zsh"]
   type            = "archive"
-  url             = "https://github.com/ohmyzsh/ohmyzsh/archive/964ddf789b022b6958b27d02d7fa54f552de21e9.tar.gz"
+  url             = "https://github.com/ohmyzsh/ohmyzsh/archive/2100c630ba4bd67bb48802c3e7da893a4fdaa1a0.tar.gz"
   exact           = false
   stripComponents = 1
-  checksum.sha256 = "89ccb57b3328f0df303d557bef54cc7d0efb6f22f016552943ef3e15273e0588"
+  checksum.sha256 = "926a97ef45a948aa014ca15d5d880b34cfd69ebde4f81cd33df845972784f469"
 
 [".oh-my-zsh/custom/plugins/zsh-autosuggestions"]
   type            = "archive"

@@ -66,7 +66,9 @@ install_package() {
             SUDO=""
         fi
         $SUDO apt-get update
-        $SUDO apt-get install -y "$PACKAGE"
+        # noninteractive: a debconf question would otherwise stop the bootstrap (see
+        # quiet_apt_enable in scripts/lib/agent-skills.sh - the iperf3 hang of 2026-10-23)
+        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$PACKAGE"
     else
         echo "Warning: Automatic installation not supported for OS: ${ID:-unknown}"
         echo "Please install '$PACKAGE' manually and rerun the script."
@@ -79,22 +81,24 @@ install_package() {
 # chezmoi's native config prompts take over. Each asset is verified against
 # the release's published checksums.txt before it is installed.
 #
-# The pin's single source is .chezmoidata.yaml versions.gum (#125): read it
-# when a checkout is on disk (direct run, devcontainer). The inline fallback
-# below only covers the one-liner run, where this script was downloaded
-# alone - scripts/update-versions.sh syncs it to the yaml pin, so the two
-# cannot drift silently.
+# The pin's single source is .chezmoidata.yaml versions.gum (#125), read from
+# the checkout - which step 1.3 below now clones BEFORE gum is bootstrapped,
+# so the one-liner gets the pin too. The inline fallback only covers a failed
+# read; scripts/update-versions.sh syncs it to the yaml pin, so the two cannot
+# drift silently.
 GUM_VERSION="${GUM_VERSION:-2.0.1}"
-for _gum_yaml in "$(dirname "$0")/.chezmoidata.yaml" \
-                  "$HOME/.local/share/chezmoi/.chezmoidata.yaml"; do
-    if [ -f "$_gum_yaml" ]; then
-        _yaml_gum="$(sed -n 's/^  gum: .\{0,1\}\([^"]*\).\{0,1\}$/\1/p' "$_gum_yaml" | head -n 1)"
-        if [ -n "$_yaml_gum" ]; then
-            GUM_VERSION="$_yaml_gum"
-            break
+read_gum_pin() {
+    for _gum_yaml in "$(dirname "$0")/.chezmoidata.yaml" \
+                      "$HOME/.local/share/chezmoi/.chezmoidata.yaml"; do
+        if [ -f "$_gum_yaml" ]; then
+            _yaml_gum="$(sed -n 's/^  gum: .\{0,1\}\([^"]*\).\{0,1\}$/\1/p' "$_gum_yaml" | head -n 1)"
+            if [ -n "$_yaml_gum" ]; then
+                GUM_VERSION="$_yaml_gum"
+                return 0
+            fi
         fi
-    fi
-done
+    done
+}
 
 # Print the sha256 of a file; empty output when no SHA-256 tool exists.
 sha256_of() {
@@ -122,6 +126,7 @@ bootstrap_gum() {
     if command -v gum >/dev/null 2>&1; then
         return 0
     fi
+    read_gum_pin
 
     GUM_OS="$(uname -s)"
     GUM_ARCH="$(uname -m)"
@@ -154,7 +159,7 @@ bootstrap_gum() {
         else
             SUDO=""
         fi
-        if ! $SUDO apt-get install -y "$GUM_TMP/$GUM_ASSET"; then
+        if ! $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$GUM_TMP/$GUM_ASSET"; then
             echo "Warning: gum install failed - menu will self-skip."
         fi
     else
@@ -209,6 +214,55 @@ if ! command -v 7z >/dev/null 2>&1 && ! command -v 7zz >/dev/null 2>&1; then
     install_package p7zip-full
 fi
 
+# 1.3 The source checkout, BEFORE gum, the menu and the apply - install.ps1's
+# step 2, ported (2026-10-23 fresh Ubuntu 26.04 VM). The one-liner downloads
+# this script alone, so scripts/select-packages.sh and the gum/chezmoi pins
+# were not on disk yet: the menu printed "package menu not found" and never
+# showed on a fresh Linux machine. Only this network step is retried.
+#
+# DOTFILES_BRANCH (default main) installs another branch - how a fix is tried
+# on a fresh machine before it is merged. An existing clone is switched to it
+# when asked for explicitly, then fast-forwarded: a rerun used to reuse the
+# old clone as-is, so merged fixes never reached the machine. Unauthenticated
+# https on purpose: the repo is public (tests/installer_url_credentials_contract.sh).
+SOURCE_DIR="$HOME/.local/share/chezmoi"
+SOURCE_URL="https://github.com/CtrlCarlitos/dotfiles.git"
+SOURCE_BRANCH="${DOTFILES_BRANCH:-main}"
+LOCAL_SOURCE=""
+if [ -f "chezmoi.toml" ] || [ -f ".chezmoi.toml.tmpl" ]; then
+    LOCAL_SOURCE=1 # running from within a checkout (e.g. devcontainer feature)
+    echo "Using the local checkout at $(pwd)"
+elif [ -d "$SOURCE_DIR/.git" ]; then
+    echo "Updating existing dotfiles clone..."
+    if [ -n "${DOTFILES_BRANCH:-}" ] &&
+        [ "$(git -C "$SOURCE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)" != "$SOURCE_BRANCH" ]; then
+        # `git switch <b>` creates the local branch from origin/<b> on its own once fetched
+        if ! _net 120 git -C "$SOURCE_DIR" fetch origin "$SOURCE_BRANCH" ||
+            ! git -C "$SOURCE_DIR" switch "$SOURCE_BRANCH"; then
+            echo "  could not switch the clone to $SOURCE_BRANCH (local changes?) - continuing on $(git -C "$SOURCE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+        fi
+    fi
+    if ! _net 120 git -C "$SOURCE_DIR" pull --ff-only; then
+        echo "  clone update failed (offline? local changes?) - continuing with existing source"
+    fi
+else
+    echo "Cloning the dotfiles ($SOURCE_BRANCH) into $SOURCE_DIR..."
+    _clone_attempt=1
+    while :; do
+        rm -rf "$SOURCE_DIR"
+        if _net 300 git clone --branch "$SOURCE_BRANCH" "$SOURCE_URL" "$SOURCE_DIR" && [ -d "$SOURCE_DIR/.git" ]; then
+            break
+        fi
+        if [ "$_clone_attempt" -ge 3 ]; then
+            echo "Could not clone $SOURCE_URL ($SOURCE_BRANCH) after 3 attempts. Check the network and re-run the installer." >&2
+            exit 1
+        fi
+        echo "clone failed (attempt $_clone_attempt of 3) - retrying in ${CHEZMOI_RETRY_DELAY:-5} seconds..."
+        sleep "${CHEZMOI_RETRY_DELAY:-5}"
+        _clone_attempt=$((_clone_attempt + 1))
+    done
+fi
+
 # 1.5 Interactive package menu - runs BEFORE `chezmoi init --apply` so the
 # selection lands in ~/.config/chezmoi/chezmoi.toml ahead of the config
 # template. The menu self-skips without a TTY or gum; chezmoi's native config
@@ -236,7 +290,7 @@ if [ -z "$IS_DEVCONTAINER" ]; then
             echo "Warning: package menu failed - continuing with chezmoi config prompts."
         fi
     else
-        echo "Note: package menu not found (fresh one-liner install) - chezmoi config prompts will collect preferences."
+        echo "Note: package menu not found in the checkout - chezmoi config prompts will collect preferences."
     fi
 else
     echo "Devcontainer detected - skipping package menu (tools come from devcontainer-features)."
@@ -346,40 +400,31 @@ run_chezmoi_with_retry() {
     return "$_rc_code"
 }
 
-if [ -d "$HOME/.local/share/chezmoi/.git" ]; then
-  # Repo exists: Run init (to ensure config exists/generates) and then apply
-  # This respects existing config but ensures setup is complete
-  run_chezmoi_with_retry chezmoi init --apply
+if [ -n "$LOCAL_SOURCE" ]; then
+  run_chezmoi_with_retry chezmoi init --apply --source .
 else
-  # If we are running from within the repo checking out (e.g. devcontainer feature)
-  if [ -f "chezmoi.toml" ] || [ -f ".chezmoi.toml.tmpl" ]; then
-     run_chezmoi_with_retry chezmoi init --apply --source .
-  else
-     # The repo is public: chezmoi clones it itself, unauthenticated.
-     #
-     # There is deliberately NO token-authenticated branch here. This used to
-     # clone an https URL with a bootstrap token interpolated into the
-     # userinfo position (before the host), and git persists a clone URL
-     # verbatim as remote.origin.url - so that token stayed in .git/config
-     # (mode 644, world-readable) for as long as the checkout lived, which is
-     # exactly what docs/backup-restore.md's "do not embed a PAT in a clone
-     # URL" rule forbids. One real machine carried a classic token there for
-     # weeks; `git remote -v` printed it on demand, and a token in the
-     # username position is not even a working push credential.
-     #
-     # If this repo is ever private again, authenticate by identity, not by
-     # URL: SSH (dot_gitconfig's url.*.insteadOf rewrites already carry a
-     # per-account identity) or a credential helper. If a token is truly
-     # unavoidable, pass it as a ONE-SHOT helper BEFORE the subcommand -
-     # `git -c credential.helper=... clone <tokenless-url>` - and never as
-     # `git clone -c ...`, which writes the value into the new repo's config
-     # and recreates this bug. tests/installer_url_credentials_contract.sh
-     # pins all of that.
-     #
-     # DOTFILES_BRANCH (default main) installs another branch - how a fix is tried on a fresh
-     # machine before it is merged (install.ps1's twin; an existing clone is not switched here).
-     run_chezmoi_with_retry chezmoi init --apply --branch "${DOTFILES_BRANCH:-main}" CtrlCarlitos/dotfiles
-  fi
+  # The checkout is on disk (step 1.3): init (re)generates the config from it
+  # and applies. The repo is public: step 1.3 clones it unauthenticated.
+  #
+  # There is deliberately NO token-authenticated branch here. This used to
+  # clone an https URL with a bootstrap token interpolated into the
+  # userinfo position (before the host), and git persists a clone URL
+  # verbatim as remote.origin.url - so that token stayed in .git/config
+  # (mode 644, world-readable) for as long as the checkout lived, which is
+  # exactly what docs/backup-restore.md's "do not embed a PAT in a clone
+  # URL" rule forbids. One real machine carried a classic token there for
+  # weeks; `git remote -v` printed it on demand, and a token in the
+  # username position is not even a working push credential.
+  #
+  # If this repo is ever private again, authenticate by identity, not by
+  # URL: SSH (dot_gitconfig's url.*.insteadOf rewrites already carry a
+  # per-account identity) or a credential helper. If a token is truly
+  # unavoidable, pass it as a ONE-SHOT helper BEFORE the subcommand -
+  # `git -c credential.helper=... clone <tokenless-url>` - and never as
+  # `git clone -c ...`, which writes the value into the new repo's config
+  # and recreates this bug. tests/installer_url_credentials_contract.sh
+  # pins all of that.
+  run_chezmoi_with_retry chezmoi init --apply
 fi
 # The exact revision this run applied, for the log (twin of install.ps1's "Dotfiles source:").
 if src_rev="$(git -C "$HOME/.local/share/chezmoi" rev-parse --short HEAD 2>/dev/null)"; then

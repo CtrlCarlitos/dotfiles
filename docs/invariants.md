@@ -556,6 +556,17 @@ interactive prompt needs both: `DEBIAN_FRONTEND=noninteractive` for debconf *and
 `tests/dotupgrade_apt_quiet_contract.sh` asserts both are set in the quiet path
 and both are absent (apt stays fully interactive) under `DOT_APT_VERBOSE=1`.
 
+**The install path has no such exception.** `dot up` and the one-liner tee their
+whole output into a log (`docs/logging.md`), so apt never has the terminal there,
+verbose or not. With `[data.logging] verbose = true` (which sets `DOT_APT_VERBOSE=1`)
+`quiet_apt_enable` used to step aside entirely, and a fresh Ubuntu 26.04 VM stopped
+on iperf3's "Start Iperf3 as a daemon automatically?" dialog. Ctrl+C ended the
+installer but not the `sudo apt` under it, which kept the dpkg lock: the next two
+runs printed nothing but "Waiting for cache lock" (2026-10-23). Installs now always
+run with both variables (and a bounded `DPkg::Lock::Timeout`); verbose only stops the
+quieting. `tests/quiet_apt_contract.sh` pins that, and `apt_lock_preflight` stops a
+run up front, naming the PIDs, when a leftover apt is sitting under a debconf dialog.
+
 ---
 
 ## Checking yourself

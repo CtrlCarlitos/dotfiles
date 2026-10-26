@@ -284,8 +284,9 @@ chezmoi doctor        # chezmoi's own health check
 |---|---|---|
 | `DOTUPGRADE_DEFER` | `dot upgrade` | Comma list of tools whose upgrades are deferred because live agent sessions are using them; consumed by `update_ai_tools.*` |
 | `DOTUPGRADE_NO_PROMPT` | `dot upgrade` | Set to `1` to skip the interactive offer to stop blocking agent sessions (the default on a terminal); the upgrade then only defers and reports, as it does when not run from a terminal |
-| `DOT_APT_VERBOSE` | `dot up` (Linux, WSL) | Set to `1` to show apt's full output; by default the installer runs `apt install` / `apt update` as `apt-get -qq` and keeps dpkg's own "Selecting / Unpacking / Setting up" lines in `~/.local/state/dotfiles/apt.log`, replaying them only when a call fails (errors always show) so a run is not ~100 lines of "already the newest version" |
-| `DOTFILES_BRANCH` | `install.sh`, `install.ps1` | Branch the installer clones (default `main`) - for trying a fix on a fresh machine before it is merged. `install.ps1` also switches an existing clone to it |
+| `DOT_APT_VERBOSE` | `dot up` (Linux, WSL) | Set to `1` to show apt's full output; by default the installer runs `apt install` / `apt update` as `apt-get -qq` and keeps dpkg's own "Selecting / Unpacking / Setting up" lines in `~/.local/state/dotfiles/apt.log`, replaying them only when a call fails (errors always show) so a run is not ~100 lines of "already the newest version". Either way installs never prompt (`DEBIAN_FRONTEND=noninteractive`) |
+| `DOT_APT_LOCK_TIMEOUT` | `dot up` (Linux, WSL) | Seconds each `apt install` / `apt update` waits for the dpkg lock (default `600`), e.g. behind first boot's unattended-upgrades; the run stops at once, naming the PIDs, if the holder is a leftover apt stuck on a debconf question |
+| `DOTFILES_BRANCH` | `install.sh`, `install.ps1` | Branch the installer clones (default `main`), or switches an existing clone to - for trying a fix on a fresh machine before it is merged |
 | `DOT_SKILLS_VERBOSE` | `dot up`, `dot upgrade` (Linux, WSL, macOS) | Set to `1` to show the `skills` CLI's full output (banner, summary box, security table, about 35 lines per skill source); by default it is shown only when a call fails |
 | `DOT_TIMING_MIN_SECONDS` | `dot upgrade` | Smallest section (in seconds, default `5`) the closing `Timings (...)` line lists; the line is also appended to `upgrade.log` |
 | `DOT_NO_RESTART` | `dot upgrade` (Windows) | Set to `1` to leave the desktop apps it closed for their upgrade closed; by default each is started again at the end, as you (not elevated) |
@@ -307,7 +308,6 @@ run_onchange_install_packages.*       # Platform installers (17-group gated)
 run_onchange_generate_identities.*    # Git identity + SSH key generation
 run_onchange_sync_pwsh_profiles.ps1.tmpl   # OneDrive-redirected profile sync (Windows)
 run_after_dotfiles-doctor.*           # dot doctor health check on every apply
-run_after_mobile-dev-adb-bridge.ps1.tmpl   # mobile_dev's WSL-only ADB Firewall rule, every apply (Windows)
 run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
 .chezmoi.toml.tmpl                    # Config template (17 promptBoolOnce groups)
 .chezmoidata.yaml + .chezmoidata/     # Curated data: VS Code baseline, package catalog, agents.yaml
