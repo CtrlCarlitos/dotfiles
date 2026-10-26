@@ -112,6 +112,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
 {{ include "scripts/lib/ps-npm-registry.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
+{{ include "scripts/lib/ps-winget-retry.ps1" }}
 # The clock starts here, so the total is the whole installer and what ran before the first section
 # (the checks and the Node.js step used to sit ahead of the first mark, unmeasured).
 Add-DotTimingMark -Name 'startup'
@@ -1148,6 +1149,8 @@ if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
 # Its own timing mark: the installs used to be counted under 'choco packages' (a dot up showed
 # 'choco packages 10m14s' for 27 winget installs, 2026-10-11).
 Add-DotTimingMark -Name 'winget packages'
+# Ids winget still failed to install after Invoke-DotWingetInstall's retry, named at the end of the run.
+$wingetFailed = @()
 if ($wingetPackages.Count -gt 0) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: winget not found - $($wingetPackages.Count) winget package(s) not installed" -ForegroundColor Red
@@ -1231,19 +1234,31 @@ if ($wingetPackages.Count -gt 0) {
                 # Jobs do not inherit this scope: id and extra args travel via $env (same as CHOCO_PKG above).
                 $env:WINGET_PKG = $wingetId
                 $env:WINGET_ARGS = "$wingetExtra"
+                # A streamed job's own exit code is lost, so the job writes winget's to this file.
+                $env:WINGET_RC_FILE = Join-Path $env:TEMP "dot-winget-rc-$PID.txt"
+                $wingetCode = $null
                 try {
-                    Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
-                        $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
-                        winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
-                        if ($LASTEXITCODE -ne 0) { "winget exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+                    $wingetCode = Invoke-DotWingetInstall -Id $wingetId -Attempt {
+                        Remove-Item -LiteralPath $env:WINGET_RC_FILE -Force -ErrorAction SilentlyContinue
+                        Invoke-WithTimeout -Description "install $env:WINGET_PKG via winget" -Seconds 900 -Action {
+                            $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
+                            winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+                            $rc = $LASTEXITCODE
+                            Set-Content -LiteralPath $env:WINGET_RC_FILE -Value $rc
+                            if ($rc -ne 0) { "winget exited with code $rc - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+                        }
+                        if (Test-Path -LiteralPath $env:WINGET_RC_FILE) { [int](Get-Content -LiteralPath $env:WINGET_RC_FILE -TotalCount 1) } else { $null }
                     }
                 } catch {
                     Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
                 }
+                # $null = timed out or never reported: also not installed
+                if ($wingetCode -ne 0) { $wingetFailed += $wingetId }
                 $wingetTime.End = Get-DotTimingNow
                 $wingetTimes.Add($wingetTime)
                 if ($wingetBeat) { $wingetBeat.State.Quiet.Restart() }
-                Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $env:WINGET_RC_FILE -Force -ErrorAction SilentlyContinue
+                Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS, Env:\WINGET_RC_FILE -ErrorAction SilentlyContinue
             }
         } finally {
             Close-DotHeartbeat -Beat $wingetBeat
@@ -3057,6 +3072,7 @@ if ($dropDesktopShortcuts) {
 }
 Write-DotTimingSummary -Title 'dot up'
 Write-Host "Package installation complete!" -ForegroundColor Green
+Write-DotWingetFailedNote -Failed $wingetFailed -InstallerKey "$($HOME -replace '\\','/')/install_packages.ps1"
 
 {{- if or $dev_desktop $remote_access }}
 
