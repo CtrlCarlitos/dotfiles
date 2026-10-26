@@ -97,6 +97,27 @@ if command -v chezmoi >/dev/null; then
         '.config/psmux/psmux.conf'; do
         grep -Fxq "$p" "$tmp/lin-managed.txt" && fail "linux: managed lists '$p'"
     done
+    # ...but an apply that INSTALLS the tool manages its config in that same
+    # apply. The dir gate alone is decided before the installer runs, so a fresh
+    # machine kept Codex's keymap and OpenCode's theme off until its second
+    # `dot up` (#431 Run 12: `chezmoi status` right after the one-liner listed
+    # `M .codex/config.toml` and `A .config/opencode/tui.json`).
+    printf '[data.packages]\nchatgpt_cli = true\nopencode_cli = false\n' >"$tmp/codex-only.toml"
+    for os in linux windows; do
+        chezmoi managed --config "$tmp/codex-only.toml" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"$os\",\"kernel\":{\"osrelease\":\"6.8.0-generic\"},\"homeDir\":\"/nonexistent\"}}" >"$tmp/sel-managed.txt"
+        grep -Fxq '.codex/config.toml' "$tmp/sel-managed.txt" ||
+            fail "$os: chatgpt_cli selected, but .codex/config.toml waits for the next apply"
+        grep -Fxq '.config/opencode/tui.json' "$tmp/sel-managed.txt" &&
+            fail "$os: opencode_cli not selected, yet .config/opencode/tui.json is managed"
+    done
+    printf '[data.packages]\nopencode_cli = true\n' >"$tmp/opencode-only.toml"
+    chezmoi managed --config "$tmp/opencode-only.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"},"homeDir":"/nonexistent"}}' >"$tmp/sel-managed.txt"
+    grep -Fxq '.config/opencode/tui.json' "$tmp/sel-managed.txt" ||
+        fail "linux: opencode_cli selected, but .config/opencode/tui.json waits for the next apply"
+    grep -Fxq '.codex/config.toml' "$tmp/sel-managed.txt" &&
+        fail "linux: chatgpt_cli not selected, yet .codex/config.toml is managed"
     # The general rule, not a fixed list: every legitimate target at the root of
     # $HOME is a dotfile (.gitconfig, .zshrc ...), so a file with a plain name at
     # the root of the REPO (SECURITY.md, CHANGELOG.md, ...) is repo metadata that
