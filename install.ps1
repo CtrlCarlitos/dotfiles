@@ -265,6 +265,9 @@ try {
     # Unauthenticated https on purpose: the repo is public (tests/installer_url_credentials_contract.sh).
     $SourceDir = Join-Path $env:USERPROFILE '.local\share\chezmoi'
     $SourceUrl = 'https://github.com/CtrlCarlitos/dotfiles.git'
+    # DOTFILES_BRANCH (default main) installs another branch - how a fix is tried on a fresh
+    # machine before it is merged. install.sh's twin; an existing clone is switched only when asked.
+    $SourceBranch = if ($env:DOTFILES_BRANCH) { $env:DOTFILES_BRANCH } else { 'main' }
     $LocalSource = (Test-Path "chezmoi.toml") -or (Test-Path ".chezmoi.toml.tmpl")
 
     # 5.1 promotes any line a native command writes to stderr into a terminating
@@ -294,15 +297,24 @@ try {
         # Fast-forward only - local commits/edits are respected; on failure
         # (offline, diverged) warn and continue with the existing source.
         Write-Info "Updating existing dotfiles clone..."
+        # Read before the `if`: a `2>` inside an if condition is PSScriptAnalyzer's
+        # PSPossibleIncorrectUsageOfRedirectionOperator (it fails CI's lint).
+        $currentBranch = (& git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null)
+        if ($env:DOTFILES_BRANCH -and $currentBranch -ne $SourceBranch) {
+            # `git switch <b>` creates the local branch from origin/<b> on its own once fetched
+            if (-not ((Invoke-Git @('-C', $SourceDir, 'fetch', 'origin', $SourceBranch)) -and (Invoke-Git @('-C', $SourceDir, 'switch', $SourceBranch)))) {
+                Write-Info "  could not switch the clone to $SourceBranch (local changes?) - continuing on the current branch"
+            }
+        }
         if (-not (Invoke-Git @('-C', $SourceDir, 'pull', '--ff-only'))) {
             Write-Info "  clone update failed (offline? local changes?) - continuing with existing source"
         }
     } else {
-        Write-Info "Cloning the dotfiles into $SourceDir..."
+        Write-Info "Cloning the dotfiles ($SourceBranch) into $SourceDir..."
         $cloned = $false
         for ($attempt = 1; $attempt -le 3 -and -not $cloned; $attempt++) {
             if (Test-Path $SourceDir) { Remove-Item -LiteralPath $SourceDir -Recurse -Force -ErrorAction SilentlyContinue }
-            $cloned = Invoke-Git @('clone', '--branch', 'main', $SourceUrl, $SourceDir)
+            $cloned = Invoke-Git @('clone', '--branch', $SourceBranch, $SourceUrl, $SourceDir)
             if (-not $cloned -and $attempt -lt 3) {
                 Write-Fail "clone failed (attempt $attempt of 3) - retrying in 5 seconds..."
                 Start-Sleep -Seconds 5
