@@ -22,8 +22,12 @@
                                  guid + source, so its generator merges into ours
     "SSH: <name>" profiles       OWNED: rebuilt from [[data.ssh_hosts]] each
                                  apply, so a removed host loses its tab too
-    schemes/themes (by name), actions (by id), keybindings (by id OR keys)
+    schemes/themes (by name)     ours merged over a same-named entry, rest kept
+    actions (by id), keybindings (by id OR keys)
                                  ours replace same-named entries, rest kept
+    Terminal 1.25's own spelling of the merge (a renamed firstWindowPreference, defaults it
+    writes into newTabMenu and our theme) is kept, or each apply and Terminal reload undo
+    each other (#430 Run 16).
 
   Two passes per apply, same merge (context: stdin = the current file, ssh_hosts):
     modify_settings.json                          in chezmoi's file pass, which comes
@@ -273,8 +277,13 @@
 {{- $ph := sha256sum "wt-psmux" }}
 {{- $psmux := dict "guid" (printf "{%s-%s-%s-%s-%s}" (substr 0 8 $ph) (substr 8 12 $ph) (substr 12 16 $ph) (substr 16 20 $ph) (substr 20 32 $ph)) "name" "psmux" "commandline" "psmux.exe" "startingDirectory" "%USERPROFILE%" "hidden" false "tabColor" "#94E2D5" }}
 
-{{- /* globals */ -}}
+{{- /* globals. Terminal 1.25 rewrites persistedWindowLayout as persistedLayoutAndContent (the same
+       behavior, its new name) the moment it reads the file, so that value counts as ours: forcing
+       the old one back made every apply and every Terminal reload undo each other (#430 Run 16).
+       1.24 keeps the old value, which is why it is still the one written. */ -}}
+{{- $fwp := get $cur "firstWindowPreference" -}}
 {{- range $k, $v := $want.globals }}{{ $_ := set $cur $k $v }}{{ end -}}
+{{- if eq (toString $fwp) "persistedLayoutAndContent" }}{{ $_ := set $cur "firstWindowPreference" $fwp }}{{ end -}}
 
 {{- /* profiles: defaults, styled-if-present, owned psmux + SSH */ -}}
 {{- if not (kindIs "map" (get $cur "profiles")) }}{{ $_ := set $cur "profiles" dict }}{{ end -}}
@@ -353,7 +362,19 @@
 {{- if $ssh }}{{ $menu = append $menu (dict "type" "separator") }}{{ range $ep := $ssh }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}{{ end }}
 {{- if $tail }}{{ $menu = append $menu (dict "type" "separator") }}{{ range $ep := $tail }}{{ $menu = append $menu (dict "type" "profile" "profile" (get $ep "guid")) }}{{ end }}{{ end }}
 {{- $menu = append $menu (dict "type" "remainingProfiles") }}
-{{- $_ := set $cur "newTabMenu" $menu -}}
+{{- /* an entry Terminal already wrote for the same type + profile keeps its extra keys (1.25 adds
+       "icon": null to each) - dropping them was the other half of the Run 16 rewrite loop */ -}}
+{{- $oldMenu := dict }}
+{{- if kindIs "slice" (get $cur "newTabMenu") }}{{ range $e := get $cur "newTabMenu" }}{{ if kindIs "map" $e }}
+{{-   $mk := printf "%v|%v" (get $e "type") (get $e "profile") }}{{ if not (hasKey $oldMenu $mk) }}{{ $_ := set $oldMenu $mk $e }}{{ end }}
+{{- end }}{{ end }}{{ end }}
+{{- $menuOut := list }}
+{{- range $m := $menu }}
+{{-   $mk := printf "%v|%v" (get $m "type") (get $m "profile") }}
+{{-   if hasKey $oldMenu $mk }}{{ $e := deepCopy (get $oldMenu $mk) }}{{ range $k, $v := $m }}{{ $_ := set $e $k $v }}{{ end }}{{ $menuOut = append $menuOut $e }}
+{{-   else }}{{ $menuOut = append $menuOut $m }}{{ end }}
+{{- end }}
+{{- $_ := set $cur "newTabMenu" $menuOut -}}
 
 {{- /* retire the earlier version's chord entries: User.tab<n> actions and their keybindings, and
        the null unbinds of ctrl+shift+<n> it wrote for empty slots */ -}}
@@ -370,15 +391,28 @@
 {{-   $_ := set $cur "keybindings" $kbs }}
 {{- end }}
 
-{{- /* schemes + themes by name */ -}}
+{{- /* schemes + themes by name: ours are merged over a same-named entry (one level into
+       window/tab/tabRow), so the defaults Terminal 1.25 writes into our theme (iconStyle, frame,
+       ...) stay and our own keys still win */ -}}
 {{- range $section := list "schemes" "themes" }}
 {{-   $mine := get $want $section }}
-{{-   $out := list }}
+{{-   $out := list }}{{ $had := dict }}
 {{-   if kindIs "slice" (get $cur $section) }}{{ range $e := get $cur $section }}
 {{-     $clash := false }}{{ range $m := $mine }}{{ if eq (toString (get $e "name")) $m.name }}{{ $clash = true }}{{ end }}{{ end }}
-{{-     if not $clash }}{{ $out = append $out $e }}{{ end }}
+{{-     if not $clash }}{{ $out = append $out $e }}{{ else if not (hasKey $had (toString (get $e "name"))) }}{{ $_ := set $had (toString (get $e "name")) $e }}{{ end }}
 {{-   end }}{{ end }}
-{{-   $_ := set $cur $section (concat $out $mine) }}
+{{-   range $m := $mine }}
+{{-     $n := deepCopy $m }}
+{{-     if hasKey $had $m.name }}
+{{-       $n = deepCopy (get $had $m.name) }}
+{{-       range $k, $v := $m }}
+{{-         if and (kindIs "map" $v) (kindIs "map" (get $n $k)) }}{{ $sub := get $n $k }}{{ range $k2, $v2 := $v }}{{ $_ := set $sub $k2 $v2 }}{{ end }}
+{{-         else }}{{ $_ := set $n $k (deepCopy $v) }}{{ end }}
+{{-       end }}
+{{-     end }}
+{{-     $out = append $out $n }}
+{{-   end }}
+{{-   $_ := set $cur $section $out }}
 {{- end -}}
 
 {{- /* actions by id; keybindings by id OR keys (one chord, one owner) */ -}}

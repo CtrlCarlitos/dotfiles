@@ -146,6 +146,19 @@ JSON
         "no ctrl+shift+<n> entry of ours may remain: Terminal's position chords label the dropdown (got: $(printf '%s' "$g" | jq -c '[.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$"))]'))"
     jg 'any(.keybindings[]; .keys == "ctrl+q" and .id == null) and any(.keybindings[]; .id == "User.keepme" and .keys == "ctrl+alt+k")' "a user's own null unbind and binding must survive the retirement"
     [ "$(printf '%s' "$g" | merge "$four")" = "$g" ] || fail "grouped merge is not idempotent"
+    # Terminal 1.25 writes our file back in its own form: the legacy persistedWindowLayout becomes
+    # persistedLayoutAndContent, and every newTabMenu profile entry and our theme gain explicit
+    # defaults. A running Terminal rewrote the merge that way within the second, on every apply
+    # (#430 Run 16). The merge must take that form as already merged, or the two never settle.
+    t125=$(printf '%s' "$g" | jq '.firstWindowPreference = "persistedLayoutAndContent"
+        | .newTabMenu |= map(if .type == "profile" then .icon = null else . end)
+        | .themes |= map(if .name == "Catppuccin Mocha" then .tab.iconStyle = "default"
+            | .window += {"experimental.rainbowFrame": false, "frame": null, "unfocusedFrame": null} else . end)')
+    [ "$(printf '%s' "$t125" | merge "$four" | jq -S .)" = "$(printf '%s' "$t125" | jq -S .)" ] ||
+        fail "Terminal 1.25's own form of the merge must merge to itself (got: $(diff <(printf '%s' "$t125" | jq -S .) <(printf '%s' "$t125" | merge "$four" | jq -S .) | tr '\n' '|'))"
+    printf '%s' '{"firstWindowPreference":"defaultProfile","themes":[{"name":"Catppuccin Mocha","window":{"useMica":true},"tab":{"showCloseButton":"always"}}]}' | merge '{}' |
+        jq -e '.firstWindowPreference == "persistedWindowLayout" and (.themes[] | select(.name == "Catppuccin Mocha") | .window.useMica == false and .tab.showCloseButton == "hover")' >/dev/null ||
+        fail "any other firstWindowPreference, and our theme's own keys, must still be forced"
     bare=$(: | merge '{}')
     jq -e '([.newTabMenu[].type] == ["profile","remainingProfiles"]) and ([.keybindings[] | select(.keys | test("^ctrl\\+shift\\+[0-9]$"))] == [])' <<<"$bare" >/dev/null ||
         fail "bare machine: the menu is psmux + remainingProfiles and no chord entry is written"
