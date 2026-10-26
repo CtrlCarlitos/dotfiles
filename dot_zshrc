@@ -123,6 +123,8 @@ fi
 # Node and OpenCode global binaries
 [[ -d "$HOME/.npm-global/bin" ]] && path=("$HOME/.npm-global/bin" "${path[@]}")
 [[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" "${path[@]}")
+# Fly.io CLI: Fly's install script puts it here on Linux/WSL and updates it in place
+[[ -d "$HOME/.fly/bin" ]] && path=("$HOME/.fly/bin" "${path[@]}")
 
 # Language ecosystem binaries
 [[ -x /usr/local/go/bin/go ]] && path=(/usr/local/go/bin "${path[@]}")

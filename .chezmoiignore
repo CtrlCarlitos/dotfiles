@@ -183,6 +183,13 @@ AppData/Roaming/geany/**
 .config/opencode/**
 {{- end }}
 
+# fly.cmd: `fly` for winget's flyctl, which exposes only `flyctl`. Windows only (brew and
+# Fly's install.sh already give macOS and Linux both names) and only with core, which
+# installs flyctl - without it the shim would forward to nothing.
+{{- if or (ne .chezmoi.os "windows") (not (get $selected "core")) }}
+.local/bin/fly.cmd
+{{- end }}
+
 # Ghostty config: macOS + Linux desktop only. Windows has Windows Terminal, and
 # WSL shells run inside it - a Ghostty config there would never be read.
 {{- $ghostty := true }}
