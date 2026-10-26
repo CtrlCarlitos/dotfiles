@@ -182,6 +182,12 @@ catalog:
       winget_args: "--scope machine"
       choco_was: terraform
       note: "apt: HashiCorp's apt repo by procedure; brew: HashiCorp's tap (Homebrew core froze terraform at 1.5.7 after the license change)"
+    - id: flyctl
+      group: core
+      brew: flyctl
+      winget: Fly-io.flyctl
+      winget_args: "--scope machine"
+      note: "the Fly.io CLI; apt: Fly's install script by procedure (no apt package), into ~/.fly/bin, where flyctl updates itself; winget: machine-wide like gum, because dot upgrade runs elevated and winget cannot upgrade a user-scope package from an elevated shell. On Windows, upgrade with dot upgrade, not the install.ps1 command flyctl's update notice suggests (that adds a second copy in ~/.fly)"
     - id: mkcert
       group: core
       apt: mkcert

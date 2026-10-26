@@ -1043,6 +1043,27 @@ install_node() {
     npm_upgrade_once
 }
 
+# Fly.io CLI on Linux/WSL (macOS takes brew's formula and Windows winget's, from the catalog).
+# There is no apt package, so Fly's own install script, at its default location: it puts flyctl
+# and its `fly` link in ~/.fly/bin (dot_zshrc adds that to PATH), and flyctl updates that copy in
+# place itself (internal/update's CanUpdateThisInstallation is true only under ~/.fly or
+# $FLYCTL_INSTALL), so dot upgrade does not own it, as with agy. The script edits an rc file only
+# when flyctl is still off PATH afterwards and it may ask; ~/.fly/bin on its PATH and
+# --non-interactive keep it away from ~/.zshrc. Judged by the binary, not the exit code: a curl
+# that fails feeds sh an empty script, which exits 0.
+install_flyctl() {
+    if command -v flyctl &>/dev/null || [ -x "$HOME/.fly/bin/flyctl" ]; then
+        return 0
+    fi
+    info "Installing flyctl (Fly.io CLI)..."
+    net_timeout 180 env PATH="$HOME/.fly/bin:$PATH" bash -c 'curl -fsSL https://fly.io/install.sh | sh -s -- --non-interactive' || true
+    if [ -x "$HOME/.fly/bin/flyctl" ]; then
+        info "flyctl installed to ~/.fly/bin (new shells have it on PATH)"
+    else
+        warn "flyctl install failed or timed out - continuing"
+    fi
+}
+
 # Curated third-party agent skills use the skills CLI's shared destination for
 # OpenCode and Codex. Antigravity receives verified copies from Claude's native target.
 install_agent_skills() {
@@ -1537,6 +1558,9 @@ install_apt() {
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
             terraform || warn "Terraform install failed - continuing"
     fi
+
+    # Fly.io CLI - Fly's install script (no apt package)
+    install_flyctl
 
     # Node.js (the versions.node_major pin, #125)
     install_node
