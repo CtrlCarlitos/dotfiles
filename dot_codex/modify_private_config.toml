@@ -122,7 +122,7 @@
 {{-       $_ := set $st "top" (append $st.top (printf "%s = %s" $path $value)) -}}
 {{-     else -}}
 {{-       $_ := set $st "out" (append $st.out "") -}}
-{{-       $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_config.toml). Edits here are overwritten.") -}}
+{{-       $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_private_config.toml). Edits here are overwritten.") -}}
 {{-       $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
 {{-       $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
 {{-     end -}}

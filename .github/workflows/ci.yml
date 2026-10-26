@@ -204,7 +204,7 @@ jobs:
         run: |
           FAILED=0
           while IFS= read -r f; do
-            # chezmoi modify-templates (e.g. dot_codex/modify_config.toml)
+            # chezmoi modify-templates (e.g. dot_codex/modify_private_config.toml)
             # are templates first and TOML only after chezmoi merges them at
             # apply time - the raw source is not valid TOML by design.
             if grep -q 'chezmoi:modify-template' "$f"; then

@@ -77,7 +77,7 @@ subsequent `dot up` hit chezmoi's *"changed since chezmoi last wrote it"* prompt
 |---|---|
 | `AppData/.../LocalState/modify_settings.json` (+ `run_after_windows-terminal-settings.ps1.tmpl`, same merge after the installer) | Windows Terminal |
 | `dot_config/opencode/modify_tui.json` | OpenCode |
-| `dot_codex/modify_config.toml` | Codex |
+| `dot_codex/modify_private_config.toml` | Codex |
 | `*/modify_keybindings.json` | VS Code |
 | `AppData/Roaming/geany/modify_geany.conf` | Geany (every exit) |
 | `AppData/Local/gtk-3.0/modify_settings.ini` | other GTK apps |

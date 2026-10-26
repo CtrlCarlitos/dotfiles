@@ -170,7 +170,7 @@ whole matrix on both platforms becomes the documented default.
   in their own configs for terminals that report the modifier.
 - **Esc is instant:** `escape-time 0` is set in both multiplexers.
 - **OpenCode and Codex clipboard:** highlight-copies inside the TUI (the
-  shells export OpenCode's copy-on-select flag; `dot_codex/modify_config.toml`
+  shells export OpenCode's copy-on-select flag; `dot_codex/modify_private_config.toml`
   forces Codex's `tui.copy_on_select = "always"`); `Ctrl+V` or Shift+right-click
   pastes (see [Terminal Experience](terminal.md#clipboard)).
 - **Big pastes through psmux:** psmux's own paste handling strips escape bytes
