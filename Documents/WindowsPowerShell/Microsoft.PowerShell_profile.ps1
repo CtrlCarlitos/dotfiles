@@ -55,9 +55,13 @@ $env:OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT = 'false'
 # first call imports the module globally, removes this shim, and forwards to
 # the real exe - after that, `choco` and `refreshenv` behave stock. Until the
 # first call there is no choco tab completion and no refreshenv; that is the
-# trade.
+# trade. The variable is named $ChocolateyProfile on purpose: Chocolatey's setup
+# (the install and every `choco upgrade chocolatey`) appends its eager block to
+# $PROFILE unless that exact string is already in the file, and the appended
+# block made the next `dot up` ask "has changed since chezmoi last wrote it?".
 #-------------------------------------------------------------------------------
-if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+if (Test-Path $ChocolateyProfile) {
     function choco {
         Remove-Item function:choco -ErrorAction SilentlyContinue
         Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -Global
@@ -244,6 +248,24 @@ function ~ { Set-Location ~ }
 # (wsl -d <distro> still works); `wsl --cd <dir>` overrides when wanted.
 function wsl {
     wsl.exe --cd ~ @args
+}
+
+# Predictive IntelliSense (the greyed-out suggestion typed from command
+# history) comes for free in pwsh 7.2+ - its own default PSReadLine (>=2.2)
+# turns PredictionSource on by itself. Windows PowerShell 5.1 ships the
+# ancient 2.0.0 forever and never turns this on even once a newer PSReadLine
+# is later installed into the user's own module path (`Install-Module
+# PSReadLine -Scope CurrentUser`, which 5.1's console host auto-loads in
+# preference to the bundled one - verified directly, 2026-10-24) - it still
+# has to be asked for here. Guarded: an old/absent PSReadLine has no
+# -PredictionSource parameter at all. try/catch, not a $Host.UI check: that
+# property reads true in hosts (this profile sourced non-interactively by
+# this repo's own tooling, among others) where the feature still throws
+# "doesn't support virtual terminal processing or it's redirected" -
+# verified directly, 2026-10-24.
+if ((Get-Module PSReadLine) -and (Get-Module PSReadLine).Version -ge [version]'2.2.0') {
+    try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView -ErrorAction Stop }
+    catch { Write-Verbose "PSReadLine prediction not enabled: $($_.Exception.Message)" }
 }
 
 # Path-like tokens autocd (twin of the PowerShell 7 profile's block,

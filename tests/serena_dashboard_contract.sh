@@ -52,6 +52,44 @@ for f in "$sh_installer" "$ps1_installer"; do
         fail "$f: every serena init site must re-assert the dashboard flag ($inits init, $writes writes)"
 done
 
+# 2b. The substitution must also fix Serena's own shipped default: the key
+#     with NO value at all (confirmed directly against a real serena-agent
+#     install, 2026-10-24), not only an explicit "true"/"false" line. A regex
+#     that required a literal value silently left every fresh install's
+#     dashboard popping a browser tab on every launch - run the REAL
+#     extracted command against that exact fixture, not a copy of the regex.
+sh_block="$(awk '/sed -i\.bak -E -e/{f=1} f{print} f&&/"\$SERENA_CFG"; then$/{exit}' "$sh_installer")"
+[ -n "$sh_block" ] || fail "$sh_installer: could not locate the Serena dashboard sed command"
+sh_cmd="${sh_block%; then}"
+sh_cmd="${sh_cmd#*if }"
+sh_fixture="$(mktemp)"
+printf 'web_dashboard_open_on_launch:\nweb_dashboard_interface: browser\n' >"$sh_fixture"
+SERENA_CFG="$sh_fixture" SERENA_OPEN=false SERENA_IFACE=browser bash -c "$sh_cmd" ||
+    fail "$sh_installer: the sed command itself failed against Serena's unset default"
+grep -Fxq 'web_dashboard_open_on_launch: false' "$sh_fixture" ||
+    fail "$sh_installer: must rewrite Serena's unset default (not only an explicit true/false)"
+rm -f "$sh_fixture" "$sh_fixture.bak"
+
+if command -v pwsh >/dev/null 2>&1; then
+    ps_fixture="$(mktemp)"
+    printf 'web_dashboard_open_on_launch:\r\nweb_dashboard_interface: browser\r\n' >"$ps_fixture"
+    PS_FIXTURE="$ps_fixture" pwsh -NoProfile -Command '
+        $serenaOpen = "false"; $serenaIface = "browser"
+        $lines = [IO.File]::ReadAllLines($env:PS_FIXTURE)
+        $new = @($lines | ForEach-Object {
+            $_ -replace "^web_dashboard_open_on_launch:\s*(true|false)?\s*$", "web_dashboard_open_on_launch: $serenaOpen" `
+               -replace "^web_dashboard_interface:.*$", "web_dashboard_interface: $serenaIface"
+        })
+        [IO.File]::WriteAllLines($env:PS_FIXTURE, $new)
+    ' || fail "$ps1_installer: the -replace expression itself failed against Serena's unset default"
+    grep -Fxq 'web_dashboard_open_on_launch: false' "$ps_fixture" ||
+        fail "$ps1_installer: must rewrite Serena's unset default (not only an explicit true/false)"
+    rm -f "$ps_fixture"
+else
+    printf 'note: pwsh not installed - the PowerShell -replace expression is not executed\n'
+fi
+pass
+
 # 3. The file is only ever edited on that one line: no rewrite from a template.
 grep -Fq 'serena_config.yml' "$repo_root/.chezmoiignore" 2>/dev/null &&
     fail ".chezmoiignore: serena_config.yml is Serena's file, not a chezmoi target"

@@ -13,6 +13,13 @@ set -euo pipefail
 # Invoke-GuardrailInstaller is extracted from the rendered template and EXECUTED with the
 # network and the upstream installer stubbed. Left alone, an installed binary must stay
 # exactly where it is and the upstream installer must be handed the pinned tag and state.
+#
+# The same harness pins two more contracts from a fresh-VM run (2026-10-23), where guardrail
+# setup saw the console on stdin, asked "Approve ...? [y/N]" instead of arming, was killed at
+# the deadline, and the throw that followed aborted the whole apply:
+#   - the upstream installer gets a closed stdin, never the caller's (this harness feeds its
+#     own stdin a "y" that the installer must not read);
+#   - exit codes: a timeout (-1) and 3 warn and continue, 1 still fails the run.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
@@ -70,7 +77,12 @@ Set-Content -LiteralPath $legacy -Value 'legacy set-aside copy' -Encoding ascii
 function Invoke-WithTimeout {
     param([string]$Description, [int]$Seconds, [scriptblock]$Action, [switch]$NoStream)
     $fake = Join-Path $env:GUARDRAIL_TMP 'install.ps1'
-    Set-Content -LiteralPath $fake -Value '($args -join " ") | Set-Content -LiteralPath $env:GUARDRAIL_TEST_SEEN -Encoding ascii; exit 0' -Encoding ascii
+    Set-Content -LiteralPath $fake -Value @'
+$line = [Console]::In.ReadLine()
+$read = if ($null -eq $line) { '<eof>' } else { $line }
+(($args -join " ") + "|stdin-redirected=" + [Console]::IsInputRedirected + "|stdin-read=" + $read) | Set-Content -LiteralPath $env:GUARDRAIL_TEST_SEEN -Encoding ascii
+exit 0
+'@ -Encoding ascii
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fake).Hash
     Set-Content -LiteralPath (Join-Path $env:GUARDRAIL_TMP 'SHA256SUMS') -Value "$hash  install.ps1" -Encoding ascii
 }
@@ -85,7 +97,17 @@ Write-Output ("binary-content=" + ((Get-Content -LiteralPath $bin) -join ''))
 Write-Output ("moved-aside=" + $siblings.Count)
 Write-Output ("upstream-called=" + ($seen -match '-Version v9\.9\.9-test' -and $seen -match '-State enabled'))
 Write-Output ("legacy-swept=" + (-not (Test-Path -LiteralPath $legacy)))
+Write-Output ("stdin-closed=" + ($seen -match '\|stdin-redirected=True\|stdin-read=<eof>'))
 Remove-Item -LiteralPath $env:GUARDRAIL_TEST_SEEN -ErrorAction SilentlyContinue
+
+# Exit-code handling, with the process runner replaced by a stub that returns the code under test.
+function Invoke-GuardrailInstallerProcess { return [int]$env:GUARDRAIL_TEST_RC }
+foreach ($rc in -1, 3, 1) {
+    $env:GUARDRAIL_TEST_RC = "$rc"
+    $result = 'continued'
+    try { Invoke-GuardrailInstaller -State enabled *> $null } catch { $result = 'failed' }
+    Write-Output ("rc$rc=$result")
+}
 PSEOF
 
 home="$tmp/home"
@@ -104,13 +126,18 @@ printf '#!/bin/sh\nexec pwsh "$@"\n' >"$shim_dir/powershell"
 chmod +x "$shim_dir/powershell"
 
 # `|| true`: a harness that throws must show its output in the failure, not end the test silently.
-out="$(HOME="$home" USERPROFILE="$home" PATH="$shim_dir:$PATH" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r' || true)"
+# stdin carries a "y": the old inherit-the-caller's-stdin code handed it to the installer.
+out="$(echo y | HOME="$home" USERPROFILE="$home" PATH="$shim_dir:$PATH" pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Rendered "$(winpath "$tmp/installer.ps1")" -HomeDir "$(winpath "$home")" 2>&1 | tr -d '\r' || true)"
 expect() { printf '%s\n' "$out" | grep -Fxq "$1" || fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500))"; }
 
 expect 'binary-in-place=True'
 expect 'binary-content=installed-binary'
 expect 'moved-aside=0'
 expect 'upstream-called=True'
+expect 'stdin-closed=True'
+expect 'rc-1=continued'
+expect 'rc3=continued'
+expect 'rc1=failed'
 # The leftover copies the OLD scheme made are still cleaned up. On Linux pwsh the
 # backslash paths are plain file names in one directory, so the sweep cannot see them.
 if [ "${OS:-}" = Windows_NT ]; then expect 'legacy-swept=True'; fi

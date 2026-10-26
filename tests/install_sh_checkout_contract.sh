@@ -58,11 +58,13 @@ run_install() { # env assignments as arguments; fresh HOME unless KEEP_HOME=1 wa
 }
 events() { tr '\n' '|' <"$tmp/events" 2>/dev/null; }
 src="$tmp/home/.local/share/chezmoi"
+# after the apply, the run reports which revision it applied (the log's "Dotfiles source:" line)
+reported="git -C $src rev-parse --short HEAD|git -C $src rev-parse --abbrev-ref HEAD|"
 
 # --- 1. fresh machine: clone main, menu from the checkout, then chezmoi ---------------------------
 run_install
 [ "$rc" -eq 0 ] || fail "fresh install must succeed (rc $rc): $(tail -3 "$tmp/out")"
-[ "$(events)" = "git clone --branch main https://github.com/CtrlCarlitos/dotfiles.git $src|menu|chezmoi init --apply|" ] ||
+[ "$(events)" = "git clone --branch main https://github.com/CtrlCarlitos/dotfiles.git $src|menu|chezmoi init --apply|$reported" ] ||
     fail "fresh install: clone main, then the menu, then one chezmoi init --apply (got: $(events))"
 pass
 
@@ -76,10 +78,10 @@ esac
 # --- 3. existing clone: fast-forward; switch only when asked --------------------------------------
 mkdir -p "$src/.git"
 run_install KEEP_HOME=1
-[ "$(events)" = "git -C $src pull --ff-only|menu|chezmoi init --apply|" ] ||
+[ "$(events)" = "git -C $src pull --ff-only|menu|chezmoi init --apply|$reported" ] ||
     fail "existing clone: pull --ff-only, no clone, no branch switch (got: $(events))"
 run_install KEEP_HOME=1 DOTFILES_BRANCH=fix/x
-[ "$(events)" = "git -C $src rev-parse --abbrev-ref HEAD|git -C $src fetch origin fix/x|git -C $src switch fix/x|git -C $src pull --ff-only|menu|chezmoi init --apply|" ] ||
+[ "$(events)" = "git -C $src rev-parse --abbrev-ref HEAD|git -C $src fetch origin fix/x|git -C $src switch fix/x|git -C $src pull --ff-only|menu|chezmoi init --apply|$reported" ] ||
     fail "existing clone + DOTFILES_BRANCH: fetch, switch, then pull (got: $(events))"
 pass
 

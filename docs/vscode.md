@@ -113,9 +113,16 @@ the note below.
 > back as-is when one already exists (see [Your settings in
 > chezmoi.toml](#your-settings-in-chezmoitoml) above), so a machine whose
 > `chezmoi.toml` still has `unset = ["remote.SSH.configFile"]` from before this
-> change won't pick up the new FORCED value on its own. Delete that line (and
-> add the `remote.SSH.configFile` entry under `[data.vscode.settings.forced]` if
-> you want it before the next `chezmoi init` reseeds it) once, by hand.
+> change won't drop that line on its own, and - if `[data.vscode.settings.forced]`
+> is missing the key too - won't pick up the new FORCED value either; add it by
+> hand if so. Either way, FORCED always wins over UNSET for the same key (the
+> installer strips any forced key out of UNSET before applying either), so this
+> no longer causes the setting to be force-set-then-immediately-removed on every
+> run the way it did before this fix - confirmed live on `LAB-DOT-WIN-HOM`
+> (2026-10-24: "VS Code settings: 2 change(s) - remote.SSH.configFile (forced),
+> remote.SSH.configFile (unset)" on every `dot up`, with the key always ending up
+> removed). Deleting the stale `unset` line is still good hygiene, just not
+> required for correctness anymore.
 
 ### Integrated terminal
 

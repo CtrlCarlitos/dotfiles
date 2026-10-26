@@ -426,6 +426,10 @@ else
   # pins all of that.
   run_chezmoi_with_retry chezmoi init --apply
 fi
+# The exact revision this run applied, for the log (twin of install.ps1's "Dotfiles source:").
+if src_rev="$(git -C "$HOME/.local/share/chezmoi" rev-parse --short HEAD 2>/dev/null)"; then
+  echo "Dotfiles source: $(git -C "$HOME/.local/share/chezmoi" rev-parse --abbrev-ref HEAD 2>/dev/null) @ $src_rev"
+fi
 
 # 3. Post-Install Checks (Devcontainer specific)
 if [ -n "$IS_DEVCONTAINER" ] || [ -f "/.dockerenv" ]; then

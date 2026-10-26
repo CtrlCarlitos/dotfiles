@@ -115,6 +115,29 @@ if command -v chezmoi >/dev/null; then
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
     grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
         fail "linux: .gitconfig must stay managed"
+
+    # Windows apps from dev_desktop: VS Code's keybindings and Geany's dark
+    # scheme are gated on the app's dir, which the package installer creates
+    # after this file was rendered. A fresh install kept them off until its
+    # second `dot up` (#430 Run 12: `chezmoi status` right after the one-liner
+    # listed `A AppData/Roaming/Code/User/keybindings.json`, `A .../geany.conf`,
+    # `A .../gtk-3.0/settings.ini`). Selecting the group manages them at once.
+    win_desktop='AppData/Roaming/Code/User/keybindings.json AppData/Roaming/geany/geany.conf AppData/Local/gtk-3.0/settings.ini'
+    printf '[data.packages]\ndev_desktop = true\n' >"$tmp/desktop.toml"
+    chezmoi managed --config "$tmp/desktop.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows","kernel":{"osrelease":""},"homeDir":"/nonexistent"}}' >"$tmp/desk-managed.txt"
+    for p in $win_desktop; do
+        grep -Fxq "$p" "$tmp/desk-managed.txt" ||
+            fail "windows: dev_desktop selected, but $p waits for the next apply"
+    done
+    # Not selected: none of them (the Geany probe also reads the real
+    # ProgramFiles, so skip those two where Geany is installed on this host).
+    geany_here=$(chezmoi execute-template --config "$tmp/chezmoi.toml" \
+        '{{ if stat (joinPath (env "ProgramFiles") "Geany") }}yes{{ end }}')
+    for p in $win_desktop; do
+        case "$p" in *geany* | *gtk-3.0*) [ -n "$geany_here" ] && continue ;; esac
+        grep -Fxq "$p" "$tmp/win-managed.txt" && fail "windows: dev_desktop not selected, yet $p is managed"
+    done
 fi
 
 finish

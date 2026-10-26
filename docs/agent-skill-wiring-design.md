@@ -75,7 +75,6 @@ find-skills
 agent-browser
 skill-creator
 design-taste-frontend
-redesign-existing-projects
 code-search
 ```
 

@@ -68,7 +68,15 @@ function Install-Gum {
 }
 
 # 0. Setup
-$InstallerUrl = "https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/main/install.ps1"
+# DOTFILES_BRANCH (see the clone step below) reaches the relaunch as Administrator too: an
+# elevated process does not inherit this session's environment, and it re-downloads this script.
+# A branch name only - the value is spliced into that relaunch's command line.
+if ($env:DOTFILES_BRANCH -and $env:DOTFILES_BRANCH -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
+    Write-Fail "DOTFILES_BRANCH '$env:DOTFILES_BRANCH' is not a branch name."
+    exit 1
+}
+$InstallerRef = if ($env:DOTFILES_BRANCH) { $env:DOTFILES_BRANCH } else { 'main' }
+$InstallerUrl = "https://raw.githubusercontent.com/CtrlCarlitos/dotfiles/$InstallerRef/install.ps1"
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 # CI matches the convention already used in .chezmoi.toml.tmpl for the same purpose
 # (GitHub Actions, and most CI systems generally, set CI=true). CHEZMOI_TEST_MINIMAL
@@ -127,6 +135,7 @@ if (-not $IsAdmin) {
         # Running from one-liner - restart command
         # Using 'iex' inside the new process to re-download and run
         $cmd = "iex (irm $InstallerUrl)"
+        if ($env:DOTFILES_BRANCH) { $cmd = "`$env:DOTFILES_BRANCH='$($env:DOTFILES_BRANCH)'; $cmd" }
         Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`""
     }
     exit
@@ -297,10 +306,17 @@ try {
         # Fast-forward only - local commits/edits are respected; on failure
         # (offline, diverged) warn and continue with the existing source.
         Write-Info "Updating existing dotfiles clone..."
-        # Read before the `if`: a `2>` inside an if condition is PSScriptAnalyzer's
-        # PSPossibleIncorrectUsageOfRedirectionOperator (it fails CI's lint).
-        $currentBranch = (& git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null)
-        if ($env:DOTFILES_BRANCH -and $currentBranch -ne $SourceBranch) {
+        # The current branch is read into a variable first: inline in the condition, `2>$null) -ne`
+        # trips PSPossibleIncorrectUsageOfRedirectionOperator, and EAP Continue keeps 5.1 from
+        # promoting git's stderr (Invoke-Git's reason).
+        $CurrentBranch = ''
+        if ($env:DOTFILES_BRANCH) {
+            try {
+                $ErrorActionPreference = 'Continue'
+                $CurrentBranch = & git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null
+            } catch { $null = $_ } finally { $ErrorActionPreference = 'Stop' }
+        }
+        if ($env:DOTFILES_BRANCH -and $CurrentBranch -ne $SourceBranch) {
             # `git switch <b>` creates the local branch from origin/<b> on its own once fetched
             if (-not ((Invoke-Git @('-C', $SourceDir, 'fetch', 'origin', $SourceBranch)) -and (Invoke-Git @('-C', $SourceDir, 'switch', $SourceBranch)))) {
                 Write-Info "  could not switch the clone to $SourceBranch (local changes?) - continuing on the current branch"
@@ -327,6 +343,16 @@ try {
         }
     }
     $PinRoot = if ($LocalSource) { (Get-Location).Path } else { $SourceDir }
+    # The exact revision this run applies, for the log: a later reader cannot recover it otherwise.
+    # EAP Continue around git for the same 5.1 stderr reason as Invoke-Git; best effort only.
+    $SourceRev = 'unknown revision'
+    try {
+        $ErrorActionPreference = 'Continue'
+        $revBranch = & git -C $PinRoot rev-parse --abbrev-ref HEAD 2>$null
+        $revSha = & git -C $PinRoot rev-parse --short HEAD 2>$null
+        if ($global:LASTEXITCODE -eq 0 -and $revSha) { $SourceRev = "$revBranch @ $revSha" }
+    } catch { $null = $_ } finally { $ErrorActionPreference = 'Stop' }
+    Write-Info "Dotfiles source: $SourceRev"
 
     # 3. chezmoi
     if (-not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {

@@ -111,8 +111,8 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-heartbeat.ps1" }}
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
 {{ include "scripts/lib/ps-npm-registry.ps1" }}
-{{ include "scripts/lib/ps-adb-bridge.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
+{{ include "scripts/lib/ps-winget-retry.ps1" }}
 # The clock starts here, so the total is the whole installer and what ran before the first section
 # (the checks and the Node.js step used to sit ahead of the first mark, unmeasured).
 Add-DotTimingMark -Name 'startup'
@@ -477,7 +477,10 @@ function Invoke-MobileDevTool {
                 if ($ProgressDir) {
                     $stageDir = Join-Path $ProgressDir '.temp'
                     if (Test-Path -LiteralPath $stageDir) {
-                        $bytes = (Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        # Summed by hand: on Windows PowerShell 5.1 an empty pipeline makes Measure-Object
+                        # emit nothing, and .Sum on $null is fatal under StrictMode (killed a VM run).
+                        $bytes = 0
+                        Get-ChildItem -LiteralPath $stageDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $bytes += $_.Length }
                         if ($bytes) { $staged = ', {0} MB staged' -f [math]::Round($bytes / 1MB) }
                     }
                 }
@@ -581,50 +584,33 @@ function Install-MobileDev {
     $avdDir = Join-Path $env:USERPROFILE ".android\avd\$avdName.avd"
     $systemImage = 'system-images;android-34;default;x86_64'
 
-    # Every question is asked HERE, before the first download, so the long part
-    # of the run (JDK, SDK tools, a multi-GB system image) goes unattended and a
-    # prompt left unanswered can never stall it half way. #336's explicit
-    # caution: nothing accepts Google's licenses silently on the user's behalf.
-    # Gated on Test-Path, like Install-Node's version check: once adb, the
-    # emulator and the AVD exist this is skipped on every later `dot up` - no
-    # separate re-prompt or re-download bookkeeping. The marks keep the time
-    # spent waiting for answers out of the sections around them.
+    # No questions: `mobile_dev = true` in chezmoi.toml IS the consent to the Android SDK licenses,
+    # the multi-GB system image and enabling WHPX (owner's call, 2026-10-23 VM run - three
+    # [y/N] prompts for a group the config already opted into was friction, not consent; this
+    # reverses #336's per-step confirmation). Each step still says what it is about to do.
+    # Gated on Test-Path, like Install-Node's version check: once adb, the emulator and the AVD
+    # exist (and WHPX is on) each step is skipped on every later `dot up`.
     $needPackages = (-not (Test-Path $adbPath)) -or (-not (Test-Path $emulatorPath))
     $needAvd = -not (Test-Path $avdDir)
     # WHPX (design doc section 3.3): Microsoft's current recommended accelerator for the Android
-    # emulator on Windows. Checked here too (not just inline below) so declining or accepting it
-    # is one more answer up front, like the licenses/AVD questions - not a separate silent toggle.
+    # emulator on Windows. Computed here, acted on below ($needWhpx, no prompt - see the note
+    # just above the JDK install).
     $whpxState = $null
     try { $whpxState = (Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -ErrorAction Stop).State } catch { Write-Host "  Warning: could not check Windows Hypervisor Platform (WHPX) availability - $_" -ForegroundColor Red }
     # $null test, not truthiness: DISM's FeatureState enum has Disabled = 0, so
-    # `$whpxState -and ...` was false exactly when WHPX was off - the question was never asked
+    # `$whpxState -and ...` was false exactly when WHPX was off - the step never ran
     # and the emulator ran unaccelerated (2026-10-14 fresh install). EnablePending = already
     # enabled, waiting for the restart.
     $needWhpx = ($null -ne $whpxState -and "$whpxState" -notin @('Enabled', 'EnablePending'))
-    $acceptLicenses = $false
-    $createAvd = $false
-    $enableWhpx = $false
-    if ($needPackages -or $needAvd -or $needWhpx) {
-        Add-DotTimingMark -Name 'your answers'
-        if ($needPackages) {
-            Write-Host "  mobile_dev needs to accept the Android SDK licenses to install platform-tools and the emulator." -ForegroundColor Cyan
-            $licenseConfirm = Read-Host "  Accept the Android SDK licenses now? [y/N]"
-            $acceptLicenses = ($licenseConfirm -eq 'y' -or $licenseConfirm -eq 'Y')
-        }
-        # The system image sits behind the licenses: asked only when they were
-        # accepted above, or (packages already present) as its own consent.
-        if ($needAvd -and ($acceptLicenses -or -not $needPackages)) {
-            Write-Host "  mobile_dev wants to create a default AVD ($avdName) - this downloads a multi-GB Android system image ($systemImage)$(if (-not $needPackages) { ' and accepts the Android SDK licenses it needs' })." -ForegroundColor Cyan
-            $imageConfirm = Read-Host "  Download the system image and create the AVD now? [y/N]"
-            $createAvd = ($imageConfirm -eq 'y' -or $imageConfirm -eq 'Y')
-            if ($createAvd) { $acceptLicenses = $true }
-        }
-        if ($needWhpx) {
-            Write-Host "  mobile_dev wants Windows Hypervisor Platform (WHPX) enabled - the Android emulator has no hardware acceleration without it. Enabling it changes what else can virtualize on this machine and needs a restart." -ForegroundColor Cyan
-            $whpxConfirm = Read-Host "  Enable it now? [y/N]"
-            $enableWhpx = ($whpxConfirm -eq 'y' -or $whpxConfirm -eq 'Y')
-        }
+    $acceptLicenses = ($needPackages -or $needAvd)
+    if ($acceptLicenses) {
+        Write-Host "  mobile_dev = true: accepting the Android SDK licenses$(if ($needAvd) { " and downloading the multi-GB system image for the default AVD ($avdName)" }). Set mobile_dev = false in chezmoi.toml to opt out." -ForegroundColor Cyan
     }
+    # WHPX is not asked (unlike the licenses/AVD above): mobile_dev itself, an opt-in group off by
+    # default, is the consent - without WHPX the emulator is unaccelerated to the point of being
+    # unusable (docs/mobile-development.md), so declining would just mean re-nagging on every
+    # later `dot up` for a group the operator already chose. Acted on below, same as WSL/
+    # VirtualMachinePlatform's unconditional enablement elsewhere in this script.
     Add-DotTimingMark -Name 'mobile_dev: JDK'
 
     $jdkMajor = {{ .versions.jdk_version }}
@@ -699,21 +685,15 @@ function Install-MobileDev {
             Remove-Item -Recurse -Force $ctTmp -ErrorAction SilentlyContinue
         }
     }
-    # WHPX: asked up front with the licenses/AVD questions above ($needWhpx/$enableWhpx) - this
-    # is where that answer is acted on. Still the operator's own informed yes/no every run it
-    # stays disabled (2026-10-11: a warning telling Carlos to run the command himself went
-    # unactioned for releases; asking and running it on a yes is the same consent, less friction).
+    # WHPX: enabled unconditionally for mobile_dev, not asked (2026-10-11: a warning telling
+    # Carlos to run the command himself went unactioned for releases; silently shipping an
+    # unaccelerated emulator is worse, see the note above $needWhpx).
     if ($needWhpx) {
-        if ($enableWhpx) {
-            try {
-                $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
-                Write-Host "  Windows Hypervisor Platform (WHPX) enabled - restart when convenient for the Android emulator to use it." -ForegroundColor Yellow
-            } catch {
-                Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "  Windows Hypervisor Platform (WHPX) is not enabled - the Android emulator has no hardware acceleration without it." -ForegroundColor Yellow
-            Write-Host "    Enable it yourself, then restart: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart" -ForegroundColor Yellow
+        try {
+            $null = Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop
+            Write-Host "  Windows Hypervisor Platform (WHPX) enabled for the Android emulator's hardware acceleration - restart when convenient." -ForegroundColor Yellow
+        } catch {
+            Write-Host "  Warning: enabling Windows Hypervisor Platform (WHPX) failed - $_ - the Android emulator will be unaccelerated." -ForegroundColor Red
         }
     }
 
@@ -736,9 +716,8 @@ function Install-MobileDev {
         if (-not $priorAdb) { $toolPaths += (Join-Path $androidHome 'platform-tools') }
         Add-MobileDevMachinePath -Paths $toolPaths
 
-        # The answers were collected up front (see $acceptLicenses/$createAvd
-        # above); the licenses are accepted ONCE here for everything below. The
-        # y feed covers every license sdkmanager can ask for.
+        # The licenses are accepted ONCE here for everything below (see
+        # $acceptLicenses above). The y feed covers every license sdkmanager can ask for.
         if ($acceptLicenses) {
             Add-DotTimingMark -Name 'mobile_dev: SDK packages'
             $yesFeed = (@('y') * 20) -join "`n"
@@ -747,13 +726,6 @@ function Install-MobileDev {
             if ($needPackages) {
                 Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @('platform-tools', 'emulator') -FailureLabel 'sdkmanager platform-tools/emulator' -ProgressDir $androidHome | Out-Null
             }
-        } elseif ($needPackages) {
-            # run_onchange only re-runs when its OWN rendered content changes
-            # (a template/version-pin edit, not a blanket "every dot up") -
-            # "just re-run dot up" would not actually re-enter this block.
-            # The documented, real re-entry point: clear chezmoi's recorded
-            # script hash so the next apply re-runs this script in full.
-            Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and install platform-tools/the emulator." -ForegroundColor Yellow
         }
 
         # A prior adb (from a manual install) and the SDK's own adb can be
@@ -775,20 +747,15 @@ function Install-MobileDev {
         # A default Pixel-like AVD, scripting what Android Studio's wizard
         # used to do (design doc section 3.4). AOSP over Google APIs/Play
         # Store (design doc section 5: lighter, sufficient for most Expo app
-        # testing). Whether to create it was answered up front; the licenses
-        # were accepted by the single --licenses run above.
+        # testing). The licenses were accepted by the single --licenses run above.
         # avdmanager create avd -n <name> -k <image> -d <device>
         if ((Test-Path $avdManagerPath) -and $needAvd) {
-            if ($createAvd) {
-                Add-DotTimingMark -Name 'mobile_dev: system image'
-                Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
-                Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
-                # avdmanager asks whether to create a custom hardware
-                # profile; "no" keeps the device profile's own default.
-                Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
-            } else {
-                Write-Host "  Skipped - run 'chezmoi state delete --bucket=entryState --key=$($HOME -replace '\\','/')/install_packages.ps1' then 'dot up' to accept and create the default AVD." -ForegroundColor Yellow
-            }
+            Add-DotTimingMark -Name 'mobile_dev: system image'
+            Write-Host "  Downloading the system image and creating the AVD (several GB; a heartbeat line prints while it runs)..." -ForegroundColor Yellow
+            Invoke-MobileDevTool -Path $sdkmanagerPath -ToolArguments @($systemImage) -FailureLabel "sdkmanager $systemImage" -ProgressDir $androidHome | Out-Null
+            # avdmanager asks whether to create a custom hardware
+            # profile; "no" keeps the device profile's own default.
+            Invoke-MobileDevTool -Path $avdManagerPath -ToolArguments @('create', 'avd', '-n', $avdName, '-k', $systemImage, '-d', 'pixel_6') -StdIn 'no' -FailureLabel 'avdmanager create avd' | Out-Null
         }
     }
 
@@ -822,45 +789,9 @@ function Install-MobileDev {
         }
     }
 
-    # ADB bridge Firewall rule (design doc section 3.3). The ADB server
-    # itself (`adb -a -P 5037 nodaemon server`) stays a manual, per-session
-    # command Carlos runs himself - the single most important constraint in
-    # this plan is that nothing here starts or registers it as a service.
-    # This only scopes the Firewall rule `adb -a` needs to the WSL vEthernet
-    # subnet, never a LAN-wide opening (#336's explicit caution). Wrapped in
-    # try/catch so a Firewall service that is off, or managed by Group
-    # Policy, never aborts the rest of the installer.
-    # Read cheaply first (scripts/lib/ps-adb-bridge.ps1): .NET for the adapter and its subnet, netsh for the
-    # rule. The rule is only touched with the NetSecurity cmdlets when it is missing or points elsewhere.
-    $wslNet = Get-DotWslSubnet
-    if ($wslNet.Found -and $wslNet.Subnet) {
-        $wslSubnet = $wslNet.Subnet
-        if ((Get-DotFirewallRuleRemoteIp -DisplayName 'mobile_dev: ADB bridge (WSL only)') -ne $wslSubnet) {
-            try {
-                $existingRule = Get-NetFirewallRule -Name 'MobileDevAdbBridge' -ErrorAction SilentlyContinue
-                if (-not $existingRule) {
-                    New-NetFirewallRule -Name 'MobileDevAdbBridge' -DisplayName 'mobile_dev: ADB bridge (WSL only)' `
-                        -Direction Inbound -Protocol TCP -LocalPort 5037 `
-                        -RemoteAddress $wslSubnet -Action Allow | Out-Null
-                } else {
-                    # WSL's subnet can change across a reboot (NAT mode
-                    # especially) - a rule left pointing at the old subnet is
-                    # exactly the "silently half-working bridge" Review Focus
-                    # item 5 warns about.
-                    $existingFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
-                    if (($existingFilter.RemoteAddress -join ',') -ne $wslSubnet) {
-                        Set-NetFirewallRule -Name 'MobileDevAdbBridge' -RemoteAddress $wslSubnet
-                    }
-                }
-            } catch {
-                Write-Host "  Warning: could not create/update the ADB bridge Firewall rule - $_" -ForegroundColor Red
-            }
-        }
-    } elseif ($wslNet.Found) {
-        Write-Host "  Warning: found the WSL vEthernet adapter but no IPv4 address on it - skipping the ADB bridge Firewall rule." -ForegroundColor Red
-    } else {
-        Write-Host "  Warning: no WSL vEthernet adapter found - skipping the ADB bridge Firewall rule (install/start WSL first)." -ForegroundColor Red
-    }
+    # The ADB bridge Firewall rule is run_after_mobile-dev-adb-bridge.ps1.tmpl's job, on every apply:
+    # this script reruns only when its content changes, and on a first install the WSL adapter the rule
+    # is scoped to does not exist until after the restart (#434 Run 7, #430 Run 11).
 }
 
 {{- if $core }}
@@ -868,6 +799,32 @@ function Install-MobileDev {
 # Names and per-tool notes live in .chezmoidata/packages.yaml (see #83).
 {{ includeTemplate "choco-packages" (dict "group" "core" "catalog" .catalog.packages) }}
 {{ includeTemplate "winget-packages" (dict "group" "core" "catalog" .catalog.packages) }}
+
+# PSReadLine >= 2.2 brings Predictive IntelliSense (the greyed-out suggestion
+# typed from command history); pwsh 7.2+ ships it and turns it on by default
+# (Documents/PowerShell/Microsoft.PowerShell_profile.ps1 needs nothing extra),
+# but Windows PowerShell 5.1 bundles the ancient 2.0.0 forever and has no path
+# to a newer one without this. -Scope CurrentUser: no elevation, and 5.1's own
+# console host auto-loads the newest available version in preference to the
+# bundled one (verified directly, 2026-10-24) - the WindowsPowerShell profile
+# only has to ask Set-PSReadLineOption for it (already does, guarded).
+Add-DotTimingMark -Name 'PSReadLine'
+$psReadLine = Get-Module -ListAvailable PSReadLine | Sort-Object Version -Descending | Select-Object -First 1
+if (-not $psReadLine -or $psReadLine.Version -lt [version]'2.2.0') {
+    Write-Host "  Installing a modern PSReadLine (Predictive IntelliSense for Windows PowerShell 5.1)..." -ForegroundColor Yellow
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        # -ListAvailable only looks: without it, 5.1's Get-PackageProvider -Name bootstraps a missing
+        # NuGet behind an interactive "install 'nuget' now?" prompt that stalled a clean run (#430).
+        if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
+        }
+        Install-Module -Name PSReadLine -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+        Write-Host "  PSReadLine upgraded - restart Windows PowerShell to pick it up." -ForegroundColor Green
+    } catch {
+        Write-Host "  Warning: could not install a modern PSReadLine - $_ - continuing" -ForegroundColor Red
+    }
+}
 
 # WSL: installed here only when missing (catalog note on wsl2); `dot upgrade` keeps it current
 # with `wsl --update`. It needs a restart to finish, so this says so instead of continuing as if
@@ -1192,6 +1149,8 @@ if (Get-Variable -Name skippedNotChoco -ErrorAction SilentlyContinue) {
 # Its own timing mark: the installs used to be counted under 'choco packages' (a dot up showed
 # 'choco packages 10m14s' for 27 winget installs, 2026-10-11).
 Add-DotTimingMark -Name 'winget packages'
+# Ids winget still failed to install after Invoke-DotWingetInstall's retry, named at the end of the run.
+$wingetFailed = @()
 if ($wingetPackages.Count -gt 0) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "  Warning: winget not found - $($wingetPackages.Count) winget package(s) not installed" -ForegroundColor Red
@@ -1275,19 +1234,31 @@ if ($wingetPackages.Count -gt 0) {
                 # Jobs do not inherit this scope: id and extra args travel via $env (same as CHOCO_PKG above).
                 $env:WINGET_PKG = $wingetId
                 $env:WINGET_ARGS = "$wingetExtra"
+                # A streamed job's own exit code is lost, so the job writes winget's to this file.
+                $env:WINGET_RC_FILE = Join-Path $env:TEMP "dot-winget-rc-$PID.txt"
+                $wingetCode = $null
                 try {
-                    Invoke-WithTimeout -Description "install $wingetId via winget" -Seconds 900 -Action {
-                        $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
-                        winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
-                        if ($LASTEXITCODE -ne 0) { "winget exited with code $LASTEXITCODE - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+                    $wingetCode = Invoke-DotWingetInstall -Id $wingetId -Attempt {
+                        Remove-Item -LiteralPath $env:WINGET_RC_FILE -Force -ErrorAction SilentlyContinue
+                        Invoke-WithTimeout -Description "install $env:WINGET_PKG via winget" -Seconds 900 -Action {
+                            $extra = @($env:WINGET_ARGS -split ' ' | Where-Object { $_ })
+                            winget install --id $env:WINGET_PKG --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra 2>&1 | & ([scriptblock]::Create("$env:DOT_INSTALLER_FILTER"))
+                            $rc = $LASTEXITCODE
+                            Set-Content -LiteralPath $env:WINGET_RC_FILE -Value $rc
+                            if ($rc -ne 0) { "winget exited with code $rc - full output: $env:DOT_INSTALLER_LOG"; exit 1 }
+                        }
+                        if (Test-Path -LiteralPath $env:WINGET_RC_FILE) { [int](Get-Content -LiteralPath $env:WINGET_RC_FILE -TotalCount 1) } else { $null }
                     }
                 } catch {
                     Write-Host "  Warning: Failed to install $wingetId - $_" -ForegroundColor Red
                 }
+                # $null = timed out or never reported: also not installed
+                if ($wingetCode -ne 0) { $wingetFailed += $wingetId }
                 $wingetTime.End = Get-DotTimingNow
                 $wingetTimes.Add($wingetTime)
                 if ($wingetBeat) { $wingetBeat.State.Quiet.Restart() }
-                Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $env:WINGET_RC_FILE -Force -ErrorAction SilentlyContinue
+                Remove-Item Env:\WINGET_PKG, Env:\WINGET_ARGS, Env:\WINGET_RC_FILE -ErrorAction SilentlyContinue
             }
         } finally {
             Close-DotHeartbeat -Beat $wingetBeat
@@ -1437,12 +1408,24 @@ Add-DotTimingMark -Name 'fonts'
 if ($wtSettings) {
     try {
         $wtJson = ConvertFrom-JsonC (Get-Content $wtSettings -Raw)
-        if (-not $wtJson.profiles) { $wtJson | Add-Member -MemberType NoteProperty -Name profiles -Value ([PSCustomObject]@{}) -Force }
-        if (-not $wtJson.profiles.defaults) { $wtJson.profiles | Add-Member -MemberType NoteProperty -Name defaults -Value ([PSCustomObject]@{}) -Force }
-        if (-not $wtJson.profiles.defaults.font) { $wtJson.profiles.defaults | Add-Member -MemberType NoteProperty -Name font -Value ([PSCustomObject]@{}) -Force }
-        if ($wtJson.profiles.defaults.font.face -ne $desiredFont) {
+        # StrictMode-safe: probe PSObject.Properties, never dot into a name that may be missing.
+        # modify_settings.json leaves profiles.defaults.font out until the Meslo files exist, so
+        # on a fresh install the font is absent here, and `$x.font` threw PropertyNotFoundStrict
+        # into the catch below as "Could not parse" (#434 Run 6).
+        # Another shape (the legacy "profiles": [ ... ] array) is left alone, not replaced.
+        $wtNode = $wtJson
+        foreach ($key in 'profiles', 'defaults', 'font') {
+            $prop = $wtNode.PSObject.Properties[$key]
+            if ($null -eq $prop -or $null -eq $prop.Value) {
+                $wtNode | Add-Member -MemberType NoteProperty -Name $key -Value ([PSCustomObject]@{}) -Force
+            }
+            $wtNode = $wtNode.$key
+            if ($wtNode -isnot [PSCustomObject]) { $wtNode = $null; break }
+        }
+        $faceProp = if ($null -ne $wtNode) { $wtNode.PSObject.Properties['face'] }
+        if ($null -ne $wtNode -and ($null -eq $faceProp -or $faceProp.Value -ne $desiredFont)) {
             Copy-Item $wtSettings "$wtSettings.bak" -Force -ErrorAction SilentlyContinue
-            $wtJson.profiles.defaults.font | Add-Member -MemberType NoteProperty -Name face -Value $desiredFont -Force
+            $wtNode | Add-Member -MemberType NoteProperty -Name face -Value $desiredFont -Force
             $wtJson | ConvertTo-Json -Depth 10 | Set-Content -Path $wtSettings -Encoding utf8
             Write-Host "  Set Windows Terminal default font to $desiredFont (backup: $wtSettings.bak)" -ForegroundColor Green
         }
@@ -1528,6 +1511,11 @@ if ($vsExtraSettingsJson -and $vsExtraSettingsJson.Trim() -ne '{}') {
         $vsDefaults[$p.Name] = $p.Value
     }
 }
+# FORCED always wins over UNSET for the same key. An existing machine's
+# chezmoi.toml can carry both for a key that moved into the forced tier
+# (docs/vscode.md has a worked example) - without this, the merge below
+# would force it, then immediately unset it again, every run.
+foreach ($k in $vsForced.Keys) { [void]$vsUnset.Remove($k) }
 
 # The winget batch above may have just installed VS Code, which adds its bin to the Machine PATH
 # this session never re-read: on a fresh machine `code` was "not installed" here, so the settings
@@ -1849,10 +1837,12 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         }
         # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
         # per-machine override [data.agents.serena] open_dashboard = true in
-        # chezmoi.toml). serena init regenerates the file with Serena's default
-        # (true), so only this one line is re-asserted; nothing else is touched.
-        # Same for the interface: empty means the platform default, which on
-        # Windows is the native app with one tray icon per instance.
+        # chezmoi.toml). serena init regenerates the file with Serena's own
+        # default - which, as shipped, is the KEY WITH NO VALUE (not the literal
+        # "true" this comment used to claim), and Serena treats an unset value
+        # as "open" - so only this one line is re-asserted; nothing else is
+        # touched. Same for the interface: empty means the platform default,
+        # which on Windows is the native app with one tray icon per instance.
         Add-DotTimingMark -Name 'Serena: config'
         $serenaCfg = "$env:USERPROFILE\.serena\serena_config.yml"
         $serenaOpen = '{{ .agents.serena.open_dashboard }}'
@@ -1861,7 +1851,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             try {
                 $serenaLines = [IO.File]::ReadAllLines($serenaCfg)
                 $serenaNew = @($serenaLines | ForEach-Object {
-                    $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)\s*$', "web_dashboard_open_on_launch: $serenaOpen" `
+                    $_ -replace '^web_dashboard_open_on_launch:\s*(true|false)?\s*$', "web_dashboard_open_on_launch: $serenaOpen" `
                        -replace '^web_dashboard_interface:.*$', "web_dashboard_interface: $serenaIface"
                 })
                 if (($serenaNew -join "`n") -ne ($serenaLines -join "`n")) {
@@ -2163,41 +2153,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         Invoke-Quietly -Description "Failed to install Superpowers for OpenCode" -Action { npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$ocConfigDir" --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null }
         }
 
-        # Both writes below must be BOM-less UTF-8: PS 5.1's
-        # `Set-Content -Encoding utf8` prepends a BOM, and guardrail's
-        # config merge (Go) refuses to merge into BOM'd JSON - confirmed live:
-        # "invalid character (the BOM's first byte) looking for beginning of value" failed
-        # every Windows CI run's opencode wiring while the BOM-less Linux
-        # side merged fine. Same WriteAllLines idiom as the mp-code-review
-        # patcher below.
-        # Read as bytes + strip any BOM before parsing: this file is written
-        # by several tools in the same install (Serena's registration runs
-        # earlier and uses PowerShell's own writers), and a BOM'd or empty
-        # file made the old bare `Get-Content | ConvertFrom-Json` throw -
-        # the catch then skipped wiring superpowers entirely on fresh
-        # installs (confirmed live: "Could not parse existing opencode.json"
-        # on a fresh Windows box, plugin key never landed). Unparseable
-        # non-empty content still warns with the reason and leaves the file
-        # alone - never clobber a config we can't read.
-        $ocRaw = if (Test-Path $ocConfig) { [IO.File]::ReadAllBytes($ocConfig) } else { $null }
-        $ocText = if ($ocRaw) { [Text.UTF8Encoding]::new($false).GetString($ocRaw).TrimStart([char]0xFEFF) } else { '' }
-        if ([string]::IsNullOrWhiteSpace($ocText)) {
-            $ocNew = @{ plugin = @($ocPluginSpec) } | ConvertTo-Json
-            [System.IO.File]::WriteAllLines($ocConfig, $ocNew, (New-Object System.Text.UTF8Encoding($false)))
-        } else {
-            try {
-                $ocJson = $ocText | ConvertFrom-Json -ErrorAction Stop
-                if (-not $ocJson.plugin) {
-                    $ocJson | Add-Member -MemberType NoteProperty -Name plugin -Value @($ocPluginSpec) -Force
-                } elseif ($ocJson.plugin -notcontains $ocPluginSpec) {
-                    $ocJson.plugin = @($ocJson.plugin) + $ocPluginSpec
-                }
-                $ocMerged = $ocJson | ConvertTo-Json -Depth 10
-                [System.IO.File]::WriteAllLines($ocConfig, $ocMerged, (New-Object System.Text.UTF8Encoding($false)))
-            } catch {
-                Write-Host "  Could not parse existing opencode.json ($_) - leaving it untouched" -ForegroundColor Yellow
-            }
-        }
+        # Add-OpenCodePluginSpec (scripts/lib/ps-skills.ps1, inlined above): BOM-less, StrictMode-safe
+        # merge into the opencode.json Serena may already have written.
+        Add-OpenCodePluginSpec -Path $ocConfig -Spec $ocPluginSpec
     }
 }
 {{- end }}
@@ -2552,16 +2510,15 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         }) -contains '__SKILLS_OK__'
     }
 
-    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend (new-page
-    # visual direction behind tunable dials + anti-slop checklist) and
-    # redesign-existing-projects (audit + targeted fixes for existing UI).
-    # Chosen 2026-09-24 for function, not popularity; presets, image-gen,
-    # GPT/Stitch variants and v1 left out (docs/skills-install-strategy.md).
-    Invoke-SkillsSource -Label "taste skills" -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend', 'redesign-existing-projects') -Agents $skAgents -Install {
-        Write-Host "  Installing taste skills (design-taste-frontend, redesign-existing-projects)..." -ForegroundColor Yellow
+    # taste skill (Leonxlnx/taste-skill, MIT): design-taste-frontend (visual
+    # direction behind tunable dials + anti-slop checklist). Chosen 2026-09-24
+    # for function, not popularity (docs/skills-install-strategy.md); upstream
+    # folded redesign-existing-projects into it on 2026-10-19.
+    Invoke-SkillsSource -Label "taste skills" -Repo 'Leonxlnx/taste-skill' -Skills @('design-taste-frontend') -Agents $skAgents -Install {
+        Write-Host "  Installing taste skill (design-taste-frontend)..." -ForegroundColor Yellow
         @(Invoke-WithTimeout -Description "taste skills install" -Seconds 300 -NoStream -Action {
             $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-            npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a $skAgents -g -y --copy 2>&1 | Out-Null
+            npx --yes --loglevel=error skills@latest add Leonxlnx/taste-skill -s design-taste-frontend -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
             '__SKILLS_OK__'
         }) -contains '__SKILLS_OK__'
@@ -2813,7 +2770,8 @@ function Invoke-GuardrailInstaller {
     # request denied/expired) - warn with the remedy and continue: the binary
     # is installed and current and the existing wiring keeps enforcing, so
     # failing the run buys nothing; Invoke-GuardrailNextStep below ends the
-    # run with the ACTION NEEDED block when steps are pending. Any other
+    # run with the ACTION NEEDED block when steps are pending. A timeout (-1)
+    # is handled the same way. Any other
     # non-zero (failed download/checksum/install/verify, genuine setup
     # failure, usage) fails this script so chezmoi surfaces it and re-runs
     # next apply - the sh twin's set -e contract. The installer's own output
@@ -2823,9 +2781,11 @@ function Invoke-GuardrailInstaller {
         Write-Host "    to finish the re-wiring: run 'guardrail setup' in an interactive terminal, complete the approval, then re-run chezmoi apply" -ForegroundColor Yellow
     } elseif ($code -eq -1) {
         # Invoke-GuardrailInstallerProcess's own timeout sentinel (confirmed live 2026-10-15): it
-        # already printed why and killed the process tree. "exited with code -1" would wrongly
-        # suggest the installer itself returned this.
-        throw "guardrail installer timed out and was killed - see the warning above"
+        # already printed why and killed the process tree. Warn and continue, like exit 3: throwing
+        # here aborted the whole apply - every later section, the remaining dotfiles and the
+        # run_after scripts - over one step whose remedy is `guardrail setup` (VM run, 2026-10-23).
+        # Invoke-GuardrailNextStep still ends the run with ACTION NEEDED while planes are unwired.
+        Write-Host "  Continuing the apply without guardrail's plane wiring (see the warning above)." -ForegroundColor Yellow
     } elseif ($code -ne 0) {
         throw "guardrail installer exited with code $code"
     }
@@ -3112,6 +3072,7 @@ if ($dropDesktopShortcuts) {
 }
 Write-DotTimingSummary -Title 'dot up'
 Write-Host "Package installation complete!" -ForegroundColor Green
+Write-DotWingetFailedNote -Failed $wingetFailed -InstallerKey "$($HOME -replace '\\','/')/install_packages.ps1"
 
 {{- if or $dev_desktop $remote_access }}
 

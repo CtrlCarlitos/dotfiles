@@ -205,7 +205,10 @@ fetch_and_verify() {
     # --quiet (GNU sha256sum, gsha256sum, perl shasum, uutils alike): the "install.sh: OK" line
     # the check printed landed in the middle of dot up / dot upgrade output, where it read as a
     # result of whatever step came before it. A mismatch still prints its FAILED line.
-    if ! ( cd "$dest" && grep " ${asset_name}\$" SHA256SUMS >SHA256SUMS.one &&
+    # [ *]: sha256sum's line is "<hash>  <name>" in text mode but "<hash> *<name>" in binary mode
+    # (Git for Windows' sha256sum.exe defaults to binary mode); a bare space before <name> only
+    # matched text mode and reported every binary-mode checksum as a mismatch (2026-10-24).
+    if ! ( cd "$dest" && grep "[ *]${asset_name}\$" SHA256SUMS >SHA256SUMS.one &&
         $sha -c --quiet SHA256SUMS.one ); then
         warn "$name: installer CHECKSUM MISMATCH - not running it"
         return 1
@@ -1651,23 +1654,22 @@ skills_add_all() {
         warn "skill-creator skill install failed or timed out - continuing"
     fi
 
-    # taste skills (Leonxlnx/taste-skill, MIT): design-taste-frontend infers a
-    # visual direction for new pages behind tunable dials plus an anti-slop
-    # checklist; redesign-existing-projects audits an existing UI's styling
-    # and applies targeted fixes without changing behaviour. Chosen 2026-09-24
-    # for function, not popularity - the repo's style presets, image-generation
-    # skills, GPT/Stitch variants and v1 were left out (see
-    # docs/skills-install-strategy.md). Overlaps anthropics/frontend-design on
+    # taste skill (Leonxlnx/taste-skill, MIT): design-taste-frontend infers a
+    # visual direction behind tunable dials plus an anti-slop checklist, for new
+    # pages and existing ones alike. Chosen 2026-09-24 for function, not
+    # popularity (docs/skills-install-strategy.md). Upstream folded its
+    # companion, redesign-existing-projects, into it on 2026-10-19 (the name is
+    # in retired-agent-skills.txt). Overlaps anthropics/frontend-design on
     # purpose; drop one if they double-trigger.
-    if skills_up_to_date Leonxlnx/taste-skill design-taste-frontend redesign-existing-projects; then
+    if skills_up_to_date Leonxlnx/taste-skill design-taste-frontend; then
         info "taste skills: up to date"
-        record_cli_result installed 2
-    elif info "Installing taste skills (design-taste-frontend, redesign-existing-projects)..." && skills_cli 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend redesign-existing-projects -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-        record_cli_result installed 2
+        record_cli_result installed 1
+    elif info "Installing taste skill (design-taste-frontend)..." && skills_cli 300 "${SK[@]}" add Leonxlnx/taste-skill -s design-taste-frontend -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed 1
         info "taste skills: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
         skills_record_source
     else
-        record_cli_result failed 2
+        record_cli_result failed 1
         warn "taste skills install failed or timed out - continuing"
     fi
 

@@ -52,9 +52,8 @@ catalog:
       group: core
       apt: wget
       brew: wget
-      winget: JernejSimoncic.Wget
-      winget_args: "--scope machine"
-      choco_was: wget
+      choco: wget
+      note: "winget (JernejSimoncic.Wget) 1.21.4's manifest hash no longer matches eternallybored.org's hosted installer - reproduced on two independent installs (2026-10-24); winget also refuses to override a hash mismatch while elevated. Move back to winget once upstream's manifest is corrected."
     - id: jq
       group: core
       apt: jq

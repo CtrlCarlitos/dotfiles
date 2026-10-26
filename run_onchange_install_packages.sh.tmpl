@@ -482,15 +482,6 @@ install_fonts() {
     fi
 }
 
-# android_sdk_interactive - true only when a person can answer a prompt: the
-# same `[[ -t 0 ]] && [[ -z "${CI:-}" ]]` check main()'s Docker
-# WSL-Integration prompt uses. A function of its own so
-# tests/mobile_dev_install_contract.sh can drive both answers without a real
-# terminal.
-android_sdk_interactive() {
-    [[ -t 0 ]] && [[ -z "${CI:-}" ]]
-}
-
 # android_cmdline_tools_install SDK_ROOT - download the pinned Android SDK
 # command-line tools zip for this OS/arch, verify its sha256 against
 # .chezmoidata.yaml's android_commandlinetools_* pins, and lay it out as
@@ -595,9 +586,8 @@ android_sdk_root() {
 # android_sdk_wanted MODE SDK_ROOT - the sdkmanager packages still missing for
 # MODE (adb: platform-tools; full: platform-tools, the emulator, the android-34
 # system image), space-separated, nothing when there is nothing to download.
-# These are exactly the packages that need Google's licenses accepted, so the
-# answer is what both the up-front question (android_sdk_ask_licenses) and
-# install_android_sdk itself act on. An adb already on PATH that is not the
+# These are exactly the packages that need Google's licenses accepted, so
+# install_android_sdk accepts them only when this is non-empty. An adb already on PATH that is not the
 # SDK's own means "no platform-tools" in adb mode (the WSL bridge only needs
 # one client).
 android_sdk_wanted() {
@@ -636,33 +626,6 @@ android_sdkmanager() {
     return "$rc"
 }
 
-# android_sdk_ask_licenses MODE - the one question mobile_dev has, asked FIRST.
-# Only a person may accept Google's Android SDK licenses, and the question used
-# to sit behind the JDK, Maestro, agent-device and command-line-tools
-# downloads: a WSL `dot up` (2026-10-11) waited 41 minutes at it for an
-# operator who had walked away, and the timing summary booked that as "agent
-# toolkit 54m03s". Asked before any download, the rest of the group runs
-# unattended; the wait is its own timing section ("Android licenses", like the
-# sudo prompt's "sudo password"). The answer travels to install_android_sdk in
-# ANDROID_LICENSES (y / n / empty = not asked: nothing missing, or no terminal,
-# in which case install_android_sdk says what was skipped and how to re-run).
-ANDROID_LICENSES=""
-android_sdk_ask_licenses() {
-    local mode="$1" sdk wanted answer=""
-    ANDROID_LICENSES=""
-    sdk="$(android_sdk_root)"
-    wanted="$(android_sdk_wanted "$mode" "$sdk")"
-    [[ -n "$wanted" ]] || return 0
-    android_sdk_interactive || return 0
-    info "mobile_dev needs Google's Android SDK licenses accepted to download: $wanted$([[ "$mode" = full ]] && printf ' (the system image is several GB)'). Asked now so everything below can run unattended."
-    info "  Review them first with: $sdk/cmdline-tools/latest/bin/sdkmanager --licenses"
-    dot_timing_wait 'Android licenses' 2>/dev/null || true
-    read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " answer || answer=""
-    dot_timing_resume 2>/dev/null || true
-    if [[ "$answer" =~ ^[Yy]$ ]]; then ANDROID_LICENSES=y; else ANDROID_LICENSES=n; fi
-    return 0
-}
-
 # install_android_sdk MODE - mobile_dev's Android SDK (design doc §3.10):
 #   full  native Linux/macOS: command-line tools, platform-tools (adb), the
 #         emulator, the android-34 system image and a default AVD
@@ -679,11 +642,14 @@ android_sdk_ask_licenses() {
 # this installer's own location.
 #
 # No confirmation before the downloads themselves (the Ollama precedent: a
-# long net_timeout and warn-and-continue). What IS gated is accepting
-# Google's Android SDK licenses, which sdkmanager requires before
-# platform-tools/emulator/the system image: only a person may agree to them,
-# so a non-interactive run (android_sdk_interactive) skips the licenses and
-# everything that depends on them, with a warning saying how to re-run.
+# long net_timeout and warn-and-continue), nor before Google's Android SDK
+# licenses, which sdkmanager requires before platform-tools/emulator/the
+# system image: mobile_dev = true in chezmoi.toml is the consent (owner's
+# call, 2026-10-23; parity with the Windows twin, reversing #336's per-step
+# question). A [y/N] after the config already opted in was friction, and it
+# made an unattended run skip the SDK, or wait at the question - a WSL
+# `dot up` (2026-10-11) waited 41 minutes for an operator who had walked away.
+# The licenses line says what is being accepted and how to opt out.
 #
 # Called as `install_android_sdk <mode> || warn ...`: errexit is suspended in
 # here, and every failure warns and returns 0.
@@ -744,35 +710,12 @@ install_android_sdk() {
     fi
 
     if [[ ${#want_pkgs[@]} -gt 0 ]]; then
-        # The question was normally asked up front (android_sdk_ask_licenses,
-        # ANDROID_LICENSES); this path asks it only when that did not happen
-        # (a direct call, or a terminal that appeared since).
-        # run_onchange re-runs only when this script's rendered content
-        # changes, so "just run dot up again" would not re-enter here; the
-        # real re-entry point is clearing chezmoi's recorded script state.
-        if [[ "${ANDROID_LICENSES:-}" = n ]]; then
-            warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
-            return 0
-        fi
-        if [[ "${ANDROID_LICENSES:-}" != y ]]; then
-            if ! android_sdk_interactive; then
-                warn "Non-interactive run - not accepting Google's Android SDK licenses on your behalf, so ${want_pkgs[*]} were not installed$([[ "$need_avd" = true ]] && printf ' and the default AVD was not created')."
-                warn "  To accept them, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
-                return 0
-            fi
-            info "mobile_dev needs Google's Android SDK licenses accepted to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)')."
-            info "  Review them first with: $sdkmanager --licenses"
-            local android_accept=""
-            dot_timing_wait 'Android licenses' 2>/dev/null || true
-            read -r -p "Accept the Android SDK licenses and download these now? [y/N]: " android_accept || android_accept=""
-            dot_timing_resume 2>/dev/null || true
-            if [[ ! "$android_accept" =~ ^[Yy]$ ]]; then
-                warn "Skipped the Android SDK licenses - to accept them later, run from a terminal: chezmoi state delete --bucket=entryState --key=\$HOME/install_packages.sh && dot up"
-                return 0
-            fi
-        fi
+        # No question: mobile_dev = true in chezmoi.toml is the consent (see the
+        # header above), so this runs the same with or without a terminal.
+        info "mobile_dev = true: accepting Google's Android SDK licenses to download: ${want_pkgs[*]}$([[ "$mode" = full ]] && printf ' (the system image is several GB)'). Set mobile_dev = false in chezmoi.toml to opt out."
+        info "  Review them with: $sdkmanager --licenses"
         # sdkmanager asks once per license; a generous "y" feed answers
-        # every one the person just agreed to (the Windows twin's approach).
+        # every one mobile_dev = true agreed to (the Windows twin's approach).
         if ! printf 'y\n%.0s' {1..50} | android_sdkmanager net_timeout 300 "$sdkmanager" --licenses >/dev/null; then
             warn "sdkmanager --licenses failed or timed out - not downloading ${want_pkgs[*]}"
             return 0
@@ -836,17 +779,6 @@ install_android_sdk() {
 # curl-piped-to-bash one-liner (its URL is in .chezmoidata.yaml's versions
 # comment) is deliberately not used: it verifies nothing but zip integrity.
 install_mobile_dev() {
-    # --- Google's Android SDK licenses: the one question, asked FIRST -------
-    # (android_sdk_ask_licenses above) so the JDK, Maestro, agent-device and
-    # SDK downloads below all run unattended. Same platform split as the
-    # install_android_sdk call further down: adb client only under WSL, the
-    # full SDK on a native host, nothing in a devcontainer.
-{{- if $isWsl }}
-    android_sdk_ask_licenses adb
-{{- else if $isHost }}
-    android_sdk_ask_licenses full
-{{- end }}
-
     # --- Standalone JDK 17+ ------------------------------------------------
     # jdk_home is computed BEFORE deciding whether to install: brew's
     # openjdk@{{ .versions.jdk_version }} is keg-only (deliberately not
@@ -1256,28 +1188,16 @@ install_agent_guardrails() {
     local code=0
     local log="$HOME/.local/state/guardrail/apply.log"
     mkdir -p "$(dirname "$log")"
-    # Terminal line discipline is snapshotted around the call and restored
-    # unconditionally. The installer can stop on an approval prompt
-    # ("Approve register guardrail on planes ...? [y/N]") and reads the answer
-    # from the terminal, but its stdout here is a PIPE (tee + the console
-    # filter), so an isatty(stdout) check inside it sees "not interactive".
-    # A tool that turns echo off to read one key and keys its restore path off
-    # that check leaves the terminal with echo off: the keystrokes still reach
-    # the prompt and the apply runs to completion, yet nothing the operator
-    # types is visible, which is indistinguishable from a hung terminal and
-    # cost a real session a terminal restart. `stty -g` round-trips the whole
-    # mode set, so this repairs whatever the installer left behind without
-    # having to know what it changed. Guards: no-op when stdin is not a
-    # terminal (CI, chezmoi apply under a pipe), and every call is tolerant -
-    # a failed probe must never fail the apply.
-    local tty_state=""
-    if [ -t 0 ] && [ -r /dev/tty ]; then
-        tty_state="$(stty -g </dev/tty 2>/dev/null || true)"
-    fi
-    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
-    if [ -n "$tty_state" ]; then
-        stty "$tty_state" </dev/tty 2>/dev/null || true
-    fi
+    # stdin is /dev/null: setup runs unattended. With a terminal on stdin,
+    # guardrail's prompt approval mode (the default) asks
+    # "Approve ...? [y/N]" instead of arming, half an hour into an unattended
+    # install - the Windows twin waited on that prompt until its deadline
+    # killed it and the apply aborted (VM run, 2026-10-23). Without one,
+    # setup does what this section's exit-code contract describes: nobody
+    # enrolled -> it arms the planes and exits 0 (ADR-0030 bootstrap); an
+    # enrolled operator -> exit 3, the warning below, and the ACTION NEEDED
+    # remedy from guardrail_next_steps at the end of the apply.
+    sh "$tmp/install.sh" --version "$GUARDRAIL_VERSION" --state "$state" </dev/null 2>&1 | tee -a "$log" | guardrail_console_filter || code=$?
     rm -rf "$tmp"
     case "$code" in
         0) ;;
@@ -1930,6 +1850,11 @@ for k in EXCLUDE:
     if k in UNSET:
         UNSET.remove(k)
 DEFAULTS.update(EXTRA)
+# FORCED always wins over UNSET for the same key. An existing machine's
+# chezmoi.toml can carry both for a key that moved into the forced tier
+# (docs/vscode.md has a worked example) - without this, the merge below
+# would force it, then immediately unset it again, every run.
+UNSET = [k for k in UNSET if k not in FORCED]
 
 path = sys.argv[1]
 text = ""
@@ -2338,16 +2263,19 @@ install_agent_toolkit() {
             serena_out="$(net_timeout 120 serena init 2>&1)" || { printf '%s\n' "$serena_out" >&2; warn "serena init failed - continuing"; }
             # Dashboard auto-open follows the catalog (agents.serena.open_dashboard;
             # per-machine override [data.agents.serena] open_dashboard = true in
-            # chezmoi.toml). serena init regenerates the file with Serena's default
-            # (true), so only this one line is re-asserted; nothing else is touched.
-            # Same for the interface: empty means the platform default, which on
-            # macOS is the native app with one tray icon per instance.
+            # chezmoi.toml). serena init regenerates the file with Serena's own
+            # default - which, as shipped, is the KEY WITH NO VALUE (not the
+            # literal "true" this comment used to claim), and Serena treats an
+            # unset value as "open" - so only this one line is re-asserted;
+            # nothing else is touched. Same for the interface: empty means the
+            # platform default, which on macOS is the native app with one tray
+            # icon per instance.
             SERENA_CFG="$HOME/.serena/serena_config.yml"
             SERENA_OPEN="{{ .agents.serena.open_dashboard }}"
             SERENA_IFACE="{{ .agents.serena.dashboard_interface }}"
             if [ -f "$SERENA_CFG" ] && { ! grep -Eq "^web_dashboard_open_on_launch: ${SERENA_OPEN}[[:space:]]*\$" "$SERENA_CFG" ||
                                           ! grep -Eq "^web_dashboard_interface: ${SERENA_IFACE}[[:space:]]*\$" "$SERENA_CFG"; }; then
-                if sed -i.bak -E -e "s/^web_dashboard_open_on_launch: (true|false)[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" \
+                if sed -i.bak -E -e "s/^web_dashboard_open_on_launch:[[:space:]]*(true|false)?[[:space:]]*\$/web_dashboard_open_on_launch: ${SERENA_OPEN}/" \
                                 -e "s/^web_dashboard_interface:.*\$/web_dashboard_interface: ${SERENA_IFACE}/" "$SERENA_CFG"; then
                     rm -f "$SERENA_CFG.bak"
                     info "Serena dashboard: auto-open=${SERENA_OPEN} interface=${SERENA_IFACE}"

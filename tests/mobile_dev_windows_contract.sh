@@ -18,13 +18,23 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sdkmanager'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'HypervisorPlatform'
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'avdmanager create avd'
 
-# WHPX (2026-10-11): asked up front like the licenses/AVD questions, and actually run on a
-# yes - not just a warning telling the operator to run the command himself.
+# WHPX (2026-10-23): enabled unconditionally when mobile_dev needs it, never asked - mobile_dev
+# itself, off by default, is the consent (2026-10-11: a warning telling the operator to run the
+# command himself went unactioned for releases; an unaccelerated emulator is worse than asking,
+# and asking is worse than just doing it for a group already opted into).
 ps_t="$repo_root/run_onchange_install_packages.ps1.tmpl"
 require "$ps_t" "Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop"
-require "$ps_t" 'Enable it now? [y/N]'
-awk '/\$needWhpx = \(/{a=NR} /Read-Host "  Enable it now/{b=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
-    fail "installer: the WHPX question must be computed and asked before the JDK install, like the licenses/AVD questions"
+if grep -Fq 'Enable it now? [y/N]' "$ps_t"; then
+    fail "installer: WHPX must not ask for confirmation - mobile_dev itself is the consent"
+fi
+awk '/\$needWhpx = \(/{a=NR} /Add-DotTimingMark -Name .mobile_dev: JDK./{b=NR} /Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -NoRestart -ErrorAction Stop/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$ps_t" ||
+    fail "installer: \$needWhpx must be computed before the JDK install, and WHPX enabled before sdkmanager runs"
+
+# No questions (2026-10-23 VM run): `mobile_dev = true` is the consent to the SDK licenses, the
+# system image and WHPX. Three [y/N] prompts after the config already opted in were friction, and
+# a prompt left unanswered stalls an otherwise unattended install.
+awk '/^function Install-MobileDev \{/ {on=1} on {print} on && /^\}/ {exit}' "$ps_t" | grep -q 'Read-Host' &&
+    fail "installer: Install-MobileDev must not prompt - mobile_dev = true in chezmoi.toml is the consent"
 pass
 
 # EXECUTED: the WHPX test itself. DISM's FeatureState has Disabled = 0, so a truthiness test
@@ -53,8 +63,12 @@ fi
 
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Genymobile.scrcpy'
 
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-NetFirewallRule'
+# The ADB bridge rule lives in scripts/lib/ps-adb-bridge.ps1, run on every apply by
+# run_after_mobile-dev-adb-bridge.ps1.tmpl (tests/adb_bridge_check_contract.sh executes it).
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'New-NetFirewallRule'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-Service'
+forbid "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'New-Service'
+forbid "$repo_root/run_after_mobile-dev-adb-bridge.ps1.tmpl" 'New-Service'
 require "$repo_root/docs/mobile-development.md" 'adb -a -P 5037 nodaemon server'
 
 # Fix pass (final-review findings, 2026-10-10):
@@ -82,16 +96,16 @@ require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'function Invoke-Mob
 require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'LASTEXITCODE'
 # the Firewall rule's RemoteAddress is corrected if the WSL subnet changed
 # (e.g. after a reboot in NAT mode), not just checked for existing by name.
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Get-NetFirewallAddressFilter'
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Set-NetFirewallRule'
-# the real re-entry point after declining a prompt (run_onchange only
-# re-runs on a rendered-content change, not on every `dot up`) is
-# documented and used in the skip messages, not a misleading "just re-run".
-require "$repo_root/run_onchange_install_packages.ps1.tmpl" '--bucket=entryState --key='
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'Get-NetFirewallAddressFilter'
+require "$repo_root/scripts/lib/ps-adb-bridge.ps1" 'Set-NetFirewallRule'
+# the real re-entry point after a failed step (run_onchange only re-runs on a
+# rendered-content change, not on every `dot up`) is documented, not a
+# misleading "just re-run".
 require "$repo_root/docs/mobile-development.md" '--bucket=entryState --key='
 # no scheduled task either - the "no new always-on service" constraint
 # covers more than just Windows Services.
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'Register-ScheduledTask'
+forbid "$repo_root/run_after_mobile-dev-adb-bridge.ps1.tmpl" 'Register-ScheduledTask'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'New-ScheduledTask'
 forbid "$repo_root/run_onchange_install_packages.ps1.tmpl" 'sc.exe create'
 # the Windows Firewall "Allow access" dialog for adb.exe can silently widen

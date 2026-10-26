@@ -96,7 +96,7 @@ the catalog, so edit the catalog and rerun the script - never this table.
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `git` | core | `git` | `git` | — | `Git.Git` | — |  |
 | `curl` | core | `curl` | `curl` | — | `cURL.cURL` | — |  |
-| `wget` | core | `wget` | `wget` | — | `JernejSimoncic.Wget` | — |  |
+| `wget` | core | `wget` | `wget` | — | — | `wget` | winget (JernejSimoncic.Wget) 1.21.4's manifest hash no longer matches eternallybored.org's hosted installer - reproduced on two independent installs (2026-10-24); winget also refuses to override a hash mismatch while elevated. Move back to winget once upstream's manifest is corrected. |
 | `jq` | core | `jq` | `jq` | — | `jqlang.jq` | — |  |
 | `fzf` | core | `fzf` | `fzf` | — | `junegunn.fzf` | — |  |
 | `zsh` | core | `zsh` | `zsh` | — | — | — |  |
@@ -282,6 +282,16 @@ re-run by hand. Ollama additionally `rm`s its binary on failure so a
 partial extract isn't mistaken for a finished install on the next pass.
 `apt` / `brew` are left alone - they carry their own network
 timeouts.
+
+A missing winget package is installed one id at a time, so one dropped link
+costs exactly one package (Go, on a fresh Windows install: `0x80072EE7` in under
+a second, the neighbours fine). `Invoke-DotWingetInstall`
+(`scripts/lib/ps-winget-retry.ps1`) retries that id once, 15 s later, when
+winget's exit code is a WinINet network error. Anything still missing is named
+after `Package installation complete!` with the command that reruns the
+installer, because the next `dot up` does not rerun it and `dot upgrade` only
+upgrades what is installed. `apt` and `brew` install a group in one call and
+have no per-package loop to retry.
 
 ## SSH agent & key loading
 
