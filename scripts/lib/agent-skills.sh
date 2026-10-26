@@ -437,7 +437,7 @@ install_maestro() {
 # used to dump on every run. Output that is not the expected JSON (or no jq) is printed
 # raw, never dropped. Returns doctor's own exit status.
 #
-# Under agent_browser_sandbox_workaround's --no-sandbox fallback, doctor runs with --quick: its live
+# Under a --no-sandbox the user chose in ~/.agent-browser/config.json, doctor runs with --quick: its live
 # launch probe ignores ~/.agent-browser/config.json, and AGENT_BROWSER_ARGS and --args with it
 # (agent-browser 0.39.2), so on a restricted kernel it failed with "No usable sandbox!" on
 # every run while `agent-browser open` launched Chrome fine (issue #431 Run 8, clean Ubuntu
@@ -452,12 +452,12 @@ agent_browser_doctor() {
     else
         printf '%s\n' "$out"
     fi
-    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox fallback in ~/.agent-browser/config.json)"
+    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox in ~/.agent-browser/config.json)"
     return "$rc"
 }
 
 # agent_browser_no_sandbox_set - 0 when the kernel restricts unprivileged user namespaces AND
-# ~/.agent-browser/config.json passes --no-sandbox (what agent_browser_sandbox_workaround sets).
+# ~/.agent-browser/config.json passes --no-sandbox (the user's explicit choice where no profile loads).
 # A user's own args without it keep doctor's full launch test, so a real failure still shows.
 agent_browser_no_sandbox_set() {
     local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
@@ -519,42 +519,43 @@ agent_browser_apparmor_install() {
 #
 # The fix is Chrome's own documented one (docs/security/apparmor-userns-restrictions.md, linked
 # from that error): an AppArmor profile that allows `userns` for the binary, so Chrome keeps its
-# sandbox (agent_browser_apparmor_install, one sudo call the first time). Until #431's follow-up
-# this function set agent-browser's --args "--no-sandbox" instead, which turns the sandbox off:
-# a page that exploits Chrome then runs with the user's own rights, on the browser an agent
-# points at pages it chose. Once the profile is in place, that exact value is removed from
-# ~/.agent-browser/config.json again.
+# sandbox (agent_browser_apparmor_install, one sudo call the first time). #439 set agent-browser's
+# --args "--no-sandbox" instead, which turns the sandbox off: a page that exploits Chrome then runs
+# with the user's own rights, on the browser an agent points at pages it chose. Once the profile is
+# in place, that exact value is removed from ~/.agent-browser/config.json again (#456), and a
+# browser still running from before is named with the command that restarts it.
 #
-# --no-sandbox stays only as the fallback where no profile can be loaded (a Docker container on
-# an Ubuntu host, no apparmor_parser, a refused sudo), with a warning that names the risk.
-# Never overwrites an `args` key that is already there - a user's own choice wins.
+# Where no profile can be loaded (a Docker container on an Ubuntu host, no apparmor_parser, a
+# refused sudo), nothing is written: running without the sandbox is the user's explicit choice,
+# made in agent-browser's own config, and the warning says how. Whenever the config passes
+# --no-sandbox - that choice, a user's own args, or a value an older run wrote - every run says
+# so; it is never left in place silently.
 # AGENT_BROWSER_APPARMOR_PROC overrides the proc path checked (tests only).
 #-------------------------------------------------------------------------------
 agent_browser_sandbox_workaround() {
     local sudo_cmd="${1-}"
     local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
-    [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 0
     local cfg="$HOME/.agent-browser/config.json"
-    if agent_browser_apparmor_install "$sudo_cmd"; then
-        if [ -f "$cfg" ] && command -v jq &>/dev/null &&
-            jq -e '.args == "--no-sandbox"' "$cfg" >/dev/null 2>&1; then
-            jq 'del(.args)' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
-            info "agent-browser: removed --no-sandbox from $cfg (the AppArmor profile makes it unnecessary)"
+    if [ "$(cat "$proc_path" 2>/dev/null)" = 1 ]; then
+        if agent_browser_apparmor_install "$sudo_cmd"; then
+            if [ -f "$cfg" ] && command -v jq &>/dev/null &&
+                jq -e '.args == "--no-sandbox"' "$cfg" >/dev/null 2>&1; then
+                jq 'del(.args)' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+                info "agent-browser: removed --no-sandbox from $cfg (the AppArmor profile makes it unnecessary)"
+            fi
+            # A browser started before keeps the flag it was launched with.
+            if pgrep -f -- "$HOME/\.agent-browser/browsers/.*--no-sandbox" >/dev/null 2>&1; then
+                warn "agent-browser: a browser started earlier still runs without its sandbox - restart it: agent-browser close --all"
+            fi
+        elif ! grep -Fq -- '--no-sandbox' "$cfg" 2>/dev/null; then
+            warn "agent-browser: Chrome cannot start its sandbox here (restricted user namespaces, and no AppArmor profile could be loaded: a container, no apparmor_parser, or a refused sudo), so agent-browser cannot launch it. On a host, rerun dot up to install the profile. To run Chrome without its sandbox instead - a page that exploits it gets your user's rights - set \"args\": \"--no-sandbox\" in $cfg yourself."
+            return 0
         fi
-        return 0
     fi
-    if ! command -v jq &>/dev/null; then
-        warn "jq unavailable - could not set agent-browser's --no-sandbox fallback for this kernel's restricted user namespaces"
-        return 0
+    if grep -Fq -- '--no-sandbox' "$cfg" 2>/dev/null; then
+        warn "agent-browser: $cfg passes --no-sandbox, so Chrome runs without its sandbox - a page that exploits it gets your user's rights. Remove it unless you chose that."
     fi
-    mkdir -p "$(dirname "$cfg")"
-    if [ -f "$cfg" ]; then
-        jq -e '.args' "$cfg" >/dev/null 2>&1 && return 0
-        jq '.args = "--no-sandbox"' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
-    else
-        jq -n '{args: "--no-sandbox"}' >"$cfg"
-    fi
-    warn "agent-browser: no AppArmor profile could be loaded here, so Chrome runs with --no-sandbox ($cfg) - a page that exploits Chrome gets your user's rights. On a host, installing the profile fixes it: rerun dot up."
+    return 0
 }
 
 #-------------------------------------------------------------------------------
