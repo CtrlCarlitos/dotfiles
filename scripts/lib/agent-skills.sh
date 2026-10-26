@@ -352,16 +352,69 @@ install_maestro() {
 # a one-line summary plus one line per warn/fail check, instead of the ~3 KB JSON blob it
 # used to dump on every run. Output that is not the expected JSON (or no jq) is printed
 # raw, never dropped. Returns doctor's own exit status.
+#
+# Under agent_browser_sandbox_workaround's --no-sandbox, doctor runs with --quick: its live
+# launch probe ignores ~/.agent-browser/config.json, and AGENT_BROWSER_ARGS and --args with it
+# (agent-browser 0.39.2), so on a restricted kernel it failed with "No usable sandbox!" on
+# every run while `agent-browser open` launched Chrome fine (issue #431 Run 8, clean Ubuntu
+# 26.04 checkpoint). The skip is said on its own line.
 #-------------------------------------------------------------------------------
 agent_browser_doctor() {
-    local out rc=0
-    out="$(net_timeout 60 "$1" doctor --json 2>&1)" || rc=$?
+    local out rc=0 quick=""
+    agent_browser_no_sandbox_set && quick=1
+    out="$(net_timeout 60 "$1" doctor --json ${quick:+--quick} 2>&1)" || rc=$?
     if command -v jq &>/dev/null && printf '%s' "$out" | jq -e '.summary' >/dev/null 2>&1; then
         printf '%s' "$out" | jq -b -r '"agent-browser doctor: \(.summary.pass // 0) pass, \(.summary.warn // 0) warn, \(.summary.fail // 0) fail", (.checks[]? | select(.status == "warn" or .status == "fail") | "  \(.status): \(.message)" + (if .fix then " (fix: \(.fix))" else "" end))'
     else
         printf '%s\n' "$out"
     fi
+    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox in ~/.agent-browser/config.json this kernel needs)"
     return "$rc"
+}
+
+# agent_browser_no_sandbox_set - 0 when the kernel restricts unprivileged user namespaces AND
+# ~/.agent-browser/config.json passes --no-sandbox (what agent_browser_sandbox_workaround sets).
+# A user's own args without it keep doctor's full launch test, so a real failure still shows.
+agent_browser_no_sandbox_set() {
+    local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
+    [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 1
+    command -v jq &>/dev/null || return 1
+    jq -b -e '(.args // "") | tostring | contains("--no-sandbox")' "$HOME/.agent-browser/config.json" >/dev/null 2>&1
+}
+
+#-------------------------------------------------------------------------------
+# agent_browser_sandbox_workaround - Ubuntu 23.10+ (confirmed live on 26.04,
+# issue #431 Run 4/Run 5) restricts unprivileged user namespaces via AppArmor
+# by default, so Chrome's own sandboxed launch refuses to start at all:
+# "No usable sandbox!" (zygote_host_impl_linux.cc), exiting before it ever
+# writes DevToolsActivePort - `agent-browser doctor --json`'s own
+# "launch.launch" check fails with exactly this on a plain VM, no sandbox
+# hardening of ours involved. agent-browser documents its own escape hatch for
+# this exact case ("required in containers, VMs, and some Linux setups"):
+# --args "--no-sandbox", read from ~/.agent-browser/config.json (the first of
+# its own three config-precedence sources) - set once here so every future
+# invocation picks it up, not just this run's install/doctor calls. Checked
+# against the actual kernel policy, not a distro/version guess, so a future
+# release that changes the default is still handled correctly either way.
+# Never overwrites an `args` key that is already there - a user's own choice
+# wins, even if that means the restriction stays unworked-around.
+# AGENT_BROWSER_APPARMOR_PROC overrides the proc path checked (tests only).
+#-------------------------------------------------------------------------------
+agent_browser_sandbox_workaround() {
+    local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
+    [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 0
+    if ! command -v jq &>/dev/null; then
+        warn "jq unavailable - could not set agent-browser's --no-sandbox workaround for this VM/container's restricted AppArmor policy"
+        return 0
+    fi
+    local cfg="$HOME/.agent-browser/config.json"
+    mkdir -p "$(dirname "$cfg")"
+    if [ -f "$cfg" ]; then
+        jq -e '.args' "$cfg" >/dev/null 2>&1 && return 0
+        jq '.args = "--no-sandbox"' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    else
+        jq -n '{args: "--no-sandbox"}' >"$cfg"
+    fi
 }
 
 #-------------------------------------------------------------------------------

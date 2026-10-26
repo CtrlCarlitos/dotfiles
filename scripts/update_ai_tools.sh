@@ -524,6 +524,7 @@ if command -v npm &>/dev/null; then
     fi
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
+        agent_browser_sandbox_workaround
         net_timeout 600 "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
         "$AGENT_BROWSER_BIN" doctor --json &>/dev/null || echo "   agent-browser verification failed - continuing"
     fi

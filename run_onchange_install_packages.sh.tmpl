@@ -2230,6 +2230,7 @@ install_agent_toolkit() {
             sudo_net_timeout "$npm_sudo" 300 "$NPM_BIN" install -g --allow-scripts=agent-browser agent-browser || warn "agent-browser install failed or timed out - continuing"
         fi
         if [[ -x "$AGENT_BROWSER_BIN" ]]; then
+            agent_browser_sandbox_workaround
             # Playwright Chromium is already available above; agent-browser
             # discovers it before downloading another browser. Its output is shown only on
             # failure: on every WSL run it printed a "Linux detected..." warning and an

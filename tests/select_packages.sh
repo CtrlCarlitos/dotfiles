@@ -66,11 +66,17 @@ ln -s "$(command -v bash)" "$EMPTYBIN/bash"
 # Fake gum: logs its argv, then serves canned results.
 #   choose --no-limit ... -> $FAKE_MULTI words, one per line ("__FAIL__" = exit 130)
 #   choose (preset)       -> $FAKE_PRESET (default "custom")
+#   FAKE_BREAK_TTY=1      -> before printing the groups result, disable
+#                            echo/icanon/isig and never restore them - the
+#                            real menu's leading suspect (issue #431 Run 4):
+#                            a gum build that keys its own restore off
+#                            isatty(stdout), which `$(...)` always makes false.
 cat >"$BIN/gum" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${FAKE_GUM_LOG:?}"
 if [[ "$*" == *--no-limit* ]]; then
     [[ "$FAKE_MULTI" == "__FAIL__" ]] && exit 130
+    [[ "${FAKE_BREAK_TTY:-}" == 1 ]] && stty -echo -icanon -isig 2>/dev/null
     tr ' ' '\n' <<<"${FAKE_MULTI:?}" | sed '/^$/d'
 else
     printf '%s\n' "${FAKE_PRESET:-custom}"
@@ -87,6 +93,20 @@ run_menu() {
         "HOME='$home' PATH='$BIN:$PATH' FAKE_GUM_LOG='$GUM_LOG' FAKE_MULTI='$1' FAKE_PRESET='${2:-custom}' bash '$script_under_test'" \
         /dev/null >/dev/null 2>&1
 }
+
+# Variant of run_menu that also captures `stty -a` immediately after the
+# script exits, inside the SAME script(1) session - the pty is gone the
+# moment script(1) itself exits, so this is the only place to observe
+# whether gum_choose put the terminal's mode back.
+TTY_STATE="$TMP/tty_state"
+run_menu_tty() { # $1 = FAKE_MULTI, $2 = HOME, $3 = FAKE_BREAK_TTY (0/1)
+    : >"$GUM_LOG"
+    : >"$TTY_STATE"
+    timeout 30 script -qec \
+        "HOME='$2' PATH='$BIN:$PATH' FAKE_GUM_LOG='$GUM_LOG' FAKE_MULTI='$1' FAKE_PRESET=custom FAKE_BREAK_TTY='$3' bash '$script_under_test'; stty -a >'$TTY_STATE' 2>&1" \
+        /dev/null >/dev/null 2>&1
+}
+tty_flag_on() { grep -Eq "(^|[[:space:]])$1([[:space:]]|\$)" "$TTY_STATE"; }
 
 # Run without a pty (stdin is a pipe) — the CI/no-TTY path.
 run_no_tty() { # $1 = HOME
@@ -208,5 +228,15 @@ out="$(timeout 30 script -qec "HOME='$H4' PATH='$EMPTYBIN' bash '$script_under_t
     fail "no-gum run: script exited non-zero"
 case "$out" in *"skipping menu"*) ;; *) fail "no-gum run: missing skipping message: $out" ;; esac
 ok "pty but no gum: exit 0 + skipping message"
+
+# --- terminal mode: restored even when gum itself never restores it --------
+echo "[10] the terminal's echo/icanon/isig are restored after the menu"
+H5="$TMP/home5"
+mkdir -p "$H5"
+run_menu_tty "core fonts guardrail" "$H5" 1
+tty_flag_on echo   || fail "tty-restore: terminal echo was left disabled after the menu (stty -a: $(tr '\n' '|' <"$TTY_STATE"))"
+tty_flag_on icanon || fail "tty-restore: terminal left in raw (non-canonical) mode after the menu (stty -a: $(tr '\n' '|' <"$TTY_STATE"))"
+tty_flag_on isig   || fail "tty-restore: terminal signal keys (Ctrl+C) were left disabled after the menu (stty -a: $(tr '\n' '|' <"$TTY_STATE"))"
+ok "gum_choose restores echo/icanon/isig even though the fake gum left them off"
 
 finish
