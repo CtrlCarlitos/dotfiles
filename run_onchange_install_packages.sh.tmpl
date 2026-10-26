@@ -2130,7 +2130,12 @@ install_playwright_chromium() {
         # lines on every run. Only stdout/stderr go to the file - stdin stays the terminal and the
         # --foreground timeout above is unchanged. The output is shown on failure; apt's summary
         # line only when something was installed.
+        # The hang above is sudo's use_pty race (issue #431 Run 7/Run 8): apt_resume_stopped
+        # continues a stopped process in the chain while install-deps runs, so the 300 s budget
+        # stays a backstop. What it resumed, and a process snapshot at 240 s, are printed after.
         if [ "$PKG_MANAGER" = apt ]; then
+            local pw_watch pw_watch_log; pw_watch_log="$(mktemp)"
+            pw_watch="$(apt_resume_stopped "$pw_watch_log" 240)"
             if [ "${DOT_APT_VERBOSE:-0}" = 1 ]; then
                 sudo_net_timeout_tty "$npm_sudo" 300 "$NPX_BIN" --yes playwright install-deps chromium || warn "Playwright system deps install failed or timed out - continuing"
             else
@@ -2143,6 +2148,9 @@ install_playwright_chromium() {
                 fi
                 rm -f "$pw_deps"
             fi
+            kill "$pw_watch" 2>/dev/null || true
+            sed 's/^/  install-deps watcher: /' "$pw_watch_log" || true
+            rm -f "$pw_watch_log"
         fi
         # Output shown only on failure: outside a project `npx playwright install` prints a 13-line
         # "install your project's dependencies first" box on EVERY run, which is not about this install.

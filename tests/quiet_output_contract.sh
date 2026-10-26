@@ -75,6 +75,7 @@ pw_run() { # <summary> <exit> [verbose]; the block runs in a subshell, inside a 
         export PW_SUMMARY="$1" PW_EXIT="$2"
         DOT_APT_VERBOSE="${3:-0}"
         sudo_net_timeout_tty() { shift 2; "$@"; }
+        apt_resume_stopped() { echo 999999; }   # the watcher (its own contract); a pid that is gone
         warn() { echo "WARN: $*" >&2; }
         PKG_MANAGER=apt; NPX_BIN="$tmp/fake-npx"; npm_sudo=""
         pw_block() {

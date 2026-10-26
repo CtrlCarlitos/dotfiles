@@ -52,6 +52,7 @@ grep -Fq '[NEEDRESTART_MODE=a]' "$tmp/apt.log" || fail "quiet: apt must run with
 grep -Fq -- '-o Dpkg::Options::=--force-confold' "$tmp/apt.log" || fail "quiet: a changed conffile must keep the installed copy (log: $(cat "$tmp/apt.log"))"
 grep -Fq -- '-qq -o Dpkg::Use-Pty=0' "$tmp/apt.log" || fail "quiet: the caller's flags and Dpkg::Use-Pty=0 must be passed (log: $(cat "$tmp/apt.log"))"
 grep -Eq 'upgrade -y( |$)' "$tmp/apt.log" || fail "quiet: it must still be 'upgrade -y' (log: $(cat "$tmp/apt.log"))"
+grep -Fq -- '-o Dpkg::Lock::Timeout=600' "$tmp/apt.log" || fail "quiet: a bounded lock wait must be set, same as the installer (log: $(cat "$tmp/apt.log"))"
 
 # 2. failure: whole output shown, said, sweep continues
 got="$(FAKE_APT_RC=100 run -qq)"
@@ -64,6 +65,7 @@ case "$got" in *'package(s) upgraded.'*) fail "verbose: no summary line (got: $g
 grep -Fq '[DEBIAN_FRONTEND=]' "$tmp/apt.log" || fail "verbose: apt stays interactive (log: $(cat "$tmp/apt.log"))"
 grep -Fq '[NEEDRESTART_MODE=]' "$tmp/apt.log" || fail "verbose: needrestart stays interactive too, same as debconf (log: $(cat "$tmp/apt.log"))"
 if grep -Fq 'force-confold' "$tmp/apt.log"; then fail "verbose: none of the non-interactive flags (log: $(cat "$tmp/apt.log"))"; else pass; fi
+grep -Fq -- '-o Dpkg::Lock::Timeout=600' "$tmp/apt.log" || fail "verbose: the bounded lock wait applies even with everything else interactive (log: $(cat "$tmp/apt.log"))"
 
 # 4. wiring: the sweep calls the function with the quiet flags; the current tools share one line
 require "$up_sh" 'apt_upgrade_run "${apt_q[@]}"'

@@ -227,28 +227,60 @@ dot_timing_mark 'system packages'
 # keeps the installed copy, --force-confold, as unattended-upgrades does). DOT_APT_VERBOSE=1
 # keeps everything on the terminal, prompts included.
 #
-# needrestart runs as its own dpkg hook, outside DEBIAN_FRONTEND entirely: upgrading a package
-# that owns a running service (openssh-server, here) makes it try its own interactive
-# "restart these services?" prompt. Nested under this captured command substitution it has no
-# real foreground terminal to read from, so the kernel SIGTTINs it and it sits stopped (`T` in
-# `ps`) forever rather than erroring or timing out - confirmed live, a WSL `dot upgrade --yes`
-# sat for 37m53s on 14 packages that took about a minute once `kill -CONT`'d by hand
-# (2026-10-14). NEEDRESTART_MODE=a tells it to restart services on its own, the same
-# unattended-upgrades-style default as the confold/confdef flags above.
+# A dpkg hook (needrestart's own "restart these services?" prompt when upgrading a package that
+# owns a running service) can try its own prompt outside DEBIAN_FRONTEND entirely - the original
+# diagnosis (a WSL `dot upgrade --yes` that sat for 37m53s on 14 packages, 2026-10-14).
+# NEEDRESTART_MODE=a tells it to restart services on its own, the same unattended-upgrades-style
+# default as the confold/confdef flags above.
+#
+# That is not the whole story: confirmed live (issue #431 Run 7, Ubuntu 26.04 desktop, needrestart
+# not even installed there) the identical symptom - a grandchild apt-get stuck in `ps` state T -
+# recurs with no needrestart involved at all. `strace -p` on the stopped pid showed SIGTTIN;
+# moments later its process group matched the controlling pty's foreground group exactly, with no
+# other apparent change - proving the mismatch at the instant of the stop was a one-time race, not
+# a persistent misconfiguration. sudo's own pty allocation (`use_pty`) creates a new pty for the
+# privileged command and must install that command's process group as its foreground group before
+# anything in that command tries to read it; a descendant that gets there first loses the race and
+# takes one stray SIGTTIN. Nothing else here ever notices or resumes a stopped grandchild - this
+# script is not an interactive shell, so there is no job-control loop watching for one - so without
+# help it sits stopped forever. `sudo kill -CONT <pid>` by hand let the exact same transaction
+# finish normally seconds later. apt_resume_stopped (scripts/lib/agent-skills.sh, shared with the
+# installer's Playwright install-deps) is that CONT, automated: a background loop, running only
+# while the privileged apt-get call below is in flight, that continues any apt/dpkg process it
+# finds stopped. (An earlier fix here replaced a command-substitution output capture
+# with the plain file redirect below, matching the installer's own `_qapt_run` - a reasonable
+# hardening on its own, but not sufficient by itself: the race is in sudo's pty setup, upstream of
+# how this script captures output, so it reproduced with either capture method.)
+#-------------------------------------------------------------------------------
 apt_upgrade_run() {
-    local apt_q=("$@") out n
+    local apt_q=("$@") out n watcher rc=0
+    watcher="$(apt_resume_stopped)"
     if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then
-        sudo apt-get "${apt_q[@]}" upgrade -y
-        return $?
+        sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" upgrade -y || rc=$?
+        kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+        return "$rc"
     fi
-    if out="$(sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
-        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y 2>&1)"; then
-        n="$(printf '%s\n' "$out" | grep -c '^Setting up ' || true)"
+    out="$(mktemp 2>/dev/null)" || out=""
+    if [ -z "$out" ]; then
+        sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+            -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y || rc=$?
+        kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+        return "$rc"
+    fi
+    # shellcheck disable=SC2024  # the redirect targets $out, already owned by this
+    # (unprivileged) user via mktemp - only the command itself needs root, which sudo grants
+    if sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "${apt_q[@]}" -o Dpkg::Use-Pty=0 \
+        -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y >"$out" 2>&1; then
+        n="$(grep -c '^Setting up ' "$out" || true)"
         [ "${n:-0}" -gt 0 ] && echo "  apt: $n package(s) upgraded."
     else
-        printf '%s\n' "$out"
+        cat "$out"
         echo "  apt upgrade failed - continuing with the rest of the sweep."
     fi
+    kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+    rm -f "$out"
     return 0
 }
 # apt_sudo_prime - prime sudo's credential cache (and time its own prompt as "sudo password",
@@ -273,47 +305,58 @@ case "$NET_CHOICE:$(uname -s)" in
         ;;
     *:Linux)
         if command -v apt-get &>/dev/null; then
-            echo "  Upgrading apt packages..."
-            # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
-            # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
-            apt_q=(-qq)
-            if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
-            apt_sudo_prime
-            if sudo apt-get "${apt_q[@]}" update; then
-                # The password was just typed (or cached): keep it alive for the rest of the run -
-                # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
-                # (lib/agent-skills.sh, 2026-10-11).
-                dot_sudo_keepalive
-                if dock_docker_running; then
-                    dock_pending="$(dock_pending_linux | tr '\n' ' ')"
-                    if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
-                        # Kept running: hold the Docker packages out of THIS run (released at exit,
-                        # and only the holds taken here), so nothing restarts Docker under you.
-                        # shellcheck disable=SC2086  # the package list is word-split on purpose
-                        dock_hold $dock_pending
-                        trap dock_unhold EXIT
-                        echo "  Docker packages held back for this run: ${dock_pending% }"
+            # A leftover apt/dpkg stuck under a debconf dialog, or - net_timeout_tty's own
+            # documented trade-off - an orphan left stopped (state T) by an earlier timed-out
+            # step, holds the dpkg lock indefinitely: without this check, the apt-get calls below
+            # just failed and the whole system-packages section was skipped with no explanation.
+            # Confirmed live: a cancelled `dot upgrade` left exactly this chain behind (sudo ->
+            # apt-get -> a stopped apt-get child), and the next `dot upgrade` ran straight into
+            # it with nothing but silent "not upgraded" (issue #431).
+            if ! apt_lock_preflight; then
+                echo "  Skipping system packages - the package system is locked by a process that will not finish (see above for how to clear it)."
+            else
+                echo "  Upgrading apt packages..."
+                # Quiet like `dot up`: no Hit:/Get:/Reading... lines, one line naming what upgrades,
+                # then only dpkg's own lines and errors. DOT_APT_VERBOSE=1 shows everything.
+                apt_q=(-qq)
+                if [ "${DOT_APT_VERBOSE:-}" = 1 ]; then apt_q=(); fi
+                apt_sudo_prime
+                if sudo apt-get "${apt_q[@]}" -o "Dpkg::Lock::Timeout=${DOT_APT_LOCK_TIMEOUT:-600}" update; then
+                    # The password was just typed (or cached): keep it alive for the rest of the run -
+                    # a Maestro download outlasted sudo's 15 minutes and the npm step asked again
+                    # (lib/agent-skills.sh, 2026-10-11).
+                    dot_sudo_keepalive
+                    if dock_docker_running; then
+                        dock_pending="$(dock_pending_linux | tr '\n' ' ')"
+                        if [ -n "${dock_pending// /}" ] && ! dock_gate "${dock_pending% }"; then
+                            # Kept running: hold the Docker packages out of THIS run (released at exit,
+                            # and only the holds taken here), so nothing restarts Docker under you.
+                            # shellcheck disable=SC2086  # the package list is word-split on purpose
+                            dock_hold $dock_pending
+                            trap dock_unhold EXIT
+                            echo "  Docker packages held back for this run: ${dock_pending% }"
+                        fi
                     fi
+                    apt_list="$(apt-get -s upgrade 2>/dev/null | awk '/^Inst / { print $2 }' | tr '\n' ' ')" || apt_list=""
+                    if [ -n "${apt_list// /}" ]; then
+                        echo "  apt: upgrading $(wc -w <<<"$apt_list") package(s): ${apt_list% }"
+                    else
+                        echo "  apt: nothing to upgrade"
+                    fi
+                    apt_upgrade_run "${apt_q[@]}"
+                    dock_unhold
+                    # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
+                    # them only when missing: this is where they get upgraded (github_tool_sync,
+                    # lib/agent-skills.sh). The closing note then names only what still lags.
+                    # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
+                    # moves them): reinstalled at the pin when the installed version differs
+                    # (release_tool_pins_upgrade, lib/agent-skills.sh). The tools that are current
+                    # share one line (tool_current_flush); any with news keeps its own.
+                    tool_current_collect
+                    for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
+                    release_tool_pins_upgrade sudo
+                    tool_current_flush 'GitHub-release tools'
                 fi
-                apt_list="$(apt-get -s upgrade 2>/dev/null | awk '/^Inst / { print $2 }' | tr '\n' ' ')" || apt_list=""
-                if [ -n "${apt_list// /}" ]; then
-                    echo "  apt: upgrading $(wc -w <<<"$apt_list") package(s): ${apt_list% }"
-                else
-                    echo "  apt: nothing to upgrade"
-                fi
-                apt_upgrade_run "${apt_q[@]}"
-                dock_unhold
-                # delta, dust, procs come from GitHub releases (no apt repo) and `dot up` installs
-                # them only when missing: this is where they get upgraded (github_tool_sync,
-                # lib/agent-skills.sh). The closing note then names only what still lags.
-                # lychee and vale follow the pins in .chezmoidata.yaml (the weekly auto-update PR
-                # moves them): reinstalled at the pin when the installed version differs
-                # (release_tool_pins_upgrade, lib/agent-skills.sh). The tools that are current
-                # share one line (tool_current_flush); any with news keeps its own.
-                tool_current_collect
-                for n in delta dust procs; do github_tool_sync "$n" sudo upgrade; done
-                release_tool_pins_upgrade sudo
-                tool_current_flush 'GitHub-release tools'
             fi
         else
             echo "  apt-get not found - skipping system packages."
