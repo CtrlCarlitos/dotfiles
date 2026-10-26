@@ -178,7 +178,8 @@ cat >"$tmp/bin/ps" <<'EOF'
 #!/bin/sh
 case "$*" in
     *stat=*)
-        pid="${*##*-p }"; pid="${pid%% *}"
+        # the argument after -p; not ${*##*-p }, which bash (a bash /bin/sh, Git Bash) strips per word
+        pid=""; prev=""; for a in "$@"; do [ "$prev" = -p ] && pid="$a"; prev="$a"; done
         for p in ${FAKE_STOPPED:-}; do [ "$p" = "$pid" ] && { echo " T"; exit 0; }; done
         echo " S"
         ;;
