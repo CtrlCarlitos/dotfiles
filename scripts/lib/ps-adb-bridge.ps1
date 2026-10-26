@@ -71,7 +71,7 @@ function Sync-DotAdbBridgeRule {
         # when idle, and a first install has none until after the restart. A rule an earlier apply added
         # is left alone; with none yet, say how to get one.
         if ($null -eq (Get-DotFirewallRuleRemoteIp -DisplayName 'mobile_dev: ADB bridge (WSL only)')) {
-            Write-Host "  ADB bridge Firewall rule not added yet: WSL is not running, so the vEthernet adapter it is scoped to does not exist. Start WSL, then run dot up." -ForegroundColor Yellow
+            Write-Host "  ADB bridge Firewall rule not added yet: WSL is not running, so the vEthernet adapter it is scoped to does not exist. Start WSL's VM - open a WSL distro or Docker Desktop, then run dot up." -ForegroundColor Yellow
         }
         return
     }

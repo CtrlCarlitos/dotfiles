@@ -212,8 +212,9 @@ for sh in "${shells[@]}"; do
             case "$got" in *"$3"*) pass ;; *) fail "$sh $1: expected output containing '$3' (got: $got)" ;; esac
         fi
     }
-    # WSL not running and no rule yet: say how to get one, touch nothing
-    check down-norule '' 'Start WSL, then run dot up'
+    # WSL not running and no rule yet: say how to get one, touch nothing. A first install has no
+    # distro, so "start WSL" alone named nothing to start (#430 Run 13): both ways must be named.
+    check down-norule '' 'a WSL distro or Docker Desktop, then run dot up'
     # WSL not running, a rule from an earlier apply: silent, untouched
     check down-rule ''
     check nov4 '' 'no IPv4 address'
