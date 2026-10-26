@@ -59,7 +59,10 @@ grep -Fq '[[ -x "$AGENT_BROWSER_BIN" ]]' "$tmp/block.sh" ||
 
 sh_run() { # $1 = outfile; env pre-set by caller
     local outfile="$1"
-    HOME="$tmp/home" PATH="$bin:/usr/bin:/bin" NPM_BIN="$bin/npm" npm_sudo="" \
+    # SUDO is the installer's own; AGENT_BROWSER_APPARMOR_DIR keeps a restricted host's real
+    # /etc/apparmor.d out of it (the sandbox setup takes its --no-sandbox fallback here).
+    HOME="$tmp/home" PATH="$bin:/usr/bin:/bin" NPM_BIN="$bin/npm" npm_sudo="" SUDO="" \
+        AGENT_BROWSER_APPARMOR_DIR="$tmp/no-apparmor" \
         NPM_LOG="$tmp/npm.log" NPM_FAIL="${NPM_FAIL:-0}" NPM_FAKE_PREFIX="$prefix" \
         AB_LOG="$tmp/ab.log" NPM_CREATES="${NPM_CREATES:-}" AB_INSTALL_FAIL="${AB_INSTALL_FAIL:-0}" \
         timeout 60 bash "$tmp/harness.sh" >"$outfile" 2>&1
