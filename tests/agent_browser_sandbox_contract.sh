@@ -9,18 +9,24 @@ set -euo pipefail
 # Run 4/Run 5). The fix keeps Chrome's sandbox: an AppArmor profile allowing
 # `userns` for agent-browser's Chrome, the rule Ubuntu ships for Google
 # Chrome. agent-browser's --args "--no-sandbox" (which turns the sandbox off)
-# is only the fallback where no profile can be loaded. The contract:
+# is never written: where no profile loads it is the user's explicit choice,
+# and whenever the config carries it, every run says so. The contract:
 #   1. unrestricted (proc file reads 0, or is missing) - nothing touched;
-#   2. restricted, no profile possible, no config yet - config.json created
-#      with args=--no-sandbox, and a warning that names the risk;
-#   3. ...existing config with other keys - args added, nothing else touched;
-#   4. ...existing config already has an `args` value - never overwritten;
-#   5. ...no jq on PATH - warns, does not crash, writes nothing;
+#   2. restricted, no profile possible, no config - nothing written; a warning
+#      says agent-browser cannot launch Chrome and how to opt in;
+#   3. ...existing config with other keys - untouched, same warning;
+#   4. ...existing config with other args - never overwritten;
+#   5. ...no jq or grep on PATH - warns, does not crash, writes nothing;
 #   9. profile loadable - loaded (parser -r), then written; no config created;
 #  10. profile loadable, config holds exactly the --no-sandbox this repo wrote
 #      - that key removed, the rest kept; a user's own different args kept;
 #  11. profile already installed with the same text - the parser never runs;
-#  12. the parser refuses it - nothing written, --no-sandbox fallback;
+#  12. the parser refuses it - no profile written, no config written;
+#  14. --no-sandbox in the config (opted in, a user's own args, or what an
+#      older run wrote) - warned on every run, profile or not, never removed
+#      unless it is exactly the value this repo wrote and the profile loaded;
+#  15. a browser still running with --no-sandbox after the profile loads -
+#      named, with the command that restarts it.
 #  13. the real profile text parses with the real apparmor_parser, where
 #      this host has one.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,23 +63,20 @@ h1b="$tmp/home1b"; mkdir -p "$h1b"
 run "" "$h1b" >/dev/null
 [ -e "$h1b/.agent-browser/config.json" ] && fail "missing proc file: config.json must not be created" || pass
 
-# 2. Restricted, no profile possible, no existing config: created with exactly
-#    {"args":"--no-sandbox"}, and the warning says what that costs.
+# 2. Restricted, no profile possible, no config: nothing written (the sandbox is never turned off
+#    on the user's behalf), and the warning says why it cannot launch and how to opt in.
 h2="$tmp/home2"; mkdir -p "$h2"
 out2="$(run 1 "$h2")"
-case "$out2" in *'--no-sandbox'*'exploits Chrome'*) ;; *) fail "fallback: must warn that the sandbox is off and why it matters (got: $out2)" ;; esac
-cfg2="$h2/.agent-browser/config.json"
-[ -f "$cfg2" ] || fail "restricted: config.json was not created"
-[ "$(jq -r '.args' "$cfg2")" = "--no-sandbox" ] || fail "restricted: args not set to --no-sandbox (got: $(cat "$cfg2"))"
-[ "$(jq -r 'keys | length' "$cfg2")" = 1 ] || fail "restricted, fresh config: unexpected extra keys (got: $(cat "$cfg2"))"
+[ -e "$h2/.agent-browser/config.json" ] && fail "no profile: --no-sandbox must be opt-in, yet a config was written ($(cat "$h2/.agent-browser/config.json"))"
+case "$out2" in *'cannot launch'*'"args": "--no-sandbox"'*'yourself'*) pass ;; *) fail "no profile: must say it cannot launch and how to opt in (got: $out2)" ;; esac
 
-# 3. Restricted, no profile possible, existing config with other keys: args added, other keys untouched.
+# 3. Restricted, no profile possible, existing config with other keys: untouched, same warning.
 h3="$tmp/home3"; mkdir -p "$h3/.agent-browser"
 cfg3="$h3/.agent-browser/config.json"
 printf '%s\n' '{"headed": true}' >"$cfg3"
-run 1 "$h3" >/dev/null
-[ "$(jq -r '.args' "$cfg3")" = "--no-sandbox" ] || fail "existing config: args not merged in (got: $(cat "$cfg3"))"
-[ "$(jq -r '.headed' "$cfg3")" = "true" ] || fail "existing config: unrelated key 'headed' was lost (got: $(cat "$cfg3"))"
+out3="$(run 1 "$h3")"
+[ "$(jq -c . "$cfg3")" = '{"headed":true}' ] || fail "no profile, existing config: must stay untouched (got: $(cat "$cfg3"))"
+case "$out3" in *'cannot launch'*) pass ;; *) fail "no profile, existing config: must warn (got: $out3)" ;; esac
 
 # 4. Restricted, existing config already sets args: never overwritten, even to a
 #    value that does not include --no-sandbox (the user's own choice wins).
@@ -85,7 +88,7 @@ run 1 "$h4" >/dev/null
 after4="$(cat "$cfg4")"
 [ "$before4" = "$after4" ] || fail "existing args: must never be overwritten (before: $before4 | after: $after4)"
 
-# 5. Restricted, no jq on PATH: warns, does not crash, writes nothing.
+# 5. Restricted, no jq or grep on PATH: warns, does not crash, writes nothing.
 h5="$tmp/home5"; mkdir -p "$h5"
 procfile5="$tmp/apparmor_proc5"; printf 1 >"$procfile5"
 emptybin="$tmp/emptybin"; mkdir -p "$emptybin"
@@ -93,8 +96,8 @@ ln -s "$(command -v bash)" "$emptybin/bash"
 ln -s "$(command -v cat)" "$emptybin/cat"
 out5="$(PATH="$emptybin" HOME="$h5" AGENT_BROWSER_APPARMOR_PROC="$procfile5" AGENT_BROWSER_APPARMOR_DIR="$tmp/no-apparmor" \
     bash -c '. "$1"; agent_browser_sandbox_workaround' _ "$repo_root/scripts/lib/agent-skills.sh" 2>&1)" || fail "no jq: must not crash (got: $out5)"
-case "$out5" in *'jq unavailable'*) ;; *) fail "no jq: must warn (got: $out5)" ;; esac
-[ -e "$h5/.agent-browser/config.json" ] && fail "no jq: must not write a config it never validated" || pass
+case "$out5" in *'cannot launch'*) ;; *) fail "no jq: must still warn (got: $out5)" ;; esac
+[ -e "$h5/.agent-browser/config.json" ] && fail "no jq: must not write a config" || pass
 
 # agent_browser_doctor: doctor's live launch probe ignores config.json's args (agent-browser
 # 0.39.2, issue #431 Run 8), so under the workaround it must run --quick and say so; anywhere
@@ -175,13 +178,45 @@ out11="$(profile_run "$h11")"
 [ -e "$tmp/parser.log" ] && fail "installed: the parser must not run again (log: $(cat "$tmp/parser.log"))"
 [ -z "$out11" ] && pass || fail "installed: nothing to say (got: $out11)"
 
-# 12. The parser refuses it (a container, a refused sudo): nothing written, fallback taken.
+# 12. The parser refuses it (a container, a refused sudo): no profile written, no config written.
 rm -rf "$tmp/aa"; mkdir -p "$tmp/aa"
 h12="$tmp/home12"; mkdir -p "$h12"
 out12="$(profile_run "$h12" PARSER_FAIL=1)"
 [ -e "$tmp/aa/agent-browser-chrome" ] && fail "refused: a profile that never loaded must not be written"
-[ "$(jq -r .args "$h12/.agent-browser/config.json" 2>/dev/null)" = '--no-sandbox' ] || fail "refused: the --no-sandbox fallback must be set"
-case "$out12" in *'exploits Chrome'*) pass ;; *) fail "refused: the fallback must warn (got: $out12)" ;; esac
+[ -e "$h12/.agent-browser/config.json" ] && fail "refused: --no-sandbox must be opt-in, yet a config was written"
+case "$out12" in *'cannot launch'*) pass ;; *) fail "refused: must warn (got: $out12)" ;; esac
+
+# 14. --no-sandbox in the config is said on every run, never silently kept.
+#  a. Opted in where no profile loads: kept, and warned (not the "cannot launch" one).
+h14="$tmp/home14"; mkdir -p "$h14/.agent-browser"
+printf '%s\n' '{"args": "--no-sandbox"}' >"$h14/.agent-browser/config.json"
+out14="$(run 1 "$h14")"
+[ "$(jq -r .args "$h14/.agent-browser/config.json")" = '--no-sandbox' ] || fail "opted in: the user's choice must stay"
+case "$out14" in *'cannot launch'*) fail "opted in: Chrome can launch, so do not say it cannot (got: $out14)" ;; *'passes --no-sandbox'*'exploits it'*) pass ;; *) fail "opted in: must warn on every run (got: $out14)" ;; esac
+#  b. A user's own args with it, profile installed: kept, and warned.
+rm -rf "$tmp/aa"; mkdir -p "$tmp/aa"
+h14b="$tmp/home14b"; mkdir -p "$h14b/.agent-browser"
+printf '%s\n' '{"args": "--disable-gpu --no-sandbox"}' >"$h14b/.agent-browser/config.json"
+out14b="$(profile_run "$h14b")"
+case "$out14b" in *'passes --no-sandbox'*) pass ;; *) fail "own args with --no-sandbox: must warn even with the profile (got: $out14b)" ;; esac
+#  c. Unrestricted kernel: still warned.
+h14c="$tmp/home14c"; mkdir -p "$h14c/.agent-browser"
+printf '%s\n' '{"args": "--no-sandbox"}' >"$h14c/.agent-browser/config.json"
+case "$(run 0 "$h14c")" in *'passes --no-sandbox'*) pass ;; *) fail "unrestricted: --no-sandbox in the config must still be said" ;; esac
+
+# 15. A browser started before the profile keeps --no-sandbox until it is closed: named, with the
+#     command. A stand-in process carries the agent-browser path in its command line.
+h15="$tmp/home15"; mkdir -p "$h15"
+if command -v pgrep >/dev/null 2>&1; then
+    bash -c 'exec -a "$1" sleep 30' _ "$h15/.agent-browser/browsers/chrome-1/chrome --no-sandbox" &
+    stale=$!
+    sleep 0.5
+    out15="$(profile_run "$h15")"
+    kill "$stale" 2>/dev/null || true
+    case "$out15" in *'agent-browser close --all'*) pass ;; *) fail "stale browser: must name the restart command (got: $out15)" ;; esac
+    out15b="$(profile_run "$h15")"
+    case "$out15b" in *'close --all'*) fail "no stale browser: nothing to restart (got: $out15b)" ;; *) pass ;; esac
+fi
 
 # 13. The real text parses (no kernel load, no root) wherever this host has the parser.
 if [ -x /usr/sbin/apparmor_parser ] && [ -d /etc/apparmor.d/abi ]; then
