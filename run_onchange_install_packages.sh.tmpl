@@ -1249,6 +1249,20 @@ guardrail_next_steps() {
 }
 # guardrail-section: end
 
+# configure_vscode_if_new - configure_vscode once more when the desktop step above just installed
+# VS Code. configure_vscode runs earlier (hoisted for macOS, #124) and skips settings and
+# extensions while `code` is missing - on a fresh machine it always is, because VS Code arrives
+# with the desktop apps afterwards. Issue #431 Run 10: the one-liner printed "Installing VS
+# Code..." and nothing else for it; the settings and extensions came with the second `dot up`,
+# and keybindings.json (gated on ~/.config/Code/User existing when the apply starts) only with
+# the third. tests/vscode_first_run_config_contract.sh executes it.
+configure_vscode_if_new() {
+    [ -z "${vscode_was_present:-}" ] && command -v code &>/dev/null || return 0
+    dot_timing_mark 'VS Code'
+    configure_vscode
+    dot_timing_mark 'desktop apps' # the AI desktop apps that follow (sections with one name add up)
+}
+
 install_linux_desktop() {
     info "Installing Linux Desktop Apps..."
 
@@ -3322,6 +3336,7 @@ main() {
     # Darwin settings arm is reachable on macOS too.
     dot_timing_mark 'VS Code'
     configure_vscode
+    vscode_was_present="$(command -v code || true)"
 
     # Graft was dropped from the dotfiles (2026-10-09): remove it where an
     # earlier run installed it. Every run and whatever the groups say (it was
@@ -3423,6 +3438,7 @@ main() {
             fi
             ;;
     esac
+    configure_vscode_if_new
 {{- else }}
     info "Desktop apps disabled in config"
 {{- end }}
