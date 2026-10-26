@@ -187,7 +187,7 @@ catalog:
       brew: flyctl
       winget: Fly-io.flyctl
       winget_args: "--scope machine"
-      note: "the Fly.io CLI; apt: Fly's install script by procedure (no apt package), into ~/.fly/bin, where flyctl updates itself; winget: machine-wide like gum, because dot upgrade runs elevated and winget cannot upgrade a user-scope package from an elevated shell. On Windows, upgrade with dot upgrade, not the install.ps1 command flyctl's update notice suggests (that adds a second copy in ~/.fly)"
+      note: "the Fly.io CLI; apt: Fly's install script by procedure (no apt package), into ~/.fly/bin, where flyctl updates itself; winget: machine-wide like gum, because dot upgrade runs elevated and winget cannot upgrade a user-scope package from an elevated shell; winget's package exposes only flyctl, so ~/.local/bin/fly.cmd forwards fly to it. On Windows, upgrade with dot upgrade, not the install.ps1 command flyctl's update notice suggests (that adds a second copy in ~/.fly)"
     - id: mkcert
       group: core
       apt: mkcert

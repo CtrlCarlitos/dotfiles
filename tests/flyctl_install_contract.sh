@@ -63,12 +63,20 @@ echo "\$*" >>"$fx/curl.log"
 cat "$fx/install.sh"
 EOF
 chmod +x "$fx/bin/curl"
+# The host's own flyctl must not answer install_flyctl's "already installed" check: once
+# winget had installed it on a test VM, every executed case below returned early. Computed
+# once, before any case overrides PATH (docs/invariants.md 20).
+host_path=""
+IFS=: read -r -a _dirs <<<"$PATH"
+for d in "${_dirs[@]}"; do
+    [ -e "$d/flyctl" ] || [ -e "$d/flyctl.exe" ] || host_path="${host_path:+$host_path:}$d"
+done
 run_install() { # [extra PATH dir]; installs into $fx/home
     trap - EXIT   # called inside $( ): the parent's cleanup must not run when that subshell ends
     : >"$fx/curl.log"; rm -f "$fx/script.args" "$fx/script.path"
     (
         HOME="$fx/home"
-        PATH="${1:+$1:}$fx/bin:$PATH"
+        PATH="${1:+$1:}$fx/bin:$host_path"
         info() { echo "INFO: $*"; }; warn() { echo "WARN: $*"; }
         net_timeout() { shift; "$@"; }
         # shellcheck disable=SC1091
@@ -104,5 +112,44 @@ pass
 
 # --- shell PATH ------------------------------------------------------------------------------
 require "$repo_root/dot_zshrc" '[[ -d "$HOME/.fly/bin" ]] && path=("$HOME/.fly/bin" "${path[@]}")'
+
+# --- fly.cmd: `fly` on Windows -----------------------------------------------------------------
+# winget's portable package adds only a `flyctl` alias (confirmed live, #434 Run 10); brew and
+# install.sh give macOS and Linux `fly` too. The shim is deployed on Windows with core only.
+shim="$repo_root/dot_local/bin/fly.cmd"
+[ -f "$shim" ] || fail "$shim missing"
+require "$shim" '@echo off'
+require "$shim" 'flyctl %*'
+if grep -v -i '^rem' "$shim" | grep -Eq '(^|[^a-z])fly([^a-z]|$)'; then
+    fail 'fly.cmd must forward to flyctl, never fly (it would call itself)'
+fi
+if command -v chezmoi >/dev/null 2>&1; then
+    empty_config="$fx/empty.toml"; : >"$empty_config"
+    ignored() { # $1 = os, $2 = core (true/false); prints the rendered .chezmoiignore
+        CI=1 chezmoi execute-template --config "$empty_config" --source "$repo_root" \
+            --override-data "{\"chezmoi\":{\"os\":\"$1\",\"kernel\":{\"osrelease\":\"6.8.0-generic\"}},\"packages\":{\"core\":$2}}" \
+            <"$repo_root/.chezmoiignore"
+    }
+    for case in "linux true" "darwin true" "windows false"; do
+        set -- $case
+        ignored "$1" "$2" | grep -Fxq '.local/bin/fly.cmd' || fail "$1 (core=$2): .local/bin/fly.cmd must be ignored"
+    done
+    if ignored windows true | grep -Fxq '.local/bin/fly.cmd'; then
+        fail "windows (core=true): .local/bin/fly.cmd must be deployed, not ignored"
+    fi
+    pass
+fi
+# Executed where cmd.exe exists: arguments (with a space) reach flyctl and its exit code comes back.
+if command -v cmd.exe >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+    mkdir -p "$fx/winbin"
+    printf '@echo off\r\necho ARGS:%%*\r\nexit /b 3\r\n' >"$fx/winbin/flyctl.cmd"
+    rc=0
+    out="$(PATH="$fx/winbin:$PATH" cmd.exe //d //c "$(cygpath -w "$shim")" apps list "--org=my org" 2>&1)" || rc=$?
+    printf '%s' "$out" | tr -d '\r' | grep -Fqx 'ARGS:apps list "--org=my org"' || fail "fly.cmd must forward every argument to flyctl (got: $out)"
+    [ "$rc" = 3 ] || fail "fly.cmd must return flyctl's exit code (got $rc)"
+    pass
+else
+    printf 'note: no cmd.exe - fly.cmd execution check skipped\n'
+fi
 
 finish
