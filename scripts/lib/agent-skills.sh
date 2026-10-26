@@ -893,12 +893,19 @@ tool_current_flush() { # <label>
 # candidate version, which `dot up` promises never to do, and it printed "Installing ..." on
 # every run (2026-10-12). The installer asks this first and skips the install when nothing is
 # missing. No dpkg-query: every name reads as missing, and the install runs as before.
+# A virtual name an installed package Provides counts as present: on Ubuntu 26.04 p7zip-full is
+# only a name 7zip provides, so dpkg reported it not-installed and the core install ran on every
+# `dot up` (issue #431 Run 9) - while 22.04 still has p7zip-full as a real package, so the catalog
+# keeps that name. The Provides list is read once, and only when some name is not installed.
 apt_missing_packages() {
-    local n st
+    local n st provided=""
     command -v dpkg-query >/dev/null 2>&1 || { printf '%s\n' "$*"; return 0; }
     for n in "$@"; do
         st="$(dpkg-query -W -f='${Status}' "$n" 2>/dev/null)" || st=""
-        case "$st" in *" installed") ;; *) printf '%s ' "$n" ;; esac
+        case "$st" in *" installed") continue ;; esac
+        [ -n "$provided" ] || provided=" $(dpkg-query -W -f='${db:Status-Abbrev}|${Provides}\n' 2>/dev/null |
+            awk -F'|' '$1 ~ /^ii/ { gsub(/\([^)]*\)/, "", $2); gsub(/,/, " ", $2); printf "%s ", $2 }') "
+        case "$provided" in *" $n "*) ;; *) printf '%s ' "$n" ;; esac
     done | sed 's/ $//'
 }
 

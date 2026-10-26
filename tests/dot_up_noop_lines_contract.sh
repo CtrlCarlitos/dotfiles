@@ -21,10 +21,12 @@ ai_ps1="$repo_root/scripts/update_ai_tools.ps1"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home"
-# dpkg-query: $INSTALLED names are "install ok installed", the rest unknown (exit 1, like dpkg)
+# dpkg-query: $INSTALLED names are "install ok installed", the rest unknown (exit 1, like dpkg);
+# with no name, the installed packages' "Status-Abbrev|Provides" lines from $PROVIDES (one per line)
 cat >"$tmp/bin/dpkg-query" <<'STUB'
 #!/bin/sh
 name="$3"
+[ -z "$name" ] && { printf '%s\n' "${PROVIDES:-}"; exit 0; }
 for n in ${INSTALLED:-}; do [ "$n" = "$name" ] && { printf 'install ok installed'; exit 0; }; done
 exit 1
 STUB
@@ -39,6 +41,11 @@ got="$(INSTALLED="git" run_lib apt_missing_packages git curl jq)"
 [ "$got" = "curl jq" ] || fail "two missing: expected 'curl jq', got '$got'"
 got="$(PATH="/nonexistent" /bin/bash -c '. "$1"; apt_missing_packages git curl' _ "$lib" 2>&1)"
 [ "$got" = "git curl" ] || fail "no dpkg-query: every name reads as missing (the install runs as before), got '$got'"
+# Ubuntu 26.04 (issue #431 Run 9): p7zip-full is a virtual name the installed 7zip provides. A
+# name only a NOT-installed package provides, or one listed with a version, reads correctly too.
+prov="$(printf '%s\n' 'ii |p7zip, p7zip-full' 'un |fd' 'ii |adwaita-icon-theme-full (= 50.0-1), gnome-icon-theme-symbolic')"
+got="$(INSTALLED="git" PROVIDES="$prov" run_lib apt_missing_packages git p7zip-full fd adwaita-icon-theme-full jq)"
+[ "$got" = "fd jq" ] || fail "virtual names: an installed package's Provides counts as present, got '$got'"
 pass
 
 # 1b. apt_index_age_hours, executed: the newest release file's age; nothing -> exit 1
