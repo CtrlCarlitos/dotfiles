@@ -121,17 +121,26 @@ _net_timeout_report() {
 # WSL sat in state T for the full timeout AFTER apt had finished (the cause is
 # a strong suspect, not reproduced: it needs a sudo password). Trade-off:
 # --foreground times out only the direct child, not its descendants.
+#
+# The terminal's mode is saved first and put back afterwards. sudo's use_pty
+# puts the operator's terminal in raw mode while its command runs and restores
+# it only on a clean exit; a stopped command never takes the SIGTERM, so `-k`
+# SIGKILLs sudo and the mode stays raw. Issue #431 Run 10: after install-deps'
+# 300 s kill the shell came back with echo off - readline keeps the echo state
+# it finds, so nothing typed showed until Enter, until `stty sane`.
 #-------------------------------------------------------------------------------
 net_timeout_tty() {
     local secs="$1"; shift
-    local bin="" rc=0
+    local bin="" rc=0 tty_state=""
     if command -v timeout &>/dev/null; then bin="timeout"
     elif command -v gtimeout &>/dev/null; then bin="gtimeout"
     fi
     if [ -n "$bin" ]; then
+        [ -t 0 ] && tty_state="$(stty -g 2>/dev/null)" || tty_state=""
         # --foreground never kills the timeout process itself, so no "Killed"
         # notice to hide here; only the 137 -> 124 reading is shared.
         "$bin" --foreground -k "${NET_TIMEOUT_KILL_AFTER:-10}" "$secs" "$@" || rc=$?
+        [ -z "$tty_state" ] || stty "$tty_state" 2>/dev/null || true
         _net_timeout_report "$rc" "$secs" "$1"
     else
         "$@"
