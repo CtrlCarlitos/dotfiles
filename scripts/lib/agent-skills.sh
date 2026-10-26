@@ -437,7 +437,7 @@ install_maestro() {
 # used to dump on every run. Output that is not the expected JSON (or no jq) is printed
 # raw, never dropped. Returns doctor's own exit status.
 #
-# Under agent_browser_sandbox_workaround's --no-sandbox, doctor runs with --quick: its live
+# Under agent_browser_sandbox_workaround's --no-sandbox fallback, doctor runs with --quick: its live
 # launch probe ignores ~/.agent-browser/config.json, and AGENT_BROWSER_ARGS and --args with it
 # (agent-browser 0.39.2), so on a restricted kernel it failed with "No usable sandbox!" on
 # every run while `agent-browser open` launched Chrome fine (issue #431 Run 8, clean Ubuntu
@@ -452,7 +452,7 @@ agent_browser_doctor() {
     else
         printf '%s\n' "$out"
     fi
-    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox in ~/.agent-browser/config.json this kernel needs)"
+    [ -z "$quick" ] || echo "  skipped: doctor's launch test (it ignores the --no-sandbox fallback in ~/.agent-browser/config.json)"
     return "$rc"
 }
 
@@ -467,31 +467,86 @@ agent_browser_no_sandbox_set() {
 }
 
 #-------------------------------------------------------------------------------
-# agent_browser_sandbox_workaround - Ubuntu 23.10+ (confirmed live on 26.04,
-# issue #431 Run 4/Run 5) restricts unprivileged user namespaces via AppArmor
-# by default, so Chrome's own sandboxed launch refuses to start at all:
-# "No usable sandbox!" (zygote_host_impl_linux.cc), exiting before it ever
-# writes DevToolsActivePort - `agent-browser doctor --json`'s own
-# "launch.launch" check fails with exactly this on a plain VM, no sandbox
-# hardening of ours involved. agent-browser documents its own escape hatch for
-# this exact case ("required in containers, VMs, and some Linux setups"):
-# --args "--no-sandbox", read from ~/.agent-browser/config.json (the first of
-# its own three config-precedence sources) - set once here so every future
-# invocation picks it up, not just this run's install/doctor calls. Checked
-# against the actual kernel policy, not a distro/version guess, so a future
-# release that changes the default is still handled correctly either way.
-# Never overwrites an `args` key that is already there - a user's own choice
-# wins, even if that means the restriction stays unworked-around.
+# agent_browser_apparmor_profile - the AppArmor profile agent_browser_sandbox_workaround installs.
+# The same rule Ubuntu ships for Google Chrome in /etc/apparmor.d/chrome (an unconfined profile
+# whose only job is `userns,`), attached to agent-browser's own Chrome downloads and to
+# Playwright's Chromium, both under the user's home where no shipped profile reaches.
+#-------------------------------------------------------------------------------
+agent_browser_apparmor_profile() {
+    cat <<'EOF'
+# Managed by the dotfiles (scripts/lib/agent-skills.sh, agent_browser_sandbox_workaround).
+# Lets agent-browser's and Playwright's Chrome create the user namespace its
+# sandbox needs under kernel.apparmor_restrict_unprivileged_userns=1, the
+# same rule Ubuntu ships for Google Chrome in /etc/apparmor.d/chrome.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile agent-browser-chrome @{HOME}/{.agent-browser/browsers/chrome-*/chrome,.cache/ms-playwright/chromium-*/chrome-linux64/chrome} flags=(unconfined) {
+  userns,
+
+  include if exists <local/agent-browser-chrome>
+}
+EOF
+}
+
+# agent_browser_apparmor_install <sudo|""> - 0 when the profile is in place: already installed
+# with this exact text, or loaded and written now. Loaded first, written second, so a file in
+# /etc/apparmor.d always means its profile reached the kernel once (and loads at every boot).
+# The text goes through a temp file, never a pipe: a first-run sudo prompt must not read it.
+# AGENT_BROWSER_APPARMOR_DIR / AGENT_BROWSER_APPARMOR_PARSER override the target (tests only).
+agent_browser_apparmor_install() {
+    local sudo_cmd="$1" dir="${AGENT_BROWSER_APPARMOR_DIR:-/etc/apparmor.d}"
+    local parser="${AGENT_BROWSER_APPARMOR_PARSER:-apparmor_parser}" file tmp rc=0
+    file="$dir/agent-browser-chrome"
+    [ "$(cat "$file" 2>/dev/null)" = "$(agent_browser_apparmor_profile)" ] && return 0
+    [ -d "$dir" ] || return 1
+    command -v "$parser" &>/dev/null || return 1
+    tmp="$(mktemp)" || return 1
+    agent_browser_apparmor_profile >"$tmp"
+    $sudo_cmd "$parser" -r "$tmp" </dev/null || rc=1
+    [ "$rc" = 1 ] || $sudo_cmd install -m 0644 "$tmp" "$file" </dev/null || rc=1
+    rm -f "$tmp"
+    [ "$rc" = 0 ] && info "agent-browser: AppArmor profile $file installed - Chrome keeps its sandbox"
+    return "$rc"
+}
+
+#-------------------------------------------------------------------------------
+# agent_browser_sandbox_workaround [sudo|""] - Ubuntu 23.10+ (confirmed live on 26.04, issue
+# #431 Run 4/Run 5) restricts unprivileged user namespaces via AppArmor by default, on every
+# install, not just VMs, so Chrome's sandboxed launch refuses to start at all: "No usable
+# sandbox!" (zygote_host_impl_linux.cc). Checked against the actual kernel policy, not a
+# distro/version guess.
+#
+# The fix is Chrome's own documented one (docs/security/apparmor-userns-restrictions.md, linked
+# from that error): an AppArmor profile that allows `userns` for the binary, so Chrome keeps its
+# sandbox (agent_browser_apparmor_install, one sudo call the first time). Until #431's follow-up
+# this function set agent-browser's --args "--no-sandbox" instead, which turns the sandbox off:
+# a page that exploits Chrome then runs with the user's own rights, on the browser an agent
+# points at pages it chose. Once the profile is in place, that exact value is removed from
+# ~/.agent-browser/config.json again.
+#
+# --no-sandbox stays only as the fallback where no profile can be loaded (a Docker container on
+# an Ubuntu host, no apparmor_parser, a refused sudo), with a warning that names the risk.
+# Never overwrites an `args` key that is already there - a user's own choice wins.
 # AGENT_BROWSER_APPARMOR_PROC overrides the proc path checked (tests only).
 #-------------------------------------------------------------------------------
 agent_browser_sandbox_workaround() {
+    local sudo_cmd="${1-}"
     local proc_path="${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
     [ "$(cat "$proc_path" 2>/dev/null)" = 1 ] || return 0
-    if ! command -v jq &>/dev/null; then
-        warn "jq unavailable - could not set agent-browser's --no-sandbox workaround for this VM/container's restricted AppArmor policy"
+    local cfg="$HOME/.agent-browser/config.json"
+    if agent_browser_apparmor_install "$sudo_cmd"; then
+        if [ -f "$cfg" ] && command -v jq &>/dev/null &&
+            jq -e '.args == "--no-sandbox"' "$cfg" >/dev/null 2>&1; then
+            jq 'del(.args)' "$cfg" >"$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+            info "agent-browser: removed --no-sandbox from $cfg (the AppArmor profile makes it unnecessary)"
+        fi
         return 0
     fi
-    local cfg="$HOME/.agent-browser/config.json"
+    if ! command -v jq &>/dev/null; then
+        warn "jq unavailable - could not set agent-browser's --no-sandbox fallback for this kernel's restricted user namespaces"
+        return 0
+    fi
     mkdir -p "$(dirname "$cfg")"
     if [ -f "$cfg" ]; then
         jq -e '.args' "$cfg" >/dev/null 2>&1 && return 0
@@ -499,6 +554,7 @@ agent_browser_sandbox_workaround() {
     else
         jq -n '{args: "--no-sandbox"}' >"$cfg"
     fi
+    warn "agent-browser: no AppArmor profile could be loaded here, so Chrome runs with --no-sandbox ($cfg) - a page that exploits Chrome gets your user's rights. On a host, installing the profile fixes it: rerun dot up."
 }
 
 #-------------------------------------------------------------------------------

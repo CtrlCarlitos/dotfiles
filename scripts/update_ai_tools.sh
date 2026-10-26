@@ -524,7 +524,8 @@ if command -v npm &>/dev/null; then
     fi
     AGENT_BROWSER_BIN="$("$NPM_BIN" prefix -g)/bin/agent-browser"
     if [[ -x "$AGENT_BROWSER_BIN" ]]; then
-        agent_browser_sandbox_workaround
+        # sudo only to install the AppArmor profile the first time (dot upgrade primed it).
+        agent_browser_sandbox_workaround "$([ "$(id -u)" = 0 ] || echo sudo)"
         net_timeout 600 "$AGENT_BROWSER_BIN" install &>/dev/null || echo "   agent-browser browser setup failed - skipping"
         "$AGENT_BROWSER_BIN" doctor --json &>/dev/null || echo "   agent-browser verification failed - continuing"
     fi
