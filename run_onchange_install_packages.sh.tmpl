@@ -3138,8 +3138,13 @@ install_opencode_desktop() {
             # Idempotence guard on the package + binary (same shape as
             # Docker Desktop/Termius): skip if either reports present, so a
             # .deb without a PATH binary can't trigger a ~120MB re-download
-            # on every apply.
-            if dpkg -s opencode-desktop &>/dev/null || command -v opencode-desktop &>/dev/null; then
+            # on every apply. The .deb's package is named `opencode` and puts
+            # its binary at /opt/OpenCode/ai.opencode.desktop, off PATH, so
+            # neither old probe ever matched and every `dot up` downloaded
+            # 117.5 MB to hear "opencode is already the newest version"
+            # (issue #431 Run 11). OPENCODE_DESKTOP_BIN is the test seam.
+            if dpkg -s opencode-desktop &>/dev/null || [ -x "${OPENCODE_DESKTOP_BIN:-/opt/OpenCode/ai.opencode.desktop}" ] \
+                || command -v opencode-desktop &>/dev/null; then
                 info "OpenCode Desktop already installed"
                 return 0
             fi
