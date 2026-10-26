@@ -26,6 +26,12 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
+# tests/lib.sh keeps every test off the real sudo and /etc/apparmor.d: a suite run once loaded this
+# profile into the operator's kernel through superpowers_refresh_contract.sh (#431, 2026-10-26).
+[ -n "${AGENT_BROWSER_APPARMOR_DIR:-}" ] && [ ! -e "$AGENT_BROWSER_APPARMOR_DIR" ] &&
+    [ "$(cat "${AGENT_BROWSER_APPARMOR_PROC:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}" 2>/dev/null)" != 1 ] &&
+    pass || fail "tests/lib.sh must point AGENT_BROWSER_APPARMOR_DIR/PROC away from the host's AppArmor"
+
 command -v jq >/dev/null 2>&1 || skip 'jq not installed'
 
 tmp="$(mktemp -d)"

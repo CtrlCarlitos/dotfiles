@@ -43,6 +43,13 @@ export XDG_STATE_HOME="$_lib_state"
 # npm (scripts/lib/ps-npm-registry.ps1). Tests that stub `npm` must stay on the stubs, whatever the host
 # has installed; the test of that library turns it back on itself.
 export DOT_NPM_DIRECT=0
+# agent_browser_sandbox_workaround (scripts/lib/agent-skills.sh) installs an AppArmor profile with
+# sudo on a host whose kernel restricts user namespaces. A test that ran update_ai_tools.sh on the
+# real PATH reached the real sudo (credential cached) and loaded a profile into the operator's
+# kernel and /etc/apparmor.d (#431, 2026-10-26). Every test now sees an unrestricted kernel and no
+# AppArmor dir; the sandbox contract sets its own per case.
+export AGENT_BROWSER_APPARMOR_PROC="$_lib_state/no-apparmor-restriction"
+export AGENT_BROWSER_APPARMOR_DIR="$_lib_state/no-apparmor"
 
 _tests_checks=0
 _tests_failed=0
