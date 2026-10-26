@@ -151,6 +151,36 @@ if command -v chezmoi >/dev/null; then
         grep -Fxq "$p" "$tmp/desk-managed.txt" ||
             fail "windows: dev_desktop selected, but $p waits for the next apply"
     done
+    # The Linux and macOS twins: VS Code's keybindings were gated on the User
+    # dir alone, so a fresh install got them only on its second `dot up` (#431
+    # Run 15: `A .config/Code/User/keybindings.json` right after the one-liner).
+    # Linux installs VS Code only on a host with $DISPLAY set, so the gate
+    # follows that; inside a Docker container it stays shut, like the installer.
+    lin_kb='.config/Code/User/keybindings.json'
+    DISPLAY=:0 chezmoi managed --config "$tmp/desktop.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"},"homeDir":"/nonexistent"}}' >"$tmp/desk-managed.txt"
+    if [ -e /.dockerenv ] || [ "${DEVCONTAINER:-}${REMOTE_CONTAINERS:-}" != '' ]; then
+        grep -Fxq "$lin_kb" "$tmp/desk-managed.txt" &&
+            fail "linux container: dev_desktop installs no VS Code here, yet $lin_kb is managed"
+    else
+        grep -Fxq "$lin_kb" "$tmp/desk-managed.txt" ||
+            fail "linux: dev_desktop selected with a display, but $lin_kb waits for the next apply"
+    fi
+    env -u DISPLAY chezmoi managed --config "$tmp/desktop.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"},"homeDir":"/nonexistent"}}' >"$tmp/desk-managed.txt"
+    grep -Fxq "$lin_kb" "$tmp/desk-managed.txt" &&
+        fail "linux: no display, so no VS Code is installed, yet $lin_kb is managed"
+    DISPLAY=:0 chezmoi managed --config "$tmp/desktop.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.6.87-microsoft-standard-WSL2"},"homeDir":"/nonexistent"}}' >"$tmp/desk-managed.txt"
+    grep -Fxq "$lin_kb" "$tmp/desk-managed.txt" &&
+        fail "wsl: VS Code is a remote server there, yet $lin_kb is managed"
+    grep -Fxq "$lin_kb" "$tmp/lin-managed.txt" &&
+        fail "linux: dev_desktop not selected, yet $lin_kb is managed"
+    chezmoi managed --config "$tmp/desktop.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"darwin","kernel":{"osrelease":""},"homeDir":"/nonexistent"}}' >"$tmp/desk-managed.txt"
+    grep -Fxq 'Library/Application Support/Code/User/keybindings.json' "$tmp/desk-managed.txt" ||
+        fail "darwin: dev_desktop selected, but VS Code's keybindings.json waits for the next apply"
+
     # Not selected: none of them (the Geany probe also reads the real
     # ProgramFiles, so skip those two where Geany is installed on this host).
     geany_here=$(chezmoi execute-template --config "$tmp/chezmoi.toml" \

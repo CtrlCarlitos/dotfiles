@@ -120,25 +120,31 @@ AppData/**
 # one per-OS location, and only where VS Code's User dir already exists, so a
 # headless server or a machine without VS Code never gets a stray Code config.
 # WSL is excluded: VS Code there is a remote server; keys live on the Windows side.
+# dev_desktop selected counts too, wherever the package installer would install
+# VS Code in this same apply: it does so after this file was rendered, so a fresh
+# install kept the keybindings off until its second `dot up` (#430 Run 12 on
+# Windows, #431 Run 15 on Linux). Linux mirrors the installer's own gate: a host
+# (no Docker container, same test as .chezmoi.toml.tmpl) with $DISPLAY set.
+{{- $desktop := false }}
+{{- if hasKey . "packages" }}{{ $desktop = get .packages "dev_desktop" }}{{ end }}
 {{- if ne .chezmoi.os "darwin" }}
 Library/**
-{{- else if not (stat (joinPath .chezmoi.homeDir "Library/Application Support/Code/User")) }}
+{{- else if not (or (stat (joinPath .chezmoi.homeDir "Library/Application Support/Code/User")) $desktop) }}
 Library/Application Support/Code/**
 {{- end }}
 {{- $codeLinux := false }}
 {{- if eq .chezmoi.os "linux" }}
 {{-   if not (contains "microsoft" (lower .chezmoi.kernel.osrelease)) }}
 {{-     if stat (joinPath .chezmoi.homeDir ".config/Code/User") }}{{ $codeLinux = true }}{{ end }}
+{{-     $envDev := or (env "DEVCONTAINER") (env "REMOTE_CONTAINERS") | default "" }}
+{{-     $container := or (eq $envDev "true") (eq $envDev "1") (stat "/.dockerenv" | not | not) }}
+{{-     if and $desktop (not $container) (env "DISPLAY") }}{{ $codeLinux = true }}{{ end }}
 {{-   end }}
 {{- end }}
 {{- if not $codeLinux }}
 .config/Code/**
 {{- end }}
-# On Windows, dev_desktop selected counts too: the package installer installs
-# VS Code and Geany after this file was rendered, so a fresh install kept their
-# keybindings and dark scheme off until its second `dot up`.
-{{- $winDesktop := false }}
-{{- if and (eq .chezmoi.os "windows") (hasKey . "packages") }}{{ $winDesktop = get .packages "dev_desktop" }}{{ end }}
+{{- $winDesktop := and (eq .chezmoi.os "windows") $desktop }}
 {{- if and (eq .chezmoi.os "windows") (not (or (stat (joinPath .chezmoi.homeDir "AppData/Roaming/Code/User")) $winDesktop)) }}
 AppData/Roaming/Code/**
 {{- end }}
