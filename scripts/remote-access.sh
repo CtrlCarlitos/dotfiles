@@ -628,15 +628,24 @@ ra_desktop_detected() {
     if command -v systemctl >/dev/null 2>&1; then
         [ "$(systemctl get-default 2>/dev/null || true)" = "graphical.target" ] && return 0
     fi
-    for dir in /usr/share/xsessions /usr/share/wayland-sessions; do
+    # RA_DESKTOP_SESSION_DIRS / RA_DESKTOP_DM_UNITS override these two real
+    # filesystem probes (tests only, same seam family as RA_PROC_VERSION):
+    # unlike every other signal above, these two read the REAL host
+    # unconditionally, so a test runner that is itself a desktop install
+    # (not just the target host under test) detects its OWN session files
+    # and takes the xrdp branch even for a fixture meant to simulate a
+    # headless server - confirmed live on a real Ubuntu Desktop VM, where a
+    # "server" test fixture's `setup` ran straight into the strict
+    # no-apt-get-calls-expected stub (issue #431 Run 6).
+    for dir in ${RA_DESKTOP_SESSION_DIRS:-/usr/share/xsessions /usr/share/wayland-sessions}; do
         [ -d "$dir" ] || continue
         set -- "$dir"/*
         [ -e "$1" ] && return 0
     done
-    for unit in \
+    for unit in ${RA_DESKTOP_DM_UNITS:-\
         /etc/systemd/system/display-manager.service \
         /lib/systemd/system/display-manager.service \
-        /usr/lib/systemd/system/display-manager.service; do
+        /usr/lib/systemd/system/display-manager.service}; do
         [ -e "$unit" ] && return 0
     done
     return 1
