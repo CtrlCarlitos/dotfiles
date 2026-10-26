@@ -2569,6 +2569,23 @@ PYEOF
     fi
 }
 
+# opencode_path_add - put the native OpenCode binary's directory on THIS process's PATH. Its
+# installer lays the binary in ~/.opencode/bin (or ~/bin) and adds that to the shell rc files
+# only, so on a fresh machine `command -v opencode` stayed false for the rest of the run:
+# Superpowers for OpenCode, its MCP registrations (sync_agent_mcp_catalog) and the OpenCode plane
+# of the agent-guardrails setup were all skipped until a second `dot up` (issue #431 Run 8 vs
+# Run 9), so OpenCode ran unguarded until then. Prepended, so the native binary also wins over a
+# leftover npm shim. The ps1 twin prepends WinGet's Links / choco's bin for the same reason.
+# tests/opencode_first_run_path_contract.sh executes it.
+opencode_path_add() {
+    local d
+    for d in "$HOME/.opencode/bin" "$HOME/bin"; do
+        [ -x "$d/opencode" ] || continue
+        case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH"; export PATH ;; esac
+        return 0
+    done
+}
+
 install_opencode_cli() {
     # OpenCode CLI (opencode_cli group - the OpenCode vendor pair's CLI side,
     # split out of agent_toolkit per the spec's placement rule). Native
@@ -2586,10 +2603,12 @@ install_opencode_cli() {
     # and never fixes it. The npm rm removes the shim so it can't shadow the
     # native binary the installer just laid down (~/.opencode/bin or ~/bin,
     # depending on what exists).
+    opencode_path_add
     if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
          info "Installing OpenCode..."
          net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
          npm rm -g opencode-ai &>/dev/null || true
+         opencode_path_add
     fi
 
     # Superpowers skills for OpenCode (separate mechanism from Claude
