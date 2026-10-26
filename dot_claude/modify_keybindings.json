@@ -8,7 +8,7 @@
   a terminal delivered Ctrl+Enter as a plain line feed - Ctrl+J, a newline - which
   is how it behaved for months. A terminal that reports extended keys now hands
   Claude Code a distinct Ctrl+Enter, and it SENDS. OpenCode, agy and Codex all treat
-  Ctrl+Enter as a newline (Codex via dot_codex/modify_config.toml), so this forces
+  Ctrl+Enter as a newline (Codex via dot_codex/modify_private_config.toml), so this forces
   the same here. Ctrl+X Ctrl+S stays the chat:sendNow chord.
 
   MERGE, not own: only "ctrl+enter" in the first "Chat" context block is forced;

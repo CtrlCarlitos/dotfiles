@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Codex config merge contract (dot_codex/modify_config.toml).
+# Codex config merge contract (dot_codex/modify_private_config.toml).
 #
 # ~/.codex/config.toml is rewritten by Codex itself - per-project trust levels
 # keyed by absolute path, SHA-256 hook hashes, model-migration notices. The
@@ -12,14 +12,20 @@ set -euo pipefail
 #
 # Each case renders the template with a crafted config on stdin and asserts both
 # halves: our key won, and the surrounding content survived.
+#
+# The file is also private: Codex writes it 0600, and without `private_` chezmoi
+# wrote 0664 on every apply, widening it and leaving `MM .codex/config.toml` in
+# `chezmoi status` once Codex rewrote it (#431 Run 13).
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-template="$repo_root/dot_codex/modify_config.toml"
+template="$repo_root/dot_codex/modify_private_config.toml"
 want='insert_newline = ["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]'
 
 . "$repo_root/tests/lib.sh"
 
-[ -f "$template" ] || { fail "dot_codex/modify_config.toml missing"; exit 1; }
+[ -f "$template" ] || { fail "dot_codex/modify_private_config.toml missing"; exit 1; }
+[ ! -e "$repo_root/dot_codex/modify_config.toml" ] ||
+    fail "dot_codex/modify_config.toml exists: without private_ chezmoi applies config.toml 0664 over Codex's 0600"
 
 # 1. Static guarantees that hold without chezmoi installed.
 head -n 1 "$template" | grep -Fq 'chezmoi:modify-template' ||
@@ -196,6 +202,22 @@ grep -Fqx 'vim_mode_default = true' "$tmp/cos-never.out" || fail "copy_on_select
 # idempotent: a second render of our own output changes nothing
 render_config < "$tmp/cos-tui.out" > "$tmp/cos-tui.out2"
 diff -u "$tmp/cos-tui.out" "$tmp/cos-tui.out2" >/dev/null || fail "copy_on_select: not idempotent"
+
+# 7c. Applied for real, the file is 0600 - the mode Codex itself writes - so a
+#     Codex rewrite is not drift. POSIX modes only; chezmoi ignores private_ on Windows.
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) ;;
+    *)
+        mkdir -p "$tmp/src/dot_codex" "$tmp/home"
+        cp "$template" "$tmp/src/dot_codex/"
+        chezmoi --source "$tmp/src" --destination "$tmp/home" --config "$tmp/chezmoi.toml" \
+            --persistent-state "$tmp/state.boltdb" --no-tty apply >/dev/null 2>&1 ||
+            fail "private mode: chezmoi apply of the template failed"
+        mode="$(stat -c %a "$tmp/home/.codex/config.toml" 2>/dev/null ||
+            stat -f %Lp "$tmp/home/.codex/config.toml" 2>/dev/null || printf 'unknown')"
+        [ "$mode" = 600 ] || fail "private mode: applied config.toml is $mode, expected 600 (Codex's own mode)"
+        ;;
+esac
 
 # 8. Every rendered case is valid TOML. This is the assertion that matters -
 #    the others describe intent, this one catches the config that won't load.

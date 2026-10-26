@@ -317,7 +317,7 @@ Enter submits in all four. For a new line:
   - **Harness layer** (terminals we do not manage, SSH from elsewhere):
     `dot_claude/modify_keybindings.json` merges `"ctrl+enter": "chat:newline"` into
     `~/.claude/keybindings.json` (hot-reloaded; `Ctrl+X Ctrl+S` stays the send-now chord),
-    and `dot_codex/modify_config.toml` binds it for Codex as below. OpenCode and agy take
+    and `dot_codex/modify_private_config.toml` binds it for Codex as below. OpenCode and agy take
     `Ctrl+Enter` natively.
 
   The Codex binding, applied for you (verified accepted by `codex` 0.155.1 - an invalid
@@ -332,7 +332,7 @@ Enter submits in all four. For a new line:
   Key names are lowercase and hyphenated (`ctrl-a`, `shift-enter`, `page-down`), and
   the full action list lives under `tui.keymap.{global,chat,composer,editor,pager,list,agents,approval,vim_*}`.
 
-  **You don't have to add it by hand** - `dot_codex/modify_config.toml` applies this
+  **You don't have to add it by hand** - `dot_codex/modify_private_config.toml` applies this
   binding on every machine. Like Windows Terminal's `settings.json`, the file is
   *merged, not owned*: Codex rewrites it constantly (per-project trust levels, hook
   hashes, model notices), so the template forces two keys (this one and
@@ -419,7 +419,7 @@ Same in Windows Terminal and the VS Code terminal:
   Upstream experimental flag, verified against 1.18.33 - if a future version
   renames it, right-click-to-copy silently comes back.
 - **Codex** also copies on select: `tui.copy_on_select = "always"` in
-  `~/.codex/config.toml`, forced by `dot_codex/modify_config.toml` on every machine.
+  `~/.codex/config.toml`, forced by `dot_codex/modify_private_config.toml` on every machine.
   Codex's default (`auto`) deliberately does *not* copy in Windows Terminal, Ghostty
   1.2+, Kitty on macOS or VS Code on Windows, assuming the terminal's own
   copy-on-select covers it. But Codex captures the mouse in its fullscreen UI, so the
