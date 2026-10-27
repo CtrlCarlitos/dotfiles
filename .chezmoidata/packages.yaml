@@ -554,6 +554,11 @@ catalog:
       cask: telegram
       winget: Telegram.TelegramDesktop
       choco_was: telegram.install
+      note: >-
+        apt: telegram-desktop where the release ships it; where it does not
+        (Ubuntu 26.04), Telegram's official Linux build from its GitHub
+        release, sha256-checked, into ~/.local/opt/Telegram by procedure (it
+        updates itself).
     - id: vlc
       group: dev_desktop
       apt: vlc

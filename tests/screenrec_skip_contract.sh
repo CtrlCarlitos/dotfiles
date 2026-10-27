@@ -17,9 +17,11 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 render_to "$tmp/installer.sh" sh '{"dev_desktop": true}'
-awk '/^screenrec_installable\(\) \{/ {on = 1} on {print} on && /^\}/ {exit}' "$tmp/installer.sh" >"$tmp/fn.sh"
+fn() { awk -v n="$1" 'index($0, n "() {") == 1 {on = 1} on {print} on && /^\}/ {exit}' "$tmp/installer.sh"; }
+{ fn apt_has_candidate; fn screenrec_installable; } >"$tmp/fn.sh"
 awk '/# 4\. ScreenRec/ {on = 1} /# 5\. Handy/ {exit} on {print}' "$tmp/installer.sh" >"$tmp/block.sh"
-grep -q 'apt-cache policy libgdk-pixbuf2.0-0' "$tmp/fn.sh" || fail "screenrec_installable not found in the rendered installer"
+grep -q 'apt_has_candidate libgdk-pixbuf2.0-0' "$tmp/fn.sh" && grep -q 'apt-cache policy' "$tmp/fn.sh" ||
+    fail "screenrec_installable (and the apt_has_candidate it calls) not found in the rendered installer"
 grep -q 'Installing ScreenRec' "$tmp/block.sh" || fail "ScreenRec block not found in the rendered installer (source shape changed?)"
 
 mkdir -p "$tmp/bin"
