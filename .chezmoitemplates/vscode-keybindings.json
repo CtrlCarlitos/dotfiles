@@ -39,8 +39,8 @@
       installed VS Code workbench bundle. */ -}}
 {{- range $b := list
       (dict "key" "alt+shift+d" "command" "workbench.action.terminal.split")
-      (dict "key" "alt+left" "command" "workbench.action.terminal.focusPrevious")
-      (dict "key" "alt+right" "command" "workbench.action.terminal.focusNext")
+      (dict "key" "alt+left" "command" "workbench.action.terminal.focusPreviousPane")
+      (dict "key" "alt+right" "command" "workbench.action.terminal.focusNextPane")
       (dict "key" "ctrl+tab" "command" "workbench.action.terminal.focusNext")
       (dict "key" "ctrl+shift+r" "command" "workbench.action.terminal.rename")
       (dict "key" "ctrl+shift+w" "command" "workbench.action.terminal.kill")

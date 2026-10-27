@@ -458,7 +458,7 @@ Set by the installer's VS Code step (DEFAULTS tier: a value you set yourself win
 - A bar cursor and 30000 lines of scrollback.
 - The agent keys and the clipboard behavior above.
 - Windows Terminal parity chords while a terminal has focus: `Alt+Shift+D` split,
-  `Alt+←/→` and `Ctrl+Tab` move between terminals, `Ctrl+Shift+R` rename,
+  `Alt+←/→` move between split panes, `Ctrl+Tab` between terminals, `Ctrl+Shift+R` rename,
   `Ctrl+Shift+W` kill, `Ctrl+=`/`Ctrl+-`/`Ctrl+0` font zoom
   (`.chezmoitemplates/vscode-keybindings.json`).
 

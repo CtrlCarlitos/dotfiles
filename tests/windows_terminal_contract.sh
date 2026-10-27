@@ -264,6 +264,11 @@ JSON
     chezmoi --source "$tmp/src" --destination "$tmp/dest" --config "$tmp/chezmoi.toml" --no-tty apply --force >/dev/null 2>&1
     jq -e 'length == 18 and any(.[]; .key == "ctrl+alt+c") and any(.[]; .key == "ctrl+shift+w" and .command == "workbench.action.terminal.kill") and any(.[]; .key == "alt+shift+d" and .command == "workbench.action.terminal.split" and .when == "terminalFocus") and any(.[]; .key == "ctrl+0" and .command == "workbench.action.terminal.fontZoomReset")' "$tmp/dest/.kb.json" >/dev/null ||
         fail "applying the keybindings modify-template produced the wrong keybinding set (8 agent chords + 9 terminal-parity chords + Ctrl+Enter = newline expected)"
+    # Alt+Left/Right move between split panes, as in Windows Terminal (focusLeft/Right) and
+    # Ghostty (goto_split). terminal.focusPrevious/focusNext cycle terminal tabs instead, so
+    # in a single split terminal they did nothing (#431 Run 18).
+    jq -e 'any(.[]; .key == "alt+left" and .command == "workbench.action.terminal.focusPreviousPane") and any(.[]; .key == "alt+right" and .command == "workbench.action.terminal.focusNextPane") and any(.[]; .key == "ctrl+tab" and .command == "workbench.action.terminal.focusNext")' "$tmp/dest/.kb.json" >/dev/null ||
+        fail "Alt+Left/Right must focus the previous/next split pane (focusPreviousPane/focusNextPane); Ctrl+Tab the next terminal"
     for g in 'Library/Application Support/Code/**' '.config/Code/**' 'AppData/Roaming/Code/**'; do
         grep -Fq "$g" "$ignore" || fail ".chezmoiignore: missing VS Code keybindings guard $g"
     done
