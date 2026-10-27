@@ -1284,6 +1284,16 @@ configure_vscode_if_new() {
     dot_timing_mark 'desktop apps' # the AI desktop apps that follow (sections with one name add up)
 }
 
+# screenrec_installable - 1 when this release has no libgdk-pixbuf2.0-0, which screenrec's .deb
+# hard-depends on (renamed libgdk-pixbuf-2.0-0 on Ubuntu 24.04+). Read from the local apt index:
+# no repo, sudo or network. Without it, every `dot up` added the vendor repo, ran two apt updates
+# and a failed install, and removed the repo again - about 8 s and four sudo calls to print the
+# same warning (#431 Run 17). When ScreenRec ships a fixed .deb, its repo is tried again only
+# where the old name still resolves; drop this check then.
+screenrec_installable() {
+    [ -n "$(apt-cache policy libgdk-pixbuf2.0-0 2>/dev/null | awk '/Candidate:/ && $2 != "(none)" {print $2}')" ]
+}
+
 install_linux_desktop() {
     info "Installing Linux Desktop Apps..."
 
@@ -1445,7 +1455,9 @@ install_linux_desktop() {
     fi
 
     # 4. ScreenRec (Official Repo - modern keyring)
-    if ! command -v screenrec &>/dev/null; then
+    if ! command -v screenrec &>/dev/null && ! screenrec_installable; then
+        info "ScreenRec skipped: its .deb needs libgdk-pixbuf2.0-0, which this release no longer ships."
+    elif ! command -v screenrec &>/dev/null; then
         info "Installing ScreenRec..."
         $SUDO mkdir -p /etc/apt/keyrings
         # Key + repo setup guarded (#114): an unguarded `curl | gpg` aborted
