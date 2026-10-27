@@ -1284,14 +1284,65 @@ configure_vscode_if_new() {
     dot_timing_mark 'desktop apps' # the AI desktop apps that follow (sections with one name add up)
 }
 
+# apt_has_candidate <package> - 0 when the local apt index can install <package>. No repo, sudo or
+# network: `apt-cache policy` prints "Candidate: (none)", or nothing at all, where it cannot.
+apt_has_candidate() {
+    [ -n "$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ && $2 != "(none)" {print $2}')" ]
+}
+
 # screenrec_installable - 1 when this release has no libgdk-pixbuf2.0-0, which screenrec's .deb
-# hard-depends on (renamed libgdk-pixbuf-2.0-0 on Ubuntu 24.04+). Read from the local apt index:
-# no repo, sudo or network. Without it, every `dot up` added the vendor repo, ran two apt updates
-# and a failed install, and removed the repo again - about 8 s and four sudo calls to print the
-# same warning (#431 Run 17). When ScreenRec ships a fixed .deb, its repo is tried again only
-# where the old name still resolves; drop this check then.
+# hard-depends on (renamed libgdk-pixbuf-2.0-0 on Ubuntu 24.04+). Without it, every `dot up` added
+# the vendor repo, ran two apt updates and a failed install, and removed the repo again - about
+# 8 s and four sudo calls to print the same warning (#431 Run 17). When ScreenRec ships a fixed
+# .deb, its repo is tried again only where the old name still resolves; drop this check then.
 screenrec_installable() {
-    [ -n "$(apt-cache policy libgdk-pixbuf2.0-0 2>/dev/null | awk '/Candidate:/ && $2 != "(none)" {print $2}')" ]
+    apt_has_candidate libgdk-pixbuf2.0-0
+}
+
+# install_telegram_linux - Telegram Desktop's official Linux build, where apt has no
+# telegram-desktop (Ubuntu 26.04: the dev_desktop loop only warned "not installable", #431 Run 17).
+# The Linux download desktop.telegram.org links is the tdesktop GitHub release asset
+# td-setup-linux-x64-<version>.tar.xz; GitHub's API gives its sha256, checked before anything is
+# unpacked, and an asset without one is refused. It lands in ~/.local/opt/Telegram, owned by the
+# user, because the app updates itself in place (its Updater sits beside it): `dot upgrade` has
+# nothing to do, and no sudo, snap or Flatpak is involved. ~/.local/bin/telegram starts it.
+# TELEGRAM_RELEASE_API overrides the release URL (tests only).
+install_telegram_linux() {
+    local dir="$HOME/.local/opt/Telegram" bin="$HOME/.local/bin/telegram"
+    local api="${TELEGRAM_RELEASE_API:-https://api.github.com/repos/telegramdesktop/tdesktop/releases/latest}"
+    local json asset url sum
+    if [ -x "$dir/Telegram" ]; then
+        info "Telegram already installed ($dir) - it updates itself"
+        return 0
+    fi
+    info "Installing Telegram (official Linux build from GitHub releases)..."
+    if ! command -v jq &>/dev/null; then
+        warn "Telegram: jq unavailable to read the release - skipping"
+        return 0
+    fi
+    json="$(net_timeout 30 curl -fsSL "$api")" || { warn "Telegram: could not read the latest release - skipping"; return 0; }
+    asset="$(printf '%s' "$json" | jq -r '[.assets[]? | select(.name | test("^td-setup-linux-x64-.*\\.tar\\.xz$"))][0] // empty | "\(.browser_download_url) \(.digest // "")"')"
+    url="${asset%% *}"
+    sum="${asset#* }"; sum="${sum#sha256:}"
+    if [ -z "$url" ] || [ "${#sum}" != 64 ]; then
+        warn "Telegram: the release has no Linux x64 build with a sha256 to check - skipping"
+        return 0
+    fi
+    rm -rf "$WORK/telegram" && mkdir -p "$WORK/telegram"
+    if ! net_timeout 300 curl -fsSL -o "$WORK/telegram.tar.xz" "$url"; then
+        warn "Telegram download failed or timed out - skipping"
+    elif [ "$(sha256sum "$WORK/telegram.tar.xz" | cut -d' ' -f1)" != "$sum" ]; then
+        warn "Telegram: the download does not match its published sha256 - not installed"
+    elif ! tar -xJf "$WORK/telegram.tar.xz" -C "$WORK/telegram" || [ ! -x "$WORK/telegram/Telegram/Telegram" ]; then
+        warn "Telegram: the archive did not unpack to Telegram/Telegram - not installed"
+    else
+        rm -rf "$dir"
+        mkdir -p "$(dirname "$dir")" "$(dirname "$bin")"
+        mv "$WORK/telegram/Telegram" "$dir"
+        ln -sfn "$dir/Telegram" "$bin"
+        success "Telegram installed to $dir - run telegram once to add its menu entry; it updates itself"
+    fi
+    rm -rf "$WORK/telegram" "$WORK/telegram.tar.xz"
 }
 
 install_linux_desktop() {
@@ -1421,6 +1472,10 @@ install_linux_desktop() {
     # Installed individually so one package that's unavailable on this release
     # doesn't take the whole `apt install` (and, under `set -e`, the run) down.
     for pkg in {{ includeTemplate "pkg-names" (dict "manager" "apt" "group" "dev_desktop" "catalog" .catalog.packages) }}; do
+        if [ "$pkg" = telegram-desktop ] && ! apt_has_candidate telegram-desktop; then
+            install_telegram_linux
+            continue
+        fi
         $SUDO apt install -y "$pkg" || warn "Skipping '$pkg' (not installable on this release)."
     done
 
