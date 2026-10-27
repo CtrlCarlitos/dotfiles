@@ -1340,7 +1340,7 @@ install_telegram_linux() {
         mkdir -p "$(dirname "$dir")" "$(dirname "$bin")"
         mv "$WORK/telegram/Telegram" "$dir"
         ln -sfn "$dir/Telegram" "$bin"
-        success "Telegram installed to $dir (telegram; it updates itself)"
+        success "Telegram installed to $dir - run telegram once to add its menu entry; it updates itself"
     fi
     rm -rf "$WORK/telegram" "$WORK/telegram.tar.xz"
 }

@@ -93,7 +93,7 @@ out="$(run '(none)')"
     fail "no candidate: ~/.local/bin/telegram must link to it"
 # The loop's other packages still go through apt; nothing about Telegram needs sudo.
 grep -qi 'telegram' "$tmp/sudo.log" && fail "no candidate: nothing for Telegram may need sudo (sudo: $(tr '\n' ';' <"$tmp/sudo.log"))" || pass
-case "$out" in *'Telegram installed'*) pass ;; *) fail "no candidate: the install must be said (got: $out)" ;; esac
+case "$out" in *'Telegram installed'*'menu entry'*) pass ;; *) fail "no candidate: the install, and the first run that adds the menu entry, must be said (got: $out)" ;; esac
 [ -z "$(ls -A "$tmp/work")" ] && pass || fail "no candidate: the download and unpack dir must be cleaned up ($(ls -A "$tmp/work"))"
 
 # 3. Already installed: no download, it updates itself.
