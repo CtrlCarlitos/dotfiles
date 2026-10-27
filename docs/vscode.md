@@ -169,7 +169,7 @@ keys live on the Windows side. The keys are scoped to a focused terminal: `Ctrl+
 |---|---|
 | `Alt+Shift+D` | Split the terminal |
 | `Alt+←` / `Alt+→` | Focus the previous / next split pane |
-| `Ctrl+Tab` | Focus the next terminal (tab) |
+| `Ctrl+Tab` | Focus the next terminal in the terminal list (splits share one entry) |
 | `Ctrl+Shift+R` | Rename the terminal |
 | `Ctrl+Shift+W` | Kill the terminal |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Terminal font zoom in / out / reset |
