@@ -11,6 +11,11 @@
 #                check count honest for tests with their own assertion helpers)
 #   require F S  assert file F contains the literal string S
 #   forbid F S   assert file F does not contain the literal string S
+#   link_tool P D  put host tool P at D in a fixture's own bin (a symlink, or
+#                an exec wrapper where ln -s copies - see the function)
+#   skip_part MSG  announce a skipped part ("SKIP: MSG") and carry on; the
+#                runner accounts the file as skipped, a failure still fails it
+#   symlinks_work  true when ln -s makes a real symlink here
 #   render ARGS  chezmoi execute-template with an empty --config (the host's
 #                own config must not shape a render) and this repo as --source
 #   finish       completion marker: prints "PASS (N checks)" or
@@ -72,6 +77,30 @@ skip() {
     _lib_cleanup
     printf 'SKIP: %s\n' "$1"
     exit 0
+}
+
+skip_part() {
+    printf 'SKIP: %s\n' "$1"
+}
+
+# Git Bash without Windows Developer Mode makes `ln -s` copy, and a copied MSYS binary on a
+# fixture PATH without /usr/bin cannot load its msys-*.dll files: it exits 127 and, under set -e,
+# ends the test there (#430 Run 17). A wrapper that execs the real path loads them from its own
+# directory, and the fixture's bin still exposes only the tools it names.
+link_tool() { # $1 = host tool path, $2 = fixture path
+    ln -s "$1" "$2" 2>/dev/null && [ -L "$2" ] && return 0
+    rm -f "$2"
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "$1" >"$2" && chmod +x "$2"
+}
+
+# True when ln -s makes a real symlink here (not on Git Bash without Developer Mode).
+symlinks_work() {
+    local d rc=1
+    d="$(mktemp -d)"
+    : >"$d/t"
+    ln -s "$d/t" "$d/l" 2>/dev/null && [ -L "$d/l" ] && rc=0
+    rm -rf "$d"
+    return "$rc"
 }
 
 require() { # $1 = file, $2 = literal

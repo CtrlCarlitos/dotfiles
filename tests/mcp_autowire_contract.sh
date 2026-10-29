@@ -19,6 +19,12 @@ sh_installer="$repo_root/run_onchange_install_packages.sh.tmpl"
 
 . "$repo_root/tests/lib.sh"
 
+# The binary behind a host tool. On Git Bash python3 is a script forwarding to `python` through
+# PATH (~/.local/bin/python3), which a fixture PATH of only these tools cannot run.
+host_tool() { # $1 = tool
+    if [ "$1" = python3 ]; then python3 -c 'import sys; print(sys.executable)'; else command -v "$1"; fi
+}
+
 # 1. opencode: the catalog's servers go into the GLOBAL mcp block, both twins.
 # The server table lives in .chezmoidata/agents.yaml (#83): both twins must
 # render it. Graft was dropped (2026-10-09): the catalog no longer carries it.
@@ -200,8 +206,8 @@ sync_fn="$(sed -n '/^sync_agent_mcp_catalog() {$/,/^}$/p' "$agy_tmp/rendered.sh"
 mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
 bash_bin="$(command -v bash)"
 for tool in python3 mkdir dirname tr rm; do
-    real="$(command -v "$tool")" || skip "$tool not installed"
-    ln -s "$real" "$sync_tmp/bin/$tool"
+    real="$(host_tool "$tool")" || skip "$tool not installed"
+    link_tool "$real" "$sync_tmp/bin/$tool"
 done
 for stub in opencode maestro serena; do
     printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"
@@ -251,8 +257,8 @@ sync_fn="$(sed -n '/^sync_agent_mcp_catalog() {$/,/^}$/p' "$agy_tmp/rendered.sh"
 [ -n "$sync_fn" ] || fail "rendered installer: no top-level sync_agent_mcp_catalog() function"
 mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
 for tool in python3 mkdir dirname tr rm; do
-    real="$(command -v "$tool")" || skip "$tool not installed"
-    ln -s "$real" "$sync_tmp/bin/$tool"
+    real="$(host_tool "$tool")" || skip "$tool not installed"
+    link_tool "$real" "$sync_tmp/bin/$tool"
 done
 for stub in opencode maestro serena agent-device; do
     printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"
@@ -291,8 +297,8 @@ if command -v chezmoi >/dev/null 2>&1; then
     sync_tmp="$off_tmp/fx"
     mkdir -p "$sync_tmp/bin" "$sync_tmp/home"
     for tool in python3 mkdir dirname tr rm; do
-        real="$(command -v "$tool")" || skip "$tool not installed"
-        ln -s "$real" "$sync_tmp/bin/$tool"
+        real="$(host_tool "$tool")" || skip "$tool not installed"
+        link_tool "$real" "$sync_tmp/bin/$tool"
     done
     for stub in opencode maestro serena agent-device; do
         printf '#!/bin/sh\nexit 0\n' >"$sync_tmp/bin/$stub"

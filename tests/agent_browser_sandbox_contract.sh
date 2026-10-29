@@ -92,8 +92,8 @@ after4="$(cat "$cfg4")"
 h5="$tmp/home5"; mkdir -p "$h5"
 procfile5="$tmp/apparmor_proc5"; printf 1 >"$procfile5"
 emptybin="$tmp/emptybin"; mkdir -p "$emptybin"
-ln -s "$(command -v bash)" "$emptybin/bash"
-ln -s "$(command -v cat)" "$emptybin/cat"
+link_tool "$(command -v bash)" "$emptybin/bash"
+link_tool "$(command -v cat)" "$emptybin/cat"
 out5="$(PATH="$emptybin" HOME="$h5" AGENT_BROWSER_APPARMOR_PROC="$procfile5" AGENT_BROWSER_APPARMOR_DIR="$tmp/no-apparmor" \
     bash -c '. "$1"; agent_browser_sandbox_workaround' _ "$repo_root/scripts/lib/agent-skills.sh" 2>&1)" || fail "no jq: must not crash (got: $out5)"
 case "$out5" in *'cannot launch'*) ;; *) fail "no jq: must still warn (got: $out5)" ;; esac

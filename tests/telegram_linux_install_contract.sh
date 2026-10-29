@@ -18,6 +18,10 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 command -v jq >/dev/null 2>&1 || skip 'jq not installed'
 command -v xz >/dev/null 2>&1 || skip 'xz not installed (the fixture is a tar.xz)'
+# The sandboxed PATH below finds jq and xz in /usr/bin on Linux/macOS/WSL; on Windows Git Bash jq is
+# a winget/choco install and xz lives in /mingw64/bin, and without them every procedure case only
+# warns "jq unavailable" or tar cannot exec xz (#430 Run 17).
+tool_dirs="$(dirname -- "$(command -v jq)"):$(dirname -- "$(command -v xz)")"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -76,7 +80,7 @@ run() { # $1 = apt candidate for telegram-desktop; env: ASSET
     : >"$tmp/sudo.log"; : >"$tmp/curl.log"; mkdir -p "$home" "$tmp/work"
     HOME="$home" WORK="$tmp/work" CANDIDATE="$1" ASSET="${ASSET:-$tmp/asset.tar.xz}" RELEASE_JSON="$tmp/release.json" \
         TELEGRAM_RELEASE_API="https://api.invalid/latest" SUDO_LOG="$tmp/sudo.log" CURL_LOG="$tmp/curl.log" \
-        PATH="$tmp/bin:/usr/bin:/bin" bash "$tmp/harness.sh" 2>&1
+        PATH="$tmp/bin:/usr/bin:/bin:$tool_dirs" bash "$tmp/harness.sh" 2>&1
 }
 
 # 1. apt can install it: apt does, the procedure stays out of it.
@@ -89,8 +93,12 @@ grep -q 'apt install -y telegram-desktop' "$tmp/sudo.log" && pass || fail "apt c
 out="$(run '(none)')"
 [ -x "$home/.local/opt/Telegram/Telegram" ] && [ -x "$home/.local/opt/Telegram/Updater" ] && pass ||
     fail "no candidate: Telegram (and its Updater) must be in ~/.local/opt/Telegram (got: $out)"
-[ "$(readlink "$home/.local/bin/telegram")" = "$home/.local/opt/Telegram/Telegram" ] && pass ||
-    fail "no candidate: ~/.local/bin/telegram must link to it"
+if symlinks_work; then
+    [ "$(readlink "$home/.local/bin/telegram")" = "$home/.local/opt/Telegram/Telegram" ] && pass ||
+        fail "no candidate: ~/.local/bin/telegram must link to it"
+else
+    skip_part "no candidate: the ~/.local/bin/telegram symlink (ln -s copies here)"
+fi
 # The loop's other packages still go through apt; nothing about Telegram needs sudo.
 grep -qi 'telegram' "$tmp/sudo.log" && fail "no candidate: nothing for Telegram may need sudo (sudo: $(tr '\n' ';' <"$tmp/sudo.log"))" || pass
 case "$out" in *'Telegram installed'*'menu entry'*) pass ;; *) fail "no candidate: the install, and the first run that adds the menu entry, must be said (got: $out)" ;; esac
