@@ -93,8 +93,12 @@ grep -q 'apt install -y telegram-desktop' "$tmp/sudo.log" && pass || fail "apt c
 out="$(run '(none)')"
 [ -x "$home/.local/opt/Telegram/Telegram" ] && [ -x "$home/.local/opt/Telegram/Updater" ] && pass ||
     fail "no candidate: Telegram (and its Updater) must be in ~/.local/opt/Telegram (got: $out)"
-[ "$(readlink "$home/.local/bin/telegram")" = "$home/.local/opt/Telegram/Telegram" ] && pass ||
-    fail "no candidate: ~/.local/bin/telegram must link to it"
+if symlinks_work; then
+    [ "$(readlink "$home/.local/bin/telegram")" = "$home/.local/opt/Telegram/Telegram" ] && pass ||
+        fail "no candidate: ~/.local/bin/telegram must link to it"
+else
+    skip_part "no candidate: the ~/.local/bin/telegram symlink (ln -s copies here)"
+fi
 # The loop's other packages still go through apt; nothing about Telegram needs sudo.
 grep -qi 'telegram' "$tmp/sudo.log" && fail "no candidate: nothing for Telegram may need sudo (sudo: $(tr '\n' ';' <"$tmp/sudo.log"))" || pass
 case "$out" in *'Telegram installed'*'menu entry'*) pass ;; *) fail "no candidate: the install, and the first run that adds the menu entry, must be said (got: $out)" ;; esac

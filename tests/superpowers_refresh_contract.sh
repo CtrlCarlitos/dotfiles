@@ -66,6 +66,8 @@ bin="$tmp/bin"
 home="$tmp/home"
 mkdir -p "$bin" "$home"
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+# The form a PowerShell FullName/Join-Path prints: backslashes on Windows.
+nativepath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 
 # --- Stubs ------------------------------------------------------------------------------------
 # codex: `plugin list` prints the header and $CODEX_ROWS (one row per line); everything else logs.
@@ -224,7 +226,11 @@ got="$(helper GIT_TAGS_DIR="$tags" -- github_latest_tag nobody/nothing)"
 [ -z "$got" ] || fail "github_latest_tag: an unreachable repo must yield nothing, got '$got'"
 pass
 
-oc_dir="$home/.cache/opencode/packages/superpowers@git+https:/github.com/obra/superpowers.git"
+# OpenCode's own name for the cache dir on Linux/macOS. A Windows filename cannot hold the ':'
+# (MSYS stores a private-use character that PowerShell cannot match), so Git Bash drops it; the
+# lookups only need 'superpowers@' in the path.
+oc_colon=':'; command -v cygpath >/dev/null 2>&1 && oc_colon=''
+oc_dir="$home/.cache/opencode/packages/superpowers@git+https$oc_colon/github.com/obra/superpowers.git"
 seed_opencode_cache() { # $1 = version
     mkdir -p "$oc_dir/node_modules/superpowers"
     printf '{\n  "dependencies": {\n    "superpowers": "github:obra/superpowers"\n  }\n}\n' >"$oc_dir/package.json"
@@ -508,7 +514,7 @@ pass
 sys="$tmp/sys"
 mkdir -p "$sys"
 for c in bash sh grep sed sort head tail cat tr wc paste mktemp rm mkdir uname awk cut timeout env printf dirname basename readlink; do
-    if p="$(command -v "$c" 2>/dev/null)"; then ln -s "$p" "$sys/$c" 2>/dev/null || true; fi
+    if p="$(command -v "$c" 2>/dev/null)"; then link_tool "$p" "$sys/$c" || true; fi
 done
 printf '#!/bin/sh\nprintf "delta 0.19.2\\n"\n' >"$sys/delta"
 printf '#!/bin/sh\nprintf "Dust 1.2.6\\n"\n' >"$sys/dust"
@@ -549,6 +555,8 @@ if ($args[0] -eq 'install' -and $args[1] -eq '--prefix') {
     $f = Join-Path $args[2] 'node_modules/superpowers/package.json'
     if (Test-Path $f) { Set-Content -LiteralPath $f -Value "{`n  `"name`": `"superpowers`",`n  `"version`": `"7.0.0`"`n}" }
 }
+# Node's own npm.ps1 ends this way, so $LASTEXITCODE is set for the caller.
+exit 0
 PSSTUB
     cat >"$bin/claude.ps1" <<'PSSTUB'
 if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
@@ -567,6 +575,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:USERPROFILE = $UserDir
 $env:HOME = $UserDir
+# The Playwright and OpenCode lookups read LOCALAPPDATA first; on Windows the host's own is real.
+$env:LOCALAPPDATA = Join-Path $UserDir 'AppData/Local'
 $env:CODEX_HOME = Join-Path $UserDir '.codex'
 . $Lib
 $env:CODEX_ROWS = 'superpowers@test-marketplace    installed, enabled  6.4.2    plugins~Plugin_abc'
@@ -651,11 +661,11 @@ PSEOF
     pexpect 'latest=7.0.0'
     pexpect 'latest-lychee=0.24.2'
     pexpect 'latest-none='
-    pexpect "opencode-dir=$(winpath "$oc_dir")"
+    pexpect "opencode-dir=$(nativepath "$oc_dir")"
     pexpect 'opencode-version=6.3.0'
     pexpect 'opencode-refresh=True'
     pexpect 'opencode-version-after=7.0.0'
-    grep -Fq "install --prefix $(winpath "$oc_dir") superpowers@github:obra/superpowers" "$tmp/npm-ps.log" ||
+    grep -Fq "install --prefix $(nativepath "$oc_dir") superpowers@github:obra/superpowers" "$tmp/npm-ps.log" ||
         fail "PowerShell: Invoke-OpenCodeSuperpowersRefresh must refresh inside OpenCode's cache directory; npm saw: $(cat "$tmp/npm-ps.log")"
     pexpect 'playwright=True'
     pexpect 'playwright-absent=False'

@@ -64,7 +64,7 @@ fi
 # --- 4. release_tool_pin_sync, executed --------------------------------------------------------
 mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/dest" "$tmp/elsewhere" "$tmp/pkg/lychee-x86_64-unknown-linux-gnu"
 for c in bash sh grep sed sort head tail cat tr wc mktemp rm mkdir awk cut timeout env printf dirname basename readlink tar gzip install cp mv chmod touch sha256sum shasum; do
-    if p="$(command -v "$c" 2>/dev/null)"; then ln -s "$p" "$tmp/sys/$c" 2>/dev/null || true; fi
+    if p="$(command -v "$c" 2>/dev/null)"; then link_tool "$p" "$tmp/sys/$c" || true; fi
 done
 printf '#!/bin/sh\necho "lychee 9.9.9"\n' >"$tmp/pkg/lychee-x86_64-unknown-linux-gnu/lychee"; chmod +x "$tmp/pkg/lychee-x86_64-unknown-linux-gnu/lychee"
 tar -czf "$tmp/release.tar.gz" -C "$tmp/pkg" lychee-x86_64-unknown-linux-gnu
