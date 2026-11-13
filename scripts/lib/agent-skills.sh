@@ -1752,52 +1752,10 @@ skills_add_all() {
         warn "Matt Pocock skills install failed or timed out - continuing"
     fi
 
-    # code-review -> mp-code-review. The `skills` CLI has no rename flag, so
-    # stage a renamed copy with its `name:` frontmatter patched and install
-    # that local directory. "mp-" keeps it distinct from this repo's own
-    # /code-review command and Superpowers' receiving-code-review skill.
-    if skills_up_to_date mattpocock/skills mp-code-review; then
-        info "mp-code-review: up to date"
-        record_cli_result installed 1
-    else
-        local sk_tmp; sk_tmp="$(mktemp -d)"
-        # net_timeout: same wall-clock contract as every other network fetch here
-        # (docs/tool-parity.md's Network-step timeouts section includes git clones).
-        if net_timeout 60 git clone --quiet --depth 1 https://github.com/mattpocock/skills "$sk_tmp/repo" 2>/dev/null; then
-            local src="$sk_tmp/repo/skills/engineering/code-review"
-            [[ -d "$src" ]] || src="$sk_tmp/repo/code-review"
-            if [[ -d "$src" ]]; then
-                mkdir -p "$sk_tmp/stage/mp-code-review"
-                cp -r "$src/." "$sk_tmp/stage/mp-code-review/"
-                local skf="$sk_tmp/stage/mp-code-review/SKILL.md"
-                if [[ -f "$skf" ]]; then
-                    # portable in-place edit (GNU and BSD sed differ on -i).
-                    # Guarded: a bare failing `sed ... && mv` here would trip
-                    # set -e and abort the whole run - frontend-design, Playwright,
-                    # act, desktop apps and shell setup all come after this.
-                    sed 's/^name:[[:space:]].*/name: mp-code-review/' "$skf" > "$skf.tmp" && mv "$skf.tmp" "$skf"
-                    if skills_cli 120 "${SK[@]}" add "$sk_tmp/stage" -s mp-code-review -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
-                        record_cli_result installed 1
-                        skills_record_source
-                        info "mp-code-review: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
-                    else
-                        record_cli_result failed 1
-                        warn "mp-code-review skill install failed - continuing"
-                    fi
-                else
-                    record_cli_result skipped 1
-                    warn "SKILL.md missing from staged code-review - upstream layout changed? Skipping mp-code-review."
-                fi
-            else
-                record_cli_result skipped 1
-                warn "code-review skill dir not found in mattpocock/skills - upstream layout changed?"
-            fi
-        else
-            record_cli_result failed 1
-            warn "mp-code-review skill source clone failed or timed out - continuing"
-        fi
-        rm -rf "$sk_tmp"
-    fi
+    # code-review -> mp-code-review moved to the CtrlCarlitos/skills batch
+    # below (the fork ships the name natively and drops the
+    # setup-matt-pocock-skills dependency; the staged clone-rename-add
+    # install it replaces is gone since 2026-11-13).
 
     # Anthropic's frontend-design skill - distinctive visual direction for new UI.
     if skills_up_to_date anthropics/skills frontend-design; then
@@ -1891,6 +1849,36 @@ skills_add_all() {
     else
         record_cli_result failed 1
         warn "code-search skill install failed or timed out - continuing"
+    fi
+
+    # The remaining CtrlCarlitos/skills (MIT, our own): mp-code-review - fork
+    # of Matt Pocock's code-review that replaces the setup-matt-pocock-skills
+    # dependency with a self-sufficient GitHub/GitLab issue-ref fetch
+    # (CtrlCarlitos/skills#7; the name stays mp-code-review for the same
+    # anti-collision reasons as before); deliver (two-gate task lifecycle
+    # through authorized merge); git-editor-config (.gitattributes/
+    # .editorconfig/exec-bit audit, gap matrix, approved-changes-only);
+    # release-notes (draft-only changelog for an explicit commit range);
+    # repo-policy (GitHub settings/governance audit, gap matrix);
+    # show-me (visual diagrams, user-invoked only); study-coach
+    # (curriculum-grounded learning bundles); update-docs (docs-vs-code audit;
+    # its lint tooling is markdownlint-cli2/lychee/vale, already in
+    # .chezmoidata/packages.yaml). One add: same repo as skill-creator and
+    # code-search above, one fetch - docs/skills-install-strategy.md.
+    local -a cc_skills=(mp-code-review deliver git-editor-config release-notes
+        repo-policy show-me study-coach update-docs)
+    if skills_up_to_date CtrlCarlitos/skills "${cc_skills[@]}"; then
+        info "CtrlCarlitos skills: up to date"
+        record_cli_result installed "${#cc_skills[@]}"
+    elif info "Installing CtrlCarlitos skills (Claude Code / OpenCode / Antigravity)..." && skills_cli 300 "${SK[@]}" add CtrlCarlitos/skills \
+        -s "${cc_skills[@]}" \
+        -a "${AGENTS[@]}" -g -y --copy < /dev/null; then
+        record_cli_result installed "${#cc_skills[@]}"
+        info "CtrlCarlitos skills: installed${SKILLS_STALE_REASON:+ ($SKILLS_STALE_REASON)}"
+        skills_record_source
+    else
+        record_cli_result failed "${#cc_skills[@]}"
+        warn "CtrlCarlitos skills install failed or timed out - continuing"
     fi
 
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to

@@ -2425,43 +2425,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         }) -contains '__SKILLS_OK__'
     }
 
-    # code-review -> mp-code-review: no rename flag in the CLI, so stage a
-    # renamed copy with its name: frontmatter patched and install that dir.
-    # "mp-" keeps it distinct from this repo's own /code-review command.
-    if (Test-SkillsUpToDate -Repo 'mattpocock/skills' -Skills @('mp-code-review') -Agents $skAgents) {
-        Write-Host "  mp-code-review: up to date"
-    } else {
-        $skRepo  = "$env:TEMP\mp-skills-repo"
-        $skStage = "$env:TEMP\mp-skills-stage"
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-        # --quiet: git's "Cloning into..." is on stderr even on success and
-        # would pollute the job's output; timeout-wrapped like every other clone.
-        Invoke-WithTimeout -Description "mattpocock/skills clone" -Seconds 60 -Action {
-            git clone --quiet --depth 1 https://github.com/mattpocock/skills "$env:TEMP\mp-skills-repo" 2>$null
-            if ($LASTEXITCODE -ne 0) { throw "git clone exited with code $LASTEXITCODE" }
-        }
-        $cr = Join-Path $skRepo "skills\engineering\code-review"
-        if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
-        if (Test-Path $cr) {
-            New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
-            Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
-            $skf = "$skStage\mp-code-review\SKILL.md"
-            if (Test-Path $skf) {
-                $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
-                [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
-            }
-            $mpInstalled = @(Invoke-WithTimeout -Description "mp-code-review skill install" -Seconds 120 -NoStream -Action {
-                $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
-                npx --yes --loglevel=error skills@latest add "$env:TEMP\mp-skills-stage" -s mp-code-review -a $skAgents -g -y --copy 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
-                '__SKILLS_OK__'
-            }) -contains '__SKILLS_OK__'
-            if ($mpInstalled) { Save-SkillsSource; Write-Host "  mp-code-review: installed" }
-        } else {
-            Write-Host "  Warning: code-review skill not found in mattpocock/skills - upstream layout changed?" -ForegroundColor Yellow
-        }
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    # code-review -> mp-code-review moved to the CtrlCarlitos/skills batch
+    # below (the fork ships the name natively; the staged clone-rename-add
+    # install it replaces is gone since 2026-11-13).
 
     Invoke-SkillsSource -Label "frontend-design skill" -Repo 'anthropics/skills' -Skills @('frontend-design') -Agents $skAgents -Install {
         Write-Host "  Installing Anthropic's frontend-design skill..." -ForegroundColor Yellow
@@ -2536,6 +2502,23 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         @(Invoke-WithTimeout -Description "code-search skill install" -Seconds 300 -NoStream -Action {
             $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
             npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
+            '__SKILLS_OK__'
+        }) -contains '__SKILLS_OK__'
+    }
+
+    # The remaining CtrlCarlitos/skills (MIT, our own): mp-code-review (fork of
+    # Matt Pocock's code-review, self-sufficient GitHub/GitLab issue-ref fetch
+    # instead of the setup-matt-pocock-skills dependency, CtrlCarlitos/skills#7),
+    # deliver (two-gate task lifecycle through authorized merge),
+    # git-editor-config, release-notes (draft-only), repo-policy (GitHub
+    # settings/governance audit), show-me (user-invoked diagrams), study-coach,
+    # update-docs (docs-vs-code audit; its lint tools are already installed).
+    Invoke-SkillsSource -Label "CtrlCarlitos skills" -Repo 'CtrlCarlitos/skills' -Skills @('mp-code-review', 'deliver', 'git-editor-config', 'release-notes', 'repo-policy', 'show-me', 'study-coach', 'update-docs') -Agents $skAgents -Install {
+        Write-Host "  Installing CtrlCarlitos skills (skills CLI)..." -ForegroundColor Yellow
+        @(Invoke-WithTimeout -Description "CtrlCarlitos skills install" -Seconds 300 -NoStream -Action {
+            $skAgents = @({{ includeTemplate "ps-list" .agents.skills.agents }})
+            npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s mp-code-review deliver git-editor-config release-notes repo-policy show-me study-coach update-docs -a $skAgents -g -y --copy 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "skills CLI exited with code $LASTEXITCODE" }
             '__SKILLS_OK__'
         }) -contains '__SKILLS_OK__'

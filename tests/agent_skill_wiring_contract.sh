@@ -37,6 +37,8 @@ required_skills=(
     find-skills agent-browser skill-creator
     design-taste-frontend
     code-search
+    deliver git-editor-config release-notes
+    repo-policy show-me study-coach update-docs
 )
 scope="${AGENT_SKILL_WIRING_SCOPE:-all}"
 # On Windows (Git Bash) only the windows scope can hold: the unix half asserts
@@ -779,6 +781,21 @@ for file in run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; 
     require_contains "$file" 'CtrlCarlitos/skills -s skill-creator'
     if grep -Fq -- 'anthropics/skills -s skill-creator' "$repo_root/$file"; then
         fail "$file must install skill-creator from CtrlCarlitos/skills, not anthropics/skills"
+    fi
+done
+
+# mp-code-review comes from the CtrlCarlitos/skills fork too (self-sufficient
+# GitHub/GitLab issue-ref fetch replacing the setup-matt-pocock-skills
+# dependency, CtrlCarlitos/skills#7), in all four consumers regardless of
+# scope - same reasoning as skill-creator above. The staged
+# clone-mattpocock-rename-and-add install it replaces must not come back.
+require_contains scripts/lib/agent-skills.sh 'cc_skills=(mp-code-review'
+for file in run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
+    require_contains "$file" 'CtrlCarlitos/skills -s mp-code-review'
+done
+for file in scripts/lib/agent-skills.sh run_onchange_install_packages.ps1.tmpl scripts/update_ai_tools.ps1; do
+    if grep -Fq -- 'mp-skills-repo' "$repo_root/$file" || grep -Fq -- 'skills/engineering/code-review' "$repo_root/$file"; then
+        fail "$file must install mp-code-review from CtrlCarlitos/skills, not a staged mattpocock/skills clone"
     fi
 done
 
