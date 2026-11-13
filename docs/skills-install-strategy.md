@@ -11,18 +11,20 @@ skills without the whole thing.
 
 ## Current state (2026-10-05)
 
-- **Catalog**: 20 curated skills, `scripts/curated-agent-skills.txt` (one name
+- **Catalog**: 26 curated skills, `scripts/curated-agent-skills.txt` (one name
   per line; the single source of truth for the verify pass and the OpenCode
   command shims).
 - **Sources** (8 `skills add` calls, in order): `mattpocock/skills` (12:
   `codebase-design`, `domain-modeling`, `grill-with-docs`,
   `improve-codebase-architecture`, `prototype`, `research`, `grilling`,
-  `handoff`, `teach`, `writing-for-agents`, `pr`, `retro`), `mattpocock/skills` staged as
-  `mp-code-review`, `anthropics/skills` (`frontend-design`),
+  `handoff`, `teach`, `writing-for-agents`, `pr`, `retro`),
+  `anthropics/skills` (`frontend-design`),
   `vercel-labs/skills` (`find-skills`), `vercel-labs/agent-browser`
-  (`agent-browser`), `CtrlCarlitos/skills` (`skill-creator`, our fork, and
-  `code-search`, two separate adds), `Leonxlnx/taste-skill`
-  (`design-taste-frontend`).
+  (`agent-browser`), `CtrlCarlitos/skills` — our own repo, three adds:
+  `skill-creator` (fork of Anthropic's), `code-search`, and the eight-skill
+  batch `mp-code-review`, `deliver`, `git-editor-config`, `release-notes`,
+  `repo-policy`, `show-me`, `study-coach`, `update-docs` — and
+  `Leonxlnx/taste-skill` (`design-taste-frontend`).
 - **Agents**: Claude Code, OpenCode and Codex through the `skills` CLI
   (`.chezmoidata/agents.yaml` `skills.agents`); Antigravity CLI by copying the
   verified Claude copy; generated commands for OpenCode only.
@@ -133,8 +135,9 @@ are never removed, and a quiet run rewrites nothing. No manual state deletion is
 needed.
 
 Anything unknown (offline, no state, a failed add) installs as before; a failed
-add is never recorded. `mp-code-review`, which is staged from a clone, is
-skipped on the same rule against `mattpocock/skills`. Helpers:
+add is never recorded. `mp-code-review` skipped on the same rule against
+`CtrlCarlitos/skills` since the 2026-11-13 fork switch (before that it was
+staged from a `mattpocock/skills` clone). Helpers:
 `skills_up_to_date` / `skills_record_source` in `scripts/lib/agent-skills.sh`,
 `Invoke-SkillsSource` in `scripts/lib/ps-skills.ps1`. To force a refetch:
 `DOT_SKILLS_FORCE=1 dot upgrade`. `dot up` is unaffected: it never upgrades, and
@@ -241,6 +244,10 @@ Update path: `npx --yes skills@latest update -g -y` (or re-run the `add`).
 > (skills update re-creating the original name) doesn't apply — the staging
 > re-runs on every install/update, always writing the patched name. What
 > follows is the original analysis for the record.
+>
+> **Superseded (2026-11-13):** the fork now ships the `mp-code-review` name
+> natively, so the staging is retired — same anti-collision name, none of the
+> clone-and-patch machinery (see the 2026-11-13 section below).
 
 The current block renames Matt Pocock's `code-review` → `mp-code-review` to
 avoid confusion with this repo's own `/code-review` command and Superpowers'
@@ -477,6 +484,54 @@ exercise the same helper library (`ps-skills.ps1`) under `pwsh`; the full Window
 path was not re-run end to end. Untested combinations: agy on native Windows/Linux/macOS,
 every agent on macOS, and any agent inside a devcontainer.
 
+## Curated set widened (2026-11-13): +7 our skills; mp-code-review from the fork
+
+Every remaining skill from `CtrlCarlitos/skills` (our own, MIT) joined the
+catalog — the repo is now installed in full. `mp-code-review` switched source
+in the same change: the fork ships the name natively and replaces upstream's
+`setup-matt-pocock-skills` dependency (a skill this dotfiles repo never
+installed; telling a user to run a skill that was never installed is a bug —
+CtrlCarlitos/skills#7) with a self-sufficient GitHub/GitLab issue-ref fetch
+(`scripts/tracker.py` in that repo). The staged
+clone-mattpocock-patch-`name:`-rename-`skills add <dir>` install it replaces
+is gone from all four consumers.
+
+| Skill | What it does |
+| :-- | :-- |
+| `mp-code-review` | two-axis review (Standards / Spec) of the diff since a fixed point, parallel sub-agents; fork of Matt Pocock's `code-review` |
+| `deliver` | two-gate task lifecycle: read-only discovery → authorized implementation → diagnose red CI, squash-merge once authorized, confirm, clean up |
+| `git-editor-config` | audits `.gitattributes`/`.editorconfig`/`.gitignore`/exec bits against the repo's actual content; gap matrix; applies only approved items |
+| `release-notes` | draft-only changelog section for an explicit commit range, grounded in diffs not labels; never tags or publishes |
+| `repo-policy` | audits GitHub settings, branch protection (Rulesets), governance files; gap matrix; applies only approved items |
+| `show-me` | fork of HumanLayer's show-me: cross-platform artifact opener; user-invoked only (`disable-model-invocation`) |
+| `study-coach` | curriculum-grounded learning bundles (MINEDUCYT/Santillana) with self-grading exam and flashcard deck |
+| `update-docs` | audits docs against code citing file/line/test evidence; fixes only what is asked (lint tooling already installed, #285) |
+
+One `skills add` for the eight (`CtrlCarlitos/skills`, same repo as
+`skill-creator` and `code-search`):
+
+```sh
+npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s mp-code-review deliver git-editor-config release-notes repo-policy show-me study-coach update-docs -a claude-code opencode codex -g -y --copy
+```
+
+**Boundaries.** The three audit skills (`git-editor-config`, `repo-policy`,
+`update-docs`) report gaps and apply only explicitly approved changes — none of
+them, nor `deliver`, authorizes a push, merge or publish on its own;
+`deliver`'s two gates are explicit user authorization, on top of Superpowers'
+own execution skills. `release-notes` output is always a draft. `show-me` is
+user-invoked only; OpenCode ignores `disable-model-invocation` on the plain
+`~/.agents/skills` path (documented upstream in the skills repo, #12 there),
+so on OpenCode it may appear in the model's skill list — a known harness gap,
+not a wiring one. `study-coach` is family-scoped and keeps its data outside
+the skills repo by design.
+
+**State-key note.** The old staged source recorded itself against
+`mattpocock/skills`; the new batch is a new key, so the first `dot upgrade`
+after this change installs the eight once, overwrites the staged
+`mp-code-review` copy with the fork, and the superseded key prunes itself
+(see "Skipping sources that have not changed"). The catalog's verify pass and
+the OpenCode command shims pick the seven new names up from the catalog alone.
+
 ## GStack — do not wire in
 
 Confirmed by reading `design-review/SKILL.md` and `qa-only/SKILL.md` (2 of the
@@ -557,6 +612,14 @@ Skills of interest: `plan-devex-review`, `devex-review`, `qa-only`,
     `tests/install_agent_skills_arguments.sh` expects 8 controlled `npx`
     calls; the catalog has 18 entries (the fallback `skipped=` count is the
     catalog length).
+9. ✅ 2026-11-13: the remaining `CtrlCarlitos/skills` skills added as one
+    eight-name batch (`mp-code-review`, `deliver`, `git-editor-config`,
+    `release-notes`, `repo-policy`, `show-me`, `study-coach`, `update-docs`;
+    see "Curated set widened (2026-11-13)"), and `mp-code-review` switched
+    from the staged mattpocock clone (item 3) to the fork — the staging is
+    removed from all four consumers. Catalog: 26 entries; still 8 controlled
+    `npx` calls; `tests/skills_source_skip_contract.sh` and
+    `tests/agent_skill_wiring_contract.sh` pin both facts and the fork source.
 
 Not done / open:
 - ~~`-a antigravity` unverified with `agy` present on a box~~ **Verified

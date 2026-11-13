@@ -197,29 +197,9 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
         $LASTEXITCODE -eq 0
     }
 
-    if (Test-SkillsUpToDate -Repo 'mattpocock/skills' -Skills @('mp-code-review') -Agents $skAgents) {
-        Write-Host "  mp-code-review: up to date"
-    } else {
-        $skRepo  = "$env:TEMP\mp-skills-repo"
-        $skStage = "$env:TEMP\mp-skills-stage"
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-        git clone --quiet --depth 1 https://github.com/mattpocock/skills $skRepo 2>$null
-        $cr = Join-Path $skRepo "skills\engineering\code-review"
-        if (-not (Test-Path $cr)) { $cr = Join-Path $skRepo "code-review" }
-        if (Test-Path $cr) {
-            New-Item -ItemType Directory -Force -Path "$skStage\mp-code-review" | Out-Null
-            Copy-Item "$cr\*" -Destination "$skStage\mp-code-review" -Recurse -Force
-            $skf = "$skStage\mp-code-review\SKILL.md"
-            if (Test-Path $skf) {
-                $patched = (Get-Content $skf) -replace '^name:\s.*$', 'name: mp-code-review'
-                [System.IO.File]::WriteAllLines($skf, $patched, (New-Object System.Text.UTF8Encoding($false)))
-            }
-            npx --yes --loglevel=error skills@latest add "$skStage" -s mp-code-review -a $skAgents -g -y --copy 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  mp-code-review update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
-            if ($LASTEXITCODE -eq 0) { Save-SkillsSource; Write-Host "  mp-code-review: installed" }
-        }
-        Remove-Item $skRepo, $skStage -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    # code-review -> mp-code-review moved to the CtrlCarlitos/skills batch
+    # below (the fork ships the name natively; the staged clone-rename-add
+    # install it replaces is gone since 2026-11-13).
 
     Invoke-SkillsSource -Label 'frontend-design' -Repo 'anthropics/skills' -Skills @('frontend-design') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add anthropics/skills -s frontend-design -a $skAgents -g -y --copy 2>$null | Out-Null
@@ -255,6 +235,16 @@ if (Get-Command npx -ErrorAction SilentlyContinue) {
     Invoke-SkillsSource -Label 'code-search' -Repo 'CtrlCarlitos/skills' -Skills @('code-search') -Agents $skAgents -Install {
         npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s code-search -a $skAgents -g -y --copy 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  code-search update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
+        $LASTEXITCODE -eq 0
+    }
+    # The remaining CtrlCarlitos/skills (MIT, our own): mp-code-review (fork of
+    # Matt Pocock's code-review, self-sufficient GitHub/GitLab issue-ref fetch
+    # instead of the setup-matt-pocock-skills dependency, CtrlCarlitos/skills#7),
+    # deliver, git-editor-config, release-notes, repo-policy, show-me,
+    # study-coach, update-docs - one add, same repo as skill-creator/code-search.
+    Invoke-SkillsSource -Label 'CtrlCarlitos skills' -Repo 'CtrlCarlitos/skills' -Skills @('mp-code-review', 'deliver', 'git-editor-config', 'release-notes', 'repo-policy', 'show-me', 'study-coach', 'update-docs') -Agents $skAgents -Install {
+        npx --yes --loglevel=error skills@latest add CtrlCarlitos/skills -s mp-code-review deliver git-editor-config release-notes repo-policy show-me study-coach update-docs -a $skAgents -g -y --copy 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "$($G.warning)  CtrlCarlitos skills update failed (exit $LASTEXITCODE)" -ForegroundColor Red }
         $LASTEXITCODE -eq 0
     }
     # (writing-great-skills removed 2026-09-14: mattpocock renamed it upstream to

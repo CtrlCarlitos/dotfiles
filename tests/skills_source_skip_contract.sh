@@ -14,13 +14,13 @@ set -euo pipefail
 # a fake git (ls-remote answers $FAKE_HEAD, empty = unreachable):
 #   a. fresh state        -> every group installs (8 adds)
 #   b. same head          -> nothing installs, but the CLI-phase tally is unchanged (19)
-#   c. head moved         -> every group installs again (mp-code-review re-staged)
+#   c. head moved         -> every group installs again
 #   d. one skill missing  -> only its group installs
 #   e. head unreachable   -> installs every run, nothing recorded
 #   f. DOT_SKILLS_FORCE=1 -> installs
 #   g. a failed add       -> not recorded, so the next run installs
 #   h. agent list changed -> installs (the key includes it)
-#   i. mp-code-review missing, head same -> only it installs
+#   i. one CtrlCarlitos-batch skill missing, head same -> its whole group installs
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
 
@@ -91,17 +91,17 @@ run_all() {
 }
 
 export FAKE_HEAD=aaaaaaa
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
-# one line per source: an installing run says "Installing ..." (7 groups; mp-code-review's
-# clone-and-add is silent) and never "up to date"; a skipped one says "<name>: up to date" only.
-[ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 7 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
+[ "$(run_all)" = 'adds=8 installed=26' ] || fail "a: fresh state must install all 8 groups (got $(run_all))"
+# one line per source: an installing run says "Installing ..." (8 groups) and never
+# "up to date"; a skipped one says "<name>: up to date" only.
+[ "$(grep -c 'Installing ' "$tmp/last-run.txt" || true)" = 8 ] || fail "a: a fresh run must print one 'Installing ...' per group (got: $(grep -c 'Installing ' "$tmp/last-run.txt" || true))"
 if grep -q 'up to date' "$tmp/last-run.txt"; then fail "a: a fresh run must not say 'up to date'"; else pass; fi
 # every "installed" line says why: a reinstall on every run must be explainable from the log
 grep -Fq "Matt Pocock's skills: installed (" "$tmp/last-run.txt" || fail "a: an install line must carry its reason (got: $(grep -F 'installed' "$tmp/last-run.txt" | head -2 | tr '\n' ' '))"
 grep -q "missing from\|no install recorded" "$tmp/last-run.txt" || fail "a: a fresh install's reason must be a missing skill or no record"
-grep -Fq 'mp-code-review: installed' "$tmp/last-run.txt" || fail "a: the staged mp-code-review install must say so (every other source prints a line; got: $(grep -c . "$tmp/last-run.txt") lines)"
+grep -Fq 'CtrlCarlitos skills: installed' "$tmp/last-run.txt" || fail "a: the CtrlCarlitos batch install must say so (every source prints a line; got: $(grep -c . "$tmp/last-run.txt") lines)"
 
-[ "$(run_all)" = 'adds=0 installed=19' ] || fail "b: unchanged head must install nothing and still report 19 (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=26' ] || fail "b: unchanged head must install nothing and still report 19 (got $(run_all))"
 [ "$(grep -c ': up to date' "$tmp/last-run.txt" || true)" = 8 ] || fail "b: every source must say '<name>: up to date' exactly once (got: $(grep -c ': up to date' "$tmp/last-run.txt" || true))"
 if grep -q 'Installing ' "$tmp/last-run.txt"; then fail "b: a skipped source must not print 'Installing ...' first (the duplicate-message bug)"; else pass; fi
 # every upstream is asked once per run, in one parallel round: 6 repos, not 8 sequential calls
@@ -129,16 +129,16 @@ prefetch_secs="$(
 if [ "${prefetch_secs:-99}" -ge 10 ]; then fail "b: the head prefetch must not wait for unrelated background jobs (took ${prefetch_secs}s)"; fi
 
 FAKE_HEAD=bbbbbbb
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=26' ] || fail "c: a moved head must reinstall every group (got $(run_all))"
 grep -Fq "code-search: installed (upstream changed)" "$tmp/last-run.txt" || fail "c: a moved head must say 'upstream changed' (got: $(grep -F 'code-search' "$tmp/last-run.txt" | tr '
 ' ' '))"
 
 rm -rf "$home/.claude/skills/code-search"
-[ "$(run_all)" = 'adds=1 installed=19' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
-[ "$(run_all)" = 'adds=0 installed=19' ] || fail "d: and be quiet again afterwards"
+[ "$(run_all)" = 'adds=1 installed=26' ] || fail "d: one missing skill must reinstall only its group (got $(run_all))"
+[ "$(run_all)" = 'adds=0 installed=26' ] || fail "d: and be quiet again afterwards"
 
 rm -rf "$home/.claude/skills/mp-code-review"
-[ "$(run_all)" = 'adds=1 installed=19' ] || fail "i: a missing mp-code-review must reinstall only it (got $(run_all))"
+[ "$(run_all)" = 'adds=1 installed=26' ] || fail "i: a missing mp-code-review must reinstall its whole CtrlCarlitos group (got $(run_all))"
 
 DOT_SKILLS_FORCE=1 run_all | grep -q '^adds=8 ' || fail "f: DOT_SKILLS_FORCE=1 must install everything"
 
@@ -158,12 +158,12 @@ good_lines="$(wc -l <"$state" | tr -d ' ')"
 printf 'mattpocock/skills|codebase-design domain-modeling grill-with-docs improve-codebase-architecture prototype research grilling handoff teach writing-for-agents|claude-code opencode codex\told\n' >>"$state"
 printf 'other/repo|x|claude-code opencode codex\tzzz\n' >>"$state"
 rm -rf "$home/.claude/skills/pr" "$home/.agents/skills/pr" "$home/.claude/skills/retro" "$home/.agents/skills/retro"
-[ "$(run_all)" = 'adds=1 installed=19' ] || fail "j: missing pr/retro must reinstall only the Matt batch (got $(run_all))"
+[ "$(run_all)" = 'adds=1 installed=26' ] || fail "j: missing pr/retro must reinstall only the Matt batch (got $(run_all))"
 if grep -Fq $'writing-for-agents|claude-code opencode codex\told' "$state"; then fail "j: the superseded Matt key must be pruned"; else pass; fi
 grep -Fq $'other/repo|x|claude-code opencode codex\tzzz' "$state" || fail "j: a repo this run never checked must keep its line"
 [ "$(wc -l <"$state" | tr -d ' ')" = "$((good_lines + 1))" ] || fail "j: expected the $good_lines current lines plus the untouched other/repo one (got $(wc -l <"$state" | tr -d ' '))"
 before="$(cat "$state")"
-[ "$(run_all)" = 'adds=0 installed=19' ] || fail "j: and be quiet again afterwards"
+[ "$(run_all)" = 'adds=0 installed=26' ] || fail "j: and be quiet again afterwards"
 [ "$(cat "$state")" = "$before" ] || fail "j: a quiet run must not rewrite the state"
 
 # e. unreachable head: installs every run and records nothing
@@ -176,7 +176,7 @@ run_all | grep -q '^adds=8 ' || fail "e: unreachable head must keep installing (
 home="$tmp/home-failing"
 FAKE_HEAD=ccccccc
 FAKE_NPX_FAIL=1 run_all >/dev/null
-[ "$(run_all)" = 'adds=8 installed=19' ] || fail "g: failed adds must not be recorded (got $(run_all))"
+[ "$(run_all)" = 'adds=8 installed=26' ] || fail "g: failed adds must not be recorded (got $(run_all))"
 
 # --- the PowerShell twin (scripts/lib/ps-skills.ps1), same scenarios, run under pwsh ------
 if command -v pwsh >/dev/null 2>&1; then

@@ -22,3 +22,10 @@ agent-browser
 skill-creator
 design-taste-frontend
 code-search
+deliver
+git-editor-config
+release-notes
+repo-policy
+show-me
+study-coach
+update-docs
