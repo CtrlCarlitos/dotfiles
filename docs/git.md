@@ -131,11 +131,12 @@ accounts and organizations to the matching SSH alias. Cloning
 ## Hooks
 
 `core.hooksPath = ~/.config/git/hooks` makes every repository run the hooks in that
-directory instead of its own `.git/hooks`. Today it holds one hook:
+directory instead of its own `.git/hooks`. It holds two hooks:
 
 | Hook | Does |
 |---|---|
 | `commit-msg` | Removes any `Co-Authored-By: Claude <noreply@anthropic.com>` trailer (either capitalisation), says so on stderr, then runs the repository's own `.git/hooks/commit-msg` if there is one, passing its exit status through |
+| `pre-commit` | No logic of its own: runs the repository's own `.git/hooks/pre-commit` if there is one, passing arguments and exit status through. Without it, every repository-local pre-commit hook (deliver's installable hooks, husky, `pre-commit install`) would silently stop running |
 
 Why at the git layer: Claude Code only omits that trailer when its attribution
 setting is off, and that setting is per machine and per agent. On 2026-09-24 a
@@ -145,9 +146,9 @@ settings were.
 
 Two consequences of `core.hooksPath`:
 
-- **Per-repo hooks run only if the shared directory chains to them.** Only
-  `commit-msg` chains today. A repository that relies on its own `pre-commit` or
-  `pre-push` needs a chaining twin added to `dot_config/git/hooks/` first.
+- **Per-repo hooks run only if the shared directory chains to them.**
+  `commit-msg` and `pre-commit` chain today. A repository that relies on its
+  own `pre-push` needs a chaining twin added to `dot_config/git/hooks/` first.
 - **`pre-commit install` refuses** while `core.hooksPath` is set globally. In that
   one repository, opt out with `git config core.hooksPath .git/hooks`; the shared
   hook then no longer runs there.

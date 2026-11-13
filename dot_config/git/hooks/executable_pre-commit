@@ -1,0 +1,29 @@
+#!/bin/sh
+# Shared pre-commit hook, run in every repository through
+# core.hooksPath = ~/.config/git/hooks (dot_gitconfig.tmpl, docs/git.md).
+#
+# core.hooksPath replaces .git/hooks entirely, so without this chain every
+# repository's own pre-commit hook (deliver's installable git hooks, husky,
+# pre-commit(1)) would silently stop running. This hook has no logic of its
+# own: it exists to find the repository's own .git/hooks/pre-commit and run it
+# with the same arguments and exit status. Managed since #425, after an
+# agent's test suite left an unmanaged stub in this directory with no source
+# of truth to recover from.
+#
+# One-off bypass: git commit --no-verify (skips every hook, this one included).
+set -eu
+
+# The repository's own hook lives under the common git dir (correct for
+# worktrees too). Never resolve it with --git-path hooks: that honours
+# core.hooksPath and would point straight back at this file. The marker
+# guards the other way a loop could form (a repo hook that is a link to
+# this file): a second entry exits at once.
+if [ -n "${DOTFILES_PRE_COMMIT_ACTIVE:-}" ]; then
+    exit 0
+fi
+export DOTFILES_PRE_COMMIT_ACTIVE=1
+local_hook="$(git rev-parse --git-common-dir)/hooks/pre-commit"
+if [ -x "$local_hook" ]; then
+    exec "$local_hook" "$@"
+fi
+exit 0
