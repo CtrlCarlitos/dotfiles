@@ -55,6 +55,7 @@ function global:Get-Partition {
 }
 function global:Get-PartitionSupportedSize {
     [CmdletBinding()] param([int]$DiskNumber, [int]$PartitionNumber)
+    if ($DiskNumber -le 0 -or $PartitionNumber -le 0) { throw "no such partition $DiskNumber`:$PartitionNumber" }
     [pscustomobject]@{ SizeMin = $script:srcMin; SizeMax = $script:srcSize }
 }
 function global:Resize-Partition {
@@ -63,7 +64,7 @@ function global:Resize-Partition {
 }
 function global:New-Partition {
     [CmdletBinding()] param([int]$DiskNumber, [switch]$UseMaximumSize, [char]$DriveLetter)
-    $script:calls.Add("new-partition disk=$DiskNumber letter=$DriveLetter")
+    $script:calls.Add("new-partition disk=$DiskNumber letter=$DriveLetter max=$UseMaximumSize")
     [pscustomobject]@{ DriveLetter = $DriveLetter; PartitionNumber = 5 }
 }
 function global:Format-Volume {
@@ -87,6 +88,7 @@ function global:New-MpPerformanceRecording {
 }
 function global:Get-MpPerformanceReport {
     [CmdletBinding()] param([string]$Path, [int]$TopProcesses, [int]$TopFiles, [int]$TopExtensions)
+    $script:lastReportArgs = "path=$Path top=$TopProcesses/$TopFiles/$TopExtensions"
     [pscustomobject]@{
         TopProcesses = @($script:reportRows | ForEach-Object { [pscustomobject]@{ ProcessPath = $_; TotalDuration = 1234 } })
         TopFiles     = @()
@@ -100,14 +102,19 @@ function Test-DevDriveAdmin { $script:isAdmin }
 function Get-DevDriveExclusionPath { $script:exclusions }
 function Invoke-DevDriveWorkload {
     param([string]$BenchPath, [int]$Seconds)
+    $script:lastBench = $BenchPath
     $script:calls.Add("workload $Seconds")
 }
 
-function Reset-Stubs {
-    $script:calls.Clear(); $script:mpCalls.Clear(); $script:recordedTo = ''
-    $script:volumes = @(@{ Letter = 'C'; Fs = 'NTFS' }, @{ Letter = 'E'; Fs = 'NTFS' })
-    $script:trusted = @{}; $script:fsutilWorks = $false; $script:isAdmin = $false
-    $script:srcSize = 2TB; $script:srcMin = 50GB; $script:exclusions = @()
+function Reset-DevDriveStub {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if ($PSCmdlet.ShouldProcess('devdrive stub state', 'reset')) {
+        $script:calls.Clear(); $script:mpCalls.Clear(); $script:recordedTo = ''; $script:lastReportArgs = ''
+        $script:volumes = @(@{ Letter = 'C'; Fs = 'NTFS' }, @{ Letter = 'E'; Fs = 'NTFS' })
+        $script:trusted = @{}; $script:fsutilWorks = $false; $script:isAdmin = $false
+        $script:srcSize = 2TB; $script:srcMin = 50GB; $script:exclusions = @()
+    }
 }
 function Invoke-Dd([string[]]$Cmd) {
     $script:calls.Clear(); $script:mpCalls.Clear()
@@ -126,7 +133,7 @@ foreach ($needle in 'no Dev Drive', '100 GB', 'V:') {
 Write-Host '  ok: plan reports status and the create plan, changes nothing'
 
 # --- [2] plan with a trusted Dev Drive present: recognized, both spellings real.
-Reset-Stubs
+Reset-DevDriveStub
 $script:volumes += @{ Letter = 'V'; Fs = 'ReFS' }
 $script:fsutilWorks = $true; $script:trusted['V'] = $true
 $out = Invoke-Dd @('plan')
@@ -134,7 +141,7 @@ if ($out -notmatch [regex]::Escape('V: Dev Drive (trusted)')) { Fail "[2] a trus
 Write-Host '  ok: plan recognizes a trusted Dev Drive'
 
 # --- [3] create without admin: refused, nothing called.
-Reset-Stubs
+Reset-DevDriveStub
 $out = Invoke-Dd @('create')
 if ($global:LASTEXITCODE -ne 1) { Fail "[3] create without admin must exit 1, got $global:LASTEXITCODE" }
 if ($script:calls.Count -ne 0) { Fail "[3] create without admin must change nothing" }
@@ -142,7 +149,7 @@ if ($out -notmatch 'admin') { Fail "[3] create must say it needs an admin shell"
 Write-Host '  ok: create refuses without an admin shell'
 
 # --- [4] create with -WhatIf: the whole plan, zero destructive calls.
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $null = Invoke-DevDrive -Arguments @('create') -WhatIf
 if ($script:calls.Count -ne 0) { Fail "[4] -WhatIf must run nothing, did: $($script:calls -join '; ')" }
@@ -151,13 +158,13 @@ Write-Host '  ok: create -WhatIf touches nothing'
 
 # --- [5] create, admin + confirmed: shrink -> partition -> format -> trust, in order,
 # and the shrink target is exactly (current size - requested GB).
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $out = & { Invoke-DevDrive -Arguments @('create', '-SizeGB', '50') } *>&1 | Out-String
 if ($global:LASTEXITCODE -ne 0) { Fail "[5] create exit $global:LASTEXITCODE`n$out" }
 $expected = @(
     ('shrink C to ' + (2TB - 50GB))
-    'new-partition disk=1 letter=V'
+    'new-partition disk=1 letter=V max=True'
     'format V devdrive=True label=DevDrive'
     'fsutil devdrv trust V:'
 )
@@ -173,7 +180,7 @@ $script:isAdmin = $false
 Write-Host '  ok: create shrinks, partitions, formats and trusts in order'
 
 # --- [6] create when the source cannot shrink enough: refused, nothing called.
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $script:srcMin = 2TB - 10GB   # only 10 GB reclaimable
 $out = & { Invoke-DevDrive -Arguments @('create') } *>&1 | Out-String
@@ -184,7 +191,7 @@ $script:isAdmin = $false
 Write-Host '  ok: an impossible shrink is refused before anything runs'
 
 # --- [7] the taken letter: create onto an in-use letter is refused.
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $out = & { Invoke-DevDrive -Arguments @('create', '-Letter', 'E') } *>&1 | Out-String
 if ($global:LASTEXITCODE -ne 1) { Fail "[7] an in-use letter must exit 1, got $global:LASTEXITCODE" }
@@ -193,7 +200,7 @@ $script:isAdmin = $false
 Write-Host '  ok: an in-use drive letter is refused'
 
 # --- [8] measure without devtmp configured: one pointer, exit 1.
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $badCfg = Get-ScratchConfig "[data.packages]`ncore = true`n"
 $out = & { Invoke-DevDrive -Arguments @('measure') -DevTmpConfigPath $badCfg } *>&1 | Out-String
@@ -206,7 +213,7 @@ Write-Host '  ok: measure without a configured devtmp folder points there and st
 # --- [9] measure, configured: bench written, one recording, the report carries
 # the TopProcesses rows, and any Defender exclusion is PRINTED (Remove-MpPreference
 # as text), never run.
-Reset-Stubs
+Reset-DevDriveStub
 $script:isAdmin = $true
 $script:exclusions = @('C:\dev\tmp')
 $bench = Join-Path $Tmp 'bench'
@@ -233,7 +240,7 @@ $script:isAdmin = $false
 Write-Host '  ok: measure generates the bench, records once, prints (never runs) exclusions'
 
 # --- [10] usage: unknown subcommand -> usage + exit 2, nothing changed.
-Reset-Stubs
+Reset-DevDriveStub
 $out = Invoke-Dd @('frobnicate')
 if ($global:LASTEXITCODE -ne 2) { Fail "[10] unknown subcommand must exit 2, got $global:LASTEXITCODE" }
 if ($out -notmatch 'usage') { Fail '[10] unknown subcommand must print usage' }
