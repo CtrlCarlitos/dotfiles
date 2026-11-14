@@ -110,7 +110,7 @@ require "$repo_root/.chezmoidata/agents.yaml" "Absent \`group\` (serena's case)"
 # `command` - the local-entry code path (serena) is untouched, asserted by
 # executing it in tests/opencode_mcp_sync_contract.sh.
 require "$sh_installer" 'catalog[name].get("type") == "remote"'
-require "$sh_installer" '"type": "remote", "url": url, "enabled": True'
+require "$sh_installer" 'flag_key, flag_val = ("disabled", False) if root_key == "servers" else ("enabled", True)'
 
 # agy: a remote entry is httpUrl + oauth (+ forceAllToolsEager, #175's ruling
 # applies to every transport), never command/args.

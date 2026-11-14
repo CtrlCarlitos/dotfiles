@@ -934,11 +934,18 @@ function Invoke-OpenCodeSuperpowersRefresh {
 # never landed (VM run, 2026-10-23). Twin of the sh installer's `.plugin // []` jq merge.
 function Add-OpenCodePluginSpec {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Spec)
+    # The key is the machine major's native shape (dotfiles#395): plugin (V1)
+    # or plugins (V2). Detected at runtime - this lib is shared by both majors'
+    # installers - defaulting to plugin when the major is unreadable.
+    $key = 'plugin'
+    if ((Get-OpenCodeDetectedMajor) -eq '2') { $key = 'plugins' }
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $raw = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllBytes($Path) } else { $null }
     $text = if ($raw) { $utf8.GetString($raw).TrimStart([char]0xFEFF) } else { '' }
     if ([string]::IsNullOrWhiteSpace($text)) {
-        [IO.File]::WriteAllLines($Path, (@{ plugin = @($Spec) } | ConvertTo-Json), $utf8)
+        $fresh = @{}
+        $fresh[$key] = @($Spec)
+        [IO.File]::WriteAllLines($Path, ($fresh | ConvertTo-Json), $utf8)
         return
     }
     try {
@@ -949,9 +956,9 @@ function Add-OpenCodePluginSpec {
     }
     # @(if ...), not if { @(...) }: an if statement's output is enumerated, so a one-entry list
     # would come back as a bare string and `+ $Spec` would concatenate the two.
-    $plugins = @(if ($json.PSObject.Properties['plugin']) { $json.plugin })
+    $plugins = @(if ($json.PSObject.Properties[$key]) { $json.$key })
     if ($plugins -notcontains $Spec) {
-        $json | Add-Member -MemberType NoteProperty -Name plugin -Value @($plugins + $Spec) -Force
+        $json | Add-Member -MemberType NoteProperty -Name $key -Value @($plugins + $Spec) -Force
     }
     [IO.File]::WriteAllLines($Path, ($json | ConvertTo-Json -Depth 10), $utf8)
 }

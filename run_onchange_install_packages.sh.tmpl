@@ -147,6 +147,12 @@ _sudo_net_timeout() {
   {{- if hasKey .packages "guardrail" }}{{- $guardrail = .packages.guardrail }}{{- end -}}
   {{- if hasKey .packages "mobile_dev" }}{{- $mobile_dev = .packages.mobile_dev }}{{- end -}}
 {{- end -}}
+{{/* OpenCode major line, machine-local (dotfiles#395 Model A): "1" default,
+     "2" only after the V2 opt-in steps. hasKey-guarded: configs written before
+     the key existed must render as major 1 (chezmoi templates are
+     missingkey=error). */}}
+{{- $ocMajor := "1" -}}
+{{- if hasKey . "opencodeMajor" }}{{- $ocMajor = .opencodeMajor }}{{- end -}}
 
 {{- $curatedTotal := 0 -}}
 {{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}
@@ -2507,7 +2513,12 @@ if os.path.exists(p) and os.path.getsize(p) > 0:
 # MCP servers come from .chezmoidata/agents.yaml (see #83); r""" keeps the
 # JSON's own escapes intact. OpenCode wants command + args as one list.
 catalog = json.loads(r"""{{ .agents.mcp | toJson }}""")
-mcp = cfg.setdefault("mcp", {})
+# The entry shape follows the machine's OpenCode major (dotfiles#395): V1
+# mcp.<name> with enabled, V2 native mcp.servers.<name> with disabled - one
+# shape per key, never mixed inside one entry.
+root_key = "{{ if eq $ocMajor "2" }}servers{{ else }}mcp{{ end }}"
+flag_key, flag_val = ("disabled", False) if root_key == "servers" else ("enabled", True)
+mcp = cfg.setdefault("mcp", {}).setdefault(root_key, {}) if root_key == "servers" else cfg.setdefault("mcp", {})
 changed = []
 for name in sorted(n for n in want if n in catalog):
     entry = mcp.get(name)
@@ -2516,7 +2527,7 @@ for name in sorted(n for n in want if n in catalog):
         # no command/args; converge on its url instead.
         url = catalog[name]["url"]
         if not isinstance(entry, dict):
-            mcp[name] = {"type": "remote", "url": url, "enabled": True}
+            mcp[name] = {"type": "remote", "url": url, flag_key: flag_val}
             changed.append(name)
         elif entry.get("url") != url:
             entry["url"] = url
@@ -2524,7 +2535,7 @@ for name in sorted(n for n in want if n in catalog):
         continue
     cmd = [catalog[name]["command"]] + catalog[name]["args"]
     if not isinstance(entry, dict):
-        mcp[name] = {"type": "local", "command": cmd, "enabled": True}
+        mcp[name] = {"type": "local", "command": cmd, flag_key: flag_val}
         changed.append(name)
     elif entry.get("command") != cmd:
         entry["command"] = cmd
@@ -2711,19 +2722,20 @@ install_opencode_cli() {
     opencode_path_add
     if ! command -v opencode &>/dev/null || ! opencode --version &>/dev/null; then
          info "Installing OpenCode..."
-         net_timeout 600 bash -c 'curl -fsSL https://opencode.ai/install | bash' || warn "OpenCode installer failed or timed out - continuing"
+         # Each line's served installer serves only its own major (the V1 script
+         # refuses --version >= 2), so the machine's choice can never cross over.
+         net_timeout 600 bash -c 'curl -fsSL {{ if eq $ocMajor "2" }}https://opencode.ai/v2/install{{ else }}https://opencode.ai/install{{ end }} | bash' || warn "OpenCode installer failed or timed out - continuing"
          npm rm -g opencode-ai &>/dev/null || true
          opencode_path_add
     fi
 
-    # Phase 0 tripwire (dotfiles#395): the served installer is V1-only today, so a
-    # 2.x here means upstream flipped without anyone opting in - and OpenCode 2
-    # runs without guardrail enforcement until agent-guardrails#534 ships.
-    # dotfiles-doctor reports the same as its opencode-major check.
+    # Phase 0 tripwire (dotfiles#395): verify the binary landed on the major
+    # this machine chose (opencodeMajor). dotfiles-doctor reports the same as
+    # its opencode-major check.
     if oc_ver="$(opencode --version 2>/dev/null | head -n 1)" && [ -n "$oc_ver" ]; then
         case "$oc_ver" in
-            1.*) info "OpenCode $oc_ver (the 1.x line this repo supports, dotfiles#395)" ;;
-            *) warn "OpenCode reports '$oc_ver' - OpenCode 2 is not adopted by this repo (dotfiles#395); on 2.x the guardrail plane does not enforce (agent-guardrails#534)" ;;
+            {{ if eq $ocMajor "2" }}*'v2.'*|2.*{{ else }}1.*{{ end }}) info "OpenCode $oc_ver (the {{ $ocMajor }}.x line this machine chose, dotfiles#395)" ;;
+            *) warn "OpenCode reports '$oc_ver' - not the {{ $ocMajor }}.x line this machine chose (opencodeMajor, dotfiles#395); on 2.x also run guardrail setup or the plane enforces nothing (agent-guardrails#534)" ;;
         esac
     fi
 
@@ -2731,11 +2743,13 @@ install_opencode_cli() {
     # Code's plugin marketplace, which lives in the claude_cli section
     # now - OpenCode reads its own opencode.json config). jq merges into
     # the plugin array without clobbering any other settings already in
-    # the file.
+    # the file. The key is the machine major's native shape: `plugin` (V1)
+    # or `plugins` (V2, dotfiles#395) - one shape per key, never mixed.
     if command -v opencode &>/dev/null; then
         local oc_config_dir="$HOME/.config/opencode"
         local oc_config="$oc_config_dir/opencode.json"
         local oc_plugin_spec="superpowers@git+https://github.com/obra/superpowers.git"
+        local oc_plugin_key="{{ if eq $ocMajor "2" }}plugins{{ else }}plugin{{ end }}"
         if [[ -f "$oc_config" ]] && grep -q "obra/superpowers" "$oc_config"; then
             info "Superpowers for OpenCode already configured (opencode.json)."
         else
@@ -2743,9 +2757,9 @@ install_opencode_cli() {
             ensure_jq
             mkdir -p "$oc_config_dir"
             if [[ ! -f "$oc_config" ]]; then
-                echo "{\"plugin\": [\"$oc_plugin_spec\"]}" > "$oc_config"
+                echo "{\"$oc_plugin_key\": [\"$oc_plugin_spec\"]}" > "$oc_config"
             elif command -v jq &>/dev/null; then
-                jq --arg spec "$oc_plugin_spec" '.plugin = ((.plugin // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+                jq --arg spec "$oc_plugin_spec" ".$oc_plugin_key = ((.$oc_plugin_key // []) + [$spec] | unique)" "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
             fi
         fi
     fi
