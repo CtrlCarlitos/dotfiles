@@ -301,10 +301,18 @@ function Reset-DevDriveStub {
     }
 }
 
+# The first two cases are fsutil's REAL output, captured on a trusted Dev
+# Drive (Windows 11 24H2, 2026-11-14): it says "developer volume", not the
+# "dev drive" the first parser guessed from undocumented wording - on the
+# real thing the verdict fell through to unknown. The later cases keep the
+# hypothetical spellings as a compatibility net; only the first is observed.
 $verdicts = @(
+    @{ FsExit = 0; Fs = @('This is a trusted developer volume.', '', 'Developer volumes are protected by antivirus filter.', '', 'Filters currently attached to this developer volume:', '    WdFilter'); FsType = 'ReFS'; Want = 'devdrive' },
+    @{ FsExit = 0; Fs = @('This is not a developer volume.');     FsType = 'ReFS';  Want = 'no' },
     @{ FsExit = 0; Fs = @('E:\ is a trusted dev drive.');               FsType = 'ReFS';  Want = 'devdrive' },
     @{ FsExit = 0; Fs = @('E:\ is not a dev drive.');                   FsType = 'ReFS';  Want = 'no' },
     @{ FsExit = 0; Fs = @('E:\ is a dev drive but it is not trusted.'); FsType = 'ReFS';  Want = 'unknown' },
+    @{ FsExit = 0; Fs = @('This is a developer volume but it is not trusted.'); FsType = 'ReFS'; Want = 'unknown' },
     @{ FsExit = 1; Fs = @();                                             FsType = 'ReFS';  Want = 'likely' },
     @{ FsExit = 1; Fs = @();                                             FsType = 'NTFS'; Want = 'no' }
 )
