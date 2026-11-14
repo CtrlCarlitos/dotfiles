@@ -2124,6 +2124,18 @@ if (-not $ocWorks) {
     }
 }
 
+# Phase 0 tripwire (dotfiles#395): winget's SST.opencode and the served installer
+# are V1-only today, so a 2.x here means upstream flipped without anyone opting in -
+# and OpenCode 2 runs without guardrail enforcement until agent-guardrails#534 ships.
+# dotfiles-doctor reports the same as its opencode-major check.
+$ocMajorVer = $null
+try { $ocMajorVer = ((& opencode --version 2>&1) | Select-Object -First 1) } catch { $ocMajorVer = $null }
+if ($ocMajorVer -match '^1\.') {
+    Write-Host "  OpenCode $ocMajorVer (the 1.x line this repo supports, dotfiles#395)"
+} elseif ($ocMajorVer) {
+    Write-Host "  Warning: OpenCode reports '$ocMajorVer' - OpenCode 2 is not adopted by this repo (dotfiles#395); on 2.x the guardrail plane does not enforce (agent-guardrails#534)" -ForegroundColor Red
+}
+
 # Superpowers skills for OpenCode (separate mechanism from Claude
 # Code's plugin marketplace, which lives in the claude_cli section
 # below - OpenCode reads its own opencode.json config). Uses the

@@ -439,6 +439,25 @@ if ($isWin) {
     }
 }
 
+# --- OpenCode major: 1.x is the line this repo supports, on purpose (dotfiles#395).
+# A 2.x binary is an upstream flip nobody opted into, and until agent-guardrails#534
+# ships it runs with no guardrail enforcement. When per-machine major choice lands
+# (#395 Model A), key this to that machine's setting instead of hardcoding 1.
+$ocCmd = Get-Command opencode -ErrorAction SilentlyContinue
+if (-not $ocCmd) {
+    Result 'skip' 'opencode-major' 'opencode not installed (opt-in via packages.opencode_cli)'
+} else {
+    $ocVer = $null
+    try { $ocVer = ((& opencode --version 2>&1) | Select-Object -First 1) } catch { $ocVer = $null }
+    if ($ocVer -match '^1\.') {
+        Result 'ok' 'opencode-major' "$ocVer - the 1.x line this repo supports, on purpose (dotfiles#395)"
+    } elseif ($ocVer -match '^2\.') {
+        Result 'warn' 'opencode-major' "$ocVer - this repo runs 1.x on purpose (dotfiles#395); on 2.x the guardrail plane does not enforce yet (agent-guardrails#534)"
+    } else {
+        Result 'warn' 'opencode-major' "unrecognized or missing version output '$ocVer' - expected 1.x, the line this repo supports on purpose (dotfiles#395)"
+    }
+}
+
 if ($script:Errors -gt 0) {
     Write-Host ""
     Write-Host "$($script:Errors) error(s). $(if ($Fix) { '(-Fix applied where safe)' } else { 're-run with -Fix for auto-repairable items' })"

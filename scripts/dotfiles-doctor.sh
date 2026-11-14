@@ -25,6 +25,11 @@ set -euo pipefail
 #                    noticed). Run `chezmoi upgrade` to converge.
 #   guardrail-pin    installed guardrail binary vs .chezmoidata.yaml's
 #                    guardrail.version (opt-in package, so warn-only).
+#   opencode-major   the repo runs OpenCode 1.x on purpose (#395): a 2.x
+#                    binary means the guardrail plane does not enforce
+#                    there yet (agent-guardrails#534) and the config
+#                    writers emit V1 shapes. When per-machine major choice
+#                    lands (#395 Model A), key this to that setting.
 #
 # Exit 0 = no errors (warnings allowed); exit 1 = at least one error.
 # Run via: bash "$(chezmoi source-path)/scripts/dotfiles-doctor.sh" [--fix]
@@ -404,6 +409,23 @@ if [ -f "$config" ]; then
     else
         result skip mobile-dev "mobile_dev off (opt-in via packages.mobile_dev)"
     fi
+fi
+
+#-------------------------------------------------------------------------------
+# OpenCode major: 1.x is the line this repo supports, on purpose (#395). A 2.x
+# binary is not a V2 adoption - it is an upstream flip nobody opted into, and
+# until agent-guardrails#534 ships it runs with no guardrail enforcement.
+#-------------------------------------------------------------------------------
+if ! command -v opencode &>/dev/null; then
+    result skip opencode-major "opencode not installed (opt-in via packages.opencode_cli)"
+elif oc_ver="$(opencode --version 2>/dev/null | head -n 1)" && [ -n "$oc_ver" ]; then
+    case "$oc_ver" in
+        1.*) result ok opencode-major "$oc_ver - the 1.x line this repo supports, on purpose (dotfiles#395)" ;;
+        2.*) result warn opencode-major "$oc_ver - this repo runs 1.x on purpose (dotfiles#395); on 2.x the guardrail plane does not enforce yet (agent-guardrails#534)" ;;
+        *) result warn opencode-major "unrecognized version output '$oc_ver' - expected 1.x, the line this repo supports on purpose (dotfiles#395)" ;;
+    esac
+else
+    result warn opencode-major "opencode is installed but --version failed - expected 1.x, the line this repo supports on purpose (dotfiles#395)"
 fi
 
 if [ "$errors" -gt 0 ]; then
