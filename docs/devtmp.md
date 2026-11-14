@@ -180,7 +180,18 @@ If you have one, or create one:
   scans, nothing excluded) moving it there is reasonable.
 
 Trade-offs: protection is reduced, not removed; and the VHDX must be mounted
-again after a reboot unless auto-mount is set.
+again after a reboot unless auto-mount is set (a native partition mounts
+itself).
+
+Measured, not assumed (cm01, 2026-11-14, the same `go test` workload as
+section 5): performance mode *reschedules* the scans, it does not remove them.
+On a trusted Dev Drive with no exclusions the recording's scan totals matched
+the unexcluded `%TEMP%` baseline almost exactly (`go.exe`: 1,956 s vs
+1,991 s per ~2-minute window), while wall clock sat between the two setups
+(2.5 s per pass, vs 3.3 s unaccelerated and 0.9 s with the excluded folder;
+a native partition measured slightly faster than a VHDX on the same disk).
+In short: **an excluded folder is the faster setup, a Dev Drive the safer
+one.**
 
 The repo does not create or mount a Dev Drive. Nothing here formats a volume,
 attaches a VHDX or enables a Windows feature - the checks are read-only

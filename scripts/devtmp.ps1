@@ -141,9 +141,12 @@ function Get-DevTmpDevDrive {
         $out = & fsutil devdrv query $root 2>$null
         $text = (@($out) -join ' ').ToLowerInvariant()
         if ($LASTEXITCODE -eq 0 -and $text -notmatch 'access is denied|error 5') {
-            if ($text -match 'trusted dev drive') { return 'devdrive' }
-            if ($text -match 'not a dev drive') { return 'no' }
-            if ($text -match 'dev drive') { return 'unknown' }
+            # fsutil's own words are "developer volume" (captured on a real
+            # trusted Dev Drive, 24H2); "dev drive" spellings are kept as a
+            # compatibility net for other builds/locales of the same tool.
+            if ($text -match 'trusted developer volume|trusted dev drive') { return 'devdrive' }
+            if ($text -match 'not a developer volume|not a dev drive') { return 'no' }
+            if ($text -match 'developer volume|dev drive') { return 'unknown' }
             return 'unknown'
         }
     }
