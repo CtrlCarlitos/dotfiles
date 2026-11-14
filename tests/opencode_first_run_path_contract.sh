@@ -67,7 +67,7 @@ out="$(run "$h1" "")" || fail "fresh: the installer function failed (got: $out)"
 case "$out" in *"resolved=$h1/.opencode/bin/opencode"*) pass ;; *) fail "fresh: opencode must resolve to the native binary in the same run (got: $out)" ;; esac
 grep -q obra/superpowers "$h1/.config/opencode/opencode.json" 2>/dev/null && pass ||
     fail "fresh: Superpowers for OpenCode must be configured in the same run"
-case "$out" in *"the 1.x line this repo supports"*) pass ;; *) fail "fresh: the installed 1.x must be reported once (got: $out)" ;; esac
+case "$out" in *"the 1.x line this machine chose"*) pass ;; *) fail "fresh: the installed 1.x must be reported once (got: $out)" ;; esac
 
 # 2. Installed, not on PATH: no reinstall.
 h2="$tmp/h2"; fake_opencode "$h2/.opencode/bin/opencode"
@@ -94,10 +94,37 @@ case "$out" in *'agent-guardrails#534'*) pass ;; *) fail "2.x: the warning must 
 # 6. The PowerShell installer twin carries the same tripwire (rendered and
 #    asserted; the behavioral sh cases above prove the logic).
 if command -v chezmoi >/dev/null 2>&1; then
-    render_to "$tmp/installer.ps1" ps1 '{"opencode_cli": true}'
-    for literal in 'dotfiles#395' 'agent-guardrails#534' 'the 1.x line this repo supports'; do
+    render_to "$tmp/installer.ps1" ps1 '{"opencode_cli": true, "agent_toolkit": true}'
+    # The ps1 tripwire interpolates the phrase at RUNTIME ($ocWantedMajor), so
+    # the render literal is the assignment, not the sentence.
+    for literal in 'dotfiles#395' 'agent-guardrails#534' "ocWantedMajor = '1'"; do
         grep -Fq -- "$literal" "$tmp/installer.ps1" || fail "windows twin: the tripwire must mention '$literal'"
     done
+    pass
+fi
+
+# 7. A machine configured for major 2 renders the V2 route on both twins: the
+#    v2 install URL (Unix) / npm @opencode/cli (Windows, no winget V2 package
+#    yet), the native `plugins` key in the superpowers writer, and the V2 MCP
+#    shape (mcp.servers with disabled) - never the V1 literals. Direct renders,
+#    not render_to: it wraps its override under "packages", and opencodeMajor
+#    is a top-level machine key.
+if command -v chezmoi >/dev/null 2>&1; then
+    cfg="$tmp/empty.toml"; : >"$cfg"
+    chezmoi execute-template --config "$cfg" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"}},"packages":{"opencode_cli":true},"opencodeMajor":"2"}' \
+        < "$repo_root/run_onchange_install_packages.sh.tmpl" | tr -d '\r' >"$tmp/v2.sh"
+    chezmoi execute-template --config "$cfg" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":"2"}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/v2.ps1"
+    for literal in 'https://opencode.ai/v2/install' 'oc_plugin_key="plugins"' 'root_key = "servers"'; do
+        grep -Fq -- "$literal" "$tmp/v2.sh" || fail "v2 sh render must carry '$literal'"
+    done
+    for literal in '@opencode/cli' "ocWantedMajor = '2'" 'disabled = $false'; do
+        grep -Fq -- "$literal" "$tmp/v2.ps1" || fail "v2 ps1 render must carry '$literal'"
+    done
+    if grep -Fq -- 'opencode.ai/install | bash' "$tmp/v2.sh"; then fail "v2 sh render must not carry the V1 installer URL"; fi
+    if grep -Fq -- 'choco install opencode' "$tmp/v2.ps1"; then fail "v2 ps1 render must not carry the V1 choco route"; fi
     pass
 fi
 

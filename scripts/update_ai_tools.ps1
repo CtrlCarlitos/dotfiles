@@ -103,8 +103,17 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 # OpenCode is winget's SST.opencode now, upgraded (or held while a session is live) by
 # dotupgrade.ps1's winget sweep. A machine where Chocolatey still has it keeps the choco upgrade
 # until scripts/migrate-to-winget.ps1 moves it.
+# The OpenCode major helpers (scripts/lib/ps-skills.ps1) are needed by the V2
+# branch below; source once, before either branch evaluates.
+if (-not (Get-Command Get-OpenCodeDetectedMajor -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
 $ocChocoLib = Join-Path $(if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }) 'lib\opencode'
-if ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $ocChocoLib)) {
+if ((Get-Command opencode -ErrorAction SilentlyContinue) -and ((Get-OpenCodeDetectedMajor) -eq '2') -and -not (Test-Deferred 'opencode')) {
+    # V2 (dotfiles#395 Model A): winget/choco carry V1 only, and V2 self-upgrades.
+    # Detected (not configured): never pull a V1 package over a V2 binary.
+    Write-Host "$($G.package) Updating OpenCode (opencode upgrade, 2.x line)..." -ForegroundColor Yellow
+    & opencode upgrade *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: opencode upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+} elseif ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $ocChocoLib)) {
     if (Test-Deferred 'opencode') {
         Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
     } else {
@@ -576,6 +585,18 @@ if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
         if (-not (Get-Command Invoke-OpenCodeSuperpowersRefresh -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
         if (Test-Deferred 'opencode') {
             Write-Host "  opencode deferred - Superpowers (OpenCode) update skipped with it." -ForegroundColor Yellow
+        } elseif ((Get-OpenCodeDetectedMajor) -eq '2') {
+            # V2 (dotfiles#395): plugins live in the npm cache layout and are
+            # owned by `opencode plugin`. The list table's VERSION is a commit
+            # hash for git specs, so there is no semver "is current" gate - the
+            # update itself is the cheap no-op ("No plugin updates available").
+            if (Invoke-OpenCodeSuperpowersRefreshV2) {
+                $ocV2After = Get-OpenCodeSuperpowersVersionV2
+                $shownV2 = 'version unknown - plugin list still warming up'; if ($ocV2After) { $shownV2 = $ocV2After }
+                Write-Host "   Superpowers (OpenCode) refreshed ($shownV2)"
+            } else {
+                Write-Host "   Superpowers (OpenCode) plugin update failed - skipping" -ForegroundColor Yellow
+            }
         } else {
             $ocBefore = Get-OpenCodeSuperpowersVersion
             $ocRefreshed = $false

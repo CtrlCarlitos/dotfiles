@@ -253,7 +253,7 @@ grep -Fq '  serena-agent:  + click==8.3.1' "$tmp/run4a2.log" || fail "DOT_UV_VER
 OPENCODE_SAYS_V2=1 run_updater "$tmp/run4b.log" || true
 grep -Fq 'OpenCode is current (9.9.9)' "$tmp/run4b.log" || fail "a current OpenCode must be reported from 'opencode upgrade' (got: $(grep -F OpenCode "$tmp/run4b.log" | tr '\n' '|'))"
 if grep -Fq 'installer re-run' "$tmp/run4b.log"; then fail "with 'opencode upgrade' succeeding the installer must not run"; else pass; fi
-grep -Fq "OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose" "$tmp/run4b.log" \
+grep -Fq "OpenCode 2 is available - a major this machine has not chosen (opencodeMajor, dotfiles#395); 'opencode upgrade --major' only on purpose" "$tmp/run4b.log" \
     || fail "the binary's OpenCode 2 notice must be surfaced as one line (got: $(grep -F 'OpenCode 2' "$tmp/run4b.log" | tr '\n' '|'))"
 if grep -Fq 'opencode upgrade --major' "$tmp/npm.log"; then fail "never run the major upgrade"; else pass; fi
 

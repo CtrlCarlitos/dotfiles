@@ -1326,6 +1326,37 @@ mcp_registered() {
 superpowers_latest_version() { github_latest_tag obra/superpowers; }
 
 # opencode_superpowers_cache_dirs - where OpenCode keeps the superpowers plugin it actually loads.
+# opencode_detected_major - "1" or "2" from the installed binary's --version
+# (V1 prints "1.19.5", V2 "opencode v2.3.0"). Exit 1 when opencode is absent
+# or the output matches neither major.
+opencode_detected_major() {
+    local v
+    command -v opencode >/dev/null 2>&1 || return 1
+    v="$(opencode --version 2>/dev/null | head -n 1)" || v=""
+    case "$v" in
+        *'v2.'*|2.*) printf '2\n' ;;
+        *'v1.'*|1.*) printf '1\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+# opencode_configured_major [config] - the machine-local opencodeMajor choice
+# (dotfiles#395, Model A; default 1). Read by parsing the config file itself,
+# NOT via `chezmoi execute-template`: its template data carries the SOURCE
+# .chezmoidata* trees, not config-file keys, so `{{ .opencodeMajor }}` errors
+# with "map has no entry" on configs that predate the key (verified live,
+# 2026-11-14 - the exact outage class the doctor's prompted-keys check
+# documents). Falls back to the detected binary when the file is unreadable,
+# then to 1 - a pre-Model-A config never breaks a run.
+opencode_configured_major() {
+    local cfg="${1:-$HOME/.config/chezmoi/chezmoi.toml}" m=""
+    if [ -f "$cfg" ]; then
+        m="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"([12])".*/\1/p' "$cfg" 2>/dev/null | head -n 1)"
+    fi
+    if [ -n "$m" ]; then printf '%s\n' "$m"; return 0; fi
+    opencode_detected_major || printf '1\n'
+}
+
 # For every `plugin` entry in opencode.json OpenCode installs the package into its OWN cache,
 # `<cache>/packages/<name>@<spec>/` (package.json + lockfile + node_modules), on the first start
 # that sees the entry, and reuses that directory for as long as it exists - a git spec without a
@@ -1367,6 +1398,31 @@ opencode_superpowers_refresh() {
         fi
     done <<<"$(opencode_superpowers_cache_dirs)"
     return "$rc"
+}
+
+# --- OpenCode 2 (dotfiles#395 Model A) ---------------------------------------------------
+# V2 moved package plugins to ~/.cache/opencode/npm/<name>-<hash>/<epoch-ms>/
+# node_modules/ (newest epoch loaded; the V1 packages/ layout is gone) and owns
+# their lifecycle: `opencode plugin update` re-resolves the unpinned git spec,
+# `opencode plugin list` reports what is loaded. Verified live on v2.3.0.
+
+# opencode_superpowers_version_v2 - the superpowers row's VERSION from
+# `opencode plugin list` (a text table: ID VERSION SOURCE). Empty when the
+# table has no superpowers row - including the warming-up "No plugins found"
+# right after an install, which is eventually consistent for a few seconds
+# (Phase 1 finding, 2026-11-14): empty means unknown, not absent. The VERSION
+# is a commit hash for git specs, never a semver comparable to a release tag.
+opencode_superpowers_version_v2() {
+    local out
+    out="$(net_timeout 60 opencode plugin list 2>/dev/null)" || return 1
+    printf '%s\n' "$out" | awk '$1 == "superpowers" { print $2; exit }'
+}
+
+# opencode_superpowers_refresh_v2 - V2's own updater. `opencode plugin update`
+# (no id: v2.3.0 answers "No plugin updates available" with exit 0 when
+# current, and re-resolves the git spec when upstream moved).
+opencode_superpowers_refresh_v2() {
+    net_timeout 300 opencode plugin update >/dev/null
 }
 
 # claude_superpowers_installs - one "<version>\t<scope>\t<projectPath>" line per superpowers

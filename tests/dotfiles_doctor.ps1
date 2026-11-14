@@ -30,6 +30,7 @@ primaryName = "Probe User"
 primaryEmail = "probe@example.com"
 primaryUsername = "probe"
 primaryKey = "id_probe"
+opencodeMajor = "1"
 
 [data.packages]
 core = true
@@ -296,14 +297,29 @@ Write-Host '  ok: mobile-dev completeness reported'
         return @{ Out = $out; Code = $code }
     }
     try {
+        # a. 2.x binary on a machine configured for 1: warn, naming both majors.
         Write-FakeOpencode '2.3.0'
         $r = Invoke-OcDoctor
-        if ($r.Out -notmatch '(?m)^warn\s+opencode-major\s') { Fail "[9] a 2.x binary must warn: $($r.Out)" }
+        if ($r.Out -notmatch '(?m)^warn\s+opencode-major\s') { Fail "[9] a major mismatch must warn: $($r.Out)" }
+        if ($r.Out -notmatch 'opencodeMajor is 1') { Fail "[9] the warning must name the configured major: $($r.Out)" }
         if ($r.Out -notmatch 'dotfiles#395') { Fail "[9] the warning must reference dotfiles#395: $($r.Out)" }
         if ($r.Out -notmatch 'agent-guardrails#534') { Fail "[9] the warning must name the guardrail port: $($r.Out)" }
+        # b. 1.x on configured 1 (the default fixture): ok.
         Write-FakeOpencode '1.19.5'
         $r = Invoke-OcDoctor
-        if ($r.Out -notmatch '(?m)^ok\s+opencode-major\s') { Fail "[9] a 1.x binary must be ok: $($r.Out)" }
+        if ($r.Out -notmatch '(?m)^ok\s+opencode-major\s') { Fail "[9] a matching 1.x must be ok: $($r.Out)" }
+        # c. 2.x on a machine configured for 2: ok.
+        $cfg = Join-Path $h '.config/chezmoi/chezmoi.toml'
+        (Get-Content -LiteralPath $cfg) -replace '^opencodeMajor = "[12]"', 'opencodeMajor = "2"' |
+            Set-Content -LiteralPath $cfg -Encoding utf8
+        Write-FakeOpencode '2.3.0'
+        $r = Invoke-OcDoctor
+        if ($r.Out -notmatch '(?m)^ok\s+opencode-major\s') { Fail "[9] a matching 2.x must be ok: $($r.Out)" }
+        # d. the V2 version spelling ("opencode v2.3.0") detects major 2.
+        Write-FakeOpencode 'opencode v2.3.0'
+        $r = Invoke-OcDoctor
+        if ($r.Out -notmatch 'opencodeMajor \(2,') { Fail "[9] the V2 version spelling must detect major 2: $($r.Out)" }
+        # e. no opencode at all: skip.
         Remove-Item -LiteralPath (Join-Path $ocBin 'opencode.ps1') -Force
         $r = Invoke-OcDoctor
         if ($r.Out -notmatch '(?m)^skip\s+opencode-major\s') { Fail "[9] no opencode must skip: $($r.Out)" }

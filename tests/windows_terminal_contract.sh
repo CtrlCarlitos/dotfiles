@@ -301,6 +301,18 @@ if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
         fail "opencode tui.json: theme must be catppuccin and user keybinds kept"
 fi
 
+# OpenCode 2 moved theme/keybinds to cli.json (theme is an OBJECT there) and
+# migrated tui.json once on first start; V1 ignores cli.json entirely, so both
+# files are managed side by side - each major reads its own (dotfiles#395).
+oc_cli_tmpl="$repo_root/dot_config/opencode/modify_cli.json"
+[ -f "$oc_cli_tmpl" ] || fail "opencode cli.json modify template missing"
+if command -v chezmoi >/dev/null && command -v jq >/dev/null; then
+    printf '// header\n{"theme":{"name":"dracula","mode":"dark"},"keybinds":{"leader":"ctrl+x"},}\n' |
+        chezmoi execute-template --config "$tmp/chezmoi.toml" --source "$repo_root" --with-stdin --file "$oc_cli_tmpl" |
+        jq -e '.["$schema"] == "https://opencode.ai/v2/cli.json" and .theme.name == "catppuccin" and .theme.mode == "dark" and .keybinds.leader == "ctrl+x"' >/dev/null ||
+        fail "opencode cli.json: theme.name must be catppuccin, user keys and nested theme keys kept"
+fi
+
 # Ghostty = the Mac/Linux twin of Windows Terminal: same theme, font, clipboard
 # and keys; installed only by the opt-in dev_desktop group; never on
 # Windows/WSL.

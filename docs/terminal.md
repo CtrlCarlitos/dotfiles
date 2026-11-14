@@ -18,7 +18,8 @@ box. Windows Terminal and Ghostty keep Catppuccin Mocha's own background.
 | Ghostty (macOS, Linux desktop) | `dot_config/ghostty/config.tmpl` | owned file (Ghostty never rewrites it) |
 | VS Code terminal: settings | `run_onchange_install_packages.{ps1,sh}.tmpl` | installer VS Code step, see [VS Code](vscode.md) |
 | VS Code terminal: keys | `.chezmoitemplates/vscode-keybindings.json`, via `modify_keybindings.json` in `AppData/Roaming/Code/User` (Windows), `Library/Application Support/Code/User` (macOS), `dot_config/Code/User` (Linux desktop) | modify-template: merges into `keybindings.json`, only where VS Code's User folder exists (on Windows, also when `dev_desktop` is selected, so the first install gets it) |
-| OpenCode theme | `dot_config/opencode/modify_tui.json` | modify-template: merges into `~/.config/opencode/tui.json` |
+| OpenCode theme (1.x) | `dot_config/opencode/modify_tui.json` | modify-template: merges into `~/.config/opencode/tui.json` |
+| OpenCode theme (2.x) | `dot_config/opencode/modify_cli.json` | modify-template: merges into `~/.config/opencode/cli.json` (theme is an object there; V2 migrated tui.json once on first start and V1 ignores cli.json - both files are managed side by side, each major reads its own) |
 | psmux conf (Windows tmux twin) | `dot_config/psmux/psmux.conf` | owned file (psmux reads it at server start and never rewrites it) |
 | Same-folder splits | `Documents/PowerShell/…profile.ps1`, `dot_zshrc` | the shell reports its folder (OSC 9;9) |
 | Clipboard over SSH | `dot_tmux.conf`, `dot_config/nvim/init.lua` | OSC 52 |
@@ -567,3 +568,22 @@ What you get in its `SSH: <name>` tab:
   `WT_SESSION` (passed in by default through `WSLENV`) and `wslpath`.
 
 [ubuntu-wsl-manage]: https://ubuntu.com/wsl/docs/stable/howto/manage-and-configure
+
+## OpenCode 2 opt-in (per machine, #395 Model A)
+
+One major per machine, chosen by `opencodeMajor` in `~/.config/chezmoi/chezmoi.toml`
+(`"1"` default, `"2"` after these steps). Changing it re-renders the installers on
+the next `dot up`. To move a machine to OpenCode 2:
+
+1. `guardrail setup` must already have run with agent-guardrails **≥ v0.23.37**
+   (the dual-major port, agent-guardrails#534). The pre-port wiring is dead on
+   V2 - a V2 upgrade without this release enforces nothing.
+2. Set `opencodeMajor = "2"` in `~/.config/chezmoi/chezmoi.toml`, then close
+   every opencode session and run `dot up` (the V2 installer replaces the V1
+   binary in place; `~/.opencode/bin/opencode2` is only a compat wrapper).
+3. Run `guardrail setup` once more: it re-wires the opencode plane for V2 under
+   one approval (`guardrail/index.js` directory plugin + the native
+   `permissions` floor, `external_directory: ask` restored).
+4. Verify enforcement in one project: a secret read must deny, and
+   `guardrail selftest` passes. `dotfiles-doctor`'s `opencode-major` check
+   reports `ok` when the binary and the choice agree.
