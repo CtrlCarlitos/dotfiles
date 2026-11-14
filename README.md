@@ -190,6 +190,7 @@ New to zsh, tmux, or neovim? Start here:
 | [Secrets & SSH Hosts](docs/secrets.md) | Machine-local config, SSH aliases, and safe handling |
 | [SSH Agents](docs/ssh-agents.md) | One key vault, one filtered agent per account; WSL relay; devcontainer forwarding |
 | [Defender & build output](docs/devtmp.md) | `dot devtmp` (Windows): one folder for Go/test output and the printed Defender exclusion |
+| [Dev Drive](docs/devdrive.md) | `dot devdrive` (Windows): create a Dev Drive (partition route) and measure Defender's scan cost |
 | [Windows Setup](docs/windows.md) | Windows specifics: elevation, PowerShell profile, Git for Windows, SSH agent, troubleshooting |
 | [Mobile Development](docs/mobile-development.md) | The opt-in `mobile_dev` group: Android SDK, ADB bridge, emulator, Maestro, per-platform setup |
 | [Devcontainer Setup](docs/devcontainer.md) | Using this in VS Code devcontainers |
@@ -251,8 +252,10 @@ dot ssh       # pick one of your [[data.ssh_hosts]] and connect (fzf); dot ssh <
 dot version   # which version of this repo is installed: tag, commits past it, short sha
 ```
 
-Windows PowerShell adds three more: `dot devtmp` (a build/test output folder for
-Defender, [docs/devtmp.md](docs/devtmp.md)), `dot ssh-fingerprints` (preview
+Windows PowerShell adds four more: `dot devtmp` (a build/test output folder for
+Defender, [docs/devtmp.md](docs/devtmp.md)), `dot devdrive` (create and measure
+a Windows Dev Drive, [docs/devdrive.md](docs/devdrive.md)),
+`dot ssh-fingerprints` (preview
 the agent fingerprint sync; `--write` saves it, [docs/ssh-agents.md](docs/ssh-agents.md))
 and `dot docker-compact` (shrink Docker Desktop's data disk,
 [docs/windows.md](docs/windows.md#compacting-the-docker-data-disk)).
