@@ -271,6 +271,48 @@ $r = Invoke-Doctor $h
 if ($r.Out -notmatch '(?m)^skip\s+mobile-dev\s') { Fail "[8] mobile_dev = false must skip the check: $($r.Out)" }
 Write-Host '  ok: mobile-dev completeness reported'
 
+# [9] opencode-major: 1.x is the supported line; 2.x warns naming dotfiles#395 and
+#     the guardrail port; absent skips. Fake opencode.ps1 on a controlled PATH so
+#     the host's own opencode never leaks in (same shape as [7]'s clean dirs).
+# Invoked (& { }) so the block executes: a bare scriptblock literal at statement
+# position would be *output as source text* and never run.
+& {
+    $h = Join-Path $Tmp 'oc'
+    $ocBin = Join-Path $Tmp 'oc-bin'
+    New-Item -ItemType Directory -Force -Path $h, $ocBin | Out-Null
+    New-ValidConfig $h
+    function Write-FakeOpencode([string]$ver) {
+        [IO.File]::WriteAllText((Join-Path $ocBin 'opencode.ps1'), "Write-Output '$ver'", $utf8NoBom)
+    }
+    $origPath = $env:PATH
+    $cleanDirs = ($origPath -split [IO.Path]::PathSeparator) | Where-Object {
+        $_ -and -not (Test-Path (Join-Path $_ 'opencode.ps1')) -and -not (Test-Path (Join-Path $_ 'opencode.exe')) -and -not (Test-Path (Join-Path $_ 'opencode'))
+    }
+    function Invoke-OcDoctor {
+        $env:HOME = $h; $env:USERPROFILE = $h; $env:CHEZMOI_CONFIG_DIR = $null
+        $env:PATH = (@($ocBin) + @($cleanDirs)) -join [IO.Path]::PathSeparator
+        try { $out = & pwsh -NoProfile -File $Doctor 2>&1 | Out-String; $code = $LASTEXITCODE }
+        finally { $env:PATH = $origPath }
+        return @{ Out = $out; Code = $code }
+    }
+    try {
+        Write-FakeOpencode '2.3.0'
+        $r = Invoke-OcDoctor
+        if ($r.Out -notmatch '(?m)^warn\s+opencode-major\s') { Fail "[9] a 2.x binary must warn: $($r.Out)" }
+        if ($r.Out -notmatch 'dotfiles#395') { Fail "[9] the warning must reference dotfiles#395: $($r.Out)" }
+        if ($r.Out -notmatch 'agent-guardrails#534') { Fail "[9] the warning must name the guardrail port: $($r.Out)" }
+        Write-FakeOpencode '1.19.5'
+        $r = Invoke-OcDoctor
+        if ($r.Out -notmatch '(?m)^ok\s+opencode-major\s') { Fail "[9] a 1.x binary must be ok: $($r.Out)" }
+        Remove-Item -LiteralPath (Join-Path $ocBin 'opencode.ps1') -Force
+        $r = Invoke-OcDoctor
+        if ($r.Out -notmatch '(?m)^skip\s+opencode-major\s') { Fail "[9] no opencode must skip: $($r.Out)" }
+        Write-Host '  ok: opencode-major reported'
+    } finally {
+        if (Test-Path (Join-Path $ocBin 'opencode.ps1')) { Remove-Item -LiteralPath (Join-Path $ocBin 'opencode.ps1') -Force }
+    }
+}
+
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
-Write-Host 'PASS: dotfiles-doctor.ps1 (7 scenarios)'
+Write-Host 'PASS: dotfiles-doctor.ps1 (9 scenarios)'
 exit 0

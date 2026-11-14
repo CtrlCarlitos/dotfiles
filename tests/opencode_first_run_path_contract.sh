@@ -34,7 +34,7 @@ done
 # The fake native binary, as OpenCode's installer would lay it down.
 fake_opencode() { # $1 = path
     mkdir -p "$(dirname "$1")"
-    printf '#!/bin/sh\necho 1.19.4\n' >"$1"
+    printf '#!/bin/sh\necho %s\n' "${OC_FAKE_VER:-1.19.4}" >"$1"
     chmod +x "$1"
 }
 export -f fake_opencode
@@ -67,6 +67,7 @@ out="$(run "$h1" "")" || fail "fresh: the installer function failed (got: $out)"
 case "$out" in *"resolved=$h1/.opencode/bin/opencode"*) pass ;; *) fail "fresh: opencode must resolve to the native binary in the same run (got: $out)" ;; esac
 grep -q obra/superpowers "$h1/.config/opencode/opencode.json" 2>/dev/null && pass ||
     fail "fresh: Superpowers for OpenCode must be configured in the same run"
+case "$out" in *"the 1.x line this repo supports"*) pass ;; *) fail "fresh: the installed 1.x must be reported once (got: $out)" ;; esac
 
 # 2. Installed, not on PATH: no reinstall.
 h2="$tmp/h2"; fake_opencode "$h2/.opencode/bin/opencode"
@@ -83,5 +84,21 @@ case "$out" in *"resolved=$h3/.opencode/bin/opencode"*) pass ;; *) fail "shim: t
 h4="$tmp/h4"; mkdir -p "$h4"
 out="$(INSTALL_FAILS=1 run "$h4" "")" || fail "failed install: must not end the run (got: $out)"
 case "$out" in *'resolved='$'\n'* | *'resolved=') pass ;; *) fail "failed install: nothing may resolve (got: $out)" ;; esac
+
+# 5. A 2.x binary (upstream flipped): the Phase 0 tripwire warns loudly.
+h5="$tmp/h5"; OC_FAKE_VER=2.3.0 fake_opencode "$h5/.opencode/bin/opencode"
+out="$(run "$h5" "")"
+case "$out" in *'dotfiles#395'*) pass ;; *) fail "2.x: the warning must reference dotfiles#395 (got: $out)" ;; esac
+case "$out" in *'agent-guardrails#534'*) pass ;; *) fail "2.x: the warning must name the guardrail port (got: $out)" ;; esac
+
+# 6. The PowerShell installer twin carries the same tripwire (rendered and
+#    asserted; the behavioral sh cases above prove the logic).
+if command -v chezmoi >/dev/null 2>&1; then
+    render_to "$tmp/installer.ps1" ps1 '{"opencode_cli": true}'
+    for literal in 'dotfiles#395' 'agent-guardrails#534' 'the 1.x line this repo supports'; do
+        grep -Fq -- "$literal" "$tmp/installer.ps1" || fail "windows twin: the tripwire must mention '$literal'"
+    done
+    pass
+fi
 
 finish

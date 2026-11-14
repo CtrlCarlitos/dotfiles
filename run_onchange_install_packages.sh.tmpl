@@ -2716,6 +2716,17 @@ install_opencode_cli() {
          opencode_path_add
     fi
 
+    # Phase 0 tripwire (dotfiles#395): the served installer is V1-only today, so a
+    # 2.x here means upstream flipped without anyone opting in - and OpenCode 2
+    # runs without guardrail enforcement until agent-guardrails#534 ships.
+    # dotfiles-doctor reports the same as its opencode-major check.
+    if oc_ver="$(opencode --version 2>/dev/null | head -n 1)" && [ -n "$oc_ver" ]; then
+        case "$oc_ver" in
+            1.*) info "OpenCode $oc_ver (the 1.x line this repo supports, dotfiles#395)" ;;
+            *) warn "OpenCode reports '$oc_ver' - OpenCode 2 is not adopted by this repo (dotfiles#395); on 2.x the guardrail plane does not enforce (agent-guardrails#534)" ;;
+        esac
+    fi
+
     # Superpowers skills for OpenCode (separate mechanism from Claude
     # Code's plugin marketplace, which lives in the claude_cli section
     # now - OpenCode reads its own opencode.json config). jq merges into

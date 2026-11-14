@@ -283,4 +283,30 @@ out9="$(run9)"
 grep -Eq '^skip +mobile-dev ' <<<"$out9" || fail "[9] mobile_dev = false must skip the check: $out9"
 echo "  ok: mobile-dev completeness reported"
 
+# [10] opencode-major: 1.x is the supported line, 2.x warns naming dotfiles#395 and
+#      the guardrail port, a broken --version warns, absent skips. The stub lives in
+#      oc-bin; doctor-bin (built in [9]) has no opencode in it, so the absent case
+#      cannot be shadowed by a user-local install.
+for d in /usr/bin /bin; do
+    [ ! -e "$d/opencode" ] || skip "$d/opencode exists - the controlled PATH would resolve it"
+done
+mkdir -p "$TMP/oc-bin"
+H="$TMP/home-oc"; valid_config "$H"
+run10() { env -u CHEZMOI_CONFIG_DIR HOME="$H" PATH="$TMP/oc-bin:$TMP/doctor-bin" bash "$doctor" 2>&1 || true; }
+printf '#!/bin/sh\necho 2.3.0\n' >"$TMP/oc-bin/opencode"; chmod +x "$TMP/oc-bin/opencode"
+out="$(run10)"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10] a 2.x binary must warn: $out"
+grep -Fq 'dotfiles#395' <<<"$out" || fail "[10] the warning must reference dotfiles#395: $out"
+grep -Fq 'agent-guardrails#534' <<<"$out" || fail "[10] the warning must name the guardrail port: $out"
+printf '#!/bin/sh\necho 1.19.5\n' >"$TMP/oc-bin/opencode"
+out="$(run10)"
+grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10] a 1.x binary must be ok: $out"
+printf '#!/bin/sh\nexit 1\n' >"$TMP/oc-bin/opencode"
+out="$(run10)"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10] a failing --version must warn: $out"
+rm -f "$TMP/oc-bin/opencode"
+out="$(run10)"
+grep -Eq '^skip +opencode-major ' <<<"$out" || fail "[10] no opencode installed must skip: $out"
+echo "  ok: opencode-major reported"
+
 finish
