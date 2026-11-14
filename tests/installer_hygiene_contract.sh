@@ -101,7 +101,7 @@ done
 #    is gone), and the npm sudo decision follows the /usr-prefix rule.
 ai_sh="$repo_root/scripts/update_ai_tools.sh"
 require "$ai_sh" 'curl -fsSL -o "$cl_inst" https://claude.ai/install.sh'
-require "$ai_sh" 'curl -fsSL -o "$oc_inst" https://opencode.ai/install'
+require "$ai_sh" 'oc_installer_url="https://opencode.ai/install"'
 require "$ai_sh" 'Claude Code installer failed - continuing'
 require "$ai_sh" 'OpenCode installer failed - continuing'
 require "$ai_sh" 'Claude Code installer download failed - continuing'
