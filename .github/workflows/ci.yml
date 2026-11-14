@@ -357,6 +357,10 @@ jobs:
       # select_packages.ps1 self-skips without a console stdin on Windows
       # (its guard says so) and devprofile_identity.ps1 requires pwsh 7 -
       # both stay wired on the Linux lint job.
+      - name: Test cross-generation module guards (5.1 child of pwsh)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/ps_modulepath.ps1
+
       - name: Test dotbackup/restore round-trip (5.1)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\dotbackup_restore.ps1

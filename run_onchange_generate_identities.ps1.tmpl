@@ -11,10 +11,10 @@ $ErrorActionPreference = "Stop"
 # 5.1, which inherits pwsh 7's module path, resolves the Core build of
 # Microsoft.PowerShell.Security from there, and dies on Set-Acl with
 # "module could not be loaded". Under 5.1, strip the Core module dirs so
-# the correct in-box module resolves.
+# the correct in-box module resolves, including when Core is a Store install.
 if ($PSVersionTable.PSVersion.Major -le 5) {
     $env:PSModulePath = (($env:PSModulePath -split ';') |
-        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
+        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') -and ($_ -notmatch '\\Microsoft\.PowerShell_[^\\]+\\') }) -join ';'
     Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue
 }
 

@@ -14,12 +14,13 @@
 $ErrorActionPreference = 'Stop'
 
 # Cross-generation PSModulePath guard (same class as the other Windows
-# scripts - Copy-Item lives in Microsoft.PowerShell.Management, which 5.1
-# cannot autoload when it inherits pwsh 7's module path).
+# scripts - Copy-Item lives in Management and Get-FileHash in Utility,
+# which 5.1 cannot autoload from pwsh 7's inherited module path). Strip
+# both standard and Microsoft Store Core module directories.
 if ($PSVersionTable.PSVersion.Major -le 5) {
     $env:PSModulePath = (($env:PSModulePath -split ';') |
-        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
-    Import-Module Microsoft.PowerShell.Management -ErrorAction SilentlyContinue
+        Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') -and ($_ -notmatch '\\Microsoft\.PowerShell_[^\\]+\\') }) -join ';'
+    Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction Stop
 }
 
 $managedRoot = Join-Path $env:USERPROFILE 'Documents'

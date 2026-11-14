@@ -15,6 +15,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 guarded=(
     run_onchange_generate_identities.ps1.tmpl
     run_onchange_install_packages.ps1.tmpl
+    run_onchange_sync_pwsh_profiles.ps1.tmpl
 )
 for f in "${guarded[@]}"; do
     path="$repo_root/$f"

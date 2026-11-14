@@ -22,12 +22,13 @@
 # path makes 5.1 resolve Core builds of in-box modules and fail with "module
 # could not be loaded" (confirmed live on Set-Acl in generate_identities
 # during a fresh Windows install). Strip the Core module dirs under 5.1 so
-# in-box modules resolve. Idempotent; safe on pwsh 7 (no-op there).
+# in-box modules resolve, including Store installs of Core. Idempotent;
+# safe on pwsh 7 (no-op there).
 # (Renamed from Use-InBoxModules: PSUseSingularNouns wants a singular noun.)
 function Repair-InBoxModulePath {
     if ($PSVersionTable.PSVersion.Major -le 5) {
         $env:PSModulePath = (($env:PSModulePath -split ';') |
-            Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') }) -join ';'
+            Where-Object { $_ -and ($_ -notmatch '\\PowerShell\\[67]\\') -and ($_ -notmatch '\\Microsoft\.PowerShell_[^\\]+\\') }) -join ';'
         Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue
     }
 }
