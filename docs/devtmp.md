@@ -126,13 +126,29 @@ anything you would not want unscanned.
 ## 5. Measuring it
 
 1. From an admin shell, record during a normal `go test` run, before:
-   `New-MpPerformanceRecording -RecordTo before.etl`, then
-   `Get-MpPerformanceReport -Path before.etl -TopProcesses 10`.
+   `New-MpPerformanceRecording -RecordTo before.etl`. Press **Enter** to stop
+   and save; Ctrl+C cancels the recording without saving.
 2. Run `dot devtmp apply`, add the exclusion (section 2), and run the tests with
    `dot devtmp run go test ./...`.
 3. Record again and compare the `TopProcesses` totals.
 
-These Defender cmdlets need an admin shell, so run them yourself.
+Read a report like this - the numbers live **on the collections**, and piping
+the report object itself prints only names:
+
+```powershell
+$r = Get-MpPerformanceReport -Path before.etl -TopProcesses 10 -TopFiles 10
+$r.TopProcesses | Format-Table -AutoSize   # Count, TotalDuration, ... per process
+$r.TopFiles      | Format-Table -AutoSize
+```
+
+Compare `go.exe`'s `TotalDuration` and the `.exe` row of `$r.TopExtensions`
+between the two runs, with the same workload in both windows. Caveats: the
+numbers are scan-duration totals, not CPU; one machine, one run each.
+
+The recording needs an admin shell **with a real console** - in a piped shell
+(an agent's) it dies with `The handle is invalid`, elevated or not.
+`Get-MpPerformanceReport` read the `.etl` fine from a normal shell on Windows
+11 24H2. Run them yourself either way.
 
 ## 6. Option 2: Dev Drive (detected, never created)
 
