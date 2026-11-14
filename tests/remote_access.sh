@@ -477,15 +477,25 @@ pass
 #      that DOES hold a session file it must report a desktop present - so
 #      the seam is proven both ways, not just assumed from the defaults
 #      being unset at the top of this file.
+#      A WSL RUNNER answers from its own fingerprint (WSL_DISTRO_NAME is in
+#      every process, /proc/version carries microsoft) before the seam is
+#      consulted, so both halves pin the fingerprint to a plain non-WSL one -
+#      RA_PROC_VERSION exists for exactly this - and drop WSL_DISTRO_NAME,
+#      which that seam cannot reach. Without it the negative half passed for
+#      the wrong reason and the positive half could never pass, on WSL.
 rc=0
-ra_call ra_desktop_detected 2>&1 || rc=$?
+( unset WSL_DISTRO_NAME
+  export RA_PROC_VERSION="Linux version 6.8.0-generic"
+  ra_call ra_desktop_detected ) 2>&1 || rc=$?
 [ "$rc" -eq 1 ] ||
     fail "ra_desktop_detected must report no desktop when its session dirs/dm units are overridden to absent paths (got $rc)"
 pass
 mkdir -p "$scratch/has-wayland-sessions"
 touch "$scratch/has-wayland-sessions/ubuntu.desktop"
 rc=0
-RA_DESKTOP_SESSION_DIRS="$scratch/no-xsessions $scratch/has-wayland-sessions" ra_call ra_desktop_detected 2>&1 || rc=$?
+( unset WSL_DISTRO_NAME
+  export RA_PROC_VERSION="Linux version 6.8.0-generic"
+  RA_DESKTOP_SESSION_DIRS="$scratch/no-xsessions $scratch/has-wayland-sessions" ra_call ra_desktop_detected ) 2>&1 || rc=$?
 [ "$rc" -eq 0 ] ||
     fail "ra_desktop_detected must report a desktop when an overridden session dir holds a session file (got $rc)"
 pass

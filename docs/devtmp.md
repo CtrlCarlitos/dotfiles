@@ -37,7 +37,7 @@ Then:
 
 | Command | What it does |
 |---|---|
-| `dot devtmp` (or `dot devtmp plan`) | Prints the plan. Changes nothing. |
+| `dot devtmp` (or `dot devtmp plan`) | Prints the plan, including whether the folder's volume is a Dev Drive (section 6). Changes nothing. |
 | `dot devtmp apply` | Creates the folder and runs `go env -w GOTMPDIR=<path>` (persistent, no admin). Says so plainly if Go is missing and `GOTMPDIR` was not set. |
 | `dot devtmp run go test ./...` | Runs the command with `TMP` and `TEMP` pointed at the folder **for that process only**. |
 
@@ -75,6 +75,10 @@ prints `N/A: Must be an administrator to view exclusions`):
 ```powershell
 (Get-MpPreference).ExclusionPath -contains 'C:\dev\tmp'   # True once added
 ```
+
+When the folder sits on a trusted Dev Drive, `plan` and `apply` print **no**
+exclusion command at all - async scanning already covers the folder, and an
+exclusion there would only reduce protection (section 6).
 
 ## 3. The contract: build and test output only
 
@@ -130,17 +134,40 @@ anything you would not want unscanned.
 
 These Defender cmdlets need an admin shell, so run them yourself.
 
-## 6. Option 2: Dev Drive (documentation only)
+## 6. Option 2: Dev Drive (detected, never created)
 
 A Dev Drive is a ReFS volume (a VHDX, 50 GB or more, on a secondary SSD). For it
 Defender uses performance (async) scanning, so no per-path exclusions are
 needed.
 
+`dot devtmp plan` and `dot devtmp apply` tell you where you stand:
+
+| The volume is | `plan` / `apply` says |
+|---|---|
+| a trusted Dev Drive | so, and prints **no** exclusion command: async scanning already covers the folder, and excluding it would only reduce protection |
+| ReFS, unconfirmed | "maybe", and prints the exclusion **plus** the command that settles it: `fsutil devdrv query <drive>` from an admin shell |
+| anything else | the plan and the exclusion, as always |
+
+`fsutil devdrv query` is the one Dev Drive command this repo runs, and it is
+read-only. An **untrusted** Dev Drive is reported as *unknown*, not as a Dev
+Drive: its filter policy - the async scans - is honored only once it is
+trusted, and trusting one (`fsutil devdrv trust`) is yours to run.
+
+If you have one, or create one:
+
 - Move `GOCACHE`, `GOMODCACHE`, `GOTMPDIR` and ideally the repository checkouts
-  onto it.
+  onto it, each with `go env -w NAME=<path on the Dev Drive>`.
 - Point `[data.devtmp] path` at a folder on it and the exclusion becomes
   unnecessary: you get the speed-up with no `Add-MpPreference`.
-- Trade-offs: protection is reduced, not removed; and the VHDX must be mounted
-  again after a reboot unless auto-mount is set.
+- Keep `GOMODCACHE` out of an *excluded* devtmp folder - it is downloaded code,
+  exactly the "no downloads" rule of section 3. On a Dev Drive volume (async
+  scans, nothing excluded) moving it there is reasonable.
 
-The repo does not create or mount a Dev Drive.
+Trade-offs: protection is reduced, not removed; and the VHDX must be mounted
+again after a reboot unless auto-mount is set.
+
+The repo does not create or mount a Dev Drive. Nothing here formats a volume,
+attaches a VHDX or enables a Windows feature - the checks are read-only
+(`Get-Volume`, `fsutil devdrv query`), and the mobile_dev/WHPX rule applies:
+Windows-shaped changes are the user's, and nothing Dev-Drive-shaped is ever
+force-enabled silently.

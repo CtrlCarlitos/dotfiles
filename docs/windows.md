@@ -702,7 +702,8 @@ Rules learned the hard way when changing the Windows scripts:
 
 Defender rescans every freshly built test binary. See [devtmp.md](devtmp.md)
 (`dot devtmp`) for a single build-output folder and the exclusion it prints for
-you to run.
+you to run; on a Dev Drive it says the exclusion is unnecessary instead
+([devtmp.md section 6](devtmp.md#6-option-2-dev-drive-detected-never-created)).
 
 ### python3 on Windows
 
