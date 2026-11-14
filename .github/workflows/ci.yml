@@ -259,6 +259,10 @@ jobs:
       - name: Test dot devtmp (pwsh)
         run: pwsh -NoProfile -File tests/devtmp.ps1
 
+      # `dot devdrive` helpers and dispatcher (volumes/partitions/fsutil/recordings stubbed).
+      - name: Test dot devdrive (pwsh)
+        run: pwsh -NoProfile -File tests/devdrive.ps1
+
       - name: Doctor dispatch and SSH LF policy
         run: pwsh -NoProfile -File tests/dot_doctor_windows.ps1
 
@@ -383,6 +387,10 @@ jobs:
       - name: Test dot devtmp (5.1)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\devtmp.ps1
+
+      - name: Test dot devdrive (5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\devdrive.ps1
 
       - name: Verify PowerShell script syntax (every .ps1, every rendered .ps1.tmpl)
         shell: pwsh

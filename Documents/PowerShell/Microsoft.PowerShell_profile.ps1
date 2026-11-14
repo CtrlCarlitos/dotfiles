@@ -213,6 +213,7 @@ function dot {
         'remote' { & (Join-Path $repoScripts 'remote-access.ps1') @rest }
         'ssh' { & (Join-Path $repoScripts 'dot-ssh.ps1') @rest }
         'devtmp' { & (Join-Path $repoScripts 'devtmp.ps1') @rest }
+        'devdrive' { & (Join-Path $repoScripts 'devdrive.ps1') @rest }
         'docker-compact' { & (Join-Path $repoScripts 'docker-compact.ps1') @rest }
         'version' { & (Join-Path $repoScripts 'dotversion.ps1') @rest }
         'ssh-fingerprints' { python (Join-Path $repoScripts 'ssh_fingerprints.py') @rest }
@@ -232,6 +233,7 @@ function dot {
             Write-Host ("  {0,-20}  {1}" -f 'dot remote', 'remote-access setup/status/fix')
             Write-Host ("  {0,-20}  {1}" -f 'dot ssh', 'pick an SSH host and connect (--list, or a name)')
             Write-Host ("  {0,-20}  {1}" -f 'dot devtmp', 'build/test output folder for Defender (plan/apply/run)')
+            Write-Host ("  {0,-20}  {1}" -f 'dot devdrive', 'Windows Dev Drive: plan/create/measure Defender cost')
             Write-Host ("  {0,-20}  {1}" -f 'dot docker-compact', "shrink Docker Desktop's data disk (stops Docker)")
             Write-Host ("  {0,-20}  {1}" -f 'dot version', 'which version of the dotfiles repo this is')
             if ($unknown) { $global:LASTEXITCODE = 2 }

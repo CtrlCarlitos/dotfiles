@@ -23,6 +23,7 @@ are reference.
 - [Windows Setup](windows.md) — elevation, PowerShell profiles, `dot upgrade` on Windows, troubleshooting
 - [Install logs](logging.md) — `[data.logging]`: the live log of every install and `dot up`, and `verbose`
 - [Defender & build output](devtmp.md) — `dot devtmp`: one folder for Go/test output, the printed Defender exclusion, Dev Drive notes
+- [Dev Drive](devdrive.md) — `dot devdrive`: create a Windows Dev Drive (partition route) and measure Defender's scan cost
 
 ## Agents and security
 

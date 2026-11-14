@@ -198,3 +198,6 @@ attaches a VHDX or enables a Windows feature - the checks are read-only
 (`Get-Volume`, `fsutil devdrv query`), and the mobile_dev/WHPX rule applies:
 Windows-shaped changes are the user's, and nothing Dev-Drive-shaped is ever
 force-enabled silently.
+
+Creating one is a single command now: [`dot devdrive create`](devdrive.md)
+(admin, partition route, `-WhatIf` first if you like).
