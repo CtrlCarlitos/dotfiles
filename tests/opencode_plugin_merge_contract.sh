@@ -27,7 +27,6 @@ command -v powershell.exe >/dev/null 2>&1 && shells+=(powershell.exe)
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 q() { # $1 = json file, $2 = python expression over d -> compact JSON
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8-sig")); print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$1" "$2"
 }
@@ -44,7 +43,7 @@ PSEOF
 
 for sh in "${shells[@]}"; do
     # `|| true`: a harness that throws must reach the assertions below, not end the test silently.
-    run() { "$sh" -NoProfile -ExecutionPolicy Bypass -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$repo_root/scripts/lib/ps-skills.ps1")" -Path "$(winpath "$1")" -Spec "$spec" 2>&1 | tr -d '\r' || true; }
+    run() { "$sh" -NoProfile -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/harness.ps1")" -Lib "$(ps_path "$sh" "$repo_root/scripts/lib/ps-skills.ps1")" -Path "$(ps_path "$sh" "$1")" -Spec "$spec" 2>&1 | tr -d '\r' || true; }
 
     # a. Serena's file: BOM, mcp only.
     cfg="$tmp/$sh-a.json"

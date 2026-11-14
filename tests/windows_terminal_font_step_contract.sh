@@ -50,8 +50,6 @@ $after = Get-Content $Settings -Raw | ConvertFrom-Json
 Write-Output ("FACE=" + $after.profiles.defaults.font.face)
 PSEOF
 
-to_native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
-
 for sh in "${shells[@]}"; do
     # Fresh install: defaults exist (the merge styled them) but carry no font yet. Comments and a
     # trailing comma keep the JSONC path honest.
@@ -61,7 +59,7 @@ for sh in "${shells[@]}"; do
   "profiles": { "defaults": { "colorScheme": "Catppuccin Mocha", }, "list": [] }
 }
 EOF
-    out="$("$sh" -NoProfile -NonInteractive -File "$(to_native "$harness/run.ps1")" -Settings "$(to_native "$harness/nofont.json")" -Dir "$(to_native "$harness")" 2>&1 || true)"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$harness/run.ps1")" -Settings "$(ps_path "$sh" "$harness/nofont.json")" -Dir "$(ps_path "$sh" "$harness")" 2>&1 || true)"
     case "$out" in
         *'Could not parse'*) fail "$sh: settings.json with no profiles.defaults.font must not hit the catch under StrictMode (got: $out)" ;;
         *'FACE=MesloLGS Nerd Font Mono'*) pass ;;
@@ -69,7 +67,7 @@ EOF
     esac
 
     printf '%s\n' '{ "profiles": { "defaults": { "font": { "face": "Cascadia Mono", "size": 12 } }, "list": [] } }' >"$harness/other.json"
-    out="$("$sh" -NoProfile -NonInteractive -File "$(to_native "$harness/run.ps1")" -Settings "$(to_native "$harness/other.json")" -Dir "$(to_native "$harness")" 2>&1 || true)"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$harness/run.ps1")" -Settings "$(ps_path "$sh" "$harness/other.json")" -Dir "$(ps_path "$sh" "$harness")" 2>&1 || true)"
     case "$out" in
         *'FACE=MesloLGS Nerd Font Mono'*) pass ;;
         *) fail "$sh: a different face must be replaced (got: $out)" ;;
@@ -77,7 +75,7 @@ EOF
 
     printf '%s\n' '{ "profiles": { "defaults": { "font": { "face": "MesloLGS Nerd Font Mono" } }, "list": [] } }' >"$harness/set.json"
     rm -f "$harness/set.json.bak"
-    out="$("$sh" -NoProfile -NonInteractive -File "$(to_native "$harness/run.ps1")" -Settings "$(to_native "$harness/set.json")" -Dir "$(to_native "$harness")" 2>&1 || true)"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$harness/run.ps1")" -Settings "$(ps_path "$sh" "$harness/set.json")" -Dir "$(ps_path "$sh" "$harness")" 2>&1 || true)"
     case "$out" in
         *'Set Windows Terminal default font'*) fail "$sh: an already-set face must be left alone (got: $out)" ;;
         *'FACE=MesloLGS Nerd Font Mono'*)
@@ -87,7 +85,7 @@ EOF
 
     # No profiles at all: the step builds the path down to font.face.
     printf '%s\n' '{ "defaultProfile": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}" }' >"$harness/bare.json"
-    out="$("$sh" -NoProfile -NonInteractive -File "$(to_native "$harness/run.ps1")" -Settings "$(to_native "$harness/bare.json")" -Dir "$(to_native "$harness")" 2>&1 || true)"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$harness/run.ps1")" -Settings "$(ps_path "$sh" "$harness/bare.json")" -Dir "$(ps_path "$sh" "$harness")" 2>&1 || true)"
     case "$out" in
         *'FACE=MesloLGS Nerd Font Mono'*) pass ;;
         *) fail "$sh: settings.json without profiles must still get the font (got: $out)" ;;
@@ -96,7 +94,7 @@ EOF
     # Legacy "profiles": [ ... ] array: left byte-for-byte alone, never replaced by an object.
     printf '%s\n' '{ "profiles": [ { "name": "Windows PowerShell" } ] }' >"$harness/legacy.json"
     cp "$harness/legacy.json" "$harness/legacy.orig"
-    "$sh" -NoProfile -NonInteractive -File "$(to_native "$harness/run.ps1")" -Settings "$(to_native "$harness/legacy.json")" -Dir "$(to_native "$harness")" >/dev/null 2>&1 || true
+    "$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$harness/run.ps1")" -Settings "$(ps_path "$sh" "$harness/legacy.json")" -Dir "$(ps_path "$sh" "$harness")" >/dev/null 2>&1 || true
     if cmp -s "$harness/legacy.json" "$harness/legacy.orig"; then pass; else
         fail "$sh: a legacy profiles array must be left untouched (now: $(cat "$harness/legacy.json"))"
     fi
