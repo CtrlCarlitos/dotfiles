@@ -106,7 +106,8 @@
 
   # OpenCode major line (dotfiles#395, Model A - per-machine choice). "1" is
   # the fleet default; "2" only after the machine's operator ran the V2
-  # opt-in steps (guardrail setup + pilot, see docs/ai-tools.md). Changing it
+  # opt-in steps (guardrail setup + pilot, see docs/terminal.md "OpenCode 2
+  # opt-in"). Changing it
   # re-renders the installers on the next `dot up`.
   opencodeMajor = {{ if $interactive }}{{ promptChoiceOnce . "opencodeMajor" "OpenCode major line (1 = default, 2 = OpenCode 2)" (list "1" "2") "1" }}{{ else }}"1"{{ end }}
 

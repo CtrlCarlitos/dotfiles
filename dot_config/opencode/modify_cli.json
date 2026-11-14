@@ -1,0 +1,28 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  OpenCode 2 CLI settings (~/.config/opencode/cli.json, every OS). V2 migrated
+  the theme/keybinds there from tui.json on its first start (verified live on
+  v2.3.0, Phase 1 dotfiles#395: "theme": "catppuccin" became
+  "theme": {"name": "catppuccin"} - theme is an object now). V1 ignores this
+  file entirely, and V2 stops re-reading tui.json after its one-time
+  migration, so both files are managed side by side: each major reads its own
+  (modify_tui.json for the 1.x line).
+
+  MERGE, not own: only $schema + theme are forced; your keybinds/cli keys
+  stay. Full-line // comments and trailing commas are stripped before parsing
+  (same loader as modify_tui.json).
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "﻿" -}}
+{{- $raw = regexReplaceAll "(?m)^\\s*//.*$" $raw "" -}}
+{{- $raw = regexReplaceAll ",(\\s*[}\\]])" $raw "${1}" | trim -}}
+{{- $cur := dict -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+{{- $_ := set $cur "$schema" "https://opencode.ai/v2/cli.json" -}}
+{{- /* theme.name is forced; a pre-existing theme object's other keys (mode,
+       accents) are the user's and stay. A string theme (never valid in V2)
+       is replaced outright. */ -}}
+{{- $theme := dict -}}
+{{- if hasKey $cur "theme" }}{{ if kindIs "map" (index $cur "theme") }}{{ $theme = index $cur "theme" }}{{ end }}{{ end -}}
+{{- $_ := set $theme "name" "catppuccin" -}}
+{{- $_ := set $cur "theme" $theme -}}
+{{- toPrettyJson $cur }}
