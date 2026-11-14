@@ -293,7 +293,13 @@ Write-Host '  ok: run scopes TMP/TEMP to the child, restores them, and keeps the
 # enables anything (mobile_dev's WHPX rule: Windows-shaped changes are the
 # user's). fsutil is authoritative but admin-only; a denied fsutil falls back
 # to the volume's file system, and only a *trusted* Dev Drive counts.
-function Reset-DevDriveStubs { $script:fsutilExit = 1; $script:fsutilLines = @(); $script:volFs = 'NTFS'; $script:volThrow = $false }
+function Reset-DevDriveStub {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if ($PSCmdlet.ShouldProcess('devdrive stub state', 'reset')) {
+        $script:fsutilExit = 1; $script:fsutilLines = @(); $script:volFs = 'NTFS'; $script:volThrow = $false
+    }
+}
 
 $verdicts = @(
     @{ FsExit = 0; Fs = @('E:\ is a trusted dev drive.');               FsType = 'ReFS';  Want = 'devdrive' },
@@ -303,12 +309,12 @@ $verdicts = @(
     @{ FsExit = 1; Fs = @();                                             FsType = 'NTFS'; Want = 'no' }
 )
 foreach ($c in $verdicts) {
-    Reset-DevDriveStubs
+    Reset-DevDriveStub
     $script:fsutilExit = $c.FsExit; $script:fsutilLines = $c.Fs; $script:volFs = $c.FsType
     $got = Get-DevTmpDevDrive -Path 'E:\dev\tmp'
     if ($got -ne $c.Want) { Fail "[6] verdict (fsutil exit $($c.FsExit), volume $($c.FsType)): expected '$($c.Want)', got '$got' (fsutil said: $($c.Fs -join ' '))" }
 }
-Reset-DevDriveStubs
+Reset-DevDriveStub
 $script:volThrow = $true
 if ((Get-DevTmpDevDrive -Path 'E:\dev\tmp') -ne 'unknown') { Fail '[6] a failed volume probe must be unknown, not a guess' }
 $script:volThrow = $false
@@ -316,7 +322,7 @@ Write-Host '  ok: the verdict is devdrive/no/unknown from fsutil; ReFS is only t
 
 # On a trusted Dev Drive: no exclusion is printed (async performance mode
 # already covers the folder), and apply still does its own two jobs.
-Reset-DevDriveStubs
+Reset-DevDriveStub
 $script:fsutilExit = 0; $script:fsutilLines = @('C:\ is a trusted dev drive.')
 foreach ($sub in 'plan', 'apply') {
     $out = Invoke-Dt @($sub)
@@ -329,7 +335,7 @@ Write-Host '  ok: a trusted Dev Drive skips the exclusion and apply still does i
 
 # ReFS seen without an authoritative answer (non-admin): the exclusion is
 # still printed, with the caveat and the confirming command.
-Reset-DevDriveStubs
+Reset-DevDriveStub
 $script:volFs = 'ReFS'
 $out = Invoke-Dt @('plan')
 if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail "[6] a merely-likely Dev Drive must still print the exclusion:`n$out" }
@@ -337,7 +343,7 @@ if ($out -notmatch 'fsutil devdrv query') { Fail "[6] a merely-likely Dev Drive 
 Write-Host '  ok: a likely Dev Drive keeps the exclusion and says how to confirm'
 
 # Plain NTFS: the plan looks exactly as before - no Dev Drive claims.
-Reset-DevDriveStubs
+Reset-DevDriveStub
 $out = Invoke-Dt @('plan')
 if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail "[6] NTFS must print the exclusion unchanged" }
 if ($out -match 'ReFS') { Fail "[6] NTFS must not claim a likely Dev Drive:`n$out" }
