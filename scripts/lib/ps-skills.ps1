@@ -874,7 +874,9 @@ function Get-OpenCodeSuperpowersVersionV2 {
             $cols = $line -split '\s+'
             if ($cols[0] -eq 'superpowers') { return $cols[1] }
         }
-    } catch { }
+    } catch {
+        return ''
+    }
     return ''
 }
 
