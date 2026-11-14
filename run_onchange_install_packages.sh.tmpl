@@ -2759,7 +2759,7 @@ install_opencode_cli() {
             if [[ ! -f "$oc_config" ]]; then
                 echo "{\"$oc_plugin_key\": [\"$oc_plugin_spec\"]}" > "$oc_config"
             elif command -v jq &>/dev/null; then
-                jq --arg spec "$oc_plugin_spec" ".$oc_plugin_key = ((.$oc_plugin_key // []) + [$spec] | unique)" "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
+                jq --arg spec "$oc_plugin_spec" --arg key "$oc_plugin_key" '.[$key] = ((.[$key] // []) + [$spec] | unique)' "$oc_config" > "$oc_config.tmp" && mv "$oc_config.tmp" "$oc_config"
             fi
         fi
     fi
