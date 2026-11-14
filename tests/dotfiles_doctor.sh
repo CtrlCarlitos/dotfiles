@@ -38,6 +38,7 @@ valid_config() { # $1 = target dir
     mkdir -p "$1/.config/chezmoi"
     cat > "$1/.config/chezmoi/chezmoi.toml" <<'EOF'
 primaryName = "Probe User"
+opencodeMajor = "1"
 primaryEmail = "probe@example.com"
 primaryUsername = "probe"
 primaryKey = "id_probe"
@@ -283,30 +284,67 @@ out9="$(run9)"
 grep -Eq '^skip +mobile-dev ' <<<"$out9" || fail "[9] mobile_dev = false must skip the check: $out9"
 echo "  ok: mobile-dev completeness reported"
 
-# [10] opencode-major: 1.x is the supported line, 2.x warns naming dotfiles#395 and
-#      the guardrail port, a broken --version warns, absent skips. The stub lives in
-#      oc-bin; doctor-bin (built in [9]) has no opencode in it, so the absent case
-#      cannot be shadowed by a user-local install.
+# [10] opencode-major: the detected binary major must match the machine's
+#      opencodeMajor choice (dotfiles#395 Model A); mismatches warn naming both
+#      sides and the guardrail caveat, in-apply mode reports detected-only, a
+#      broken --version warns, absent opencode skips.
 for d in /usr/bin /bin; do
     [ ! -e "$d/opencode" ] || skip "$d/opencode exists - the controlled PATH would resolve it"
 done
 mkdir -p "$TMP/oc-bin"
-H="$TMP/home-oc"; valid_config "$H"
 run10() { env -u CHEZMOI_CONFIG_DIR HOME="$H" PATH="$TMP/oc-bin:$TMP/doctor-bin" bash "$doctor" 2>&1 || true; }
-printf '#!/bin/sh\necho 2.3.0\n' >"$TMP/oc-bin/opencode"; chmod +x "$TMP/oc-bin/opencode"
+oc_cfg() { # $2 = major; replaces the top-level key, keeping TOML table scope
+    local f="$H/.config/chezmoi/chezmoi.toml"
+    grep -v '^opencodeMajor' "$f" > "$f.tmp"
+    { printf 'opencodeMajor = "%s"\n' "$2"; cat "$f.tmp"; } > "$f"
+    rm -f "$f.tmp"
+}
+oc_stub() { printf '#!/bin/sh\necho %s\n' "$1" >"$TMP/oc-bin/opencode"; chmod +x "$TMP/oc-bin/opencode"; }
+
+# a. 2.x binary on a machine configured for 1: warn, name both majors + the port.
+H="$TMP/home-oc"; valid_config "$H"
+oc_stub 2.3.0
 out="$(run10)"
-grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10] a 2.x binary must warn: $out"
-grep -Fq 'dotfiles#395' <<<"$out" || fail "[10] the warning must reference dotfiles#395: $out"
-grep -Fq 'agent-guardrails#534' <<<"$out" || fail "[10] the warning must name the guardrail port: $out"
-printf '#!/bin/sh\necho 1.19.5\n' >"$TMP/oc-bin/opencode"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10a] a major mismatch must warn: $out"
+grep -Fq 'opencodeMajor is 1' <<<"$out" || fail "[10a] the warning must name the configured major: $out"
+grep -Fq 'dotfiles#395' <<<"$out" || fail "[10a] the warning must reference dotfiles#395: $out"
+grep -Fq 'agent-guardrails#534' <<<"$out" || fail "[10a] the warning must name the guardrail port: $out"
+# b. 1.x on configured 1 (the default fixture): ok.
+oc_stub 1.19.5
 out="$(run10)"
-grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10] a 1.x binary must be ok: $out"
-printf '#!/bin/sh\nexit 1\n' >"$TMP/oc-bin/opencode"
+grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10b] a matching 1.x must be ok: $out"
+# c. 2.x on a machine configured for 2: ok.
+H="$TMP/home-oc2"; valid_config "$H"; oc_cfg "$H" 2
+oc_stub 2.3.0
 out="$(run10)"
-grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10] a failing --version must warn: $out"
+grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10c] a matching 2.x must be ok: $out"
+# d. 1.x on configured 2: warn (the other direction flips too).
+oc_stub 1.19.5
+out="$(run10)"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10d] 1.x against opencodeMajor 2 must warn: $out"
+# e. no opencodeMajor key at all (pre-Model-A config): defaults to 1.
+H="$TMP/home-oc-legacy"; valid_config "$H"
+grep -v "^opencodeMajor" "$H/.config/chezmoi/chezmoi.toml" > "$H/.config/chezmoi/legacy.toml"
+mv "$H/.config/chezmoi/legacy.toml" "$H/.config/chezmoi/chezmoi.toml"
+oc_stub 1.19.5
+out="$(run10)"
+grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10e] a legacy config defaults to major 1: $out"
+# f. V2 version spelling ("opencode v2.3.0") is detected as 2.
+H="$TMP/home-oc"; oc_stub 'opencode v2.3.0'
+out="$(run10)"
+grep -Fq 'major 2' <<<"$out" || fail "[10f] the V2 version spelling must detect major 2: $out"
+# g. in-apply mode: the comparison needs only the config FILE (no chezmoi
+#    call, no state lock), so it behaves exactly like standalone.
+out="$(env -u CHEZMOI_CONFIG_DIR DOTFILES_DOCTOR_IN_APPLY=1 HOME="$H" PATH="$TMP/oc-bin:$TMP/doctor-bin" bash "$doctor" 2>&1 || true)"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10g] in-apply must still compare (home-oc is configured 1, stub is v2): $out"
+# h. a failing --version warns; i. no opencode skips.
+oc_stub ''
+printf '#!/bin/sh\nexit 1\n' >"$TMP/oc-bin/opencode"; chmod +x "$TMP/oc-bin/opencode"
+out="$(run10)"
+grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10h] a failing --version must warn: $out"
 rm -f "$TMP/oc-bin/opencode"
 out="$(run10)"
-grep -Eq '^skip +opencode-major ' <<<"$out" || fail "[10] no opencode installed must skip: $out"
+grep -Eq '^skip +opencode-major ' <<<"$out" || fail "[10i] no opencode installed must skip: $out"
 echo "  ok: opencode-major reported"
 
 finish

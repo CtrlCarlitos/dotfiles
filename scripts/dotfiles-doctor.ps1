@@ -439,22 +439,33 @@ if ($isWin) {
     }
 }
 
-# --- OpenCode major: 1.x is the line this repo supports, on purpose (dotfiles#395).
-# A 2.x binary is an upstream flip nobody opted into, and until agent-guardrails#534
-# ships it runs with no guardrail enforcement. When per-machine major choice lands
-# (#395 Model A), key this to that machine's setting instead of hardcoding 1.
+# --- OpenCode major vs the machine's choice (dotfiles#395, Model A) ------------
+# One major per machine, chosen by opencodeMajor in chezmoi.toml ("1" default,
+# "2" only after the V2 opt-in steps: guardrail setup + pilot). A binary on the
+# other major means one side was flipped alone - and until `guardrail setup`
+# re-runs on V2, the plane enforces nothing there (agent-guardrails#534).
+# The choice is parsed from the config FILE, never rendered through chezmoi:
+# config keys are not template data (the map-has-no-entry class), and a file
+# read needs no state lock, so in-apply mode compares too.
 $ocCmd = Get-Command opencode -ErrorAction SilentlyContinue
 if (-not $ocCmd) {
     Result 'skip' 'opencode-major' 'opencode not installed (opt-in via packages.opencode_cli)'
 } else {
     $ocVer = $null
     try { $ocVer = ((& opencode --version 2>&1) | Select-Object -First 1) } catch { $ocVer = $null }
-    if ($ocVer -match '^1\.') {
-        Result 'ok' 'opencode-major' "$ocVer - the 1.x line this repo supports, on purpose (dotfiles#395)"
-    } elseif ($ocVer -match '^2\.') {
-        Result 'warn' 'opencode-major' "$ocVer - this repo runs 1.x on purpose (dotfiles#395); on 2.x the guardrail plane does not enforce yet (agent-guardrails#534)"
+    $ocMajor = $null
+    if ("$ocVer" -match '2\.') { $ocMajor = '2' } elseif ("$ocVer" -match '1\.') { $ocMajor = '1' }
+    $ocWant = '1'
+    if (Test-Path -LiteralPath $config) {
+        $ocMatch = Select-String -LiteralPath $config -Pattern '^\s*opencodeMajor\s*=\s*"([12])"'
+        if ($ocMatch) { $ocWant = $ocMatch.Matches[0].Groups[1].Value }
+    }
+    if (-not $ocMajor) {
+        Result 'warn' 'opencode-major' "unrecognized version output '$ocVer' - expected the 1.x or 2.x line this machine chose (opencodeMajor, dotfiles#395)"
+    } elseif ($ocMajor -eq $ocWant) {
+        Result 'ok' 'opencode-major' "$ocVer - matches this machine's opencodeMajor ($ocWant, dotfiles#395)"
     } else {
-        Result 'warn' 'opencode-major' "unrecognized or missing version output '$ocVer' - expected 1.x, the line this repo supports on purpose (dotfiles#395)"
+        Result 'warn' 'opencode-major' "$ocVer is major $ocMajor but opencodeMajor is $ocWant - align them: set opencodeMajor in chezmoi.toml and dot up, or install the $ocWant.x line (dotfiles#395; on 2.x run guardrail setup or the plane enforces nothing, agent-guardrails#534)"
     }
 }
 

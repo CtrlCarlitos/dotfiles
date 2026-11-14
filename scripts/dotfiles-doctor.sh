@@ -412,20 +412,30 @@ if [ -f "$config" ]; then
 fi
 
 #-------------------------------------------------------------------------------
-# OpenCode major: 1.x is the line this repo supports, on purpose (#395). A 2.x
-# binary is not a V2 adoption - it is an upstream flip nobody opted into, and
-# until agent-guardrails#534 ships it runs with no guardrail enforcement.
+# OpenCode major vs the machine's choice (#395, Model A): every machine runs
+# ONE major, chosen by opencodeMajor in chezmoi.toml ("1" default, "2" only
+# after the V2 opt-in steps: guardrail setup + pilot). A binary on the other
+# major means one side was flipped alone - and until `guardrail setup` re-runs
+# on V2, the plane enforces nothing there (agent-guardrails#534), so say it
+# plainly. In-apply mode cannot read the config (state lock): report the
+# detected major only.
 #-------------------------------------------------------------------------------
 if ! command -v opencode &>/dev/null; then
     result skip opencode-major "opencode not installed (opt-in via packages.opencode_cli)"
-elif oc_ver="$(opencode --version 2>/dev/null | head -n 1)" && [ -n "$oc_ver" ]; then
-    case "$oc_ver" in
-        1.*) result ok opencode-major "$oc_ver - the 1.x line this repo supports, on purpose (dotfiles#395)" ;;
-        2.*) result warn opencode-major "$oc_ver - this repo runs 1.x on purpose (dotfiles#395); on 2.x the guardrail plane does not enforce yet (agent-guardrails#534)" ;;
-        *) result warn opencode-major "unrecognized version output '$oc_ver' - expected 1.x, the line this repo supports on purpose (dotfiles#395)" ;;
-    esac
 else
-    result warn opencode-major "opencode is installed but --version failed - expected 1.x, the line this repo supports on purpose (dotfiles#395)"
+    oc_ver="$(opencode --version 2>/dev/null | head -n 1)" || oc_ver=""
+    case "$oc_ver" in
+        *'v2.'*|2.*) oc_major=2 ;;
+        *'v1.'*|1.*) oc_major=1 ;;
+        *) oc_major="" ;;
+    esac
+    if [ -z "$oc_major" ]; then
+        result warn opencode-major "unrecognized version output '$oc_ver' - expected the 1.x or 2.x line this machine chose (opencodeMajor, dotfiles#395)"
+    elif oc_want="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"([12])".*/\1/p' "$config" 2>/dev/null | head -n 1)" && [ "$oc_major" = "${oc_want:-1}" ]; then
+        result ok opencode-major "$oc_ver - matches this machine's opencodeMajor (${oc_want:-1}, dotfiles#395)"
+    else
+        result warn opencode-major "$oc_ver is major $oc_major but opencodeMajor is ${oc_want:-1} - align them: set opencodeMajor in ~/.config/chezmoi/chezmoi.toml and dot up, or install the ${oc_want:-1}.x line (dotfiles#395; on 2.x run guardrail setup or the plane enforces nothing, agent-guardrails#534)"
+    fi
 fi
 
 if [ "$errors" -gt 0 ]; then
