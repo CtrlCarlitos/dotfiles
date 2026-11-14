@@ -1400,6 +1400,31 @@ opencode_superpowers_refresh() {
     return "$rc"
 }
 
+# --- OpenCode 2 (dotfiles#395 Model A) ---------------------------------------------------
+# V2 moved package plugins to ~/.cache/opencode/npm/<name>-<hash>/<epoch-ms>/
+# node_modules/ (newest epoch loaded; the V1 packages/ layout is gone) and owns
+# their lifecycle: `opencode plugin update` re-resolves the unpinned git spec,
+# `opencode plugin list` reports what is loaded. Verified live on v2.3.0.
+
+# opencode_superpowers_version_v2 - the superpowers row's VERSION from
+# `opencode plugin list` (a text table: ID VERSION SOURCE). Empty when the
+# table has no superpowers row - including the warming-up "No plugins found"
+# right after an install, which is eventually consistent for a few seconds
+# (Phase 1 finding, 2026-11-14): empty means unknown, not absent. The VERSION
+# is a commit hash for git specs, never a semver comparable to a release tag.
+opencode_superpowers_version_v2() {
+    local out
+    out="$(net_timeout 60 opencode plugin list 2>/dev/null)" || return 1
+    printf '%s\n' "$out" | awk '$1 == "superpowers" { print $2; exit }'
+}
+
+# opencode_superpowers_refresh_v2 - V2's own updater. `opencode plugin update`
+# (no id: v2.3.0 answers "No plugin updates available" with exit 0 when
+# current, and re-resolves the git spec when upstream moved).
+opencode_superpowers_refresh_v2() {
+    net_timeout 300 opencode plugin update >/dev/null
+}
+
 # claude_superpowers_installs - one "<version>\t<scope>\t<projectPath>" line per superpowers
 # install Claude Code knows of (`claude plugin list --json`), the user-scope one included.
 # Project- and local-scope installs are per repository and `claude plugin update` run from

@@ -835,6 +835,55 @@ function Get-OpenCodeSuperpowersPathInstall {
     return ''
 }
 
+# --- OpenCode 2 (dotfiles#395, Model A: one major per machine) -------------------------
+# V2 moved package plugins to ~\.cache\opencode\npm\<name>-<hash>\<epoch-ms>\
+# node_modules\ and owns their lifecycle via `opencode plugin`. Verified live
+# against OpenCode v2.3.0 (Phase 1, 2026-11-14).
+
+function Get-OpenCodeDetectedMajor {
+    # V1 prints "1.19.5", V2 "opencode v2.3.0" -> '1'/'2'; '' when unreadable.
+    if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) { return '' }
+    try { $v = (& opencode --version 2>&1 | Select-Object -First 1) } catch { return '' }
+    if ("$v" -match '2\.') { return '2' }
+    if ("$v" -match '1\.') { return '1' }
+    return ''
+}
+
+function Get-OpenCodeConfiguredMajor {
+    # The machine-local opencodeMajor choice (default 1), parsed from the config
+    # FILE: config keys are not execute-template data (the map-has-no-entry
+    # class), and a file read needs no state lock.
+    $want = '1'
+    $cfg = if ($env:CHEZMOI_CONFIG_DIR) { Join-Path $env:CHEZMOI_CONFIG_DIR 'chezmoi.toml' } else { Join-Path $env:USERPROFILE '.config/chezmoi/chezmoi.toml' }
+    if (Test-Path -LiteralPath $cfg) {
+        $m = Select-String -LiteralPath $cfg -Pattern '^\s*opencodeMajor\s*=\s*"([12])"'
+        if ($m) { $want = $m.Matches[0].Groups[1].Value }
+    }
+    return $want
+}
+
+function Get-OpenCodeSuperpowersVersionV2 {
+    # The superpowers row's VERSION from `opencode plugin list` (a text table:
+    # ID VERSION SOURCE; a commit hash for git specs, never a release tag).
+    # Empty when the table has no superpowers row - including the warming-up
+    # "No plugins found" for a few seconds right after an install: empty means
+    # unknown, not absent.
+    try {
+        $out = @(& opencode plugin list 2>$null | ForEach-Object { "$_" })
+        foreach ($line in $out) {
+            $cols = $line -split '\s+'
+            if ($cols[0] -eq 'superpowers') { return $cols[1] }
+        }
+    } catch { }
+    return ''
+}
+
+function Invoke-OpenCodeSuperpowersRefreshV2 {
+    # V2's own updater; "No plugin updates available" exits 0 when current.
+    & opencode plugin update *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
 # The version OpenCode loads: the first cache directory, else the Windows path install ('' when
 # neither exists).
 function Get-OpenCodeSuperpowersVersion {
@@ -1151,7 +1200,19 @@ function Write-SuperpowersReport {
         }
     }
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
-        Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version (Get-OpenCodeSuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
+        if ((Get-OpenCodeDetectedMajor) -eq '2') {
+            # V2's plugin list reports the git spec's commit hash, never a
+            # release tag - incomparable to upstream's semver, so it prints as
+            # the loaded revision, not as "behind".
+            $ocV2 = Get-OpenCodeSuperpowersVersionV2
+            if ($ocV2) {
+                Write-Host "   OpenCode: $ocV2 (git revision; refreshed by dot upgrade)"
+            } else {
+                Write-Host '   OpenCode: version unknown (plugin list empty - still warming up or not installed)'
+            }
+        } else {
+            Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version (Get-OpenCodeSuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')
+        }
     }
     if (Get-Command agy -ErrorAction SilentlyContinue) {
         Write-Host (Format-SuperpowersVersionLine -Harness 'Antigravity' -Version (Get-AntigravitySuperpowersVersion) -Upstream $upstream -Note 're-run dot upgrade')

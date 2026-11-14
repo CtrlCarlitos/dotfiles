@@ -426,15 +426,21 @@ if command -v opencode &>/dev/null; then
                 echo "   OpenCode is current (${oc_ver:-installed})"
             fi
             if printf '%s\n' "$oc_up" | grep -q 'OpenCode 2 is available'; then
-                echo "   OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose"
+                echo "   OpenCode 2 is available - a major this machine has not chosen (opencodeMajor, dotfiles#395); 'opencode upgrade --major' only on purpose"
             fi
         else
             printf '%s\n' "$oc_up"
             echo "   opencode upgrade failed - re-running the installer"
         # Fetch-then-run with the same guard shape as the Claude installer
-        # above (#114).
+        # above (#114). The URL follows the machine's major (opencodeMajor /
+        # the detected binary): each line's installer only serves its own
+        # major (the V1 script refuses --version >= 2), so this can never
+        # cross majors by accident.
+        oc_major_now="$(opencode_detected_major 2>/dev/null || printf '1')"
+        oc_installer_url="https://opencode.ai/install"
+        [ "$oc_major_now" = 2 ] && oc_installer_url="https://opencode.ai/v2/install"
         oc_inst="$(mktemp)"
-        if curl -fsSL -o "$oc_inst" https://opencode.ai/install; then
+        if curl -fsSL -o "$oc_inst" "$oc_installer_url"; then
             # The installer prints a progress bar, an ASCII logo and a "to start" block; the
             # version is the only news. Its whole output is shown only when it fails.
             oc_out="$(mktemp)"
@@ -472,6 +478,17 @@ if command -v opencode &>/dev/null; then
     echo "✨ Updating Superpowers (OpenCode)..."
     if deferred opencode; then
         echo "  opencode deferred - Superpowers (OpenCode) update skipped with it."
+    elif [ "$(opencode_detected_major 2>/dev/null || printf '1')" = 2 ]; then
+        # V2 (dotfiles#395): plugins live in the npm cache layout and are
+        # owned by `opencode plugin`. The list table's VERSION is a commit
+        # hash for git specs, so there is no semver "is current" gate - the
+        # update itself is the cheap no-op ("No plugin updates available").
+        if opencode_superpowers_refresh_v2; then
+            oc_sp_after="$(opencode_superpowers_version_v2 || true)"
+            echo "   Superpowers (OpenCode) refreshed (${oc_sp_after:-version unknown - plugin list still warming up})"
+        else
+            echo "   Superpowers (OpenCode) plugin update failed - skipping"
+        fi
     elif [ -z "$(opencode_superpowers_cache_dirs)" ]; then
         echo "   OpenCode has not installed its Superpowers plugin yet (it does on its next start) - skipping"
     else
@@ -689,7 +706,19 @@ superpowers_report() {
         fi
     fi
     if command -v opencode &>/dev/null; then
-        superpowers_version_line OpenCode "$(opencode_superpowers_version || true)" "$upstream" "re-run dot upgrade"
+        if [ "$(opencode_detected_major 2>/dev/null || printf '1')" = 2 ]; then
+            # V2's plugin list reports the git spec's commit hash, never a
+            # release tag - incomparable to upstream's semver, so it prints
+            # as the loaded revision, not as "behind".
+            oc_sp_ver="$(opencode_superpowers_version_v2 || true)"
+            if [ -n "$oc_sp_ver" ]; then
+                echo "   OpenCode: ${oc_sp_ver} (git revision; refreshed by dot upgrade)"
+            else
+                echo "   OpenCode: version unknown (plugin list empty - still warming up or not installed)"
+            fi
+        else
+            superpowers_version_line OpenCode "$(opencode_superpowers_version || true)" "$upstream" "re-run dot upgrade"
+        fi
     fi
     if command -v agy &>/dev/null; then
         superpowers_version_line Antigravity "$(antigravity_superpowers_version || true)" "$upstream" "re-run dot upgrade"

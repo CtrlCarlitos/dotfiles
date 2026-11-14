@@ -255,6 +255,62 @@ got="$(helper -- opencode_superpowers_cache_dirs)"
 [ -z "$got" ] || fail "opencode_superpowers_cache_dirs: nothing when OpenCode has not installed the plugin, got '$got'"
 pass
 
+# --- V2 (dotfiles#395 Model A): plugin update + plugin list, npm cache layout ----
+# V2 moved package plugins to ~/.cache/opencode/npm/<name>-<hash>/<epoch-ms>/
+# node_modules and gave `opencode plugin` add/list/update. `plugin list` is a
+# text table (ID VERSION SOURCE), eventually consistent right after an install
+# ("No plugins found" for a few seconds - Phase 1 finding, 2026-11-14), and its
+# VERSION column is a commit hash for git specs, so it never matches a semver
+# upstream tag: the refresh always runs and the report line says so instead of
+# crying "behind". Verified live against OpenCode v2.3.0 in a scratch HOME.
+# The shared V1 stub below this section is saved and restored: the end-to-end
+# updater cases later in this file pin V1 semantics.
+cp "$bin/opencode" "$tmp/opencode-v1-stub"
+write_v2_opencode_stub() {
+cat >"$bin/opencode" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    --version) printf 'opencode v2.3.0\n' ;;
+    plugin)
+        case "$2" in
+            list)
+                if [ -n "${OC_LIST_EMPTY:-}" ]; then
+                    printf 'No plugins found\n'
+                else
+                    printf 'ID           VERSION  SOURCE\nsuperpowers  %s  superpowers@git+https://github.com/obra/superpowers.git\n' "${OC_LIST_VER:-22f0b46}"
+                fi
+                ;;
+            update)
+                [ -n "${OC_UPDATE_LOG:-}" ] && printf 'update\n' >>"$OC_UPDATE_LOG"
+                exit "${OC_UPDATE_RC:-0}"
+                ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    *) exit 1 ;;
+esac
+STUB
+chmod +x "$bin/opencode"
+}
+write_v2_opencode_stub
+
+: >"$tmp/oc-update.log"
+helper OC_UPDATE_LOG="$tmp/oc-update.log" -- opencode_superpowers_refresh_v2 ||
+    fail "opencode_superpowers_refresh_v2 must succeed when 'opencode plugin update' does"
+grep -Fqx update "$tmp/oc-update.log" ||
+    fail "opencode_superpowers_refresh_v2 must run 'opencode plugin update' (log: $(cat "$tmp/oc-update.log"))"
+if helper OC_UPDATE_RC=1 -- opencode_superpowers_refresh_v2 2>/dev/null; then
+    fail "opencode_superpowers_refresh_v2 must fail when 'opencode plugin update' does"
+fi
+got="$(helper -- opencode_superpowers_version_v2)"
+[ "$got" = 22f0b46 ] || fail "opencode_superpowers_version_v2 must read the superpowers row's VERSION, got '$got'"
+got="$(helper OC_LIST_EMPTY=1 -- opencode_superpowers_version_v2)"
+[ -z "$got" ] || fail "a warming-up 'No plugins found' table must answer empty, not fail (got '$got')"
+got="$(helper -- opencode_detected_major)"
+[ "$got" = 2 ] || fail "the stub opencode must detect as major 2 for these cases, got '$got'"
+pass
+mv "$tmp/opencode-v1-stub" "$bin/opencode"
+
 mkdir -p "$home/.gemini/config/plugins/superpowers/.claude-plugin"
 printf '{\n  "name": "superpowers",\n  "version": "7.0.0"\n}\n' >"$home/.gemini/config/plugins/superpowers/.claude-plugin/plugin.json"
 got="$(helper -- antigravity_superpowers_version)"
@@ -421,7 +477,7 @@ if grep -Fq 'codex plugin list' "$tmp/stub.log"; then fail "cached plugin: no 'c
 grep -Fq 'codex plugin add superpowers@test-marketplace' "$tmp/stub.log" || fail "cached plugin: the add must still run (codex saw: $(grep codex "$tmp/stub.log" | tr '\n' ' '))"
 expect '   Superpowers (Codex) is 6.4.2 - the marketplace has not published v7.0.0 yet'
 expect '   Codex: 6.4.2 (marketplace latest - upstream v7.0.0 is not published there yet)'
-expect "   OpenCode 2 is available - a major this repo has not adopted yet (dotfiles#395); 'opencode upgrade --major' only on purpose"
+expect "   OpenCode 2 is available - a major this machine has not chosen (opencodeMajor, dotfiles#395); 'opencode upgrade --major' only on purpose"
 # the Codex section is reported after the Claude Code and OpenCode steps now (its add overlaps them)
 cx_line="$(grep -n 'Updating Superpowers (Codex)' "$out" | head -1 | cut -d: -f1)"; oc_line="$(grep -n 'Updating OpenCode' "$out" | head -1 | cut -d: -f1)"
 if [ -n "$cx_line" ] && [ -n "$oc_line" ] && [ "$cx_line" -gt "$oc_line" ]; then pass; else fail "the Codex section must be joined after the OpenCode step (codex at line $cx_line, opencode at $oc_line)"; fi
@@ -605,6 +661,17 @@ Write-Output ('opencode-version=' + (Get-OpenCodeSuperpowersVersion))
 $env:NPM_LOG = $NpmLog
 Write-Output ('opencode-refresh=' + (Invoke-OpenCodeSuperpowersRefresh))
 Write-Output ('opencode-version-after=' + (Get-OpenCodeSuperpowersVersion))
+# V2 helpers (dotfiles#395 Model A): detected major from the stub, the
+# configured major from a config-less fixture home (defaults to 1), the
+# superpowers row from the plugin list table, the warming-up empty table, and
+# the refresh through `opencode plugin update` (whose log the stub writes).
+Write-Output ('oc-major=' + (Get-OpenCodeDetectedMajor))
+Write-Output ('oc-want=' + (Get-OpenCodeConfiguredMajor))
+Write-Output ('oc-sp-v2=' + (Get-OpenCodeSuperpowersVersionV2))
+Write-Output ('oc-sp-v2-refresh=' + (Invoke-OpenCodeSuperpowersRefreshV2))
+$env:OC_LIST_EMPTY = '1'
+Write-Output ('oc-sp-v2-warm=' + ([string]::IsNullOrEmpty((Get-OpenCodeSuperpowersVersionV2))))
+Remove-Item Env:OC_LIST_EMPTY
 Write-Output ('playwright=' + (Test-PlaywrightChromiumInstalled))
 Remove-Item -Recurse -Force (Join-Path $UserDir '.cache/ms-playwright')
 Write-Output ('playwright-absent=' + (Test-PlaywrightChromiumInstalled))
@@ -647,7 +714,13 @@ Write-Output ('refresh-offline=' + (Format-SuperpowersRefreshLine -Harness 'Code
 Write-Output ('refresh-unknown-empty=' + ([string]::IsNullOrEmpty((Format-SuperpowersRefreshLine -Harness 'Codex' -Version '' -Upstream '7.0.0' -Behind 'x'))))
 PSEOF
     : >"$tmp/npm-ps.log"
-    ps_out="$(PATH="$bin:$PATH" GIT_TAGS_DIR="$(winpath "$tags")" pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserDir "$(winpath "$home")" -CacheDir "$(winpath "$oc_dir")" -NpmLog "$(winpath "$tmp/npm-ps.log")" 2>&1 | tr -d '\r' || true)"
+    # The V2 helper cases below need `opencode` to answer as v2.3.0: on Linux
+# pwsh resolves the extensionless stub over any .ps1 in the same dir, so the
+# V1 stub is swapped for the same v2 one the sh section used, then restored.
+cp "$bin/opencode" "$tmp/opencode-v1-stub-ps"
+write_v2_opencode_stub
+ps_out="$(PATH="$bin:$PATH" GIT_TAGS_DIR="$(winpath "$tags")" pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserDir "$(winpath "$home")" -CacheDir "$(winpath "$oc_dir")" -NpmLog "$(winpath "$tmp/npm-ps.log")" 2>&1 | tr -d '\r' || true)"
+mv "$tmp/opencode-v1-stub-ps" "$bin/opencode"
     pexpect() { printf '%s\n' "$ps_out" | grep -Fxq -- "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$ps_out" | tr '\n' '|' | cut -c1-900))"; }
     pexpect 'codex-installed=6.4.2'
     pexpect 'codex-catalog=6.4.2'
@@ -665,6 +738,11 @@ PSEOF
     pexpect 'opencode-version=6.3.0'
     pexpect 'opencode-refresh=True'
     pexpect 'opencode-version-after=7.0.0'
+    pexpect 'oc-major=2'
+    pexpect 'oc-want=1'
+    pexpect 'oc-sp-v2=22f0b46'
+    pexpect 'oc-sp-v2-refresh=True'
+    pexpect 'oc-sp-v2-warm=True'
     grep -Fq "install --prefix $(nativepath "$oc_dir") superpowers@github:obra/superpowers" "$tmp/npm-ps.log" ||
         fail "PowerShell: Invoke-OpenCodeSuperpowersRefresh must refresh inside OpenCode's cache directory; npm saw: $(cat "$tmp/npm-ps.log")"
     pexpect 'playwright=True'
