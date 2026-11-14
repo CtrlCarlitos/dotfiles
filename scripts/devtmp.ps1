@@ -118,9 +118,22 @@ function Initialize-DevTmpDirectory {
 #   'no'        fsutil says not a Dev Drive, or the volume is not ReFS
 #   'unknown'   fsutil said something else (an untrusted Dev Drive, garbage),
 #               or the volume could not be probed at all
+# The drive root of a normalised Windows path, by STRING ONLY: the .ps1 twin
+# runs on the Linux CI runner too, where [IO.Path]::GetPathRoot('E:\x') answers
+# '' (no root on a Unix filesystem) and every root-derived probe would then
+# silently degrade to 'unknown'. Empty when $Path carries no drive letter.
+function Get-DevTmpDriveRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($Path.Length -ge 2 -and $Path[1] -eq ':' -and [char]::IsLetter($Path[0])) {
+        return ($Path.Substring(0, 1) + ':\')
+    }
+    return ''
+}
+
 function Get-DevTmpDevDrive {
     param([Parameter(Mandatory)][string]$Path)
-    $root = [IO.Path]::GetPathRoot($Path)
+    $root = Get-DevTmpDriveRoot -Path $Path
+    if (-not $root) { return 'unknown' }
     if (Get-Command fsutil -ErrorAction SilentlyContinue) {
         # A native command's stderr (the access-denied line when not elevated)
         # is not a PowerShell error; judge by exit code and output.
@@ -194,7 +207,7 @@ function Invoke-DevTmp {
     $path = $verdict.Path
     # `run` never prints the exclusion, so it never needs the verdict either.
     $devdrive = if ($sub -eq 'run') { '' } else { Get-DevTmpDevDrive -Path $path }
-    $devdriveRoot = [IO.Path]::GetPathRoot($path)
+    $devdriveRoot = Get-DevTmpDriveRoot -Path $path
 
     if ($sub -eq 'run') {
         $command = $Arguments[1]
