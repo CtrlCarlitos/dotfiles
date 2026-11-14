@@ -67,7 +67,6 @@ fi
 command -v pwsh >/dev/null 2>&1 || { printf 'SKIP (helpers run under PowerShell): pwsh not installed\n'; finish; exit 0; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 cat >"$tmp/harness.ps1" <<'PSEOF'
 param([string]$Lib)
@@ -128,7 +127,7 @@ $live = Get-DotWslSubnet
 Out 'live-has-found' ($null -ne $live.Found)
 PSEOF
 
-out="$(pwsh -NoProfile -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$lib")" 2>&1 | tr -d '\r')" || fail "the harness must run: $out"
+out="$(pwsh -NoProfile -File "$(ps_path pwsh "$tmp/harness.ps1")" -Lib "$(ps_path pwsh "$lib")" 2>&1 | tr -d '\r')" || fail "the harness must run: $out"
 expect() { case "$out" in *"$1"*) pass ;; *) fail "expected '$1' (got: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-900))" ;; esac; }
 expect 'subnet-20=172.23.96.0/20'
 expect 'subnet-24=192.168.1.0/24'
@@ -195,7 +194,7 @@ PSEOF
 shells=(pwsh)
 command -v powershell.exe >/dev/null 2>&1 && shells+=(powershell.exe)
 for sh in "${shells[@]}"; do
-    out="$("$sh" -NoProfile -NonInteractive -File "$(winpath "$tmp/sync.ps1")" -Lib "$(winpath "$lib")" 2>&1 | tr -d '\r')" || fail "$sh: the sync harness must run: $out"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/sync.ps1")" -Lib "$(ps_path "$sh" "$lib")" 2>&1 | tr -d '\r')" || fail "$sh: the sync harness must run: $out"
     line() { printf '%s\n' "$out" | grep "^$1 " || true; }
     # check LABEL CALLS [SAID]: the exact cmdlet calls, and a fixed substring of what it printed (none
     # given: it must print nothing)

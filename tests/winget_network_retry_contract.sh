@@ -36,7 +36,6 @@ command -v pwsh >/dev/null 2>&1 || { printf 'SKIP (helpers run under PowerShell)
 [ -f "$lib" ] || { finish; exit 1; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 cat >"$tmp/harness.ps1" <<'PSEOF'
 param([string]$Lib)
@@ -81,7 +80,7 @@ PSEOF
 shells=(pwsh)
 command -v powershell.exe >/dev/null 2>&1 && shells+=(powershell.exe)
 for sh in "${shells[@]}"; do
-    out="$("$sh" -NoProfile -NonInteractive -File "$(winpath "$tmp/harness.ps1")" -Lib "$(winpath "$lib")" 2>&1 | tr -d '\r')" || fail "$sh: the harness must run: $out"
+    out="$("$sh" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/harness.ps1")" -Lib "$(ps_path "$sh" "$lib")" 2>&1 | tr -d '\r')" || fail "$sh: the harness must run: $out"
     # check LABEL CALLS SLEPT RESULT [SAID]: attempts made, seconds paused, the code returned, and a fixed
     # substring of what it printed (none given: it must print nothing)
     check() {

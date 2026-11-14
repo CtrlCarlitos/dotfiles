@@ -119,6 +119,26 @@ forbid() { # $1 = file, $2 = literal
     fi
 }
 
+# ps_path HOST PATH -> PATH spelled for HOST's filesystem (#470). The 5.1 twin
+# runs under powershell.exe wherever interop exposes it, but that binary cannot
+# read the Linux filesystem: on WSL a *.exe host gets the wslpath -w UNC form
+# (\\wsl.localhost\<distro>\tmp\... - verified readable by -File), while the
+# Linux pwsh keeps the POSIX path. Git Bash (cygpath exists) is all-Windows:
+# every host gets cygpath -m, as the local winpath() copies always did.
+ps_path() { # $1 = host command name (pwsh|powershell.exe|...), $2 = path
+    case "$1" in
+        *.exe)
+            if command -v cygpath >/dev/null 2>&1; then cygpath -m "$2"
+            elif command -v wslpath >/dev/null 2>&1; then wslpath -w "$2"
+            else printf '%s' "$2"
+            fi ;;
+        *)
+            if command -v cygpath >/dev/null 2>&1; then cygpath -m "$2"
+            else printf '%s' "$2"
+            fi ;;
+    esac
+}
+
 # seed_vscode_config FILE - write the VS Code settings a fresh machine's `chezmoi init` writes
 #   ([data.vscode.settings] from .chezmoitemplates/vscode-settings.toml) into FILE. The settings
 #   live in chezmoi.toml, not in .chezmoidata, so a render without them has empty tiers.
