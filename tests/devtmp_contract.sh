@@ -80,6 +80,17 @@ if grep -nE '[&.|;(][[:space:]]*Add-MpPreference' "$script"; then
     fail "$script: Add-MpPreference must never be invoked (call operator, dot, pipe or subexpression)"
 fi
 
+# --- Dev Drive (#227): detected and reported, never created, mounted or
+# enabled. The mobile_dev/WHPX precedent - Windows-shaped changes are the
+# user's - taken one step further: even detection is read-only, and the
+# volume/format/feature commands stay out of the repo entirely.
+require "$script" 'devdrv query'
+for forbidden in 'Format-Volume' 'New-VHD' 'Mount-VHD' 'New-Partition' \
+    'Enable-WindowsOptionalFeature' 'devdrv enable' 'devdrv trust' \
+    'devdrv untrust' 'devdrv setFiltersAllowed' 'devdrv clearFiltersAllowed'; do
+    forbid "$script" "$forbidden"
+done
+
 # --- both PowerShell profiles carry the arm and the help row (invariant #10:
 # the two profiles are twins). Windows-only: the zsh dispatcher must NOT.
 ps1_profile="$repo_root/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
@@ -103,6 +114,9 @@ require "$doc" 'admin shell'
 require "$doc" 'Dev Drive'
 require "$doc" 'New-MpPerformanceRecording'
 require "$doc" '8.3'
+require "$doc" 'fsutil devdrv query'
+require "$doc" 'trusted Dev Drive'
+require "$doc" 'The repo does not create or mount a Dev Drive'
 require "$repo_root/docs/README.md" '(devtmp.md)'
 require "$repo_root/docs/windows.md" 'devtmp.md'
 

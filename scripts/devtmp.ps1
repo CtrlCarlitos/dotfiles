@@ -9,6 +9,11 @@ freshly built executables is bounded (issue #227). Windows only. Reached as
   dot devtmp run <cmd> [args]   run <cmd> with TMP/TEMP pointed at the folder
                                 for THAT process only (nothing system-wide)
 
+plan/apply also report whether the folder's volume is a Dev Drive, where
+Defender scans asynchronously and the exclusion is unnecessary. Detection is
+READ-ONLY (fsutil devdrv query, Get-Volume); a Dev Drive is never created,
+trusted, mounted or enabled from here.
+
 The folder comes from [data.devtmp] path in ~/.config/chezmoi/chezmoi.toml.
 It holds build and test output ONLY: once excluded, nothing in it is scanned.
 
@@ -102,6 +107,43 @@ function Initialize-DevTmpDirectory {
     }
 }
 
+# Whether the configured folder's volume is a Dev Drive (issue #227, option 2).
+# READ-ONLY: fsutil devdrv query is the only Dev Drive command this repo ever
+# runs - creating, trusting or enabling one is the user's alone (the forbids in
+# tests/devtmp_contract.sh hold that line). fsutil needs an admin shell, so a
+# denied query falls back to the volume's file system: ReFS is the tell-tale of
+# a Dev Drive on a dev box, reported as 'likely', never as fact.
+#   'devdrive'  fsutil says a trusted Dev Drive (asynchronous Defender scans)
+#   'likely'    fsutil denied or absent, and the volume is ReFS
+#   'no'        fsutil says not a Dev Drive, or the volume is not ReFS
+#   'unknown'   fsutil said something else (an untrusted Dev Drive, garbage),
+#               or the volume could not be probed at all
+function Get-DevTmpDevDrive {
+    param([Parameter(Mandatory)][string]$Path)
+    $root = [IO.Path]::GetPathRoot($Path)
+    if (Get-Command fsutil -ErrorAction SilentlyContinue) {
+        # A native command's stderr (the access-denied line when not elevated)
+        # is not a PowerShell error; judge by exit code and output.
+        $ErrorActionPreference = 'Continue'
+        $out = & fsutil devdrv query $root 2>$null
+        $text = (@($out) -join ' ').ToLowerInvariant()
+        if ($LASTEXITCODE -eq 0 -and $text -notmatch 'access is denied|error 5') {
+            if ($text -match 'trusted dev drive') { return 'devdrive' }
+            if ($text -match 'not a dev drive') { return 'no' }
+            if ($text -match 'dev drive') { return 'unknown' }
+            return 'unknown'
+        }
+    }
+    try {
+        $letter = $root.Substring(0, 1)
+        $volume = Get-Volume -DriveLetter $letter -ErrorAction Stop
+        if ($volume -and $volume.FileSystemType -eq 'ReFS') { return 'likely' }
+        return 'no'
+    } catch {
+        return 'unknown'
+    }
+}
+
 function Write-DevTmpUsage {
     Write-Host 'usage: dot devtmp [plan | apply | run <command> [args...]]'
     Write-Host '  plan   (default)  print what would change; change nothing'
@@ -150,6 +192,9 @@ function Invoke-DevTmp {
         return
     }
     $path = $verdict.Path
+    # `run` never prints the exclusion, so it never needs the verdict either.
+    $devdrive = if ($sub -eq 'run') { '' } else { Get-DevTmpDevDrive -Path $path }
+    $devdriveRoot = [IO.Path]::GetPathRoot($path)
 
     if ($sub -eq 'run') {
         $command = $Arguments[1]
@@ -209,11 +254,32 @@ function Invoke-DevTmp {
         Write-Host "  folder     $path  $(if (Test-Path -LiteralPath $path) { '(exists)' } else { '(will be created)' })"
         Write-Host "  GOTMPDIR   $(if ($current) { $current } else { '(unset)' })  ->  $path"
         Write-Host '  TMP/TEMP   set per command only: dot devtmp run <cmd> [args]'
+        if ($devdrive -eq 'devdrive') {
+            Write-Host "  Dev Drive  yes - $devdriveRoot is a trusted Dev Drive; Defender already scans it"
+            Write-Host '              asynchronously (performance mode), so no exclusion is needed'
+        } elseif ($devdrive -eq 'likely') {
+            Write-Host "  Dev Drive  maybe - the volume is ReFS; confirm from an admin shell:"
+            Write-Host "                fsutil devdrv query $devdriveRoot"
+        } elseif ($devdrive -eq 'unknown') {
+            Write-Host "  Dev Drive  unknown (fsutil devdrv query $devdriveRoot from an admin shell says for sure)"
+        } else {
+            Write-Host '  Dev Drive  no'
+        }
     }
     Write-Host ''
-    Write-Host 'Defender exclusion - run this yourself from an ADMIN shell (this script never does):'
-    Write-Host "  $exclusionCommand"
-    Write-Host 'Everything under that folder is then unscanned: build and test output only.'
+    if ($devdrive -eq 'devdrive') {
+        Write-Host "Defender exclusion: NOT needed - $devdriveRoot is a trusted Dev Drive, Defender already"
+        Write-Host 'scans it in asynchronous performance mode; excluding it would only reduce protection.'
+    } else {
+        Write-Host 'Defender exclusion - run this yourself from an ADMIN shell (this script never does):'
+        Write-Host "  $exclusionCommand"
+        Write-Host 'Everything under that folder is then unscanned: build and test output only.'
+        if ($devdrive -eq 'likely') {
+            Write-Host ''
+            Write-Host "Note: the volume $devdriveRoot is ReFS - likely a Dev Drive, where the exclusion is"
+            Write-Host "unnecessary. Confirm from an admin shell: fsutil devdrv query $devdriveRoot"
+        }
+    }
     $global:LASTEXITCODE = 0
 }
 

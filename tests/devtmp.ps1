@@ -145,6 +145,24 @@ function New-DevTmpDirectory {
     if ($PSCmdlet.ShouldProcess($Path)) { $script:calls.Add("New-DevTmpDirectory $Path") }
 }
 
+# Dev Drive detection stays deterministic on every runner: fsutil and
+# Get-Volume are stubbed before any Invoke-DevTmp case runs (functions shadow
+# cmdlets and PATH executables). Defaults say "plain NTFS volume, fsutil
+# denied" - the most common real (non-admin) machine.
+$script:fsutilExit = 1      # nonzero: denied (non-admin) or failed
+$script:fsutilLines = @()   # what a successful fsutil prints
+$script:volFs = 'NTFS'      # Get-Volume's FileSystemType
+$script:volThrow = $false   # Get-Volume itself failing (no Storage cmdlet)
+function global:fsutil {
+    $script:fsutilLines
+    $global:LASTEXITCODE = $script:fsutilExit
+}
+function global:Get-Volume {
+    [CmdletBinding()] param([char]$DriveLetter)
+    if ($script:volThrow) { throw 'no Storage cmdlet' }
+    [pscustomobject]@{ DriveLetter = $DriveLetter; FileSystemType = $script:volFs }
+}
+
 $cfgBody = "[data]`n  [data.devtmp]`n    path = `"C:/dev/tmp`"`n[[data.accounts]]`n  dirs = [`"projects/personal`"]`n"
 $cfg = Get-ScratchConfig $cfgBody
 
@@ -270,6 +288,61 @@ $null = Invoke-Dt @('run', 'devtmp-no-such-command-xyz')
 if ($global:LASTEXITCODE -eq 0) { Fail '[5] run of a missing command must not exit 0' }
 if ($env:TMP -ne 'KEEP-TMP' -or $env:TEMP -ne 'KEEP-TEMP') { Fail '[5] run leaked TMP/TEMP after a missing command' }
 Write-Host '  ok: run scopes TMP/TEMP to the child, restores them, and keeps the exit code'
+
+# --- [6] Dev Drive detection: `dot devtmp` reports it, never creates or
+# enables anything (mobile_dev's WHPX rule: Windows-shaped changes are the
+# user's). fsutil is authoritative but admin-only; a denied fsutil falls back
+# to the volume's file system, and only a *trusted* Dev Drive counts.
+function Reset-DevDriveStubs { $script:fsutilExit = 1; $script:fsutilLines = @(); $script:volFs = 'NTFS'; $script:volThrow = $false }
+
+$verdicts = @(
+    @{ FsExit = 0; Fs = @('E:\ is a trusted dev drive.');               FsType = 'ReFS';  Want = 'devdrive' },
+    @{ FsExit = 0; Fs = @('E:\ is not a dev drive.');                   FsType = 'ReFS';  Want = 'no' },
+    @{ FsExit = 0; Fs = @('E:\ is a dev drive but it is not trusted.'); FsType = 'ReFS';  Want = 'unknown' },
+    @{ FsExit = 1; Fs = @();                                             FsType = 'ReFS';  Want = 'likely' },
+    @{ FsExit = 1; Fs = @();                                             FsType = 'NTFS'; Want = 'no' }
+)
+foreach ($c in $verdicts) {
+    Reset-DevDriveStubs
+    $script:fsutilExit = $c.FsExit; $script:fsutilLines = $c.Fs; $script:volFs = $c.FsType
+    $got = Get-DevTmpDevDrive -Path 'E:\dev\tmp'
+    if ($got -ne $c.Want) { Fail "[6] verdict (fsutil exit $($c.FsExit), volume $($c.FsType)): expected '$($c.Want)', got '$got' (fsutil said: $($c.Fs -join ' '))" }
+}
+Reset-DevDriveStubs
+$script:volThrow = $true
+if ((Get-DevTmpDevDrive -Path 'E:\dev\tmp') -ne 'unknown') { Fail '[6] a failed volume probe must be unknown, not a guess' }
+$script:volThrow = $false
+Write-Host '  ok: the verdict is devdrive/no/unknown from fsutil; ReFS is only the fallback guess'
+
+# On a trusted Dev Drive: no exclusion is printed (async performance mode
+# already covers the folder), and apply still does its own two jobs.
+Reset-DevDriveStubs
+$script:fsutilExit = 0; $script:fsutilLines = @('C:\ is a trusted dev drive.')
+foreach ($sub in 'plan', 'apply') {
+    $out = Invoke-Dt @($sub)
+    if ($global:LASTEXITCODE -ne 0) { Fail "[6] $sub on a Dev Drive must exit 0, got $global:LASTEXITCODE" }
+    if ($out -match 'Add-MpPreference') { Fail "[6] $sub on a Dev Drive must not print an exclusion command:`n$out" }
+    if ($out -notmatch 'Dev Drive') { Fail "[6] $sub on a Dev Drive must say so:`n$out" }
+}
+if (($script:calls -join '; ') -ne 'New-DevTmpDirectory C:\dev\tmp; Set-GoTmpDir C:\dev\tmp') { Fail "[6] apply on a Dev Drive must still create the folder and set GOTMPDIR: $($script:calls -join '; ')" }
+Write-Host '  ok: a trusted Dev Drive skips the exclusion and apply still does its jobs'
+
+# ReFS seen without an authoritative answer (non-admin): the exclusion is
+# still printed, with the caveat and the confirming command.
+Reset-DevDriveStubs
+$script:volFs = 'ReFS'
+$out = Invoke-Dt @('plan')
+if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail "[6] a merely-likely Dev Drive must still print the exclusion:`n$out" }
+if ($out -notmatch 'fsutil devdrv query') { Fail "[6] a merely-likely Dev Drive must name the confirming command:`n$out" }
+Write-Host '  ok: a likely Dev Drive keeps the exclusion and says how to confirm'
+
+# Plain NTFS: the plan looks exactly as before - no Dev Drive claims.
+Reset-DevDriveStubs
+$out = Invoke-Dt @('plan')
+if ($out -notmatch [regex]::Escape("Add-MpPreference -ExclusionPath 'C:\dev\tmp'")) { Fail "[6] NTFS must print the exclusion unchanged" }
+if ($out -match 'ReFS') { Fail "[6] NTFS must not claim a likely Dev Drive:`n$out" }
+Write-Host '  ok: plain NTFS output is unchanged'
+
 
 # Deferred minor: a folder that cannot be created is a one-line refusal and exit 1,
 # not a raw terminating error; nothing else runs afterwards.
