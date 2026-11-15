@@ -457,7 +457,7 @@ if (-not $ocCmd) {
     if ("$ocVer" -match '2\.') { $ocMajor = '2' } elseif ("$ocVer" -match '1\.') { $ocMajor = '1' }
     $ocWant = '1'
     if (Test-Path -LiteralPath $config) {
-        $ocMatch = Select-String -LiteralPath $config -Pattern '^\s*opencodeMajor\s*=\s*"([12])"'
+        $ocMatch = Select-String -LiteralPath $config -Pattern '^\s*opencodeMajor\s*=\s*"?([12])"?\s*$'
         if ($ocMatch) { $ocWant = $ocMatch.Matches[0].Groups[1].Value }
     }
     if (-not $ocMajor) {

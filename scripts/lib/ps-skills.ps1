@@ -856,7 +856,7 @@ function Get-OpenCodeConfiguredMajor {
     $want = '1'
     $cfg = if ($env:CHEZMOI_CONFIG_DIR) { Join-Path $env:CHEZMOI_CONFIG_DIR 'chezmoi.toml' } else { Join-Path $env:USERPROFILE '.config/chezmoi/chezmoi.toml' }
     if (Test-Path -LiteralPath $cfg) {
-        $m = Select-String -LiteralPath $cfg -Pattern '^\s*opencodeMajor\s*=\s*"([12])"'
+        $m = Select-String -LiteralPath $cfg -Pattern '^\s*opencodeMajor\s*=\s*"?([12])"?\s*$'
         if ($m) { $want = $m.Matches[0].Groups[1].Value }
     }
     return $want

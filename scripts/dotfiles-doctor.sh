@@ -431,7 +431,7 @@ else
     esac
     if [ -z "$oc_major" ]; then
         result warn opencode-major "unrecognized version output '$oc_ver' - expected the 1.x or 2.x line this machine chose (opencodeMajor, dotfiles#395)"
-    elif oc_want="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"([12])".*/\1/p' "$config" 2>/dev/null | head -n 1)" && [ "$oc_major" = "${oc_want:-1}" ]; then
+    elif oc_want="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"?([12])"?[[:space:]]*$/\1/p' "$config" 2>/dev/null | head -n 1)" && [ "$oc_major" = "${oc_want:-1}" ]; then
         result ok opencode-major "$oc_ver - matches this machine's opencodeMajor (${oc_want:-1}, dotfiles#395)"
     else
         result warn opencode-major "$oc_ver is major $oc_major but opencodeMajor is ${oc_want:-1} - align them: set opencodeMajor in ~/.config/chezmoi/chezmoi.toml and dot up, or install the ${oc_want:-1}.x line (dotfiles#395; on 2.x run guardrail setup or the plane enforces nothing, agent-guardrails#534)"

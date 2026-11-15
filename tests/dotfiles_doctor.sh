@@ -324,11 +324,20 @@ out="$(run10)"
 grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10d] 1.x against opencodeMajor 2 must warn: $out"
 # e. no opencodeMajor key at all (pre-Model-A config): defaults to 1.
 H="$TMP/home-oc-legacy"; valid_config "$H"
-grep -v "^opencodeMajor" "$H/.config/chezmoi/chezmoi.toml" > "$H/.config/chezmoi/legacy.toml"
+grep -v '^opencodeMajor' "$H/.config/chezmoi/chezmoi.toml" > "$H/.config/chezmoi/legacy.toml"
 mv "$H/.config/chezmoi/legacy.toml" "$H/.config/chezmoi/chezmoi.toml"
 oc_stub 1.19.5
 out="$(run10)"
 grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10e] a legacy config defaults to major 1: $out"
+# e2. a TOML-int choice (opencodeMajor = 2, what promptChoiceOnce persisted on
+#     the VM pilots): parsed as 2, never as "unreadable".
+H="$TMP/home-oc-int"; valid_config "$H"
+{ grep -v '^opencodeMajor' "$H/.config/chezmoi/chezmoi.toml"; printf 'opencodeMajor = 2\n'; } > "$H/.config/chezmoi/int.toml"
+mv "$H/.config/chezmoi/int.toml" "$H/.config/chezmoi/chezmoi.toml"
+oc_stub 2.3.0
+out="$(run10)"
+grep -Eq '^ok +opencode-major ' <<<"$out" || fail "[10e2] an int-typed opencodeMajor = 2 must compare as 2: $out"
+H="$TMP/home-oc"
 # f. V2 version spelling ("opencode v2.3.0") is detected as 2.
 H="$TMP/home-oc"; oc_stub 'opencode v2.3.0'
 out="$(run10)"

@@ -137,6 +137,14 @@ if command -v chezmoi >/dev/null 2>&1; then
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":"1"}' \
         < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/v1.ps1"
     grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v1.ps1" || fail "v1 ps1 render must still carry the SST.opencode catalog install"
+    # 8. promptChoiceOnce persists its choice as a TOML INT (opencodeMajor = 2,
+    #    the live VM-pilot failure of 2026-11-14: eq int64 vs string killed every
+    #    apply). An int-typed override must render identically to the string one.
+    chezmoi execute-template --config "$cfg2" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":2}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/int.ps1"
+    grep -Fq -- "ocWantedMajor = '2'" "$tmp/int.ps1" || fail "int-typed opencodeMajor must render as major 2 (the VM-pilot regression)"
+    grep -Fq -- '@opencode/cli' "$tmp/int.ps1" || fail "int-typed opencodeMajor must take the npm V2 route"
     pass
 fi
 

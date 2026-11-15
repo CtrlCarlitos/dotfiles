@@ -1351,7 +1351,7 @@ opencode_detected_major() {
 opencode_configured_major() {
     local cfg="${1:-$HOME/.config/chezmoi/chezmoi.toml}" m=""
     if [ -f "$cfg" ]; then
-        m="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"([12])".*/\1/p' "$cfg" 2>/dev/null | head -n 1)"
+        m="$(sed -nE 's/^[[:space:]]*opencodeMajor[[:space:]]*=[[:space:]]*"?([12])"?[[:space:]]*$/\1/p' "$cfg" 2>/dev/null | head -n 1)"
     fi
     if [ -n "$m" ]; then printf '%s\n' "$m"; return 0; fi
     opencode_detected_major || printf '1\n'
