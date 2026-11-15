@@ -109,7 +109,7 @@
   # opt-in steps (guardrail setup + pilot, see docs/terminal.md "OpenCode 2
   # opt-in"). Changing it
   # re-renders the installers on the next `dot up`.
-  opencodeMajor = {{ if $interactive }}{{ promptChoiceOnce . "opencodeMajor" "OpenCode major line (1 = default, 2 = OpenCode 2)" (list "1" "2") "1" }}{{ else }}"1"{{ end }}
+  opencodeMajor = {{ if $interactive }}{{ promptChoiceOnce . "opencodeMajor" "OpenCode major line (1 = default, 2 = OpenCode 2)" (list "1" "2") "1" | quote }}{{ else }}"1"{{ end }}
 
   # ==========================================================================
   # Package Configuration (customize in ~/.config/chezmoi/chezmoi.toml)

@@ -152,7 +152,7 @@ _sudo_net_timeout() {
      the key existed must render as major 1 (chezmoi templates are
      missingkey=error). */}}
 {{- $ocMajor := "1" -}}
-{{- if hasKey . "opencodeMajor" }}{{- $ocMajor = .opencodeMajor }}{{- end -}}
+{{- if hasKey . "opencodeMajor" }}{{- $ocMajor = .opencodeMajor | toString }}{{- end -}}
 
 {{- $curatedTotal := 0 -}}
 {{- if stat (joinPath .chezmoi.sourceDir "scripts/curated-agent-skills.txt") -}}

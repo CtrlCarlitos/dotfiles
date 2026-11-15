@@ -308,9 +308,11 @@ Write-Host '  ok: mobile-dev completeness reported'
         Write-FakeOpencode '1.19.5'
         $r = Invoke-OcDoctor
         if ($r.Out -notmatch '(?m)^ok\s+opencode-major\s') { Fail "[9] a matching 1.x must be ok: $($r.Out)" }
-        # c. 2.x on a machine configured for 2: ok.
+        # c. 2.x on a machine configured for 2: ok. The config is written as a
+        #    TOML INT on purpose: promptChoiceOnce persisted exactly that on the
+        #    VM pilots (2026-11-14), and the parse must accept both spellings.
         $cfg = Join-Path $h '.config/chezmoi/chezmoi.toml'
-        (Get-Content -LiteralPath $cfg) -replace '^opencodeMajor = "[12]"', 'opencodeMajor = "2"' |
+        (Get-Content -LiteralPath $cfg) -replace '^opencodeMajor = "?[12]"?', 'opencodeMajor = 2' |
             Set-Content -LiteralPath $cfg -Encoding utf8
         Write-FakeOpencode '2.3.0'
         $r = Invoke-OcDoctor
