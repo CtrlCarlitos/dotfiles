@@ -588,9 +588,11 @@ the next `dot up`. To move a machine to OpenCode 2:
    every opencode session and run `dot up` (the V2 installer replaces the V1
    binary in place; `~/.opencode/bin/opencode2` is only a compat wrapper).
    On Windows, also remove a previously installed V1 package once:
-   `winget uninstall --id SST.opencode --exact` - the major-2 install is
-   npm's `@opencode/cli`, and the two `opencode` binaries must not fight on
-   PATH.
+   `choco uninstall opencode -y` (or `winget uninstall --id SST.opencode
+   --exact` on a machine from before winget dropped that id). The major-2
+   install is winget's `Anomaly.OpenCode`, and the two `opencode` binaries
+   must not fight on PATH. `dot up` removes an npm `@opencode/cli` left by
+   the pilot's npm route itself.
 3. Run `guardrail setup` once more: it re-wires the opencode plane for V2 under
    one approval (`guardrail/index.js` directory plugin + the native
    `permissions` floor, `external_directory: ask` restored).

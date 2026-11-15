@@ -181,7 +181,7 @@ function Test-DevTmpPathSafe {
 $script:NonSessionPathPattern = @{
     claude   = @('\\AnthropicClaude\\')
     codex    = @('\\\.codex\\packages\\app-server-daemon\\', '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)', '\\AppData\\Local\\OpenAI\\Codex\\')
-    opencode = @('\\@opencode-ai?desktop\\', '\\AppData\\Local\\OpenCode\\')
+    opencode = @('\\@opencode(-ai)?desktop\\', '\\AppData\\Local\\OpenCode\\')
 }
 
 # The agent desktop apps (dot upgrade). Their installers cannot replace a running app, and
@@ -199,7 +199,7 @@ $script:AgentDesktopApp = @(
     [pscustomobject]@{ Label = 'ChatGPT / Codex';  Path = '\\WindowsApps\\OpenAI\.(Codex|ChatGPT)|\\AppData\\Local\\OpenAI\\Codex\\'; Service = 'CodexSandboxService.OpenAI.Codex'; Launch = ''; UpgradeId = '9PLM9XGG6VKS' }
     [pscustomobject]@{ Label = 'Antigravity';      Path = '\\Programs\\antigravity\\';                         Service = ''; Launch = ''; UpgradeId = 'Google.Antigravity' }
     [pscustomobject]@{ Label = 'Antigravity IDE';  Path = '\\Programs\\Antigravity IDE\\';                     Service = ''; Launch = ''; UpgradeId = '' }
-    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode-ai?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; Launch = ''; UpgradeId = 'SST.OpenCodeDesktop' }
+    [pscustomobject]@{ Label = 'OpenCode Desktop'; Path = '\\@opencode(-ai)?desktop\\|\\AppData\\Local\\OpenCode\\'; Service = ''; Launch = ''; UpgradeId = 'Anomaly.OpenCode.Desktop' }
     [pscustomobject]@{ Label = 'Ollama';           Path = '\\Programs\\Ollama\\';                              Service = ''; Launch = 'ollama app.exe'; UpgradeId = 'Ollama.Ollama' }
 )
 
