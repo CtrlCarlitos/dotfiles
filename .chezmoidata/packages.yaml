@@ -25,6 +25,8 @@
 #            scripts/migrate-to-winget.ps1 uses it to find and replace that copy
 #   npm      global npm package, the same name on every OS (needs Node). `dot up`
 #            installs it when missing; `dot upgrade` updates it when installed.
+#   major    "1" or "2": the record belongs to that opencodeMajor only (dotfiles#395); the
+#            installer renders the group's pass for the machine's major and no other
 #   note     why this tool, or a caveat worth keeping next to its name
 #   migrate_risk  shown by migrate-to-winget before it
 #            asks; the tool IS a candidate but uninstalling it has a consequence
@@ -649,12 +651,17 @@ catalog:
       choco_was: antigravity
     - id: opencode-desktop
       group: opencode_desktop
-      winget: SST.OpenCodeDesktop
+      winget: Anomaly.OpenCode.Desktop
       choco_was: opencode-desktop
+      note: "winget's SST.OpenCodeDesktop is gone (2026-11-14): upstream republished it as Anomaly.OpenCode.Desktop, a 2.x app"
     - id: opencode-cli
       group: opencode_cli
-      winget: SST.opencode
+      major: "1"
+      choco: opencode
+      note: "Windows only here: the Unix installers use OpenCode's own install script. The 1.x line (opencodeMajor 1, dotfiles#395): winget's 1.x SST.opencode is gone (2026-11-14) and Anomaly.OpenCode is 2.x only, so 1.x is Chocolatey's"
+    - id: opencode-cli-2
+      group: opencode_cli
+      major: "2"
+      winget: Anomaly.OpenCode
       winget_args: "--scope machine"
-      choco_was: opencode
-      note: "Windows only here: the Unix installers use OpenCode's own install script. Chocolatey's opencode package pulled fzf, ripgrep and unzip in as dependencies, which kept those on Chocolatey too"
-      migrate_risk: "close every opencode session first - its binary is replaced (fzf and ripgrep can move after it)"
+      note: "Windows only here. The 2.x line (opencodeMajor 2, dotfiles#395). No choco_was: migrate-to-winget must never move a 1.x install to the 2.x package"

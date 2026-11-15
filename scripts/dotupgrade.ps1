@@ -170,7 +170,8 @@ if ($skipPackageSweeps) {
     if ($dockerKept) { $wingetHold += 'Docker.DockerDesktop' }   # running: its installer would fail mid-sweep
     if ($vsCodeKept) { $wingetHold += 'Microsoft.VisualStudioCode' }   # running: Inno Setup exits 1
     # A live opencode session holds its binary open; replacing it races the running process.
-    if (@($defer) -contains 'opencode') { $wingetHold += 'SST.opencode' }
+    # Only a major-2 machine has it on winget (Anomaly.OpenCode); major 1 is choco's opencode.
+    if (@($defer) -contains 'opencode') { $wingetHold += 'Anomaly.OpenCode' }
     # Claude Desktop and Claude Code share the process name claude.exe, and its installer closes
     # claude.exe (Chocolatey's force-killed every one, Claude Code sessions included). While any
     # OTHER one runs, Claude Desktop waits for the next run - the same rule the choco sweep keeps.

@@ -84,6 +84,10 @@ render '{{ .catalog.packages | toJson }}' > "$tmp/catalog.json" || fail "catalog
 # cask loop (darwin-gated) renders; linux again for the apt lines.
 render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$all_on}" --file "$ps_t" > "$tmp/ps1.rendered" 2>"$tmp/ps1.err" ||
     fail "the .ps1 twin does not render with os=windows and every group on: $(head -c 300 "$tmp/ps1.err")"
+# The OpenCode CLI has one record per opencodeMajor (field `major`, dotfiles#395): the
+# render above is the default major 1, this one major 2.
+render --override-data "{\"chezmoi\":{\"os\":\"windows\"},\"packages\":$all_on,\"opencodeMajor\":\"2\"}" --file "$ps_t" > "$tmp/ps1-major2.rendered" 2>"$tmp/ps1m2.err" ||
+    fail "the .ps1 twin does not render with opencodeMajor 2 and every group on: $(head -c 300 "$tmp/ps1m2.err")"
 render --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"kernel\":{\"osrelease\":\"24.0.0\"}},\"packages\":$all_on}" --file "$sh_t" > "$tmp/sh-darwin.rendered" 2>"$tmp/shd.err" ||
     fail "the .sh twin does not render with os=darwin and every group on: $(head -c 300 "$tmp/shd.err")"
 # kernel.osrelease exists only on a Linux host; the template reads it for WSL
@@ -130,8 +134,15 @@ for i, r in enumerate(cat):
     if "winget" in r and "choco" in r:
         err(where + ": both winget and choco - winget is primary, choco only where winget has no current package")
 
-choco = [r["choco"] for r in cat if "choco" in r]
-winget = [r["winget"] + "|" + r.get("winget_args", "") + "|" + r.get("choco_was", "") for r in cat if "winget" in r]
+    if r.get("major", "1") not in ("1", "2"):
+        err(where + ": major %r - only '1' or '2' (opencodeMajor)" % r.get("major"))
+
+# The installer's view for one opencodeMajor: records of the other major never render.
+def ps_names(major):
+    keep = [r for r in cat if r.get("major", major) == major]
+    return ([r["choco"] for r in keep if "choco" in r],
+            [r["winget"] + "|" + r.get("winget_args", "") + "|" + r.get("choco_was", "") for r in keep if "winget" in r])
+choco, winget = ps_names("1")
 brew  = [r["brew"] for r in cat if "brew" in r]
 cask  = [r["cask"] for r in cat if "cask" in r]
 apt   = [r["apt"] for r in cat if "apt" in r]
@@ -153,6 +164,17 @@ if got != choco:
         % (sorted(set(choco) - set(got)), sorted(set(got) - set(choco))))
 else:
     print("  rendered .ps1 (os=windows, all groups): %d choco names, exactly the catalog, in catalog order" % len(got))
+
+# 3a'. the same for an opencodeMajor 2 render: only that major's records
+ps1 = read("ps1-major2.rendered")
+choco2, winget2 = ps_names("2")
+gotw = re.findall(r'^\$wingetPackages \+= "([^"]+)"', ps1, re.M)
+got = re.findall(r'^\$packages \+= "([^"]+)"', ps1, re.M)
+if gotw != winget2 or got != choco2:
+    err("ps1 render (opencodeMajor 2): names differ from the catalog's major-2 view - winget missing=%s extra=%s, choco missing=%s extra=%s"
+        % (sorted(set(winget2) - set(gotw)), sorted(set(gotw) - set(winget2)), sorted(set(choco2) - set(got)), sorted(set(got) - set(choco2))))
+else:
+    print("  rendered .ps1 (opencodeMajor 2, all groups): %d winget ids and %d choco names, exactly the catalog's major-2 view" % (len(gotw), len(got)))
 
 # 3b. the .sh on darwin: every formula and every cask
 sh = read("sh-darwin.rendered")

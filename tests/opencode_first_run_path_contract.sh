@@ -110,8 +110,8 @@ if command -v chezmoi >/dev/null 2>&1; then
 fi
 
 # 7. A machine configured for major 2 renders the V2 route on both twins: the
-#    v2 install URL (Unix) / npm @opencode/cli (Windows, no winget V2 package
-#    yet), the native `plugins` key in the superpowers writer, and the V2 MCP
+#    v2 install URL (Unix) / winget Anomaly.OpenCode (Windows), the native
+#    `plugins` key in the superpowers writer, and the V2 MCP
 #    shape (mcp.servers with disabled) - never the V1 literals. Direct renders,
 #    not render_to: it wraps its override under "packages", and opencodeMajor
 #    is a top-level machine key.
@@ -126,23 +126,24 @@ if command -v chezmoi >/dev/null 2>&1; then
     for literal in 'https://opencode.ai/v2/install' 'oc_plugin_key="plugins"' 'root_key = "servers"'; do
         grep -Fq -- "$literal" "$tmp/v2.sh" || fail "v2 sh render must carry '$literal'"
     done
-    for literal in '@opencode/cli' "ocWantedMajor = '2'" 'disabled = $false'; do
+    for literal in '$wingetPackages += "Anomaly.OpenCode|' "ocWantedMajor = '2'" 'disabled = $false'; do
         grep -Fq -- "$literal" "$tmp/v2.ps1" || fail "v2 ps1 render must carry '$literal'"
     done
-    # The catalog winget/choco passes must NOT run for opencode_cli on major 2:
-    # they would install the V1 SST.opencode next to npm's V2 binary. Assert on
-    # the code line, not the prose (stale comments may still name the package).
-    if grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v2.ps1"; then
-        fail "v2 ps1 render must not install SST.opencode (the V1 catalog install)"
-    fi
+    # One catalog pass per major (winget dropped the 1.x SST.opencode on
+    # 2026-11-14; Anomaly.OpenCode is 2.x only): major 2 must NOT render the
+    # choco 1.x pass, and never the npm route (its postinstall-stub binary).
+    # Assert on the code lines, not the prose.
+    if grep -Fq -- '$packages += "opencode"' "$tmp/v2.ps1"; then fail "v2 ps1 render must not install choco's 1.x opencode"; fi
+    if grep -Fq -- 'npm install -g "@opencode/cli"' "$tmp/v2.ps1"; then fail "v2 ps1 render must not install OpenCode from npm"; fi
     if grep -Fq -- 'opencode.ai/install | bash' "$tmp/v2.sh"; then fail "v2 sh render must not carry the V1 installer URL"; fi
-    if grep -Fq -- 'choco install opencode' "$tmp/v2.ps1"; then fail "v2 ps1 render must not carry the V1 choco route"; fi
-    # ... while a major-1 render keeps the catalog passes (SST.opencode).
+    # ... while major 1 renders only the choco pass.
     cfg2="$tmp/empty2.toml"; : >"$cfg2"
     chezmoi execute-template --config "$cfg2" --source "$repo_root" \
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":"1"}' \
         < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/v1.ps1"
-    grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v1.ps1" || fail "v1 ps1 render must still carry the SST.opencode catalog install"
+    grep -Fq -- '$packages += "opencode"' "$tmp/v1.ps1" || fail "v1 ps1 render must carry choco's opencode (the 1.x route)"
+    if grep -Fq -- '$wingetPackages += "Anomaly.OpenCode|' "$tmp/v1.ps1"; then fail "v1 ps1 render must not install winget's 2.x Anomaly.OpenCode"; fi
+    if grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v1.ps1"; then fail "v1 ps1 render must not install the dead SST.opencode id"; fi
     # 8. promptChoiceOnce persists its choice as a TOML INT (opencodeMajor = 2,
     #    the live VM-pilot failure of 2026-11-14: eq int64 vs string killed every
     #    apply). An int-typed override must render identically to the string one.
@@ -150,43 +151,51 @@ if command -v chezmoi >/dev/null 2>&1; then
         --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":2}' \
         < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/int.ps1"
     grep -Fq -- "ocWantedMajor = '2'" "$tmp/int.ps1" || fail "int-typed opencodeMajor must render as major 2 (the VM-pilot regression)"
-    grep -Fq -- '@opencode/cli' "$tmp/int.ps1" || fail "int-typed opencodeMajor must take the npm V2 route"
+    grep -Fq -- '$wingetPackages += "Anomaly.OpenCode|' "$tmp/int.ps1" || fail "int-typed opencodeMajor must take the winget V2 route"
     pass
-fi
 
-# 9. EXECUTED: the Windows V2 route against an npm 12 that runs no install
-#    script it was not allowed to (#430 pilot, 2026-11-14: @opencode/cli's
-#    bin/opencode.exe stayed the postinstall placeholder, every opencode call
-#    failed, and the apply still printed "no errors"). The fake npm heals the
-#    shim only for --allow-scripts=@opencode/cli; the tripwire must speak up
-#    when the shim resolves but does not run.
-if command -v chezmoi >/dev/null 2>&1 && command -v pwsh >/dev/null 2>&1; then
-    from="$(grep -n '^\$ocWorks = \$false' "$tmp/v2.ps1" | head -n 1 | cut -d: -f1)"
-    to="$(grep -n '^# Superpowers skills for OpenCode' "$tmp/v2.ps1" | head -n 1 | cut -d: -f1)"
-    [ -n "$from" ] && [ -n "$to" ] || fail "v2 ps1: the OpenCode install block was not found"
-    sed -n "${from},$((to - 1))p" "$tmp/v2.ps1" >"$tmp/oc-block.ps1"
-    cat >"$tmp/oc-fixture.ps1" <<'POWERSHELL'
-$ErrorActionPreference = 'Stop'
-$block, $mode = $args
-$env:LOCALAPPDATA = [IO.Path]::GetTempPath()
-$script:ocHealthy = $false
-function npm {
-    if ($mode -eq 'heal' -and ($args -contains 'install') -and ($args -contains '--allow-scripts=@opencode/cli')) { $script:ocHealthy = $true }
-    $global:LASTEXITCODE = 0
-}
-function opencode {
-    if (-not $script:ocHealthy) { throw "Program 'opencode.exe' failed to run: The specified executable is not a valid application for this OS platform." }
-    'opencode v2.3.0'
-    $global:LASTEXITCODE = 0
-}
-Invoke-Expression (Get-Content -Raw $block)
+    # 9. The rendered route blocks EXECUTED. Major 2: once winget's binary is
+    #    there, an npm @opencode/cli (the pilot's route, whose shim the profile
+    #    puts first on PATH) is removed; with no working binary it says winget.
+    #    Major 1: the legacy opencode-ai shim goes, and a failure names choco.
+    if command -v pwsh >/dev/null 2>&1; then
+        for major in 1 2; do
+            src="$tmp/v$major.ps1"
+            awk '/^# OpenCode: one package per major/ {on=1} /^# Major-aware tripwire/ {exit} on {print}' "$src" >"$tmp/route$major.ps1"
+            grep -q 'ocWorks' "$tmp/route$major.ps1" || fail "v$major ps1: the OpenCode route block was not found in the render"
+        done
+        cat >"$tmp/route-harness.ps1" <<'POWERSHELL'
+param([string]$Block, [string]$Mode, [string]$Local)
+# Both winget roots point into the fixture: a real Anomaly.OpenCode on the host must not count.
+$env:LOCALAPPDATA = $Local
+$env:ProgramFiles = Join-Path $Local 'pf'
+$script:npmArgs = @()
+function Invoke-Quietly { param([string]$Description, [scriptblock]$Action) & $Action }
+function npm { $script:npmArgs += "$args"; $global:LASTEXITCODE = 0 }
+function opencode { if ($Mode -ne 'works') { throw 'not a valid application for this OS platform' }; 'opencode v2.2.7'; $global:LASTEXITCODE = 0 }
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath $Block)))
+"npm=$($script:npmArgs -join ';')"
 POWERSHELL
-    ocps() { pwsh -NoProfile -File "$(cygpath -w "$tmp/oc-fixture.ps1" 2>/dev/null || printf '%s' "$tmp/oc-fixture.ps1")" \
-        "$(cygpath -w "$tmp/oc-block.ps1" 2>/dev/null || printf '%s' "$tmp/oc-block.ps1")" "$1" 2>&1; }
-    out="$(ocps heal)" || fail "v2 ps1 heal: the block threw (got: $out)"
-    case "$out" in *'the 2.x line this machine chose'*) pass ;; *) fail "v2 ps1: npm must install @opencode/cli with --allow-scripts=@opencode/cli so its postinstall lays the binary down (got: $out)" ;; esac
-    out="$(ocps dead)" || fail "v2 ps1 dead: the block threw (got: $out)"
-    case "$out" in *"does not run"*) pass ;; *) fail "v2 ps1: a resolving-but-dead opencode must be reported, not passed in silence (got: $out)" ;; esac
+        harness="$(ps_path pwsh "$tmp/route-harness.ps1")"
+        run_route() { # $1 = major, $2 = works|dead, $3 = LOCALAPPDATA
+            pwsh -NoProfile -File "$harness" "$(ps_path pwsh "$tmp/route$1.ps1")" "$2" "$(ps_path pwsh "$3")" 2>&1
+        }
+        # --scope machine (the catalog's winget_args): the package lands under Program Files.
+        la="$tmp/la-winget"; mkdir -p "$la/pf/WinGet/Packages/Anomaly.OpenCode_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        : >"$la/pf/WinGet/Packages/Anomaly.OpenCode_Microsoft.Winget.Source_8wekyb3d8bbwe/opencode.exe"
+        out="$(run_route 2 works "$la")" || fail "v2 route: the block failed (got: $out)"
+        case "$out" in *'npm=rm -g @opencode/cli'*) pass ;; *) fail "v2 route: winget's binary present - the npm @opencode/cli must be removed (got: $out)" ;; esac
+        case "$out" in *'is not working'*) fail "v2 route: no warning when opencode runs (got: $out)" ;; *) pass ;; esac
+        la0="$tmp/la-empty"; mkdir -p "$la0"
+        out="$(run_route 2 dead "$la0")" || fail "v2 route: a missing binary must not end the run (got: $out)"
+        case "$out" in *'rm -g @opencode/cli'*) fail "v2 route: no winget binary - npm must be left alone (got: $out)" ;; *) pass ;; esac
+        case "$out" in *'winget install --id Anomaly.OpenCode --exact'*) pass ;; *) fail "v2 route: a dead install must name the winget fix (got: $out)" ;; esac
+        out="$(run_route 1 dead "$la0")" || fail "v1 route: a missing binary must not end the run (got: $out)"
+        case "$out" in *'npm=rm -g opencode-ai'*) pass ;; *) fail "v1 route: the legacy npm opencode-ai shim must be removed (got: $out)" ;; esac
+        case "$out" in *'choco install opencode -y'*) pass ;; *) fail "v1 route: a dead install must name the choco fix (got: $out)" ;; esac
+    else
+        skip_part 'pwsh not installed - the executed OpenCode route blocks (case 9)'
+    fi
 fi
 
 finish

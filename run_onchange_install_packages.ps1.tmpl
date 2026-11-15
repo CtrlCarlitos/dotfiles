@@ -1013,24 +1013,22 @@ Install-NpmCatalogTool -Package @('{{ includeTemplate "pkg-names" (dict "manager
 {{- end }}
 
 {{- if $opencode_desktop }}
-# OpenCode Desktop (spec section 5) - official Chocolatey package (opencode-desktop,
-# confirmed current on community.chocolatey.org at 1.18.30, matching the
-# upstream anomalyco/opencode release train). Rides the capped choco loop
-# like every other desktop package; the OpenCode CLI is a separate
+# OpenCode Desktop (spec section 5) - winget's Anomaly.OpenCode.Desktop (the
+# catalog entry; SST.OpenCodeDesktop is gone). The OpenCode CLI is a separate
 # opencode_cli group - different software, different gate.
 {{ includeTemplate "choco-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{ includeTemplate "winget-packages" (dict "group" "opencode_desktop" "catalog" .catalog.packages) }}
 {{- end }}
 
 {{- if $opencode_cli }}
-# OpenCode CLI: on major 1, winget's SST.opencode (+ choco fallback) via the
-# catalog passes below, and the OpenCode section further down checks the binary
-# works and wires Superpowers. On major 2 (dotfiles#395 Model A) both catalog
-# passes are SKIPPED - winget/choco carry V1 only, and the section installs
-# npm's @opencode/cli instead; a leftover V1 install should be removed once
-# (winget uninstall --id SST.opencode) so the two binaries never fight on PATH.
+# OpenCode CLI: one catalog pass per major (dotfiles#395). Major 1 is choco's
+# opencode (winget's 1.x SST.opencode is gone, and Anomaly.OpenCode is 2.x
+# only); major 2 is winget's Anomaly.OpenCode. Never both: the other pass would
+# put the other major's binary on PATH. The OpenCode section further down checks
+# the binary works and wires Superpowers.
 {{- if ne $ocMajor "2" }}
 {{ includeTemplate "choco-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
+{{- else }}
 {{ includeTemplate "winget-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
 {{- end }}
 {{- end }}
@@ -2095,81 +2093,58 @@ if ($env:ChocolateyInstall -and (Test-Path (Join-Path $env:ChocolateyInstall 'li
 # done by the agent-guardrails installer, and the Serena MCP registration
 # into opencode.json stays with Serena in agent_toolkit.
 
-# OpenCode: winget's SST.opencode, installed by the catalog's winget pass above (Chocolatey's
-#    opencode package only where winget is missing). NOT npm: opencode-ai's npm package only fetches
-#    its real platform binary in a postinstall script, and any install
-#    where that didn't run (npm 12 script handling, --ignore-scripts,
-#    partial installs) leaves bin/opencode.exe an invalid exe - every
-#    launch then dies with "not a valid application for this OS platform"
-#    from the %APPDATA%\npm\opencode.ps1 shim (confirmed live 2026-08-31
-#    on a machine this repo had npm-installed it on). The --version
-#    re-check matters because Get-Command alone is fooled by that shim
-#    (the shim exists, the binary inside it is dead), and the npm rm is
-#    required or the leftover shim keeps shadowing choco's binary - the
-#    PowerShell profile prepends %APPDATA%\npm to PATH ahead of the real binary.
-# winget installs it as a portable package: its command link lands in WinGet\Links, which a
-# first portable install adds to the user PATH - this session only sees it after a re-read.
-$wingetLinks = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
-if ((Test-Path $wingetLinks) -and (($env:Path -split ';') -notcontains $wingetLinks)) { $env:Path = "$wingetLinks;" + $env:Path }
+# OpenCode: one package per major, installed by the catalog pass above (dotfiles#395):
+#    major 1 choco's opencode, major 2 winget's Anomaly.OpenCode. NOT npm: both
+#    npm packages (V1 opencode-ai, V2 @opencode/cli) leave bin/opencode.exe a stub
+#    until a postinstall replaces it, and any install where that didn't run (npm
+#    12 runs no script it was not allowed to, --ignore-scripts, partial installs)
+#    dies with "not a valid application for this OS platform" from the
+#    %APPDATA%\npm\opencode.ps1 shim (live 2026-08-31 for V1, 2026-11-14 for V2,
+#    #434/#430). The --version re-check matters because Get-Command alone is
+#    fooled by that shim, and the npm rm is required or a leftover shim keeps
+#    shadowing the real binary - the PowerShell profile prepends %APPDATA%\npm
+#    to PATH ahead of it.
+{{- if eq $ocMajor "2" }}
+# winget installs Anomaly.OpenCode as a portable package (--scope machine, the catalog's
+# winget_args): a link in WinGet\Links where it can create symlinks, otherwise its package
+# directory added to the PATH - either way this session only sees it after a re-read. Add the
+# Machine/User PATH entries this session lacks (not a full rebuild: %APPDATA%\npm can be
+# session-only, and dropping it skips every npm step).
+$ocWingetRoots = @(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'WinGet' }; if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet' })
+$ocPathAdd = @(@($ocWingetRoots | ForEach-Object { Join-Path $_ 'Links' }) + @([System.Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') + @([System.Environment]::GetEnvironmentVariable('Path', 'User') -split ';') | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and (($env:Path -split ';') -notcontains $_) } | Select-Object -Unique)
+if ($ocPathAdd.Count -gt 0) { $env:Path = ($ocPathAdd -join ';') + ';' + $env:Path }
+# The pilot's npm route (#395 before the winget package): its shim shadows winget's binary.
+$ocWingetExe = @($ocWingetRoots | ForEach-Object { Get-Item -Path (Join-Path $_ 'Links\opencode.exe'), (Join-Path $_ 'Packages\Anomaly.OpenCode_*\opencode.exe') -ErrorAction SilentlyContinue })
+if ($ocWingetExe.Count -gt 0 -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+    Invoke-Quietly -Description "Failed to remove the npm @opencode/cli install" -Action { npm rm -g "@opencode/cli" --loglevel=error --no-progress 2>$null | Out-Null }
+}
+{{- else }}
+# Make choco's shim resolvable by the OpenCode-gated steps below, ahead of a leftover winget
+# SST.opencode link (remove that once: winget uninstall --id SST.opencode). Prepend choco's bin
+# rather than rebuild Machine+User: %APPDATA%\npm can be session-only (the profile prepends it),
+# and a full rebuild would drop it, silently skipping every later npm/npx step.
+$chocoBin = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall "bin" } else { "C:\ProgramData\chocolatey\bin" }
+if (Test-Path $chocoBin) {
+    $env:Path = "$chocoBin;" + $env:Path
+} else {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Invoke-Quietly -Description "Failed to remove legacy npm opencode-ai shim" -Action { npm rm -g opencode-ai --loglevel=error --no-progress 2>$null | Out-Null }
+}
+{{- end }}
 $ocWorks = $false
 if (Get-Command opencode -ErrorAction SilentlyContinue) {
     try { opencode --version 2>&1 | Out-Null; $ocWorks = ($LASTEXITCODE -eq 0) } catch { $ocWorks = $false }
 }
 if (-not $ocWorks) {
-{{ if eq $ocMajor "2" }}
-    # OpenCode 2 (dotfiles#395 Model A): no winget/choco V2 package exists yet,
-    # so the Windows route is npm's @opencode/cli. Its bin/opencode.exe is a
-    # 229-byte placeholder that the package's postinstall replaces with the
-    # platform binary, and npm 12+ runs no install script it was not told to
-    # (allow-scripts) - without the allowlist the install exits 0 and leaves a
-    # dead shim ("not a valid application for this OS platform", #430 pilot).
-    # Same shape as agent-browser. dot upgrade self-updates via `opencode upgrade`.
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing OpenCode 2 (@opencode/cli, npm - no winget V2 package yet)..." -ForegroundColor Yellow
-        npm install -g --allow-scripts=@opencode/cli "@opencode/cli" --loglevel=error --no-progress 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  Warning: @opencode/cli install failed (exit $LASTEXITCODE)" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "  Warning: npm not found - cannot install OpenCode 2 (needs Node/npm; the core group installs it)" -ForegroundColor Red
-    }
-{{ else }}
-    # Get-Command guard + try/catch, not a bare call: choco can legitimately
-    # be absent here (non-admin run where Chocolatey itself was skipped -
-    # see the degraded-mode warning at the top of this script), and under
-    # $ErrorActionPreference=Stop a bare `choco ...` would then throw
-    # CommandNotFoundException and silently kill everything after this
-    # point (Superpowers, skills, Playwright, Antigravity, desktop apps).
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        # The winget pass above installs SST.opencode; reaching here means it failed (its warning
-        # is printed there) or the binary does not run.
-        Write-Host "  Warning: OpenCode (winget SST.opencode) is not working - see the winget install above, or run: winget install --id SST.opencode --exact" -ForegroundColor Red
-    } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing OpenCode (choco - winget is not available)..." -ForegroundColor Yellow
-        try {
-            choco install opencode -y --no-progress | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "  Warning: Failed to install OpenCode (choco exit code $LASTEXITCODE)" -ForegroundColor Red
-            }
-        } catch {
-            Write-Host "  Warning: Failed to install OpenCode - $_" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "  Warning: choco not found - cannot install OpenCode (needs Chocolatey; re-run elevated so it gets installed)" -ForegroundColor Red
-    }
-    Invoke-Quietly -Description "Failed to remove legacy npm opencode-ai shim" -Action { npm rm -g opencode-ai --loglevel=error --no-progress 2>$null }
-    # Make choco's shim resolvable by the OpenCode-gated steps below. Prefer
-    # prepending choco's bin over the full Machine+User rebuild: %APPDATA%\npm
-    # (where the npm/npx shims live) can be session-only - the PowerShell
-    # profile prepends it at runtime - and a full rebuild would drop it from
-    # this session, silently skipping every later npm/npx step.
-    $chocoBin = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall "bin" } else { "C:\ProgramData\chocolatey\bin" }
-    if (Test-Path $chocoBin) {
-        $env:Path = "$chocoBin;" + $env:Path
-    } else {
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    }
-{{ end }}
+    # The catalog pass above printed its own failure; reaching here means it failed or the
+    # binary does not run.
+{{- if eq $ocMajor "2" }}
+    Write-Host "  Warning: OpenCode 2 (winget Anomaly.OpenCode) is not working - see the winget install above, or run: winget install --id Anomaly.OpenCode --exact" -ForegroundColor Red
+{{- else }}
+    Write-Host "  Warning: OpenCode (choco opencode) is not working - see the choco install above, or run elevated: choco install opencode -y" -ForegroundColor Red
+{{- end }}
 }
 
 # Major-aware tripwire (dotfiles#395): verify the binary landed on the major
@@ -2182,10 +2157,6 @@ if ("$ocMajorVer" -match "$ocWantedMajor\.") {
     Write-Host "  OpenCode $ocMajorVer (the $ocWantedMajor.x line this machine chose, dotfiles#395)"
 } elseif ("$ocMajorVer" -match '[12]\.') {
     Write-Host "  Warning: OpenCode reports '$ocMajorVer' - not the $ocWantedMajor.x line this machine chose (opencodeMajor, dotfiles#395); on 2.x also run guardrail setup or the plane enforces nothing (agent-guardrails#534)" -ForegroundColor Red
-} elseif (Get-Command opencode -ErrorAction SilentlyContinue) {
-    # A shim that resolves but does not run (an npm package whose postinstall
-    # never ran) used to pass here in silence and the apply still said "no errors".
-    Write-Host "  Warning: OpenCode is on PATH but 'opencode --version' does not run - the $ocWantedMajor.x install is broken and the OpenCode steps after it (Superpowers, guardrail plane major) cannot work (dotfiles#395)" -ForegroundColor Red
 }
 
 # Superpowers skills for OpenCode (separate mechanism from Claude
