@@ -841,6 +841,40 @@ function Get-OpenCodeSuperpowersPathInstall {
     return ''
 }
 
+# The path install's own version ('' when there is none). On OpenCode 2 it is a directory plugin,
+# which `opencode plugin list` never lists, so this file is the only place its version can be read.
+function Get-OpenCodeSuperpowersPathVersion {
+    $dir = Get-OpenCodeSuperpowersPathInstall
+    if (-not $dir) { return '' }
+    try {
+        $json = Get-Content -LiteralPath (Join-Path $dir 'package.json') -Raw | ConvertFrom-Json
+        if ($json.PSObject.Properties['version']) { return [string]$json.version }
+    } catch { Write-Verbose "unreadable package.json: $dir" }
+    return ''
+}
+
+# Re-resolve the path install to upstream HEAD with the same `npm install --prefix` that made it,
+# on both majors: OpenCode 2's `opencode plugin update` moves only registry and git package specs,
+# never a directory plugin (dotfiles#434 Run 15). $false when npm failed; its output is shown then.
+function Invoke-OpenCodeSuperpowersPathRefresh {
+    $dir = Get-OpenCodeSuperpowersPathInstall
+    if (-not $dir) { return $false }
+    $prefix = Split-Path -Parent (Split-Path -Parent $dir)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
+        $out = @(& npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix $prefix --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { Write-Host "    $_" }; return $false }
+        return $true
+    } catch {
+        Write-Host "    $($_.Exception.Message)"
+        return $false
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 # --- OpenCode 2 (dotfiles#395, Model A: one major per machine) -------------------------
 # V2 moved package plugins to ~\.cache\opencode\npm\<name>-<hash>\<epoch-ms>\
 # node_modules\ and owns their lifecycle via `opencode plugin`. Verified live
@@ -940,8 +974,11 @@ function Invoke-OpenCodeSuperpowersRefresh {
 # Latest, where reading $json.plugin off a file without the key throws. Serena's file never has
 # one, so on a fresh Windows install the catch below used to report a parse failure and the plugin
 # never landed (VM run, 2026-10-23). Twin of the sh installer's `.plugin // []` jq merge.
+#
+# -Supersedes names entries $Spec replaces: the first one found is swapped for $Spec in place, the
+# rest are dropped (OpenCode 2's absolute path for the V1 `~` spelling, dotfiles#434 Run 15).
 function Add-OpenCodePluginSpec {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Spec)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Spec, [string[]]$Supersedes = @())
     # The key is the machine major's native shape (dotfiles#395): plugin (V1)
     # or plugins (V2). Detected at runtime - this lib is shared by both majors'
     # installers - defaulting to plugin when the major is unreadable.
@@ -965,6 +1002,15 @@ function Add-OpenCodePluginSpec {
     # @(if ...), not if { @(...) }: an if statement's output is enumerated, so a one-entry list
     # would come back as a bare string and `+ $Spec` would concatenate the two.
     $plugins = @(if ($json.PSObject.Properties[$key]) { $json.$key })
+    if ($Supersedes.Count -gt 0) {
+        $kept = @()
+        foreach ($p in $plugins) {
+            if ($Supersedes -notcontains $p) { $kept += $p }
+            elseif ($kept -notcontains $Spec) { $kept += $Spec }
+        }
+        $plugins = $kept
+        $json | Add-Member -MemberType NoteProperty -Name $key -Value @($plugins) -Force
+    }
     if ($plugins -notcontains $Spec) {
         $json | Add-Member -MemberType NoteProperty -Name $key -Value @($plugins + $Spec) -Force
     }
@@ -1218,9 +1264,14 @@ function Write-SuperpowersReport {
         if ((Get-OpenCodeDetectedMajor) -eq '2') {
             # V2's plugin list reports the git spec's commit hash, never a
             # release tag - incomparable to upstream's semver, so it prints as
-            # the loaded revision, not as "behind".
-            $ocV2 = Get-OpenCodeSuperpowersVersionV2
-            if ($ocV2) {
+            # the loaded revision, not as "behind". The Windows path install is never in that list;
+            # its package.json carries the release version (dotfiles#434 Run 15).
+            $ocPathV = Get-OpenCodeSuperpowersPathVersion
+            $ocV2 = ''
+            if (-not $ocPathV) { $ocV2 = Get-OpenCodeSuperpowersVersionV2 }
+            if ($ocPathV) {
+                Write-Host (Format-SuperpowersVersionLine -Harness 'OpenCode' -Version $ocPathV -Upstream $upstream -Note 're-run dot upgrade')
+            } elseif ($ocV2) {
                 Write-Host "   OpenCode: $ocV2 (git revision; refreshed by dot upgrade)"
             } else {
                 Write-Host '   OpenCode: version unknown (plugin list empty - still warming up or not installed)'
