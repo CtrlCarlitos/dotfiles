@@ -217,6 +217,19 @@ if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
     }
 }
 
+Add-DotTimingMark -Name 'PowerShell Gallery modules'
+# --- 1a3. The catalog's PowerShell Gallery modules (field `psgallery`: PSScriptAnalyzer), read at
+# runtime like update_ai_tools.ps1's npm globals. Updated only when installed and behind; `dot up`
+# installs them. A new version installs beside the old one, so a shell that has it loaded is fine.
+$psGalleryModules = @()
+# Templates with a double quote go to chezmoi on STDIN: Windows PowerShell 5.1 strips the quotes
+# inside a native argument.
+try { $psGalleryModules = @((('{{ range .catalog.packages }}{{ if hasKey . "psgallery" }}{{ .psgallery }} {{ end }}{{ end }}' | chezmoi execute-template | Out-String).Trim() -split ' ') | Where-Object { $_ }) } catch { Write-Verbose "psgallery module list probe failed: $($_.Exception.Message)" }
+if ($psGalleryModules.Count -gt 0) {
+    Write-Host "  Updating PowerShell Gallery modules..." -ForegroundColor Yellow
+    foreach ($psGalleryModule in $psGalleryModules) { $null = Install-PSGalleryModule -Name $psGalleryModule -Upgrade }
+}
+
 Add-DotTimingMark -Name 'VS Code extensions'
 # --- 1b. VS Code extensions: `dot up` only installs missing ones (no --force); updates are
 # this command's job. Skipped quietly when VS Code is absent; a failure never aborts.

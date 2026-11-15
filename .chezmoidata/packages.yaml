@@ -25,6 +25,11 @@
 #            scripts/migrate-to-winget.ps1 uses it to find and replace that copy
 #   npm      global npm package, the same name on every OS (needs Node). `dot up`
 #            installs it when missing; `dot upgrade` updates it when installed.
+#   psgallery  PowerShell Gallery module (Windows). Installed -Scope CurrentUser
+#            under Windows PowerShell 5.1, into Documents\WindowsPowerShell\Modules,
+#            which pwsh 7 searches too, so one copy serves both shells
+#            (scripts/lib/ps-psgallery.ps1). `dot up` installs it when missing;
+#            `dot upgrade` updates it when installed.
 #   major    "1" or "2": the record belongs to that opencodeMajor only (dotfiles#395); the
 #            installer renders the group's pass for the machine's major and no other
 #   note     why this tool, or a caveat worth keeping next to its name
@@ -368,6 +373,10 @@ catalog:
       winget_args: "--scope machine"
       choco_was: shfmt
       note: "apt: official release binary by procedure, checksum-verified on x86_64/amd64 and aarch64/arm64"
+    - id: psscriptanalyzer
+      group: modern_cli
+      psgallery: PSScriptAnalyzer
+      note: "Windows only: a PowerShell Gallery module, so no manager column names it. The PowerShell counterpart of shellcheck - CI lints every .ps1 and stripped .ps1.tmpl with it (ci.yml pins its own version), and a fresh machine needs it locally too"
     - id: strace
       group: modern_cli
       apt: strace

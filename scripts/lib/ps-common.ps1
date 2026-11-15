@@ -1833,6 +1833,8 @@ function Invoke-DockerDiskCompact {
 . (Join-Path $PSScriptRoot 'ps-background.ps1')
 # Is a global npm package current, without starting npm (scripts/lib/ps-npm-registry.ps1).
 . (Join-Path $PSScriptRoot 'ps-npm-registry.ps1')
+# The catalog's PowerShell Gallery modules, one copy for both shells (scripts/lib/ps-psgallery.ps1).
+. (Join-Path $PSScriptRoot 'ps-psgallery.ps1')
 
 # Read-Host for dot upgrade's prompts: the time spent answering is its own section ("your
 # answers") in the closing Timings line, not part of the work it interrupted. Twin of

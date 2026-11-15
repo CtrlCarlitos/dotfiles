@@ -107,7 +107,7 @@ groups = set(open(tmp + "/groups.txt").read().split())
 if not groups: err("no promptBoolOnce groups found - parser is stale")
 
 # 1. shape
-ids, seen = set(), {"apt": {}, "brew": {}, "cask": {}, "choco": {}, "winget": {}, "npm": {}}
+ids, seen = set(), {"apt": {}, "brew": {}, "cask": {}, "choco": {}, "winget": {}, "npm": {}, "psgallery": {}}
 for i, r in enumerate(cat):
     where = "record %d (%s)" % (i, r.get("id", "?"))
     if "id" not in r: err(where + ": no id"); continue
@@ -121,7 +121,7 @@ for i, r in enumerate(cat):
         # on all three platforms) may omit manager keys, but its record must
         # then carry the note the catalog header promises.
         if not r.get("note"):
-            err(where + ": names no manager (apt/brew/cask/choco/winget/npm) and has no note")
+            err(where + ": names no manager (apt/brew/cask/choco/winget/npm/psgallery) and has no note")
     for m in mgrs:
         if r[m] in seen[m]: err(where + ": %s name %r already used by %s" % (m, r[m], seen[m][r[m]]))
         seen[m][r[m]] = r["id"]

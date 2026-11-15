@@ -112,6 +112,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 {{ include "scripts/lib/ps-heartbeat.ps1" }}
 {{ include "scripts/lib/ps-package-inventory.ps1" }}
 {{ include "scripts/lib/ps-npm-registry.ps1" }}
+{{ include "scripts/lib/ps-psgallery.ps1" }}
 {{ include "scripts/lib/ps-installer-output.ps1" }}
 {{ include "scripts/lib/ps-winget-retry.ps1" }}
 # The clock starts here, so the total is the whole installer and what ran before the first section
@@ -950,6 +951,16 @@ function Install-NpmCatalogTool {
     if ($resumeSection) { Add-DotTimingMark -Name $resumeSection }
 }
 Install-NpmCatalogTool -Package @('{{ includeTemplate "pkg-names" (dict "manager" "npm" "group" "modern_cli" "catalog" .catalog.packages) }}' -split ' ' | Where-Object { $_ })
+
+# The catalog's PowerShell Gallery modules (field `psgallery`: PSScriptAnalyzer), each only when it
+# is missing; `dot upgrade` keeps them current. One copy for both shells (scripts/lib/ps-psgallery.ps1).
+$psGalleryModules = @('{{ includeTemplate "pkg-names" (dict "manager" "psgallery" "group" "modern_cli" "catalog" .catalog.packages) }}' -split ' ' | Where-Object { $_ })
+if ($psGalleryModules.Count -gt 0) {
+    $resumeSection = $script:DotTimingLast
+    Add-DotTimingMark -Name 'PowerShell Gallery modules'
+    foreach ($psGalleryModule in $psGalleryModules) { $null = Install-PSGalleryModule -Name $psGalleryModule }
+    if ($resumeSection) { Add-DotTimingMark -Name $resumeSection }
+}
 {{- end }}
 
 {{- if $fonts }}
