@@ -59,7 +59,11 @@ cat >"$tmp/harness.ps1" <<'PSEOF'
 param([string]$Lib, [string]$Bin, [string]$UserDir, [string]$Cfg, [string]$Spec, [string]$Old, [string]$NpmLog)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$env:Path = $Bin + [IO.Path]::PathSeparator + $env:Path
+# Functions, not PATH: a function wins over any command on every OS, while on Linux `$env:Path`
+# is not PATH (names are case-sensitive) and the runner's real npm answered instead (#492 CI).
+foreach ($t in 'opencode', 'npm', 'claude', 'agy', 'codex') {
+    Set-Item -Path "function:global:$t" -Value ([scriptblock]::Create("& '$(Join-Path $Bin "$t.ps1")' @args"))
+}
 $env:USERPROFILE = $UserDir
 $env:HOME = $UserDir
 $env:NPM_LOG = $NpmLog
