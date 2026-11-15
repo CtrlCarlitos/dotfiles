@@ -89,6 +89,10 @@ JSON
     j 'all(.profiles.list[]; .guid != "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}")' "styled profile was created on a machine without it"
     j '[.profiles.list[].name | select(startswith("SSH: "))] == ["SSH: mac1", "SSH: box"]' \
         "SSH profiles: expected exactly mac1 + box (stale removed, hostless skipped)"
+    j '[.profiles.list[] | select(.name | startswith("SSH: ")) | .suppressApplicationTitle] == [true, true]' \
+        "SSH profiles must keep their name: the remote shell overwrites the tab title otherwise (issue #478)"
+    j '[.profiles.list[] | select((.name | startswith("SSH: ")) | not) | select(.suppressApplicationTitle == true)] | length == 0' \
+        "suppressApplicationTitle must stay SSH-only: local tabs keep their live titles"
     j '[.profiles.list[] | select(.name == "psmux")] | length == 1' \
         "psmux profile must exist exactly once (a stale copy is replaced, not duplicated)"
     j '.profiles.list[] | select(.name == "psmux") | .startingDirectory == "%USERPROFILE%" and .tabColor == "#94E2D5"' \

@@ -258,7 +258,7 @@
 {{- if hasKey . "ssh_hosts" }}{{ range .ssh_hosts }}
 {{-   if and (hasKey . "name") (hasKey . "hostname") }}
 {{-     $h := sha256sum (printf "wt-ssh:%s" .name) }}
-{{-     $p := dict "guid" (printf "{%s-%s-%s-%s-%s}" (substr 0 8 $h) (substr 8 12 $h) (substr 12 16 $h) (substr 16 20 $h) (substr 20 32 $h)) "name" (printf "SSH: %s" .name) "commandline" (printf "ssh.exe %s" .name) "startingDirectory" "%USERPROFILE%" "hidden" false "tabColor" "#CBA6F7" }}
+{{-     $p := dict "guid" (printf "{%s-%s-%s-%s-%s}" (substr 0 8 $h) (substr 8 12 $h) (substr 12 16 $h) (substr 16 20 $h) (substr 20 32 $h)) "name" (printf "SSH: %s" .name) "commandline" (printf "ssh.exe %s" .name) "startingDirectory" "%USERPROFILE%" "hidden" false "tabColor" "#CBA6F7" "suppressApplicationTitle" true }}
 {{-     if hasKey . "tmux" }}{{ if .tmux }}
 {{-       $session := "main" }}{{ if kindIs "string" .tmux }}{{ $session = .tmux }}{{ end }}
 {{-       $_ := set $p "commandline" (printf "ssh.exe -t %s \"tmux new-session -A -s %s\"" .name $session) }}
