@@ -590,7 +590,10 @@ the next `dot up`. To move a machine to OpenCode 2:
    On Windows, also remove a previously installed V1 package once:
    `winget uninstall --id SST.opencode --exact` - the major-2 install is
    npm's `@opencode/cli`, and the two `opencode` binaries must not fight on
-   PATH.
+   PATH. By hand it is `npm install -g --allow-scripts=@opencode/cli
+   @opencode/cli`: npm 12+ skips the postinstall that lays the real binary
+   down unless allowed, and leaves a stub that fails with "not a valid
+   application for this OS platform".
 3. Run `guardrail setup` once more: it re-wires the opencode plane for V2 under
    one approval (`guardrail/index.js` directory plugin + the native
    `permissions` floor, `external_directory: ask` restored).

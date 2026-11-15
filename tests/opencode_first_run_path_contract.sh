@@ -34,7 +34,8 @@ done
 # The fake native binary, as OpenCode's installer would lay it down.
 fake_opencode() { # $1 = path
     mkdir -p "$(dirname "$1")"
-    printf '#!/bin/sh\necho %s\n' "${OC_FAKE_VER:-1.19.4}" >"$1"
+    if [ "${OC_FAKE_DEAD:-0}" = 1 ]; then printf '#!/bin/sh\nexit 1\n' >"$1"
+    else printf '#!/bin/sh\necho %s\n' "${OC_FAKE_VER:-1.19.4}" >"$1"; fi
     chmod +x "$1"
 }
 export -f fake_opencode
@@ -91,6 +92,11 @@ out="$(run "$h5" "")"
 case "$out" in *'dotfiles#395'*) pass ;; *) fail "2.x: the warning must reference dotfiles#395 (got: $out)" ;; esac
 case "$out" in *'agent-guardrails#534'*) pass ;; *) fail "2.x: the warning must name the guardrail port (got: $out)" ;; esac
 
+# 5b. A binary that resolves but does not run: the tripwire says so (#430 pilot).
+h5b="$tmp/h5b"; mkdir -p "$h5b"
+out="$(OC_FAKE_DEAD=1 run "$h5b" "")" || fail "dead binary: must not end the run (got: $out)"
+case "$out" in *"does not run"*) pass ;; *) fail "dead binary: must be reported, not passed in silence (got: $out)" ;; esac
+
 # 6. The PowerShell installer twin carries the same tripwire (rendered and
 #    asserted; the behavioral sh cases above prove the logic).
 if command -v chezmoi >/dev/null 2>&1; then
@@ -146,6 +152,41 @@ if command -v chezmoi >/dev/null 2>&1; then
     grep -Fq -- "ocWantedMajor = '2'" "$tmp/int.ps1" || fail "int-typed opencodeMajor must render as major 2 (the VM-pilot regression)"
     grep -Fq -- '@opencode/cli' "$tmp/int.ps1" || fail "int-typed opencodeMajor must take the npm V2 route"
     pass
+fi
+
+# 9. EXECUTED: the Windows V2 route against an npm 12 that runs no install
+#    script it was not allowed to (#430 pilot, 2026-11-14: @opencode/cli's
+#    bin/opencode.exe stayed the postinstall placeholder, every opencode call
+#    failed, and the apply still printed "no errors"). The fake npm heals the
+#    shim only for --allow-scripts=@opencode/cli; the tripwire must speak up
+#    when the shim resolves but does not run.
+if command -v chezmoi >/dev/null 2>&1 && command -v pwsh >/dev/null 2>&1; then
+    from="$(grep -n '^\$ocWorks = \$false' "$tmp/v2.ps1" | head -n 1 | cut -d: -f1)"
+    to="$(grep -n '^# Superpowers skills for OpenCode' "$tmp/v2.ps1" | head -n 1 | cut -d: -f1)"
+    [ -n "$from" ] && [ -n "$to" ] || fail "v2 ps1: the OpenCode install block was not found"
+    sed -n "${from},$((to - 1))p" "$tmp/v2.ps1" >"$tmp/oc-block.ps1"
+    cat >"$tmp/oc-fixture.ps1" <<'POWERSHELL'
+$ErrorActionPreference = 'Stop'
+$block, $mode = $args
+$env:LOCALAPPDATA = [IO.Path]::GetTempPath()
+$script:ocHealthy = $false
+function npm {
+    if ($mode -eq 'heal' -and ($args -contains 'install') -and ($args -contains '--allow-scripts=@opencode/cli')) { $script:ocHealthy = $true }
+    $global:LASTEXITCODE = 0
+}
+function opencode {
+    if (-not $script:ocHealthy) { throw "Program 'opencode.exe' failed to run: The specified executable is not a valid application for this OS platform." }
+    'opencode v2.3.0'
+    $global:LASTEXITCODE = 0
+}
+Invoke-Expression (Get-Content -Raw $block)
+POWERSHELL
+    ocps() { pwsh -NoProfile -File "$(cygpath -w "$tmp/oc-fixture.ps1" 2>/dev/null || printf '%s' "$tmp/oc-fixture.ps1")" \
+        "$(cygpath -w "$tmp/oc-block.ps1" 2>/dev/null || printf '%s' "$tmp/oc-block.ps1")" "$1" 2>&1; }
+    out="$(ocps heal)" || fail "v2 ps1 heal: the block threw (got: $out)"
+    case "$out" in *'the 2.x line this machine chose'*) pass ;; *) fail "v2 ps1: npm must install @opencode/cli with --allow-scripts=@opencode/cli so its postinstall lays the binary down (got: $out)" ;; esac
+    out="$(ocps dead)" || fail "v2 ps1 dead: the block threw (got: $out)"
+    case "$out" in *"does not run"*) pass ;; *) fail "v2 ps1: a resolving-but-dead opencode must be reported, not passed in silence (got: $out)" ;; esac
 fi
 
 finish

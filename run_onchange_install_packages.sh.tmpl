@@ -2737,6 +2737,8 @@ install_opencode_cli() {
             {{ if eq $ocMajor "2" }}*'v2.'*|2.*{{ else }}1.*{{ end }}) info "OpenCode $oc_ver (the {{ $ocMajor }}.x line this machine chose, dotfiles#395)" ;;
             *) warn "OpenCode reports '$oc_ver' - not the {{ $ocMajor }}.x line this machine chose (opencodeMajor, dotfiles#395); on 2.x also run guardrail setup or the plane enforces nothing (agent-guardrails#534)" ;;
         esac
+    elif command -v opencode &>/dev/null; then
+        warn "OpenCode is on PATH but 'opencode --version' does not run - the {{ $ocMajor }}.x install is broken and the OpenCode steps after it (Superpowers, guardrail plane major) cannot work (dotfiles#395)"
     fi
 
     # Superpowers skills for OpenCode (separate mechanism from Claude
