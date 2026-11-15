@@ -907,23 +907,60 @@ function Get-OpenCodeSuperpowersVersionV2 {
     # ID VERSION SOURCE; a commit hash for git specs, never a release tag).
     # Empty when the table has no superpowers row - including the warming-up
     # "No plugins found" for a few seconds right after an install: empty means
-    # unknown, not absent.
+    # unknown, not absent. A cold service answers that for 1-3 s (#492), so the
+    # list is polled: OPENCODE_PLUGIN_LIST_TRIES tries (default 5), 1 s apart.
+    $tries = 5
+    if ($env:OPENCODE_PLUGIN_LIST_TRIES) { $tries = [int]$env:OPENCODE_PLUGIN_LIST_TRIES }
+    $wasUp = Test-OpenCodeServiceUp
+    $ver = ''
     try {
-        $out = @(& opencode plugin list 2>$null | ForEach-Object { "$_" })
+        for ($i = 1; $i -le $tries; $i++) {
+            $out = @(& opencode plugin list 2>$null | ForEach-Object { "$_" })
+            if (-not ($out -match 'No plugins found')) { break }
+            if ($i -lt $tries) { Start-Sleep -Seconds 1 }
+        }
         foreach ($line in $out) {
             $cols = $line -split '\s+'
-            if ($cols[0] -eq 'superpowers') { return $cols[1] }
+            if ($cols[0] -eq 'superpowers') { $ver = $cols[1]; break }
         }
     } catch {
-        return ''
+        $ver = ''
+    } finally {
+        Restore-OpenCodeService -WasUp $wasUp
     }
-    return ''
+    return $ver
 }
 
 function Invoke-OpenCodeSuperpowersRefreshV2 {
     # V2's own updater; "No plugin updates available" exits 0 when current.
+    $wasUp = Test-OpenCodeServiceUp
     & opencode plugin update *> $null
-    return ($LASTEXITCODE -eq 0)
+    $ok = ($LASTEXITCODE -eq 0)
+    Restore-OpenCodeService -WasUp $wasUp
+    return $ok
+}
+
+function Test-OpenCodeServiceUp {
+    # $true when OpenCode 2's managed service is running. Any V2 command that
+    # needs a server (`plugin list`/`update`) starts it and leaves it up: run
+    # from an elevated dot upgrade it stayed up as Administrator and held the
+    # background unit's stdout, so the unit's output was lost (#430 Run 22,
+    # #492). `opencode service status` prints its URL, or "stopped", and starts
+    # nothing. Twin of opencode_service_up (scripts/lib/agent-skills.sh).
+    try {
+        $s = "$(& opencode service status 2>$null | Select-Object -First 1)".Trim()
+    } catch {
+        return $false
+    }
+    return ($LASTEXITCODE -eq 0 -and $s -ne '' -and $s -ne 'stopped')
+}
+
+function Restore-OpenCodeService {
+    # Stop the service a helper's own `plugin` call started; one that was
+    # already up (a live TUI's, the user's) is left alone.
+    param([bool]$WasUp)
+    if ($WasUp) { return }
+    try { & opencode service stop *> $null } catch { }
 }
 
 # The version OpenCode loads: the first cache directory, else the Windows path install ('' when
