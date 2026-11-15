@@ -31,19 +31,25 @@ q() { # $1 = json file, $2 = python expression over d -> compact JSON
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8-sig")); print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$1" "$2"
 }
 
+# The key follows the detected major (`opencode --version`), so a host's own
+# OpenCode 2 would turn every case below into `plugins` (dotfiles#434 Run 15):
+# pin a V1 stub. The V2 key is opencode2_superpowers_path_contract.sh's.
+mkdir -p "$tmp/bin"
+printf "if (\$args[0] -eq '--version') { '1.19.5' }\nexit 0\n" >"$tmp/bin/opencode.ps1"
 # shellcheck disable=SC2088  # the literal spec the installer writes; OpenCode expands it, not the shell
 spec='~/.config/opencode/node_modules/superpowers'
 cat >"$tmp/harness.ps1" <<'PSEOF'
-param([string]$Lib, [string]$Path, [string]$Spec)
+param([string]$Lib, [string]$Bin, [string]$Path, [string]$Spec)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$env:Path = $Bin + [IO.Path]::PathSeparator + $env:Path
 . $Lib
 Add-OpenCodePluginSpec -Path $Path -Spec $Spec
 PSEOF
 
 for sh in "${shells[@]}"; do
     # `|| true`: a harness that throws must reach the assertions below, not end the test silently.
-    run() { "$sh" -NoProfile -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/harness.ps1")" -Lib "$(ps_path "$sh" "$repo_root/scripts/lib/ps-skills.ps1")" -Path "$(ps_path "$sh" "$1")" -Spec "$spec" 2>&1 | tr -d '\r' || true; }
+    run() { "$sh" -NoProfile -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/harness.ps1")" -Lib "$(ps_path "$sh" "$repo_root/scripts/lib/ps-skills.ps1")" -Bin "$(ps_path "$sh" "$tmp/bin")" -Path "$(ps_path "$sh" "$1")" -Spec "$spec" 2>&1 | tr -d '\r' || true; }
 
     # a. Serena's file: BOM, mcp only.
     cfg="$tmp/$sh-a.json"
