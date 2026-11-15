@@ -215,7 +215,10 @@ chezmoi itself (`install.ps1`, not in the catalog) and scrcpy (the mobile_dev bl
 `--scope machine` flag directly on their own winget install calls. A per-user copy from before that fix is
 reported by `dot up`; the one-time fix is `winget uninstall --id <winget-id> --exact` from a non-elevated
 terminal, then re-run `dot up` (or, for chezmoi, `winget install --id twpayne.chezmoi --exact --scope
-machine` right after, since it isn't in the catalog's own re-install sweep).
+machine` right after, since it isn't in the catalog's own re-install sweep). For chezmoi, `dot doctor`
+reports a per-user copy as `chezmoi-scope`. Upgrade chezmoi with `dot upgrade`, not `chezmoi upgrade`:
+that refuses a winget install and suggests `winget upgrade --id twpayne.chezmoi` with no `--scope`,
+which reinstalls it per-user, and the elevated shell that ran it no longer finds `chezmoi` on its PATH.
 
 Two more holds in the sweep: a new **Python minor** (3.14 to 3.15) is left out of `choco upgrade all`
 because venvs and uv/pipx tools are bound to their minor (patch releases still upgrade); take it with
