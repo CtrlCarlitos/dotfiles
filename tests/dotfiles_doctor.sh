@@ -354,6 +354,14 @@ grep -Eq '^warn +opencode-major ' <<<"$out" || fail "[10h] a failing --version m
 rm -f "$TMP/oc-bin/opencode"
 out="$(run10)"
 grep -Eq '^skip +opencode-major ' <<<"$out" || fail "[10i] no opencode installed must skip: $out"
+# j. the native installer's ~/.opencode/bin, off PATH: the run_after doctor
+#    inherits chezmoi's pre-install PATH, so a fresh install's binary is only
+#    there (issue #431 Run 23: in-apply said "not installed" right after
+#    installing v2.3.0). It must still be found and compared.
+H="$TMP/home-oc2"; mkdir -p "$H/.opencode/bin"
+printf '#!/bin/sh\necho opencode v2.3.0\n' >"$H/.opencode/bin/opencode"; chmod +x "$H/.opencode/bin/opencode"
+out="$(env -u CHEZMOI_CONFIG_DIR DOTFILES_DOCTOR_IN_APPLY=1 HOME="$H" PATH="$TMP/oc-bin:$TMP/doctor-bin" bash "$doctor" 2>&1 || true)"
+grep -Eq '^ok +opencode-major .*v2\.3\.0' <<<"$out" || fail "[10j] ~/.opencode/bin/opencode off PATH must be found: $out"
 echo "  ok: opencode-major reported"
 
 finish

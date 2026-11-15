@@ -14,7 +14,11 @@ set -euo pipefail
 #   b. a plugin list without the spec: appended, the user's entry kept;
 #   c. the spec already present: not duplicated;
 #   d. no file: created with the spec;
-#   e. unparseable content: left byte-for-byte untouched, with a warning.
+#   e. unparseable content: left byte-for-byte untouched, with a warning;
+#   f. an OpenCode 2 binary: the spec goes under V2's `plugins` key (#395).
+# The key follows the DETECTED major (`opencode --version`), so the harness pins
+# `opencode` to a stub function: the host's own binary must not pick the shape
+# (a VM with OpenCode 2 failed a-d, issue #431 Run 23).
 # The sh twin merges with jq (`.plugin // []`), which has no such failure mode.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
@@ -34,10 +38,11 @@ q() { # $1 = json file, $2 = python expression over d -> compact JSON
 # shellcheck disable=SC2088  # the literal spec the installer writes; OpenCode expands it, not the shell
 spec='~/.config/opencode/node_modules/superpowers'
 cat >"$tmp/harness.ps1" <<'PSEOF'
-param([string]$Lib, [string]$Path, [string]$Spec)
+param([string]$Lib, [string]$Path, [string]$Spec, [string]$OcVer = '1.19.5')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . $Lib
+function opencode { $OcVer }
 Add-OpenCodePluginSpec -Path $Path -Spec $Spec
 PSEOF
 
@@ -77,6 +82,13 @@ for sh in "${shells[@]}"; do
     out="$(run "$cfg")"
     [ "$(cat "$cfg")" = '{ not json' ] || fail "$sh: e: an unparseable file must be left untouched"
     case "$out" in *'Could not parse existing opencode.json'*) pass ;; *) fail "$sh: e: an unparseable file must warn (got: $out)" ;; esac
+
+    # f. OpenCode 2: V2's plugins key, the user's entry kept, no V1 key added.
+    cfg="$tmp/$sh-f.json"
+    printf '{"plugins":["other"]}' >"$cfg"
+    "$sh" -NoProfile -ExecutionPolicy Bypass -File "$(ps_path "$sh" "$tmp/harness.ps1")" -Lib "$(ps_path "$sh" "$repo_root/scripts/lib/ps-skills.ps1")" -Path "$(ps_path "$sh" "$cfg")" -Spec "$spec" -OcVer 'opencode v2.3.0' >/dev/null 2>&1 || true
+    [ "$(q "$cfg" 'd.get("plugins")')" = "[\"other\",\"$spec\"]" ] || fail "$sh: f: V2 must append under plugins (got $(q "$cfg" 'd.get("plugins")'))"
+    [ "$(q "$cfg" 'd.get("plugin")')" = 'null' ] || fail "$sh: f: V2 must not write the V1 plugin key"
 done
 
 finish
