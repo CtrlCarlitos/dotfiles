@@ -2187,6 +2187,15 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
         $ocConfigDir = "$env:USERPROFILE\.config\opencode"
         $ocConfig = "$ocConfigDir\opencode.json"
         $ocPluginSpec = "~/.config/opencode/node_modules/superpowers"
+        $ocSupersedes = @()
+{{- if eq $ocMajor "2" }}
+        # OpenCode 2 loads a directory plugin by its absolute path and does not expand `~`: it read
+        # the V1 spelling as an npm `file:` package whose update check failed on every start, leaving
+        # a literal `~` tree in its npm cache (dotfiles#434 Run 15; Superpowers' index.js says the
+        # same). Replace that entry on machines this installer already wrote it to.
+        $ocPluginSpec = Join-Path $ocConfigDir 'node_modules\superpowers'
+        $ocSupersedes = @('~/.config/opencode/node_modules/superpowers')
+{{- end }}
         New-Item -ItemType Directory -Force -Path $ocConfigDir | Out-Null
         # --allow-git=all: npm 12+ blocks git-URL dependencies by default
         # (EALLOWGIT) - confirmed live on this exact command, breaking the
@@ -2201,7 +2210,7 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 
         # Add-OpenCodePluginSpec (scripts/lib/ps-skills.ps1, inlined above): BOM-less, StrictMode-safe
         # merge into the opencode.json Serena may already have written.
-        Add-OpenCodePluginSpec -Path $ocConfig -Spec $ocPluginSpec
+        Add-OpenCodePluginSpec -Path $ocConfig -Spec $ocPluginSpec -Supersedes $ocSupersedes
     }
 }
 {{- end }}

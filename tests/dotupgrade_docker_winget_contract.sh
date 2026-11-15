@@ -48,10 +48,12 @@ Write-Output ('parse-none=' + @(ConvertFrom-WingetUpgradeTable -Lines @('No inst
 $script:sweep = @()
 $script:listing = @()
 $script:sweepExit = 0
+$script:pinnedExit = 0
 $script:wingetCalls = @()
 function winget {
     $script:wingetCalls += ($args -join ' ')
     if ($args -contains '--all') { $script:sweep | ForEach-Object { $_ }; $global:LASTEXITCODE = $script:sweepExit }
+    elseif ($args -contains '--installer-type') { $global:LASTEXITCODE = $script:pinnedExit }
     elseif ($args -contains '--id' -and $script:idProbe.Count -gt 0) { $script:idProbe[[string]$args[([array]::IndexOf($args, '--id') + 1)]] | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
     else { $script:listing | ForEach-Object { $_ }; $global:LASTEXITCODE = 0 }
 }
@@ -105,6 +107,19 @@ $script:wingetCalls = @()
 $printed = (Invoke-WingetPinnedUpgrade -Id 'Microsoft.PowerShell' -HostEdition 'Core' 6>&1 | Out-String)
 Write-Output ('pinned-core-runs-nothing=' + ($script:wingetCalls.Count -eq 0))
 Write-Output ('pinned-core-prints-command=' + ($printed -match 'from Windows PowerShell \(powershell\.exe\), run: winget upgrade --id Microsoft\.PowerShell --exact --scope machine --installer-type wix'))
+# winget-pkgs published PowerShell 7.7.0.0 as an MSIX only: the pinned upgrade exits 0x8A15002B
+# ("No applicable update found") and the same command run by hand fails the same way (#430 Run 22).
+$script:pinnedExit = -1978335189
+$noMsi = ''
+$printed = (& { $script:noMsi = Invoke-WingetPinnedUpgrade -Id 'Microsoft.PowerShell' -HostEdition 'Desktop' } 6>&1 | Out-String)
+Write-Output ('pinned-no-installer-result=' + $script:noMsi)
+Write-Output ('pinned-no-installer-says-why=' + ($printed -match 'no --scope machine --installer-type wix installer yet'))
+Write-Output ('pinned-no-installer-no-retry-advice=' + (-not ($printed -match 'run it yourself')))
+$script:pinnedExit = 1
+$printed = (& { $script:realFail = Invoke-WingetPinnedUpgrade -Id 'Microsoft.PowerShell' -HostEdition 'Desktop' } 6>&1 | Out-String)
+Write-Output ('pinned-fail-result=' + $script:realFail)
+Write-Output ('pinned-fail-advice=' + ($printed -match 'failed \(exit 1\) - run it yourself'))
+$script:pinnedExit = 0
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
 Write-Output ('pinned-not-a-reinstall=' + (-not ($script:out -match 'winget uninstall --id Microsoft\.PowerShell')))
 $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @('Found Microsoft Edge') }
@@ -307,6 +322,11 @@ expect 'other-reinstall-hint=True'
 expect 'pinned-desktop-runs=True'
 expect 'pinned-core-runs-nothing=True'
 expect 'pinned-core-prints-command=True'
+expect 'pinned-no-installer-result=unavailable'
+expect 'pinned-no-installer-says-why=True'
+expect 'pinned-no-installer-no-retry-advice=True'
+expect 'pinned-fail-result=failed'
+expect 'pinned-fail-advice=True'
 expect 'pinned-not-a-reinstall=True'
 expect 'other-path-warning=True'
 expect 'other-not-nothing=True'

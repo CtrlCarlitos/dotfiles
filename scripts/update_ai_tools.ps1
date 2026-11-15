@@ -595,7 +595,22 @@ if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
             # owned by `opencode plugin`. The list table's VERSION is a commit
             # hash for git specs, so there is no semver "is current" gate - the
             # update itself is the cheap no-op ("No plugin updates available").
-            if (Invoke-OpenCodeSuperpowersRefreshV2) {
+            # The Windows path install is a directory plugin, which `plugin update` never moves and
+            # `plugin list` never shows: it is refreshed with npm and reported by its package.json,
+            # gated on upstream's release like V1's (dotfiles#434 Run 15, invariant 19).
+            if (Get-OpenCodeSuperpowersPathInstall) {
+                $ocPathBefore = Get-OpenCodeSuperpowersPathVersion
+                $ocUp = Get-SuperpowersLatestVersionCached
+                if ($ocPathBefore -and $ocPathBefore -eq $ocUp) {
+                    Write-Host "   Superpowers (OpenCode) is current ($ocPathBefore)"
+                } elseif (Invoke-OpenCodeSuperpowersPathRefresh) {
+                    $ocPathAfter = Get-OpenCodeSuperpowersPathVersion
+                    if ($ocPathAfter -and $ocPathAfter -ne $ocPathBefore) { Write-Host "   Superpowers (OpenCode) upgraded to $ocPathAfter" }
+                    else { $shown = 'installed'; if ($ocPathAfter) { $shown = $ocPathAfter }; Write-Host "   Superpowers (OpenCode) is current ($shown)" }
+                } else {
+                    Write-Host "   Superpowers (OpenCode) refresh failed - skipping" -ForegroundColor Yellow
+                }
+            } elseif (Invoke-OpenCodeSuperpowersRefreshV2) {
                 $ocV2After = Get-OpenCodeSuperpowersVersionV2
                 $shownV2 = 'version unknown - plugin list still warming up'; if ($ocV2After) { $shownV2 = $ocV2After }
                 Write-Host "   Superpowers (OpenCode) refreshed ($shownV2)"
@@ -613,10 +628,7 @@ if (-not (Show-DotBackgroundSection 'Superpowers (OpenCode)')) {
                 Write-Host "   Superpowers (OpenCode) is current ($ocBefore)"
             } else {
             if (Get-OpenCodeSuperpowersPathInstall) {
-                # --allow-git=all: npm 12+ blocks git-URL dependencies by default (EALLOWGIT)
-                # Its "up to date, audited N packages / looking for funding" summary said nothing on every run.
-                npm install "superpowers@git+https://github.com/obra/superpowers.git" --prefix "$env:USERPROFILE\.config\opencode" --ignore-scripts --allow-git=all --loglevel=error --no-progress --fund=false --audit=false 2>$null | Out-Null
-                if ($LASTEXITCODE -ne 0) { $ocFailed = $true } else { $ocRefreshed = $true }
+                if (Invoke-OpenCodeSuperpowersPathRefresh) { $ocRefreshed = $true } else { $ocFailed = $true }
             }
             if (@(Get-OpenCodeSuperpowersCacheDir).Count -gt 0) {
                 if (Invoke-OpenCodeSuperpowersRefresh) { $ocRefreshed = $true } else { $ocFailed = $true }
