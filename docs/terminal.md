@@ -195,6 +195,11 @@ The practical consequences:
   - `tmux = true` (or a session name) makes the tab run
     `ssh -t <host> "tmux new-session -A -s main"`. Every tab re-attaches to the same
     remote session, so an agent keeps running after a disconnect.
+  - SSH tabs set `suppressApplicationTitle`: the tab keeps the profile name
+    ("SSH: \<name\>") instead of whatever the remote shell sends - without it,
+    every remote shell's title integration renames the tab to its cwd (`~`),
+    and the tabs become indistinguishable (#478). Local tabs are untouched:
+    their live titles (prompt/running/stopped) still work.
 
 ### Keys
 
