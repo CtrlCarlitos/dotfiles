@@ -331,6 +331,33 @@ Write-Host '  ok: mobile-dev completeness reported'
     }
 }
 
+# [10] chezmoi-scope (Windows): a chezmoi resolved from the per-user winget folder warns with the
+#      machine-wide reinstall (#434 Run 14: `chezmoi upgrade` suggested a scope-less winget upgrade
+#      that moved chezmoi per-user, and the next elevated dot upgrade lost it). A forwarding
+#      chezmoi.cmd stands in for winget's per-user link; LOCALAPPDATA decides what is per-user.
+if ($env:OS -eq 'Windows_NT') {
+    $h = Join-Path $Tmp 'scope'; New-Item -ItemType Directory -Force -Path $h | Out-Null
+    New-ValidConfig $h
+    $realChezmoi = (Get-Command chezmoi -CommandType Application | Select-Object -First 1).Source
+    $la = Join-Path $Tmp 'scope-la'
+    $links = Join-Path $la 'Microsoft\WinGet\Links'
+    New-Item -ItemType Directory -Force -Path $links | Out-Null
+    [IO.File]::WriteAllText((Join-Path $links 'chezmoi.cmd'), "@`"$realChezmoi`" %*`r`n", $utf8NoBom)
+    $origPath = $env:PATH; $origLa = $env:LOCALAPPDATA
+    try {
+        $env:PATH = "$links;$origPath"; $env:LOCALAPPDATA = $la
+        $r = Invoke-Doctor $h
+        if ($r.Out -notmatch '(?m)^warn\s+chezmoi-scope\s+per-user winget copy') { Fail "[10] a per-user winget chezmoi must warn: $($r.Out)" }
+        if ($r.Out -notmatch '--scope machine') { Fail "[10] the warning must give the machine-wide reinstall: $($r.Out)" }
+        $env:PATH = $origPath; $env:LOCALAPPDATA = Join-Path $Tmp 'scope-other'
+        $r = Invoke-Doctor $h
+        if ($r.Out -notmatch '(?m)^ok\s+chezmoi-scope\s') { Fail "[10] a chezmoi outside the per-user winget folder must be ok: $($r.Out)" }
+    } finally {
+        $env:PATH = $origPath; $env:LOCALAPPDATA = $origLa
+    }
+    Write-Host '  ok: chezmoi-scope reported'
+}
+
 Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
-Write-Host 'PASS: dotfiles-doctor.ps1 (9 scenarios)'
+Write-Host 'PASS: dotfiles-doctor.ps1 (10 scenarios)'
 exit 0
