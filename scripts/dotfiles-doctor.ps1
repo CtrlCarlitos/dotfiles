@@ -201,12 +201,26 @@ $installedVersion = ''
 try { $installedVersion = ((& chezmoi --version 2>$null | Out-String).Trim() -replace '^chezmoi version ', '') -replace ',.*$', '' } catch { Write-Verbose "chezmoi --version probe failed: $($_.Exception.Message)" }
 if ($pinVersion -and $installedVersion -and ($installedVersion -match '^v?\d+\.\d+\.\d+')) {
     if ((VerNum $installedVersion) -lt (VerNum $pinVersion)) {
-        Result 'warn' 'chezmoi-version' "installed $installedVersion < pinned $pinVersion - run: chezmoi upgrade"
+        # Not `chezmoi upgrade`: it refuses a winget install, and the command it suggests instead
+        # (no --scope) reinstalls chezmoi per-user (#434 Run 14). dot upgrade's winget sweep
+        # upgrades it where it is.
+        Result 'warn' 'chezmoi-version' "installed $installedVersion < pinned $pinVersion - run: dot upgrade"
     } else {
         Result 'ok' 'chezmoi-version' "installed $installedVersion (pin: $pinVersion)"
     }
 } else {
     Result 'skip' 'chezmoi-version' "cannot compare (installed: $(if ($installedVersion) { $installedVersion } else { '?' }), pin: $(if ($pinVersion) { $pinVersion } else { '?' }))"
+}
+
+# install.ps1 installs chezmoi machine-wide (--scope machine): dot upgrade runs elevated, and
+# winget cannot upgrade a per-user package from an elevated shell (docs/windows.md). chezmoi is
+# not in the catalog, so the installer's per-user report never sees it.
+$chezmoiSource = (Get-Command chezmoi -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$perUserWinget = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet').TrimEnd('\') + '\' } else { '' }
+if ($isWin -and $chezmoiSource -and $perUserWinget -and $chezmoiSource.StartsWith($perUserWinget, [StringComparison]::OrdinalIgnoreCase)) {
+    Result 'warn' 'chezmoi-scope' "per-user winget copy ($chezmoiSource) - dot upgrade cannot upgrade it. From a NON-elevated terminal: winget uninstall --id twpayne.chezmoi --exact; then elevated: winget install --id twpayne.chezmoi --exact --scope machine"
+} elseif ($isWin -and $chezmoiSource) {
+    Result 'ok' 'chezmoi-scope' $chezmoiSource
 }
 
 } # end not-in-apply (chezmoi-version)

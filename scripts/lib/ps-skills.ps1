@@ -250,7 +250,13 @@ function Write-AgentBrowserDoctorSummary {
 # hook latency and anything never seen before - above all an approval prompt or URL, which the
 # installer blocks on - stay. DOT_GUARDRAIL_VERBOSE=1 shows everything.
 $script:GuardrailHidden = 0
-$script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):|^web-research enforcement:|^recipes |^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)|^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)|^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)|^antigravity coverage:|^  (configured MCP servers|declared MCP tools|uncontracted)|^note: codex probes invoke the hook directly|^setup: (registering|plane status)|^guardrail v[0-9]'
+# The settings success family hides on its STABLE PREFIX, not a suffix shape (dotfiles#485):
+# guardrail's wording after "registered" evolves freely (bare, "; informational", "(detail)",
+# " - evidence window reset..." from agent-guardrails#562) and stays hidden - that state's
+# visibility lives in `guardrail doctor` / selftest's exit code and the apply log. The ONE
+# exception, carved in stone: a line carrying NEVER OBSERVED FIRING is a warning, always shown
+# (the leading (?!...) lookahead). Twin of the perl filter's exception in agent-skills.sh.
+$script:GuardrailRoutinePattern = '^(cwd|GUARDRAIL_CONFIG|overlay|policy warnings|waivers|audit log|approval mode|operator authenticators|engine health|spawn latency):|^web-research enforcement:|^recipes |^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)|^(?!.*NEVER OBSERVED FIRING)(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered|^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)|^antigravity coverage:|^  (configured MCP servers|declared MCP tools|uncontracted)|^note: codex probes invoke the hook directly|^setup: (registering|plane status)|^guardrail v[0-9]'
 
 # Get-CodexSuperpowersMarketplace - the marketplace that actually carries a superpowers plugin on
 # THIS codex, or $null.

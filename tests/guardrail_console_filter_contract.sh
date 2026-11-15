@@ -46,7 +46,9 @@ opencode settings: guardrail integration registered
 codex settings: guardrail hooks registered; verify trust in /hooks; hosted tools and write_stdin bypass pre-hooks (ADR-0014)
 codex settings: guardrail hooks registered; on Windows allowed commands run behind a PowerShell working-directory check
 claude settings: guardrail hook registered
+opencode settings: guardrail integration registered (opencode 1, plugin entry)
 antigravity settings: guardrail integration registered
+claude settings: guardrail hook registered — evidence window reset by the recent update (3 earlier real-session records predate this binary): start a Claude session, then re-run `guardrail selftest --evidence claude`
 claude ownership: manifest matches settings
 codex ownership: no manifest (entries written before this release, or state cleared); `plane disable codex` will fall back
 engine health: reachable (self-spawn ok)

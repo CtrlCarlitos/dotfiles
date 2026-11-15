@@ -1586,7 +1586,14 @@ guardrail_console_filter() {
             return 1 if $l =~ /^web-research enforcement:/;
             return 1 if $l =~ /^recipes /;
             return 1 if $l =~ /^(claude|opencode|antigravity|codex): (already enabled|probes pass|guardrail (hook|hooks|integration) registered)/;
-            return 1 if $l =~ /^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered($|;)/;
+            # The settings success family hides on its STABLE PREFIX, not a suffix
+            # shape (dotfiles#485): the wording after "registered" evolves freely
+            # (bare, "; informational", "(detail)", " - evidence window reset..."
+            # from agent-guardrails#562) and stays hidden - the visibility of that
+            # state lives in `guardrail doctor` / the selftest exit code and the
+            # apply log. ONE exception, carved in stone: a line carrying
+            # NEVER OBSERVED FIRING is a warning and is always shown.
+            return 1 if $l =~ /^(claude|opencode|antigravity|codex) settings: guardrail (hook|hooks|integration) registered/ && $l !~ /NEVER OBSERVED FIRING/;
             return 1 if $l =~ /^(claude|opencode|antigravity|codex) ownership: (manifest matches settings|no manifest)/;
             return 1 if $l =~ /^antigravity coverage:/;
             return 1 if $l =~ /^  (configured MCP servers|declared MCP tools|uncontracted)/;

@@ -35,6 +35,12 @@ $G = @{
     check    = [string][char]0x2705
 }
 if (-not $OnlySection) { Write-Host "$($G.robot) Updating AI Coding Tools..." -ForegroundColor Cyan }
+# Every pin and package name below is read through `chezmoi execute-template`. With no chezmoi on
+# this shell's PATH each step said only "unavailable from chezmoi data" (#434 Run 14: a winget
+# reinstall of chezmoi in the same terminal moved it to a directory this shell's PATH lacked).
+if (-not $OnlySection -and -not (Get-Command chezmoi -ErrorAction SilentlyContinue)) {
+    Write-Host "$($G.warning)  chezmoi is not on this shell's PATH, so every step that reads a pin or package name from it skips. Open a new terminal (reinstalling chezmoi changes PATH) and run dot upgrade again." -ForegroundColor Red
+}
 
 # Defer protocol: scripts/dotupgrade.ps1 (the ONLY entry point - `dot
 # upgrade`) exports DOTUPGRADE_DEFER with the tools whose package dirs
