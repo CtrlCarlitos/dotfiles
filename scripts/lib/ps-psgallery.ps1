@@ -15,6 +15,9 @@
 function Get-WindowsPowerShellModulePath {
     $paths = @()
     $docs = [Environment]::GetFolderPath('MyDocuments')
+    # .NET answers '' when the Documents known folder cannot be resolved (always, off Windows):
+    # the user's path is still the one 5.1's Install-Module -Scope CurrentUser falls back to.
+    if (-not $docs -and $HOME) { $docs = Join-Path $HOME 'Documents' }
     if ($docs) { $paths += Join-Path (Join-Path $docs 'WindowsPowerShell') 'Modules' }
     if ($env:ProgramFiles) { $paths += Join-Path (Join-Path $env:ProgramFiles 'WindowsPowerShell') 'Modules' }
     if ($env:SystemRoot) { $paths += Join-Path $env:SystemRoot 'system32\WindowsPowerShell\v1.0\Modules' }
