@@ -1088,8 +1088,8 @@ function ConvertFrom-WingetUpgradeTable {
 $script:WingetInstallerPin = @{ 'Microsoft.PowerShell' = @('--scope', 'machine', '--installer-type', 'wix') }
 
 # PowerShell 7 cannot replace the pwsh.exe that is running this: from there the command is printed,
-# to run from Windows PowerShell (powershell.exe); from Windows PowerShell it is run. 'ok', 'failed'
-# or 'manual'.
+# to run from Windows PowerShell (powershell.exe); from Windows PowerShell it is run. 'ok', 'failed',
+# 'manual', or 'unavailable' when the newer version has no installer with the pin's flags yet.
 function Invoke-WingetPinnedUpgrade {
     param([Parameter(Mandatory)][string]$Id, [string]$HostEdition = $PSVersionTable.PSEdition)
     $pin = @($script:WingetInstallerPin[$Id])
@@ -1102,6 +1102,13 @@ function Invoke-WingetPinnedUpgrade {
     $ErrorActionPreference = 'Continue'
     try { $null = & winget upgrade --id $Id --exact @pin --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 }
     finally { $ErrorActionPreference = $previous }
+    # 0x8A15002B, "No applicable update found": winget-pkgs published the newer version without an
+    # installer that matches the pin (PowerShell 7.7.0.0 came as an MSIX only, #430 Run 22). The same
+    # command by hand fails the same way, so it is not offered; a later sweep takes it once one exists.
+    if ($LASTEXITCODE -eq -1978335189) {
+        Write-Host "    $Id stays where it is: winget's newer version has no $($pin -join ' ') installer yet - a later dot upgrade takes it once one is published." -ForegroundColor Yellow
+        return 'unavailable'
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "    $Id upgrade with its pinned installer failed (exit $LASTEXITCODE) - run it yourself: $command" -ForegroundColor Red
         return 'failed'
