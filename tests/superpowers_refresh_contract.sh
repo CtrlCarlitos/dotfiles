@@ -717,10 +717,29 @@ PSEOF
     # The V2 helper cases below need `opencode` to answer as v2.3.0: on Linux
 # pwsh resolves the extensionless stub over any .ps1 in the same dir, so the
 # V1 stub is swapped for the same v2 one the sh section used, then restored.
+# Windows pwsh cannot run that bash stub at all (every call threw, so the
+# detected major and the plugin row came back empty, #430 Run 20/21): a v2
+# .ps1 sibling answers there instead, and Linux still takes the bash one.
 cp "$bin/opencode" "$tmp/opencode-v1-stub-ps"
 write_v2_opencode_stub
+cat >"$bin/opencode.ps1" <<'PSSTUB'
+if ($args[0] -eq '--version') { 'opencode v2.3.0'; exit 0 }
+if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
+    if ($env:OC_LIST_EMPTY) { 'No plugins found' } else {
+        'ID           VERSION  SOURCE'
+        "superpowers  $(if ($env:OC_LIST_VER) { $env:OC_LIST_VER } else { '22f0b46' })  superpowers@git+https://github.com/obra/superpowers.git"
+    }
+    exit 0
+}
+if ($args[0] -eq 'plugin' -and $args[1] -eq 'update') {
+    if ($env:OC_UPDATE_LOG) { Add-Content -LiteralPath $env:OC_UPDATE_LOG -Value 'update' }
+    exit $(if ($env:OC_UPDATE_RC) { [int]$env:OC_UPDATE_RC } else { 0 })
+}
+exit 1
+PSSTUB
 ps_out="$(PATH="$bin:$PATH" GIT_TAGS_DIR="$(winpath "$tags")" pwsh -NoProfile -File "$(winpath "$tmp/ps-harness.ps1")" -Lib "$(winpath "$ps_lib")" -UserDir "$(winpath "$home")" -CacheDir "$(winpath "$oc_dir")" -NpmLog "$(winpath "$tmp/npm-ps.log")" 2>&1 | tr -d '\r' || true)"
 mv "$tmp/opencode-v1-stub-ps" "$bin/opencode"
+rm -f "$bin/opencode.ps1"
     pexpect() { printf '%s\n' "$ps_out" | grep -Fxq -- "$1" || fail "PowerShell: expected '$1' (got: $(printf '%s' "$ps_out" | tr '\n' '|' | cut -c1-900))"; }
     pexpect 'codex-installed=6.4.2'
     pexpect 'codex-catalog=6.4.2'
