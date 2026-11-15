@@ -960,7 +960,7 @@ function Restore-OpenCodeService {
     # already up (a live TUI's, the user's) is left alone.
     param([bool]$WasUp)
     if ($WasUp) { return }
-    try { & opencode service stop *> $null } catch { }
+    try { & opencode service stop *> $null } catch { $null = $_ }
 }
 
 # The version OpenCode loads: the first cache directory, else the Windows path install ('' when
