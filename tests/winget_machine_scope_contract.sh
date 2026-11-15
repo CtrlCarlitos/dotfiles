@@ -26,7 +26,7 @@ check_scope() {
 for id in gum powershell-core vscode \
     curl jq fzf ripgrep ffmpeg terraform flyctl mkcert psmux \
     bat less eza fd delta zoxide direnv lazygit tealdeer dust duf procs shellcheck shfmt lychee pstop \
-    act opencode-cli; do
+    act opencode-cli-2; do
     check_scope "$id"
 done
 pass

@@ -62,13 +62,12 @@ if ($OnlySection) {
 }
 
 Add-DotTimingMark -Name 'NPM packages and OpenCode'
-# 1. NPM Packages (Codex) + OpenCode via choco
-# OpenCode is NOT npm on Windows anymore: opencode-ai's npm package only
-# fetches its real platform binary in a postinstall script, and installs
-# where that didn't run leave a dead exe that fails with "not a valid
-# application for this OS platform" (confirmed live 2026-08-31). choco is
-# the Windows route opencode's own README documents - see
-# run_onchange_install_packages.ps1.tmpl #3 for the full story.
+# 1. NPM Packages (Codex) + OpenCode (choco on 1.x, winget on 2.x)
+# OpenCode is NOT npm on Windows: both its npm packages only get their real
+# platform binary from a postinstall script, and installs where that didn't
+# run leave a dead exe that fails with "not a valid application for this OS
+# platform" (live 2026-08-31 for 1.x, 2026-11-14 for 2.x) - see the OpenCode
+# section of run_onchange_install_packages.ps1.tmpl for the full story.
 if (Get-Command npm -ErrorAction SilentlyContinue) {
     if (Test-Deferred 'codex') {
         Write-Host "  codex deferred - a codex session is live (dot upgrade reports it)." -ForegroundColor Yellow
@@ -106,9 +105,9 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 } else {
     Write-Host "$($G.warning)  npm not found. Skipping npm packages." -ForegroundColor Red
 }
-# OpenCode is winget's SST.opencode now, upgraded (or held while a session is live) by
-# dotupgrade.ps1's winget sweep. A machine where Chocolatey still has it keeps the choco upgrade
-# until scripts/migrate-to-winget.ps1 moves it.
+# OpenCode follows the machine's major (dotfiles#395): 1.x is choco's opencode, upgraded below
+# (winget's 1.x SST.opencode is gone); 2.x is winget's Anomaly.OpenCode, which self-upgrades below
+# and which dotupgrade.ps1's winget sweep also covers (held while a session is live).
 # The OpenCode major helpers (scripts/lib/ps-skills.ps1) are needed by the V2
 # branch below; source once, before either branch evaluates.
 if (-not (Get-Command Get-OpenCodeDetectedMajor -ErrorAction SilentlyContinue) -and $PSScriptRoot) { . (Join-Path $PSScriptRoot 'lib\ps-skills.ps1') }
