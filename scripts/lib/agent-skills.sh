@@ -1412,9 +1412,21 @@ opencode_superpowers_refresh() {
 # right after an install, which is eventually consistent for a few seconds
 # (Phase 1 finding, 2026-11-14): empty means unknown, not absent. The VERSION
 # is a commit hash for git specs, never a semver comparable to a release tag.
+# A cold service answers "No plugins found" for about a second (0.8 s on
+# v2.3.0, issue #431 Run 23; 1-3 s on Windows, #492), so the list is polled:
+# OPENCODE_PLUGIN_LIST_TRIES tries (default 5), one second apart.
 opencode_superpowers_version_v2() {
-    local out
-    out="$(net_timeout 60 opencode plugin list 2>/dev/null)" || return 1
+    local out rc=0 up=0 tries="${OPENCODE_PLUGIN_LIST_TRIES:-5}"
+    opencode_service_up && up=1
+    while :; do
+        out="$(net_timeout 60 opencode plugin list 2>/dev/null)" || { rc=1; break; }
+        case "$out" in *'No plugins found'*) ;; *) break ;; esac
+        tries=$((tries - 1))
+        [ "$tries" -gt 0 ] || break
+        sleep 1
+    done
+    opencode_service_restore "$up"
+    [ "$rc" = 0 ] || return 1
     printf '%s\n' "$out" | awk '$1 == "superpowers" { print $2; exit }'
 }
 
@@ -1422,7 +1434,29 @@ opencode_superpowers_version_v2() {
 # (no id: v2.3.0 answers "No plugin updates available" with exit 0 when
 # current, and re-resolves the git spec when upstream moved).
 opencode_superpowers_refresh_v2() {
-    net_timeout 300 opencode plugin update >/dev/null
+    local rc=0 up=0
+    opencode_service_up && up=1
+    net_timeout 300 opencode plugin update >/dev/null || rc=$?
+    opencode_service_restore "$up"
+    return "$rc"
+}
+
+# opencode_service_up - 0 when OpenCode 2's managed service is running. Any V2
+# command that needs a server (`plugin list`/`update`) starts it, and it stays
+# up after the command exits: elevated and holding the background unit's stdout
+# on Windows (#430 Run 22, #492), for hours at ~460 MB on Linux (#431 Run 23).
+# `opencode service status` prints its URL, or "stopped", and starts nothing.
+opencode_service_up() {
+    local s
+    s="$(net_timeout 15 opencode service status 2>/dev/null)" || return 1
+    [ -n "$s" ] && [ "$s" != stopped ]
+}
+
+# opencode_service_restore <was-up: 0|1> - stop the service a helper's own
+# `plugin` call started; one that was already up (a live TUI's, the user's)
+# is left alone.
+opencode_service_restore() {
+    [ "$1" = 1 ] || net_timeout 15 opencode service stop >/dev/null 2>&1 || true
 }
 
 # claude_superpowers_installs - one "<version>\t<scope>\t<projectPath>" line per superpowers

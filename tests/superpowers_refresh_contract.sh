@@ -269,12 +269,32 @@ cp "$bin/opencode" "$tmp/opencode-v1-stub"
 write_v2_opencode_stub() {
 cat >"$bin/opencode" <<'STUB'
 #!/usr/bin/env bash
+# OC_SVC (a file path) opts into the managed service: present = running. `plugin`
+# calls start it, as V2's do; `service status` prints its URL or "stopped" and
+# starts nothing; `service stop` removes it and logs to OC_SVC_LOG.
+# OC_LIST_EMPTY_FIRST=<n> answers "No plugins found" to the first n lists
+# (counted in OC_LIST_COUNT), the cold service's warm-up.
 case "$1" in
     --version) printf 'opencode v2.3.0\n' ;;
+    service)
+        case "$2" in
+            status) if [ -n "${OC_SVC:-}" ] && [ -f "$OC_SVC" ]; then echo 'http://127.0.0.1:28894'; else echo stopped; fi ;;
+            stop)
+                [ -n "${OC_SVC_LOG:-}" ] && printf 'stop\n' >>"$OC_SVC_LOG"
+                [ -z "${OC_SVC:-}" ] || rm -f "$OC_SVC"
+                ;;
+            *) exit 1 ;;
+        esac
+        ;;
     plugin)
+        [ -z "${OC_SVC:-}" ] || : >"$OC_SVC"
         case "$2" in
             list)
-                if [ -n "${OC_LIST_EMPTY:-}" ]; then
+                n=0
+                if [ -n "${OC_LIST_COUNT:-}" ]; then
+                    n=$(( $(cat "$OC_LIST_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$OC_LIST_COUNT"
+                fi
+                if [ -n "${OC_LIST_EMPTY:-}" ] || { [ "$n" -gt 0 ] && [ "$n" -le "${OC_LIST_EMPTY_FIRST:-0}" ]; }; then
                     printf 'No plugins found\n'
                 else
                     printf 'ID           VERSION  SOURCE\nsuperpowers  %s  superpowers@git+https://github.com/obra/superpowers.git\n' "${OC_LIST_VER:-22f0b46}"
@@ -304,8 +324,28 @@ if helper OC_UPDATE_RC=1 -- opencode_superpowers_refresh_v2 2>/dev/null; then
 fi
 got="$(helper -- opencode_superpowers_version_v2)"
 [ "$got" = 22f0b46 ] || fail "opencode_superpowers_version_v2 must read the superpowers row's VERSION, got '$got'"
-got="$(helper OC_LIST_EMPTY=1 -- opencode_superpowers_version_v2)"
-[ -z "$got" ] || fail "a warming-up 'No plugins found' table must answer empty, not fail (got '$got')"
+got="$(helper OC_LIST_EMPTY=1 OPENCODE_PLUGIN_LIST_TRIES=2 -- opencode_superpowers_version_v2)"
+[ -z "$got" ] || fail "a table that stays 'No plugins found' must answer empty, not fail (got '$got')"
+# The managed service (#430 Run 22, #492): a `plugin` call starts it and V2
+# leaves it running - for hours, ~460 MB (#431 Run 23). The helpers stop the
+# one they started and leave a running one (a live TUI's, the user's) alone.
+svc="$tmp/oc-svc"; svc_log="$tmp/oc-svc.log"; : >"$svc_log"
+helper OC_SVC="$svc" OC_SVC_LOG="$svc_log" -- opencode_superpowers_refresh_v2 ||
+    fail "opencode_superpowers_refresh_v2 must still succeed around the service handling"
+[ ! -e "$svc" ] || fail "opencode_superpowers_refresh_v2 must stop the service its 'plugin update' started"
+helper OC_SVC="$svc" OC_SVC_LOG="$svc_log" -- opencode_superpowers_version_v2 >/dev/null
+[ ! -e "$svc" ] || fail "opencode_superpowers_version_v2 must stop the service its 'plugin list' started"
+[ "$(grep -c stop "$svc_log")" = 2 ] || fail "each cold helper call must stop the service once (log: $(cat "$svc_log"))"
+: >"$svc"; : >"$svc_log"
+helper OC_SVC="$svc" OC_SVC_LOG="$svc_log" -- opencode_superpowers_refresh_v2 >/dev/null
+helper OC_SVC="$svc" OC_SVC_LOG="$svc_log" -- opencode_superpowers_version_v2 >/dev/null
+[ -e "$svc" ] && [ ! -s "$svc_log" ] || fail "a service that was already running must be left running (log: $(cat "$svc_log"))"
+rm -f "$svc"
+# A cold service lists nothing for ~1 s (0.8 s measured, #431 Run 23): poll it.
+got="$(helper OC_SVC="$svc" OC_LIST_COUNT="$tmp/oc-list.n" OC_LIST_EMPTY_FIRST=2 -- opencode_superpowers_version_v2)"
+[ "$got" = 22f0b46 ] || fail "a warming-up list must be polled until the row appears, got '$got'"
+[ "$(cat "$tmp/oc-list.n")" = 3 ] || fail "the poll must stop at the first non-empty answer (calls: $(cat "$tmp/oc-list.n"))"
+[ ! -e "$svc" ] || fail "the polled version lookup must still stop the service it started"
 got="$(helper -- opencode_detected_major)"
 [ "$got" = 2 ] || fail "the stub opencode must detect as major 2 for these cases, got '$got'"
 pass
@@ -670,8 +710,27 @@ Write-Output ('oc-want=' + (Get-OpenCodeConfiguredMajor))
 Write-Output ('oc-sp-v2=' + (Get-OpenCodeSuperpowersVersionV2))
 Write-Output ('oc-sp-v2-refresh=' + (Invoke-OpenCodeSuperpowersRefreshV2))
 $env:OC_LIST_EMPTY = '1'
+$env:OPENCODE_PLUGIN_LIST_TRIES = '2'
 Write-Output ('oc-sp-v2-warm=' + ([string]::IsNullOrEmpty((Get-OpenCodeSuperpowersVersionV2))))
 Remove-Item Env:OC_LIST_EMPTY
+Remove-Item Env:OPENCODE_PLUGIN_LIST_TRIES
+# The managed service: stopped when a helper started it, left alone when it ran before.
+$env:OC_SVC = Join-Path $UserDir '.oc-svc'
+$env:OC_SVC_LOG = Join-Path $UserDir '.oc-svc.log'
+$null = Invoke-OpenCodeSuperpowersRefreshV2
+$null = Get-OpenCodeSuperpowersVersionV2
+Write-Output ('oc-svc-cold-stopped=' + (-not (Test-Path -LiteralPath $env:OC_SVC)) + ':' + @(Get-Content -LiteralPath $env:OC_SVC_LOG -ErrorAction SilentlyContinue).Count)
+# -Force: pwsh on Linux marks dot-files Hidden, and Remove-Item skips those without it.
+Remove-Item -Force -LiteralPath $env:OC_SVC_LOG -ErrorAction SilentlyContinue
+New-Item -ItemType File -Path $env:OC_SVC | Out-Null
+$null = Invoke-OpenCodeSuperpowersRefreshV2
+$null = Get-OpenCodeSuperpowersVersionV2
+Write-Output ('oc-svc-warm-kept=' + (Test-Path -LiteralPath $env:OC_SVC) + ':' + (-not (Test-Path -LiteralPath $env:OC_SVC_LOG)))
+Remove-Item -Force -LiteralPath $env:OC_SVC
+$env:OC_LIST_COUNT = Join-Path $UserDir '.oc-list.n'
+$env:OC_LIST_EMPTY_FIRST = '2'
+Write-Output ('oc-sp-v2-polled=' + (Get-OpenCodeSuperpowersVersionV2) + ':' + (Get-Content -LiteralPath $env:OC_LIST_COUNT))
+Remove-Item Env:OC_SVC, Env:OC_SVC_LOG, Env:OC_LIST_COUNT, Env:OC_LIST_EMPTY_FIRST
 Write-Output ('playwright=' + (Test-PlaywrightChromiumInstalled))
 Remove-Item -Recurse -Force (Join-Path $UserDir '.cache/ms-playwright')
 Write-Output ('playwright-absent=' + (Test-PlaywrightChromiumInstalled))
@@ -724,8 +783,21 @@ cp "$bin/opencode" "$tmp/opencode-v1-stub-ps"
 write_v2_opencode_stub
 cat >"$bin/opencode.ps1" <<'PSSTUB'
 if ($args[0] -eq '--version') { 'opencode v2.3.0'; exit 0 }
+if ($args[0] -eq 'service' -and $args[1] -eq 'status') {
+    if ($env:OC_SVC -and (Test-Path -LiteralPath $env:OC_SVC)) { 'http://127.0.0.1:28894' } else { 'stopped' }
+    exit 0
+}
+if ($args[0] -eq 'service' -and $args[1] -eq 'stop') {
+    if ($env:OC_SVC_LOG) { Add-Content -LiteralPath $env:OC_SVC_LOG -Value 'stop' }
+    if ($env:OC_SVC) { Remove-Item -LiteralPath $env:OC_SVC -ErrorAction SilentlyContinue }
+    exit 0
+}
+if ($args[0] -eq 'plugin' -and $env:OC_SVC) { New-Item -ItemType File -Force -Path $env:OC_SVC | Out-Null }
 if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
-    if ($env:OC_LIST_EMPTY) { 'No plugins found' } else {
+    $n = 0
+    if ($env:OC_LIST_COUNT) { $n = 1 + [int](Get-Content -LiteralPath $env:OC_LIST_COUNT -ErrorAction SilentlyContinue | Select-Object -First 1); Set-Content -LiteralPath $env:OC_LIST_COUNT -Value $n }
+    $first = 0; if ($env:OC_LIST_EMPTY_FIRST) { $first = [int]$env:OC_LIST_EMPTY_FIRST }
+    if ($env:OC_LIST_EMPTY -or ($n -gt 0 -and $n -le $first)) { 'No plugins found' } else {
         'ID           VERSION  SOURCE'
         "superpowers  $(if ($env:OC_LIST_VER) { $env:OC_LIST_VER } else { '22f0b46' })  superpowers@git+https://github.com/obra/superpowers.git"
     }
@@ -762,6 +834,9 @@ rm -f "$bin/opencode.ps1"
     pexpect 'oc-sp-v2=22f0b46'
     pexpect 'oc-sp-v2-refresh=True'
     pexpect 'oc-sp-v2-warm=True'
+    pexpect 'oc-svc-cold-stopped=True:2'
+    pexpect 'oc-svc-warm-kept=True:True'
+    pexpect 'oc-sp-v2-polled=22f0b46:3'
     grep -Fq "install --prefix $(nativepath "$oc_dir") superpowers@github:obra/superpowers" "$tmp/npm-ps.log" ||
         fail "PowerShell: Invoke-OpenCodeSuperpowersRefresh must refresh inside OpenCode's cache directory; npm saw: $(cat "$tmp/npm-ps.log")"
     pexpect 'playwright=True'
