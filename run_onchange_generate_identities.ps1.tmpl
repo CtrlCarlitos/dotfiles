@@ -296,7 +296,12 @@ try {
         Write-Host "  ! Could not configure the ssh-agent service (first-time setup needs an elevated shell): $_" -ForegroundColor Yellow
     }
 
-    # Newline-separated inside @( ) - no trailing-comma hazard.
+    # Newline-separated inside @( ) - no trailing-comma hazard. The ssh_hosts
+    # identities belong here too (issue #477): vscode_hosts pins
+    # `IdentityFile <identity>.pub + IdentitiesOnly`, which only works when the
+    # agent holds the matching private key - without this, every host entry
+    # ships broken ("Load key ...pub: invalid format") until a manual ssh-add.
+    # Select-Object -Unique below collapses hosts that share a key name.
     $declaredKeys = @(
 {{- range .accounts }}
 {{- if and (hasKey . "key") .key }}
@@ -305,6 +310,13 @@ try {
 {{- $sk := "" }}{{ if hasKey . "signingKey" }}{{ $sk = .signingKey }}{{ else if hasKey . "signingkey" }}{{ $sk = .signingkey }}{{ end }}
 {{- if $sk }}
         '{{ $sk }}'
+{{- end }}
+{{- end }}
+{{- if hasKey . "ssh_hosts" }}
+{{- range .ssh_hosts }}
+{{- if and (hasKey . "identity") .identity }}
+        '{{ .identity }}'
+{{- end }}
 {{- end }}
 {{- end }}
     ) | Where-Object { $_ } | Select-Object -Unique
