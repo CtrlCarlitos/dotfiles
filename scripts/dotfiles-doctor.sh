@@ -419,7 +419,16 @@ fi
 # on V2, the plane enforces nothing there (agent-guardrails#534), so say it
 # plainly. In-apply mode cannot read the config (state lock): report the
 # detected major only.
+# The native installer's dirs are looked at too, as the installer's
+# opencode_path_add does: the run_after doctor inherits chezmoi's pre-install
+# PATH, so on a fresh install the binary is only there (issue #431 Run 23).
 #-------------------------------------------------------------------------------
+for oc_dir in "$HOME/.opencode/bin" "$HOME/bin"; do
+    if [ -x "$oc_dir/opencode" ]; then
+        case ":$PATH:" in *":$oc_dir:"*) ;; *) PATH="$oc_dir:$PATH" ;; esac
+        break
+    fi
+done
 if ! command -v opencode &>/dev/null; then
     result skip opencode-major "opencode not installed (opt-in via packages.opencode_cli)"
 else
