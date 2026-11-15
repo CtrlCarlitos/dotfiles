@@ -34,7 +34,8 @@ done
 # The fake native binary, as OpenCode's installer would lay it down.
 fake_opencode() { # $1 = path
     mkdir -p "$(dirname "$1")"
-    printf '#!/bin/sh\necho %s\n' "${OC_FAKE_VER:-1.19.4}" >"$1"
+    if [ "${OC_FAKE_DEAD:-0}" = 1 ]; then printf '#!/bin/sh\nexit 1\n' >"$1"
+    else printf '#!/bin/sh\necho %s\n' "${OC_FAKE_VER:-1.19.4}" >"$1"; fi
     chmod +x "$1"
 }
 export -f fake_opencode
@@ -90,6 +91,11 @@ h5="$tmp/h5"; OC_FAKE_VER=2.3.0 fake_opencode "$h5/.opencode/bin/opencode"
 out="$(run "$h5" "")"
 case "$out" in *'dotfiles#395'*) pass ;; *) fail "2.x: the warning must reference dotfiles#395 (got: $out)" ;; esac
 case "$out" in *'agent-guardrails#534'*) pass ;; *) fail "2.x: the warning must name the guardrail port (got: $out)" ;; esac
+
+# 5b. A binary that resolves but does not run: the tripwire says so (#430 pilot).
+h5b="$tmp/h5b"; mkdir -p "$h5b"
+out="$(OC_FAKE_DEAD=1 run "$h5b" "")" || fail "dead binary: must not end the run (got: $out)"
+case "$out" in *"does not run"*) pass ;; *) fail "dead binary: must be reported, not passed in silence (got: $out)" ;; esac
 
 # 6. The PowerShell installer twin carries the same tripwire (rendered and
 #    asserted; the behavioral sh cases above prove the logic).
