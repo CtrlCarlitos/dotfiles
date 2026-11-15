@@ -123,8 +123,20 @@ if command -v chezmoi >/dev/null 2>&1; then
     for literal in '@opencode/cli' "ocWantedMajor = '2'" 'disabled = $false'; do
         grep -Fq -- "$literal" "$tmp/v2.ps1" || fail "v2 ps1 render must carry '$literal'"
     done
+    # The catalog winget/choco passes must NOT run for opencode_cli on major 2:
+    # they would install the V1 SST.opencode next to npm's V2 binary. Assert on
+    # the code line, not the prose (stale comments may still name the package).
+    if grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v2.ps1"; then
+        fail "v2 ps1 render must not install SST.opencode (the V1 catalog install)"
+    fi
     if grep -Fq -- 'opencode.ai/install | bash' "$tmp/v2.sh"; then fail "v2 sh render must not carry the V1 installer URL"; fi
     if grep -Fq -- 'choco install opencode' "$tmp/v2.ps1"; then fail "v2 ps1 render must not carry the V1 choco route"; fi
+    # ... while a major-1 render keeps the catalog passes (SST.opencode).
+    cfg2="$tmp/empty2.toml"; : >"$cfg2"
+    chezmoi execute-template --config "$cfg2" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"windows"},"packages":{"opencode_cli":true,"agent_toolkit":true},"opencodeMajor":"1"}' \
+        < "$repo_root/run_onchange_install_packages.ps1.tmpl" | tr -d '\r' >"$tmp/v1.ps1"
+    grep -Fq -- '$wingetPackages += "SST.opencode' "$tmp/v1.ps1" || fail "v1 ps1 render must still carry the SST.opencode catalog install"
     pass
 fi
 
