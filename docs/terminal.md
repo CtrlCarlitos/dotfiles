@@ -578,9 +578,14 @@ the next `dot up`. To move a machine to OpenCode 2:
 1. `guardrail setup` must already have run with agent-guardrails **≥ v0.23.37**
    (the dual-major port, agent-guardrails#534). The pre-port wiring is dead on
    V2 - a V2 upgrade without this release enforces nothing.
-2. Set `opencodeMajor = "2"` in `~/.config/chezmoi/chezmoi.toml`, then close
+2. Set `opencodeMajor = "2"` in `~/.config/chezmoi/chezmoi.toml` (the first
+   `dot up` on the new code asks the question once - answer 2), then close
    every opencode session and run `dot up` (the V2 installer replaces the V1
    binary in place; `~/.opencode/bin/opencode2` is only a compat wrapper).
+   On Windows, also remove a previously installed V1 package once:
+   `winget uninstall --id SST.opencode --exact` - the major-2 install is
+   npm's `@opencode/cli`, and the two `opencode` binaries must not fight on
+   PATH.
 3. Run `guardrail setup` once more: it re-wires the opencode plane for V2 under
    one approval (`guardrail/index.js` directory plugin + the native
    `permissions` floor, `external_directory: ask` restored).

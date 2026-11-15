@@ -1023,10 +1023,16 @@ Install-NpmCatalogTool -Package @('{{ includeTemplate "pkg-names" (dict "manager
 {{- end }}
 
 {{- if $opencode_cli }}
-# OpenCode CLI: winget's SST.opencode, installed by the winget pass like every catalog package.
-# The OpenCode section further down checks the binary works and wires Superpowers for it.
+# OpenCode CLI: on major 1, winget's SST.opencode (+ choco fallback) via the
+# catalog passes below, and the OpenCode section further down checks the binary
+# works and wires Superpowers. On major 2 (dotfiles#395 Model A) both catalog
+# passes are SKIPPED - winget/choco carry V1 only, and the section installs
+# npm's @opencode/cli instead; a leftover V1 install should be removed once
+# (winget uninstall --id SST.opencode) so the two binaries never fight on PATH.
+{{- if ne $ocMajor "2" }}
 {{ includeTemplate "choco-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
 {{ includeTemplate "winget-packages" (dict "group" "opencode_cli" "catalog" .catalog.packages) }}
+{{- end }}
 {{- end }}
 
 # Where the time of a dot up goes (scripts/lib/ps-timing.ps1, inlined above): one mark per section,
