@@ -19,7 +19,9 @@ set -euo pipefail
 #      absolute one under V2's `plugins` key and keeps the user's entries;
 #   b. Invoke-OpenCodeSuperpowersPathRefresh re-resolves the path install with
 #      npm --prefix (its config dir) and reports npm's exit code;
-#   c. Get-OpenCodeSuperpowersPathVersion reads the path install's package.json.
+#   c. Get-OpenCodeSuperpowersPathVersion reads the path install's package.json;
+#   e. Invoke-OpenCodeV2Upgrade says what version `opencode upgrade` left behind
+#      (#430 Run 25: it printed nothing, invariant 19) and shows a failure.
 # And the major-2 Windows render writes the absolute spec with the supersede.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/tests/lib.sh"
@@ -40,7 +42,14 @@ q() { # $1 = json file, $2 = python expression over d -> compact JSON
 # install's version, and exits with $NPM_EXIT.
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/opencode.ps1" <<'PSSTUB'
-if ($args[0] -eq '--version') { 'opencode v2.2.7' }
+$vf = $env:OC_VER_FILE
+$ver = if ($vf -and (Test-Path -LiteralPath $vf)) { (Get-Content -LiteralPath $vf -Raw).Trim() } else { '2.2.7' }
+if ($args[0] -eq '--version') { "opencode v$ver" }
+if ($args[0] -eq 'upgrade') {
+    if ($env:OC_UPGRADE_TO) { Set-Content -LiteralPath $vf -Value $env:OC_UPGRADE_TO }
+    'upgrade chatter'
+    exit [int]$env:OC_UPGRADE_EXIT
+}
 exit 0
 PSSTUB
 cat >"$tmp/bin/npm.ps1" <<'PSSTUB'
@@ -77,6 +86,15 @@ $env:NPM_EXIT = '1'
 Write-Output ('refresh-failed=' + (Invoke-OpenCodeSuperpowersPathRefresh))
 $env:CODEX_HOME = Join-Path $UserDir '.codex'
 Write-Output ('report=' + ((Write-SuperpowersReport -Upstream '7.1.0' *>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match 'OpenCode' }) -join '|'))
+$env:OC_VER_FILE = Join-Path $UserDir 'oc-version'
+Set-Content -LiteralPath $env:OC_VER_FILE -Value '2.2.7'
+function Upgrade { $lines = @(& { $script:r = Invoke-OpenCodeV2Upgrade } *>&1 | ForEach-Object { "$_" }); "$($script:r)|$($lines -join '|')" }
+$env:OC_UPGRADE_TO = ''; $env:OC_UPGRADE_EXIT = '0'
+Write-Output ('upgrade-current=' + (Upgrade))
+$env:OC_UPGRADE_TO = '2.2.8'
+Write-Output ('upgrade-moved=' + (Upgrade))
+$env:OC_UPGRADE_TO = ''; $env:OC_UPGRADE_EXIT = '3'
+Write-Output ('upgrade-failed=' + (Upgrade))
 PSEOF
 
 # shellcheck disable=SC2088  # the literal V1 spec the installer used to write
@@ -111,6 +129,10 @@ for sh in "${shells[@]}"; do
         || fail "$sh: b: npm must re-resolve the git spec into the prefix (log: $(cat "$tmp/$sh-npm.log"))"
     # d. the report reads the path install, not V2's plugin list (which never shows it).
     printf '%s\n' "$out" | grep -Fxq 'report=   OpenCode: 7.1.0 (current)' || fail "$sh: d: the report must name the path install's version (output: $out)"
+    # e. `opencode upgrade` reports the version it left; its chatter shows only on failure.
+    printf '%s\n' "$out" | grep -Fxq 'upgrade-current=True|  OpenCode is current (2.2.7)' || fail "$sh: e: a current OpenCode must say its version (output: $out)"
+    printf '%s\n' "$out" | grep -Fxq 'upgrade-moved=True|  OpenCode upgraded to 2.2.8' || fail "$sh: e: an upgrade must name the new version (output: $out)"
+    printf '%s\n' "$out" | grep -Fxq 'upgrade-failed=False|    upgrade chatter|  Warning: opencode upgrade failed (exit 3) - continuing' || fail "$sh: e: a failure must show the output and the exit code (output: $out)"
     pass
 done
 

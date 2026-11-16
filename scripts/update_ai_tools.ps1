@@ -116,8 +116,7 @@ if ((Get-Command opencode -ErrorAction SilentlyContinue) -and ((Get-OpenCodeDete
     # V2 (dotfiles#395 Model A): winget/choco carry V1 only, and V2 self-upgrades.
     # Detected (not configured): never pull a V1 package over a V2 binary.
     Write-Host "$($G.package) Updating OpenCode (opencode upgrade, 2.x line)..." -ForegroundColor Yellow
-    & opencode upgrade *> $null
-    if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: opencode upgrade failed (exit $LASTEXITCODE) - continuing" -ForegroundColor Red }
+    $null = Invoke-OpenCodeV2Upgrade
 } elseif ((Get-Command choco -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $ocChocoLib)) {
     if (Test-Deferred 'opencode') {
         Write-Host "  opencode deferred - an opencode session is live (upgrading it races the running binary)." -ForegroundColor Yellow
