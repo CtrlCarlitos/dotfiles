@@ -57,6 +57,15 @@
       "tui.keymap.editor.insert_newline" `["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]`
       "tui.copy_on_select" `"always"`
 -}}
+{{- /* env.GH_TOKEN: the ADR-0038 bot GitHub identity, injected into every
+       subprocess Codex spawns via [shell_environment_policy.set] ("Explicit
+       environment values injected after exclusions" - the config reference's
+       only env-setting mechanism). The token comes from the machine-local
+       [data.githubBot] config table (never committed); machines without it
+       force nothing and this template's behavior is unchanged. */ -}}
+{{- if hasKey . "githubBot" -}}
+{{-   $forced = merge $forced (dict "shell_environment_policy.set.GH_TOKEN" (printf "%q" .githubBot.token)) -}}
+{{- end -}}
 
 {{- $raw := .chezmoi.stdin | trimPrefix "\ufeff" -}}
 {{- $eol := "\n" -}}

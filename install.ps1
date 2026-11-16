@@ -474,7 +474,7 @@ try {
     # was restarted (2026-10-14).
     Write-Info "2. Restart any running agent (Claude Code, Codex, OpenCode, agy) - their hooks need the new PATH."
     if (Test-Path (Join-Path $env:USERPROFILE '.local\bin\guardrail.exe')) {
-        Write-Info "3. Run 'guardrail setup' to enroll yourself - the install armed the agent planes without asking anyone."
+        Write-Info "3. Passkey approval mode only: run 'guardrail operator enroll' to enroll yourself - the install armed the agent planes without asking anyone (prompt mode needs no enrollment)."
     }
     Write-Info "Customize: edit $env:USERPROFILE\.config\chezmoi\chezmoi.toml (examples in $SourceDir\docs\), then run 'dot up'."
     Write-Info "----------------------------------------------------------------"

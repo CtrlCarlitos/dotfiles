@@ -329,6 +329,16 @@
 [data.backup]
   extra_dirs = ["~/projects"]
 {{- end }}
+{{/* [data.githubBot]: the ADR-0038 bot GitHub identity (token = <bot PAT>).
+     Machine-local secret, NEVER committed: this file lives in ~/.config, and
+     this hasKey re-emit (the [data.backup] pattern) preserves the table
+     across the `chezmoi init` regeneration that `dot up` runs. Consumed by
+     dot_claude/modify_settings.json and dot_codex/modify_private_config.toml
+     (env.GH_TOKEN / [shell_environment_policy.set]). Absent on machines that
+     have not wired it - every consumer is hasKey-guarded. */}}
+{{ if hasKey . "githubBot" }}
+{{ includeTemplate "toml-align" (replace "[githubBot" "[data.githubBot" (toToml (dict "githubBot" .githubBot))) | trimSuffix "\n" }}
+{{- end }}
 {{ if $isDevcontainer }}
   # Devcontainer defaults - create a minimal account for git identity
 [[data.accounts]]

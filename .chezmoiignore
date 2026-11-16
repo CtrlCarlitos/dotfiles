@@ -29,6 +29,10 @@ install.ps1
 # between that apply and the next (a fresh machine would keep Ctrl+Enter = send until
 # its second `dot up`, and `chezmoi verify` would report drift right after install).
 !.claude/keybindings.json
+# ...and the settings merge (dot_claude/modify_settings.json): forces
+# env.GH_TOKEN (the ADR-0038 bot identity) when the machine-local
+# [data.githubBot] table exists, preserving every Claude-written key.
+!.claude/settings.json
 
 # Git worktrees (agent isolation; source-repo only, matches .gitignore)
 .worktrees/**
