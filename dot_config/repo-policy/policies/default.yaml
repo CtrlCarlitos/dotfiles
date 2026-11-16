@@ -1,0 +1,46 @@
+# The operator's own policy for the CtrlCarlitos/skills `repo-policy` skill:
+# a single-maintainer repo where coding agents open PRs and, once guardrail
+# allows `gh pr merge --auto` (agent-guardrails#606), merge them. GitHub's
+# rules -- not the agent, and not a reviewer -- decide a merge, so every key
+# below is about those rules holding. Modelled on CtrlCarlitos/dotfiles'
+# `main` ruleset (2026-11-16). Deployed to ~/.config/repo-policy/policies/,
+# where the skill looks after a repo's own .repo-policy/policy.yaml.
+
+default_branch: main
+
+merge_strategy: squash_only   # every merge here is a squash; deliver prefers it
+delete_branch_on_merge: true
+allow_auto_merge: true        # agents queue --auto; GitHub merges on green
+
+require_pull_request: true
+# GitHub never counts the author's own approval, and the agents' PRs come
+# from the maintainer's account: anything above 0 stops every merge.
+required_approving_review_count: 0
+require_code_owner_review: false
+required_review_thread_resolution: false
+
+# Something has to pass, against the current base, and nobody skips it.
+require_status_checks: true
+# Check names are per repo: list them in that repo's .repo-policy/policy.yaml.
+required_status_checks: []
+strict_required_status_checks: true
+no_bypass_actors: true
+
+required_signatures: true     # GitHub signs the squash commits it makes
+required_linear_history: true
+block_force_push: true
+block_branch_deletion: true
+
+release_tags_protected: true
+
+# Only useful with other contributors; paperwork on a solo repo.
+codeowners: false
+contributing: false
+pr_template: false
+issue_templates: false
+
+security_md: true
+dependabot: true   # only where Dependabot has something to update
+agents_md: true    # only where the repo is already set up for agents
+
+exceptions: {}

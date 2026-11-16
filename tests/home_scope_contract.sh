@@ -136,6 +136,13 @@ if command -v chezmoi >/dev/null; then
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
     grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
         fail "linux: .gitconfig must stay managed"
+    # The operator's repo-policy default, read by the repo-policy skill on
+    # every OS (it would otherwise fall back to a built-in default that
+    # requires an approval nobody can give on a solo repo).
+    for f in "$tmp/lin-managed.txt" "$tmp/win-managed.txt"; do
+        grep -Fxq '.config/repo-policy/policies/default.yaml' "$f" ||
+            fail "$(basename "$f"): .config/repo-policy/policies/default.yaml must be managed"
+    done
 
     # Windows apps from dev_desktop: VS Code's keybindings and Geany's dark
     # scheme are gated on the app's dir, which the package installer creates
