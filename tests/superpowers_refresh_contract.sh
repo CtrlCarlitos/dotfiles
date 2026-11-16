@@ -273,7 +273,9 @@ cat >"$bin/opencode" <<'STUB'
 # calls start it, as V2's do; `service status` prints its URL or "stopped" and
 # starts nothing; `service stop` removes it and logs to OC_SVC_LOG.
 # OC_LIST_EMPTY_FIRST=<n> answers "No plugins found" to the first n lists
-# (counted in OC_LIST_COUNT), the cold service's warm-up.
+# (counted in OC_LIST_COUNT), the cold service's warm-up. OC_LIST_PARTIAL_UNTIL=<n>
+# then lists only the local guardrail plugin up to list n: the first start after
+# an install, while V2 still fetches the git plugin (#431 Run 25).
 case "$1" in
     --version) printf 'opencode v2.3.0\n' ;;
     service)
@@ -296,6 +298,8 @@ case "$1" in
                 fi
                 if [ -n "${OC_LIST_EMPTY:-}" ] || { [ "$n" -gt 0 ] && [ "$n" -le "${OC_LIST_EMPTY_FIRST:-0}" ]; }; then
                     printf 'No plugins found\n'
+                elif [ "$n" -gt 0 ] && [ "$n" -le "${OC_LIST_PARTIAL_UNTIL:-0}" ]; then
+                    printf 'ID         VERSION  SOURCE\nguardrail  local    /home/lab/.local/share/guardrail/guardrail\n'
                 else
                     printf 'ID           VERSION  SOURCE\nsuperpowers  %s  superpowers@git+https://github.com/obra/superpowers.git\n' "${OC_LIST_VER:-22f0b46}"
                 fi
@@ -344,8 +348,16 @@ rm -f "$svc"
 # A cold service lists nothing for ~1 s (0.8 s measured, #431 Run 23): poll it.
 got="$(helper OC_SVC="$svc" OC_LIST_COUNT="$tmp/oc-list.n" OC_LIST_EMPTY_FIRST=2 -- opencode_superpowers_version_v2)"
 [ "$got" = 22f0b46 ] || fail "a warming-up list must be polled until the row appears, got '$got'"
-[ "$(cat "$tmp/oc-list.n")" = 3 ] || fail "the poll must stop at the first non-empty answer (calls: $(cat "$tmp/oc-list.n"))"
+[ "$(cat "$tmp/oc-list.n")" = 3 ] || fail "the poll must stop at the first answer with the row (calls: $(cat "$tmp/oc-list.n"))"
 [ ! -e "$svc" ] || fail "the polled version lookup must still stop the service it started"
+# The first start after an install lists the local guardrail plugin while V2
+# still fetches the git one (~3 s, #431 Run 25): a table without the row is not
+# an answer yet. Stopping there also stopped the service mid-fetch, every time.
+rm -f "$tmp/oc-list.n"
+got="$(helper OC_SVC="$svc" OC_LIST_COUNT="$tmp/oc-list.n" OC_LIST_EMPTY_FIRST=1 OC_LIST_PARTIAL_UNTIL=3 -- opencode_superpowers_version_v2)"
+[ "$got" = 22f0b46 ] || fail "a list without the superpowers row must be polled until the row appears, got '$got'"
+[ "$(cat "$tmp/oc-list.n")" = 4 ] || fail "the poll must stop at the first answer with the row (calls: $(cat "$tmp/oc-list.n"))"
+[ ! -e "$svc" ] || fail "the lookup must stop the service only after the row appeared"
 got="$(helper -- opencode_detected_major)"
 [ "$got" = 2 ] || fail "the stub opencode must detect as major 2 for these cases, got '$got'"
 pass
@@ -730,7 +742,12 @@ Remove-Item -Force -LiteralPath $env:OC_SVC
 $env:OC_LIST_COUNT = Join-Path $UserDir '.oc-list.n'
 $env:OC_LIST_EMPTY_FIRST = '2'
 Write-Output ('oc-sp-v2-polled=' + (Get-OpenCodeSuperpowersVersionV2) + ':' + (Get-Content -LiteralPath $env:OC_LIST_COUNT))
-Remove-Item Env:OC_SVC, Env:OC_SVC_LOG, Env:OC_LIST_COUNT, Env:OC_LIST_EMPTY_FIRST
+# A guardrail-only table while V2 still fetches the git plugin is not an answer yet (#431 Run 25).
+Remove-Item -Force -LiteralPath $env:OC_LIST_COUNT
+$env:OC_LIST_EMPTY_FIRST = '1'
+$env:OC_LIST_PARTIAL_UNTIL = '3'
+Write-Output ('oc-sp-v2-partial=' + (Get-OpenCodeSuperpowersVersionV2) + ':' + (Get-Content -LiteralPath $env:OC_LIST_COUNT) + ':' + (-not (Test-Path -LiteralPath $env:OC_SVC)))
+Remove-Item Env:OC_SVC, Env:OC_SVC_LOG, Env:OC_LIST_COUNT, Env:OC_LIST_EMPTY_FIRST, Env:OC_LIST_PARTIAL_UNTIL
 Write-Output ('playwright=' + (Test-PlaywrightChromiumInstalled))
 Remove-Item -Recurse -Force (Join-Path $UserDir '.cache/ms-playwright')
 Write-Output ('playwright-absent=' + (Test-PlaywrightChromiumInstalled))
@@ -797,7 +814,12 @@ if ($args[0] -eq 'plugin' -and $args[1] -eq 'list') {
     $n = 0
     if ($env:OC_LIST_COUNT) { $n = 1 + [int](Get-Content -LiteralPath $env:OC_LIST_COUNT -ErrorAction SilentlyContinue | Select-Object -First 1); Set-Content -LiteralPath $env:OC_LIST_COUNT -Value $n }
     $first = 0; if ($env:OC_LIST_EMPTY_FIRST) { $first = [int]$env:OC_LIST_EMPTY_FIRST }
-    if ($env:OC_LIST_EMPTY -or ($n -gt 0 -and $n -le $first)) { 'No plugins found' } else {
+    $partial = 0; if ($env:OC_LIST_PARTIAL_UNTIL) { $partial = [int]$env:OC_LIST_PARTIAL_UNTIL }
+    if ($env:OC_LIST_EMPTY -or ($n -gt 0 -and $n -le $first)) { 'No plugins found' }
+    elseif ($n -gt 0 -and $n -le $partial) {
+        'ID         VERSION  SOURCE'
+        'guardrail  local    /home/lab/.local/share/guardrail/guardrail'
+    } else {
         'ID           VERSION  SOURCE'
         "superpowers  $(if ($env:OC_LIST_VER) { $env:OC_LIST_VER } else { '22f0b46' })  superpowers@git+https://github.com/obra/superpowers.git"
     }
@@ -837,6 +859,7 @@ rm -f "$bin/opencode.ps1"
     pexpect 'oc-svc-cold-stopped=True:2'
     pexpect 'oc-svc-warm-kept=True:True'
     pexpect 'oc-sp-v2-polled=22f0b46:3'
+    pexpect 'oc-sp-v2-partial=22f0b46:4:True'
     grep -Fq "install --prefix $(nativepath "$oc_dir") superpowers@github:obra/superpowers" "$tmp/npm-ps.log" ||
         fail "PowerShell: Invoke-OpenCodeSuperpowersRefresh must refresh inside OpenCode's cache directory; npm saw: $(cat "$tmp/npm-ps.log")"
     pexpect 'playwright=True'
