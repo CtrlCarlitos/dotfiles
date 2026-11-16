@@ -120,8 +120,12 @@ $printed = (& { $script:realFail = Invoke-WingetPinnedUpgrade -Id 'Microsoft.Pow
 Write-Output ('pinned-fail-result=' + $script:realFail)
 Write-Output ('pinned-fail-advice=' + ($printed -match 'failed \(exit 1\) - run it yourself'))
 $script:pinnedExit = 0
+$script:wingetCalls = @()
 Run { $script:code = Invoke-WingetUpgradeAll -LogPath $log }
 Write-Output ('pinned-not-a-reinstall=' + (-not ($script:out -match 'winget uninstall --id Microsoft\.PowerShell')))
+# winget installed it (the pinned MSI), so it is not "installed another way" (#430 Run 25)
+Write-Output ('pinned-not-other-way=' + (-not ($script:out -match 'installed another way')))
+Write-Output ('pinned-still-reported=' + ($script:out -match 'Microsoft\.PowerShell --exact --scope machine --installer-type wix'))
 $script:idProbe = @{ 'Docker.DockerDesktop' = @($sentence); 'Microsoft.Edge' = @('Found Microsoft Edge') }
 $script:sweep = @($real)
 $script:listing = $listingNoNote
@@ -328,6 +332,8 @@ expect 'pinned-no-installer-no-retry-advice=True'
 expect 'pinned-fail-result=failed'
 expect 'pinned-fail-advice=True'
 expect 'pinned-not-a-reinstall=True'
+expect 'pinned-not-other-way=True'
+expect 'pinned-still-reported=True'
 expect 'other-path-warning=True'
 expect 'other-not-nothing=True'
 expect 'other-no-raw-blocked=True'
