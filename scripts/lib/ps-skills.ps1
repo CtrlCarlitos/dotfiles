@@ -889,6 +889,40 @@ function Get-OpenCodeDetectedMajor {
     return ''
 }
 
+# The bare version from `opencode --version` ("opencode v2.2.7" -> "2.2.7"); '' when unreadable.
+# `--version` never starts the managed service (#430 Run 22).
+function Get-OpenCodeVersion {
+    try { $v = "$(& opencode --version 2>&1 | Select-Object -First 1)" } catch { return '' }
+    if ($v -match '(\d+\.\d+\.\d+\S*)') { return $Matches[1] }
+    return ''
+}
+
+# V2 self-upgrades with `opencode upgrade` (no --major); winget/choco carry V1 only. Says what version
+# it left behind, like the sh twin (invariant 19; #430 Run 25 printed nothing). $false when it failed.
+function Invoke-OpenCodeV2Upgrade {
+    $before = Get-OpenCodeVersion
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = @(& opencode upgrade 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } catch {
+        $out = @($_.Exception.Message)
+        $code = 1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) {
+        $out | ForEach-Object { Write-Host "    $_" }
+        Write-Host "  Warning: opencode upgrade failed (exit $code) - continuing" -ForegroundColor Red
+        return $false
+    }
+    $after = Get-OpenCodeVersion
+    if ($after -and $after -ne $before) { Write-Host "  OpenCode upgraded to $after" -ForegroundColor Green }
+    else { Write-Host "  OpenCode is current ($(if ($after) { $after } else { 'installed' }))" }
+    return $true
+}
+
 function Get-OpenCodeConfiguredMajor {
     # The machine-local opencodeMajor choice (default 1), parsed from the config
     # FILE: config keys are not execute-template data (the map-has-no-entry

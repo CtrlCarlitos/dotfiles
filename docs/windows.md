@@ -205,6 +205,8 @@ winget lists some packages it cannot upgrade at all (`A newer version was found,
 technology is different`: Docker Desktop installed by Chocolatey, Microsoft Edge). When it reports blocked
 upgrades, each pending package is asked about by id, and the ones it refuses move out of "still pending"
 into `Not upgradeable through winget (installed another way; its own updater handles it): ...`.
+A package the catalog pins to an installer (PowerShell 7's MSI, below) is winget's own install, so it
+stays out of that line: it is upgraded with its pin, and that step says what happened to it.
 
 `dot upgrade` runs elevated, and winget cannot upgrade a **per-user** package from an elevated shell
 (`The package installed for user scope cannot be uninstalled when running with administrator privileges`).

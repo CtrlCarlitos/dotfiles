@@ -1274,17 +1274,23 @@ function Invoke-WingetUpgradeAll {
         Write-Host "  Nothing to upgrade in winget."
     }
     if (@($pending.Other).Count -gt 0) {
-        $others = @($pending.Other | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
-        Write-Host ("  Not upgradeable through winget (installed another way; its own updater handles it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
+        # A package the catalog pins to an installer (PowerShell: the machine-wide MSI) is upgraded with
+        # that pin instead - winget's default for it is the MSIX, which is what "different technology" means.
+        # winget installed it, so it is left out of "installed another way" (#430 Run 25);
+        # Invoke-WingetPinnedUpgrade says what happened to it.
+        $pinnedRows = @($pending.Other | Where-Object { $_.Id -and $script:WingetInstallerPin.ContainsKey($_.Id) })
+        $otherRows = @($pending.Other | Where-Object { -not ($_.Id -and $script:WingetInstallerPin.ContainsKey($_.Id)) })
+        if ($otherRows.Count -gt 0) {
+            $others = @($otherRows | ForEach-Object { "{0} ({1} -> {2})" -f $_.Name, $_.Version, $_.Available })
+            Write-Host ("  Not upgradeable through winget (installed another way; its own updater handles it): {0}" -f ($others -join ', ')) -ForegroundColor Yellow
+        }
         # Some have no updater of their own (PowerShell installed as an MSI stays on its version for
         # good). winget's answer is a reinstall - from ANOTHER shell, since this one may be the app -
         # and a reinstall can change the app's path, which breaks a profile or shortcut that names it.
-        # A package the catalog pins to an installer (PowerShell: the machine-wide MSI) is upgraded with
-        # that pin instead - winget's default for it is the MSIX, which is what "different technology" means.
-        foreach ($pinnedRow in @($pending.Other | Where-Object { $_.Id -and $script:WingetInstallerPin.ContainsKey($_.Id) })) {
+        foreach ($pinnedRow in $pinnedRows) {
             $null = Invoke-WingetPinnedUpgrade -Id $pinnedRow.Id
         }
-        $reinstallable = @($pending.Other | Where-Object { $_.Id -and -not $script:WingetInstallerPin.ContainsKey($_.Id) } | ForEach-Object { "winget uninstall --id $($_.Id); winget install --id $($_.Id)" })
+        $reinstallable = @($otherRows | Where-Object { $_.Id } | ForEach-Object { "winget uninstall --id $($_.Id); winget install --id $($_.Id)" })
         if ($reinstallable.Count -gt 0) {
             Write-Host "    To put one under winget, from another shell: $($reinstallable -join '  |  ')" -ForegroundColor DarkGray
             Write-Host "    (a reinstall can move the app: check terminal profiles and shortcuts that name its old path)" -ForegroundColor DarkGray
