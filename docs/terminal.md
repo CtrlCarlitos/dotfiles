@@ -583,9 +583,13 @@ the next `dot up`. To move a machine to OpenCode 2:
 1. `guardrail setup` must already have run with agent-guardrails **≥ v0.23.37**
    (the dual-major port, agent-guardrails#534). The pre-port wiring is dead on
    V2 - a V2 upgrade without this release enforces nothing.
-2. Set `opencodeMajor = "2"` in `~/.config/chezmoi/chezmoi.toml` (the first
-   `dot up` on the new code asks the question once - answer 2), then close
-   every opencode session and run `dot up` (the V2 installer replaces the V1
+2. Set the major: the first `dot up` on the new code asks the question once -
+   answer 2. Hand-editing instead? The key lives under the **[data]** section
+   of ~/.config/chezmoi/chezmoi.toml (`opencodeMajor = "2"`, indented, inside
+   [data]) - a top-level key outside [data] is a different namespace:
+   promptChoiceOnce never sees it and every `chezmoi init` re-prompts (hit
+   live on the workstation, 2026-11-15). Then close every opencode session
+   and run `dot up` (the V2 installer replaces the V1
    binary in place; `~/.opencode/bin/opencode2` is only a compat wrapper).
    On Windows, also remove a previously installed V1 package once:
    `choco uninstall opencode -y` (or `winget uninstall --id SST.opencode
