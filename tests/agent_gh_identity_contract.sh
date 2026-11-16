@@ -31,7 +31,7 @@ pass
 require "$repo_root/.chezmoiignore" '!.claude/settings.json'
 require "$repo_root/.chezmoi.toml.tmpl" '[data.githubBot]'
 require "$repo_root/.chezmoi.toml.tmpl" '"githubBot" .githubBot'
-require "$repo_root/run_after_agent-gh-identity-permissions.sh" 'chmod 600 "$f"'
+require "$repo_root/run_after_agent-gh-identity-permissions.sh.tmpl" 'chmod 600 "$f"'
 require "$repo_root/install.ps1" "guardrail operator enroll"
 if grep -Fq "Run 'guardrail setup' to enroll" "$repo_root/install.ps1"; then
     fail "install.ps1: the enrollment hint must name 'guardrail operator enroll', not 'guardrail setup'"
