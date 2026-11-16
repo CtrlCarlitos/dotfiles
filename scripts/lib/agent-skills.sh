@@ -1413,21 +1413,25 @@ opencode_superpowers_refresh() {
 # (Phase 1 finding, 2026-11-14): empty means unknown, not absent. The VERSION
 # is a commit hash for git specs, never a semver comparable to a release tag.
 # A cold service answers "No plugins found" for about a second (0.8 s on
-# v2.3.0, issue #431 Run 23; 1-3 s on Windows, #492), so the list is polled:
-# OPENCODE_PLUGIN_LIST_TRIES tries (default 5), one second apart.
+# v2.3.0, issue #431 Run 23; 1-3 s on Windows, #492). On its first start after
+# an install it then lists only the local plugins (guardrail) for ~3 s while it
+# fetches the git spec (#431 Run 25), so the list is polled until the
+# superpowers row appears: OPENCODE_PLUGIN_LIST_TRIES tries (default 5), one
+# second apart. Stopping the service before then also abandons that fetch.
 opencode_superpowers_version_v2() {
-    local out rc=0 up=0 tries="${OPENCODE_PLUGIN_LIST_TRIES:-5}"
+    local out ver='' rc=0 up=0 tries="${OPENCODE_PLUGIN_LIST_TRIES:-5}"
     opencode_service_up && up=1
     while :; do
         out="$(net_timeout 60 opencode plugin list 2>/dev/null)" || { rc=1; break; }
-        case "$out" in *'No plugins found'*) ;; *) break ;; esac
+        ver="$(printf '%s\n' "$out" | awk '$1 == "superpowers" { print $2; exit }')"
+        [ -z "$ver" ] || break
         tries=$((tries - 1))
         [ "$tries" -gt 0 ] || break
         sleep 1
     done
     opencode_service_restore "$up"
     [ "$rc" = 0 ] || return 1
-    printf '%s\n' "$out" | awk '$1 == "superpowers" { print $2; exit }'
+    [ -z "$ver" ] || printf '%s\n' "$ver"
 }
 
 # opencode_superpowers_refresh_v2 - V2's own updater. `opencode plugin update`

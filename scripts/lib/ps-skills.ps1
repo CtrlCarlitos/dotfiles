@@ -907,8 +907,12 @@ function Get-OpenCodeSuperpowersVersionV2 {
     # ID VERSION SOURCE; a commit hash for git specs, never a release tag).
     # Empty when the table has no superpowers row - including the warming-up
     # "No plugins found" for a few seconds right after an install: empty means
-    # unknown, not absent. A cold service answers that for 1-3 s (#492), so the
-    # list is polled: OPENCODE_PLUGIN_LIST_TRIES tries (default 5), 1 s apart.
+    # unknown, not absent. A cold service answers that for 1-3 s (#492); on its
+    # first start after an install it then lists only the local plugins
+    # (guardrail) for ~3 s while it fetches the git spec (#431 Run 25). So the
+    # list is polled until the superpowers row appears:
+    # OPENCODE_PLUGIN_LIST_TRIES tries (default 5), 1 s apart. Stopping the
+    # service before then also abandons that fetch.
     $tries = 5
     if ($env:OPENCODE_PLUGIN_LIST_TRIES) { $tries = [int]$env:OPENCODE_PLUGIN_LIST_TRIES }
     $wasUp = Test-OpenCodeServiceUp
@@ -916,12 +920,12 @@ function Get-OpenCodeSuperpowersVersionV2 {
     try {
         for ($i = 1; $i -le $tries; $i++) {
             $out = @(& opencode plugin list 2>$null | ForEach-Object { "$_" })
-            if (-not ($out -match 'No plugins found')) { break }
+            foreach ($line in $out) {
+                $cols = $line -split '\s+'
+                if ($cols[0] -eq 'superpowers') { $ver = $cols[1]; break }
+            }
+            if ($ver) { break }
             if ($i -lt $tries) { Start-Sleep -Seconds 1 }
-        }
-        foreach ($line in $out) {
-            $cols = $line -split '\s+'
-            if ($cols[0] -eq 'superpowers') { $ver = $cols[1]; break }
         }
     } catch {
         $ver = ''
