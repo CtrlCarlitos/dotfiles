@@ -72,6 +72,28 @@ asks for before those steps. It does not cover:
 
 Each of those still needs its own decision.
 
+## Steps guardrail hands back to the operator
+
+With guardrail armed and the agent in an auto or bypass permission mode,
+guardrail denies every action it would otherwise ask about: the host would
+answer its own prompt (rule `host-auto-ask-escalated`, seen on v0.23.43). On
+these VMs that covers `gh pr merge`, `git worktree remove`, `git branch -D`,
+and any shell command guardrail cannot resolve, such as a polling loop. The
+workflow is shaped so that only the merge is left for the operator:
+
+- **Work in a throwaway clone** in the session's scratchpad, never a worktree
+  of the chezmoi source. Nothing needs removing afterwards, the source checkout
+  stays on its branch for `dot up`, and GitHub deletes the merged remote branch.
+- **Wait for CI with one background `gh pr checks <n> --watch`**, not a loop.
+- **Hand over the merge as one line**, once CI is green and the PR reports
+  mergeable. The operator types it in the agent's prompt, so it runs as them
+  and its output reaches the agent:
+  `! gh pr merge <n> --squash --match-head-commit <tested sha>`.
+  Then verify that the squash commit's tree equals the tested head, check
+  `main`'s CI, and record the merge in the machine issue.
+- **On a deny, neither retry nor work around it.** `guardrail explain` shows
+  the rule and the next step.
+
 ## The prompt
 
 You are running inside a Hyper-V lab VM used to validate this repository's
@@ -163,8 +185,10 @@ pushes to that branch, creation/update of a PR, and updates to this VM's
 tracking issue. Complete those actions without repeatedly asking whether to
 commit, push, or open the PR.
 
-Follow the repository workflow, preserve unrelated work, reuse a dedicated
-branch/worktree when appropriate, and leave the PR open for my review. Before
+Follow the repository workflow, preserve unrelated work, work on a task branch
+in a throwaway clone ([Steps guardrail hands back to the operator](#steps-guardrail-hands-back-to-the-operator)),
+and leave the PR open for my review. When I ask you to merge, hand me the
+merge command from that section. Before
 implementing a shared defect, check relevant open PRs and other VM reports so
 an existing fix can be reused or cross-linked; do not overwrite another
 agent's work. Do not merge or restore the VM automatically.
