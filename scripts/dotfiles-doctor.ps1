@@ -356,6 +356,29 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
     }
 }
 
+# --- 7b. Configured SSH identities exist as key files (ssh-identities) --------
+# Twin of the ssh-identities check in dotfiles-doctor.sh: same reference set
+# ssh_fingerprints.py validates, same incident (id_penn-elcom, 2026-11-17 -
+# --write aborted on a key with no file while doctor said nothing). Windows
+# is the authoritative machine for key files: WSL serves them from this
+# agent via the relay. Sits before the LF-pass section on purpose: the
+# doctor's test harness extracts that section (LF marker onward) into a
+# standalone scriptblock, so nothing region-dependent may live inside it.
+# $repoRoot is null-guarded for any other extraction style. EAP drops to
+# Continue around the native call: PS 5.1 turns any python stderr line into
+# a terminating NativeCommandError under 'Stop' + 2>$null.
+if ($repoRoot -and (Test-Path (Join-Path $repoRoot 'scripts\ssh_identity_check.py'))) {
+    $pyCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pyCmd) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & python (Join-Path $repoRoot 'scripts\ssh_identity_check.py')
+        $ErrorActionPreference = $prevEAP
+    } else {
+        Result 'skip' 'ssh-identities' 'python not available for the key-file check'
+    }
+}
+
 # --- 8. SSH text files use LF on every platform -------------------------------
 # Strict UTF-8 text only; preserve binary files, standalone CRs and ACLs.
 # Do not follow reparse points out of the SSH directory.
@@ -481,23 +504,6 @@ if (-not $ocCmd) {
     } else {
         Result 'warn' 'opencode-major' "$ocVer is major $ocMajor but opencodeMajor is $ocWant - align them: set opencodeMajor in chezmoi.toml and dot up, or install the $ocWant.x line (dotfiles#395; on 2.x run guardrail setup or the plane enforces nothing, agent-guardrails#534)"
     }
-}
-
-# --- Configured SSH identities exist as key files (ssh-identities) -------------
-# Twin of check 11 in dotfiles-doctor.sh: same reference set ssh_fingerprints.py
-# validates, same incident (id_penn-elcom, 2026-11-17 - --write aborted on a
-# key with no file while doctor said nothing). Windows is the authoritative
-# machine for key files: WSL serves them from this agent via the relay.
-# EAP drops to Continue around the native call: PS 5.1 turns any python
-# stderr line into a terminating NativeCommandError under 'Stop' + 2>$null.
-$pyCmd = Get-Command python -ErrorAction SilentlyContinue
-if ($pyCmd) {
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & python (Join-Path $repoRoot 'scripts\ssh_identity_check.py')
-    $ErrorActionPreference = $prevEAP
-} else {
-    Result 'skip' 'ssh-identities' 'python not available for the key-file check'
 }
 
 if ($script:Errors -gt 0) {
