@@ -65,7 +65,13 @@ def main():
         line("skip", f"no config at {config_path}")
         return 0
 
-    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, OSError) as exc:
+        # A broken config is the config-utf8/config-parse checks' failure
+        # class; never crash (a traceback on stderr kills PS 5.1 harnesses).
+        line("skip", f"config not readable as UTF-8/TOML ({exc.__class__.__name__}) - config-utf8/config-parse own that")
+        return 0
     ssh_dir = Path(args.ssh_dir)
 
     missing, malformed = [], []

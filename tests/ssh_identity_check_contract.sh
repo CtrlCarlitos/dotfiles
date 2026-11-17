@@ -82,4 +82,11 @@ check '^skip +ssh-identities +keys live in the Windows agent' "$out" "WSL skip l
 python3 "$checker" --config "$config" --ssh-dir "$tmp/ssh" --release '6.8.0-arch1-1' >/dev/null &&
     pass || fail "checker must exit 0 on warnings"
 
+# 6. Unreadable config (the cp1252 doctor fixture class) -> skip, never a
+#    traceback: stderr kills PS 5.1 harnesses.
+printf 'name = \x93quoted\x94\n' > "$tmp/config/broken.toml"
+out="$(python3 "$checker" --config "$tmp/config/broken.toml" --ssh-dir "$tmp/ssh" --release '6.8.0-arch1-1' 2>"$tmp/err")"
+check '^skip +ssh-identities +config not readable as UTF-8/TOML' "$out" "unreadable config skips cleanly"
+[ ! -s "$tmp/err" ] && pass || fail "checker wrote to stderr on unreadable config: $(cat "$tmp/err")"
+
 finish

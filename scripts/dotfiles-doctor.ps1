@@ -370,10 +370,15 @@ if (Test-Path (Join-Path $homeDir '.ssh')) {
 if ($repoRoot -and (Test-Path (Join-Path $repoRoot 'scripts\ssh_identity_check.py'))) {
     $pyCmd = Get-Command python -ErrorAction SilentlyContinue
     if ($pyCmd) {
+        # EAP drops to Continue and output is captured stringified: under
+        # PS 5.1 with EAP='Stop' (the test harnesses run that way) any
+        # native stderr line becomes a terminating NativeCommandError that
+        # kills the whole doctor run - the config-parse check's old bug.
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & python (Join-Path $repoRoot 'scripts\ssh_identity_check.py')
+        $pyOut = & python (Join-Path $repoRoot 'scripts\ssh_identity_check.py') 2>&1 | Out-String
         $ErrorActionPreference = $prevEAP
+        Write-Host $pyOut.TrimEnd()
     } else {
         Result 'skip' 'ssh-identities' 'python not available for the key-file check'
     }
