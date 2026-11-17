@@ -483,6 +483,23 @@ if (-not $ocCmd) {
     }
 }
 
+# --- Configured SSH identities exist as key files (ssh-identities) -------------
+# Twin of check 11 in dotfiles-doctor.sh: same reference set ssh_fingerprints.py
+# validates, same incident (id_penn-elcom, 2026-11-17 - --write aborted on a
+# key with no file while doctor said nothing). Windows is the authoritative
+# machine for key files: WSL serves them from this agent via the relay.
+# EAP drops to Continue around the native call: PS 5.1 turns any python
+# stderr line into a terminating NativeCommandError under 'Stop' + 2>$null.
+$pyCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($pyCmd) {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & python (Join-Path $repoRoot 'scripts\ssh_identity_check.py')
+    $ErrorActionPreference = $prevEAP
+} else {
+    Result 'skip' 'ssh-identities' 'python not available for the key-file check'
+}
+
 if ($script:Errors -gt 0) {
     Write-Host ""
     Write-Host "$($script:Errors) error(s). $(if ($Fix) { '(-Fix applied where safe)' } else { 're-run with -Fix for auto-repairable items' })"
