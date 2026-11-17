@@ -1,0 +1,18 @@
+{{- if ne .chezmoi.os "windows" -}}
+#!/bin/sh
+# The agent GitHub identity (ADR-0038) lands GH_TOKEN plus the GIT_AUTHOR/
+# GIT_COMMITTER identity pair in ~/.claude/settings.json and ~/.codex/config.toml
+# through modify templates. A freshly created target
+# gets chezmoi's default 0644 (the private_ attribute does not combine with
+# modify_ scripts), so this pins both to 0600 on every apply - before Claude or
+# Codex ever rewrite the files themselves. Idempotent; a no-op when either file
+# is absent. Renders empty on Windows: %USERPROFILE% ACLs default to user-only,
+# and a bare .sh cannot fork/exec there (the Windows Installer CI run caught
+# exactly that).
+set -eu
+for f in "$HOME/.claude/settings.json" "$HOME/.codex/config.toml"; do
+    if [ -f "$f" ]; then
+        chmod 600 "$f"
+    fi
+done
+{{- end -}}

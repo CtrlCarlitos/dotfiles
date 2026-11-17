@@ -1,0 +1,45 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Claude Code settings (~/.claude/settings.json, every OS). MERGE, not own -
+  the same loader as modify_tui.json (JSONC-tolerant: full-line // comments
+  and trailing commas stripped before parsing; Claude's own keys preserved).
+
+  Forces these keys when the machine-local secret is present:
+    env.GH_TOKEN  - the bot account's GitHub token (ADR-0038, dotfiles#277
+    follow-up). gh honors GH_TOKEN over hosts.yml, so every Claude Code
+    session - and every process it spawns - acts as the bot account while
+    the operator's own terminal keeps its gh profile: `gh auth switch` was
+    rejected as the mechanism because it flips machine-global state.
+    env.GIT_AUTHOR_NAME/EMAIL, GIT_COMMITTER_NAME/EMAIL - GH_TOKEN alone only
+    governs `gh` API calls; a bare `git commit` in the same session still
+    falls back to ~/.gitconfig's [user] (the operator's identity) unless these
+    are set too. Live check on a wired machine confirmed the silent fallback
+    before these were added. Bot identity is fixed, not machine-local data:
+    every wired machine must commit as the same single bot account.
+
+  The token VALUE never lives in this repo: it comes from the machine-local
+  config's [data.githubBot] table (~/.config/chezmoi/chezmoi.toml, 0600,
+  never committed, preserved across `chezmoi init` by the hasKey re-emit
+  block in .chezmoi.toml.tmpl). Machines without the table apply this
+  template as a no-op reformat and gain no env key.
+
+  The attribution writer (configure_claude_attribution, run_onchange
+  installer) merges into this same file at runtime; both directions
+  preserve foreign keys, so they compose.
+*/ -}}
+{{- $raw := .chezmoi.stdin | trimPrefix "\ufeff" -}}
+{{- $raw = regexReplaceAll "(?m)^\\s*//.*$" $raw "" -}}
+{{- $raw = regexReplaceAll ",(\\s*[}\\]])" $raw "${1}" | trim -}}
+{{- $cur := dict -}}
+{{- if $raw }}{{ $cur = fromJson $raw }}{{ end -}}
+{{- if hasKey . "githubBot" -}}
+{{-   $env := dict -}}
+{{-   if hasKey $cur "env" }}{{ $env = $cur.env }}{{ end -}}
+{{-   $_ := set $env "GH_TOKEN" .githubBot.token -}}
+{{-   $_ := set $env "GIT_AUTHOR_NAME" "c20260202" -}}
+{{-   $_ := set $env "GIT_AUTHOR_EMAIL" "258988202+c20260202@users.noreply.github.com" -}}
+{{-   $_ := set $env "GIT_COMMITTER_NAME" "c20260202" -}}
+{{-   $_ := set $env "GIT_COMMITTER_EMAIL" "258988202+c20260202@users.noreply.github.com" -}}
+{{-   $_ := set $cur "env" $env -}}
+{{- end -}}
+{{- toPrettyJson $cur }}

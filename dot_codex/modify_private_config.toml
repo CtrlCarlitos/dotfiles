@@ -57,6 +57,53 @@
       "tui.keymap.editor.insert_newline" `["shift-enter", "ctrl-j", "ctrl-enter", "alt-enter"]`
       "tui.copy_on_select" `"always"`
 -}}
+{{- /* env.GH_TOKEN, GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL: the
+       ADR-0038 bot GitHub identity, injected into every subprocess Codex
+       spawns via [shell_environment_policy.set] ("Explicit environment
+       values injected after exclusions" - the config reference's only
+       env-setting mechanism). GH_TOKEN alone only governs `gh` API calls; a
+       bare `git commit` in the same session still falls back to
+       ~/.gitconfig's [user] (the operator's identity) without the
+       GIT_AUTHOR/GIT_COMMITTER pair too - confirmed by a live check on a
+       wired machine before these were added. The bot identity is fixed, not
+       machine-local data: every wired machine commits as the same single bot
+       account. The token comes from the machine-local [data.githubBot]
+       config table (never committed); machines without it force nothing
+       and this template's behavior is unchanged. */ -}}
+{{- if hasKey . "githubBot" -}}
+{{-   $forced = merge $forced (dict
+        "shell_environment_policy.set.GH_TOKEN" (printf "%q" .githubBot.token)
+        "shell_environment_policy.set.GIT_AUTHOR_NAME" `"c20260202"`
+        "shell_environment_policy.set.GIT_AUTHOR_EMAIL" `"258988202+c20260202@users.noreply.github.com"`
+        "shell_environment_policy.set.GIT_COMMITTER_NAME" `"c20260202"`
+        "shell_environment_policy.set.GIT_COMMITTER_EMAIL" `"258988202+c20260202@users.noreply.github.com"`
+      ) -}}
+{{- end -}}
+
+{{- /* Pre-format every forced "key = value" line once, padded to share its
+       table's widest key (docs/invariants.md #15: a block of two+ key = value
+       lines shares one "=" column - shell_environment_policy.set now carries
+       five). Computed once and reused by both the in-place replace path and
+       the end-of-file append path below, so the block stays aligned the same
+       way on every apply, not just the render that first writes it. */ -}}
+{{- $tableOf := dict -}}
+{{- $widths := dict -}}
+{{- range $path, $value := $forced -}}
+{{-   $parts := splitList "." $path -}}
+{{-   $key := last $parts -}}
+{{-   $table := join "." (initial $parts) -}}
+{{-   $_ := set $tableOf $path $table -}}
+{{-   $cur := 0 -}}
+{{-   if hasKey $widths $table }}{{ $cur = get $widths $table }}{{ end -}}
+{{-   if gt (len $key) $cur }}{{ $_ := set $widths $table (len $key) }}{{ end -}}
+{{- end -}}
+{{- $lineOf := dict -}}
+{{- range $path, $value := $forced -}}
+{{-   $parts := splitList "." $path -}}
+{{-   $key := last $parts -}}
+{{-   $w := get $widths (get $tableOf $path) -}}
+{{-   $_ := set $lineOf $path (printf "%-*s = %s" (int $w) $key $value) -}}
+{{- end -}}
 
 {{- $raw := .chezmoi.stdin | trimPrefix "\ufeff" -}}
 {{- $eol := "\n" -}}
@@ -86,7 +133,7 @@
 {{-     range $path, $value := $forced -}}
 {{-       $key := $path | trimPrefix (printf "%s." $h) -}}
 {{-       if and (ne $key $path) (not (contains "." $key)) (not (hasKey $st.done $path)) -}}
-{{-         $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-         $_ := set $st "out" (append $st.out (get $lineOf $path)) -}}
 {{-         $_ := set $st.done $path true -}}
 {{-       end -}}
 {{-     end -}}
@@ -97,7 +144,13 @@
 {{-     if and (eq $st.header "") (contains "." $key) }}{{ $_ := set $st.rootdotted (first (splitList "." $key)) true }}{{ end -}}
 {{-     if hasKey $forced $path -}}
 {{- /* an existing setting for a forced key: drop it (and any continuation
-             lines of a multi-line array), then emit ours unless already done */ -}}
+             lines of a multi-line array), then emit ours unless already done.
+             Un-padded, and $key as parsed - not $lineOf's table-relative form:
+             this line may be a root-dotted key (its $key IS the full dotted
+             path, e.g. tui.copy_on_select) interleaved with arbitrary
+             surrounding content, not a clean block of only forced keys, so
+             neither the alignment nor the table-relative key name from
+             $lineOf is safe to apply here. */ -}}
 {{-       $rest := trim (last (splitList "=" $t)) -}}
 {{-       if and (hasPrefix "[" $rest) (not (contains "]" $rest)) }}{{ $_ := set $st "skip" true }}{{ end -}}
 {{-       if not (hasKey $st.done $path) -}}
@@ -112,21 +165,32 @@
 {{-   end -}}
 {{- end -}}
 
-{{- /* nothing in the file claimed a forced key: append its table at the end */ -}}
+{{- /* nothing in the file claimed a forced key: append its table at the end.
+       Grouped by table first - two forced keys sharing a table (GH_TOKEN and
+       the four GIT_AUTHOR/GIT_COMMITTER vars both live under
+       shell_environment_policy.set) must share ONE [table] header; emitting
+       it once per key is a TOML "cannot declare twice" parse error. */ -}}
+{{- $pending := dict -}}
 {{- range $path, $value := $forced -}}
 {{-   if not (hasKey $st.done $path) -}}
 {{-     $parts := splitList "." $path -}}
-{{-     $key := last $parts -}}
-{{-     $table := join "." (initial $parts) -}}
 {{-     if hasKey $st.rootdotted (first $parts) -}}
 {{-       $_ := set $st "top" (append $st.top (printf "%s = %s" $path $value)) -}}
 {{-     else -}}
-{{-       $_ := set $st "out" (append $st.out "") -}}
-{{-       $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_private_config.toml). Edits here are overwritten.") -}}
-{{-       $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
-{{-       $_ := set $st "out" (append $st.out (printf "%s = %s" $key $value)) -}}
+{{-       $table := join "." (initial $parts) -}}
+{{-       $lines := list -}}
+{{-       if hasKey $pending $table }}{{ $lines = get $pending $table }}{{ end -}}
+{{-       $_ := set $pending $table (append $lines (get $lineOf $path)) -}}
 {{-     end -}}
 {{-     $_ := set $st.done $path true -}}
+{{-   end -}}
+{{- end -}}
+{{- range $table, $lines := $pending -}}
+{{-   $_ := set $st "out" (append $st.out "") -}}
+{{-   $_ := set $st "out" (append $st.out "# Managed by chezmoi (dot_codex/modify_private_config.toml). Edits here are overwritten.") -}}
+{{-   $_ := set $st "out" (append $st.out (printf "[%s]" $table)) -}}
+{{-   range $lines -}}
+{{-     $_ := set $st "out" (append $st.out .) -}}
 {{-   end -}}
 {{- end -}}
 
