@@ -447,6 +447,23 @@ else
     fi
 fi
 
+#-------------------------------------------------------------------------------
+# 11. Configured SSH identities exist as key files. Collects the same
+#     references ssh_fingerprints.py validates ([[data.accounts]] key/
+#     signingKey, [[data.ssh_hosts]] identity) so `dot ssh-fingerprints
+#     --write` can never die on a key `dot doctor` called healthy: the
+#     id_penn-elcom outage (2026-11-17) - two ssh_hosts entries named a key
+#     that had no file, --write aborted on the first validation. The shared
+#     python checker skips on WSL (keys live in the Windows agent there);
+#     the Windows twin is authoritative. Warn-only: a missing key degrades
+#     fingerprint sync, it does not break the relay that already has pins.
+#-------------------------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1; then
+    python3 "$repo_root/scripts/ssh_identity_check.py" || true
+else
+    result skip ssh-identities "python3 not available for the key-file check"
+fi
+
 if [ "$errors" -gt 0 ]; then
     printf '\n%d error(s). ' "$errors"
     if $FIX; then printf '(--fix applied where safe)\n'; else printf 're-run with --fix for auto-repairable items\n'; fi
