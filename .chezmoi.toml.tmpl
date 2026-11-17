@@ -333,9 +333,15 @@
      Machine-local secret, NEVER committed: this file lives in ~/.config, and
      this hasKey re-emit (the [data.backup] pattern) preserves the table
      across the `chezmoi init` regeneration that `dot up` runs. Consumed by
-     dot_claude/modify_settings.json and dot_codex/modify_private_config.toml
-     (env.GH_TOKEN / [shell_environment_policy.set]). Absent on machines that
-     have not wired it - every consumer is hasKey-guarded. */}}
+     dot_claude/modify_settings.json and dot_codex/modify_private_config.toml,
+     which force env.GH_TOKEN plus GIT_AUTHOR_NAME/EMAIL and
+     GIT_COMMITTER_NAME/EMAIL (env / [shell_environment_policy.set]) - GH_TOKEN
+     alone only covers `gh` API calls, a bare `git commit` still needs the
+     author/committer pair or it silently falls back to the operator's own
+     ~/.gitconfig identity. The bot's name/email are fixed in those templates,
+     not read from this table: ADR-0038 is one bot account for every wired
+     machine, not a per-machine choice. Absent on machines that have not wired
+     it - every consumer is hasKey-guarded. */}}
 {{ if hasKey . "githubBot" }}
 {{ includeTemplate "toml-align" (replace "[githubBot" "[data.githubBot" (toToml (dict "githubBot" .githubBot))) | trimSuffix "\n" }}
 {{- end }}
