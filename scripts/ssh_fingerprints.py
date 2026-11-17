@@ -29,7 +29,13 @@ def account_id(account):
 
 
 def collect(config, ssh_dir, keygen, ssh_add):
-    loaded = set(re.findall(r"SHA256:[A-Za-z0-9+/]+", run(ssh_add, "-l", "-E", "sha256")))
+    try:
+        loaded = set(re.findall(r"SHA256:[A-Za-z0-9+/]+", run(ssh_add, "-l", "-E", "sha256")))
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(
+            "ssh-add cannot reach the agent (is the Windows ssh-agent service running?) - "
+            f"Start-Service ssh-agent in an elevated terminal once, then re-run. Detail: {exc.stderr.strip()}"
+        ) from exc
     cache = {}
 
     def fingerprint(name):
@@ -37,9 +43,29 @@ def collect(config, ssh_dir, keygen, ssh_add):
             raise ValueError(f"expected a key filename, got {name!r}")
         if name not in cache:
             public = ssh_dir / (name + ".pub")
-            match = re.search(r"SHA256:[A-Za-z0-9+/]+", run(keygen, "-E", "sha256", "-lf", str(public)))
-            if not match or match[0] not in loaded:
-                raise ValueError(f"{name}: key is not loaded in the Windows agent; run ssh-add manually")
+            try:
+                listing = run(keygen, "-E", "sha256", "-lf", str(public))
+            except subprocess.CalledProcessError as exc:
+                stderr = (exc.stderr or "").strip()
+                if "No such file" in stderr:
+                    raise ValueError(
+                        f"{name}: no public key at {public} - restore the key pair or fix the "
+                        "reference; `dot doctor` (ssh-identities) names these"
+                    ) from exc
+                raise ValueError(
+                    f"{name}: {public} is unreadable as a public key - fix or regenerate the "
+                    f"file. Detail: {stderr}"
+                ) from exc
+            match = re.search(r"SHA256:[A-Za-z0-9+/]+", listing)
+            if not match:
+                raise ValueError(f"{name}: no fingerprint in keygen output for {public}")
+            if match[0] not in loaded:
+                raise ValueError(
+                    f"{name}: key exists but is not loaded in the Windows agent - run: "
+                    f"ssh-add {ssh_dir / name} "
+                    "(a passphrase prompt is normal and one-time; the agent service "
+                    "remembers the key across reboots)"
+                )
             cache[name] = match[0]
         return cache[name]
 
