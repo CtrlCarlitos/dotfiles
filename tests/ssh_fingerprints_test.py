@@ -59,6 +59,42 @@ enabled = false
         self.assertEqual(accounts[("github", "a")], {"auth_fingerprint": "SHA256:auth", "signing_fingerprint": "SHA256:sign"})
         self.assertEqual(hosts, {"id_server": "SHA256:host"})
 
+    def test_not_loaded_guides_to_ssh_add_with_passphrase_note(self):
+        # The penn-elcom outage (2026-11-17): key file present, fingerprint
+        # computed, but never added to the agent. The message must carry the
+        # exact command and the one-time-passphrase reassurance.
+        with patch.object(sync, "run", side_effect=["256 SHA256:other x", "256 SHA256:auth x"]):
+            with self.assertRaises(ValueError) as ctx:
+                sync.collect(tomllib.loads(self.text), Path("fixture"), "keygen", "agent")
+        msg = str(ctx.exception)
+        self.assertIn("not loaded in the Windows agent", msg)
+        self.assertIn("ssh-add", msg)
+        self.assertIn("id_a", msg)
+        self.assertIn("one-time", msg)
+
+    def test_missing_pub_points_at_dot_doctor(self):
+        err = subprocess.CalledProcessError(255, ["keygen"], stderr="load: No such file or directory")
+        with patch.object(sync, "run", side_effect=["256 SHA256:x x", err]):
+            with self.assertRaises(ValueError) as ctx:
+                sync.collect(tomllib.loads(self.text), Path("fixture"), "keygen", "agent")
+        msg = str(ctx.exception)
+        self.assertIn("no public key at", msg)
+        self.assertIn("dot doctor", msg)
+
+    def test_unreadable_pub_names_the_file(self):
+        err = subprocess.CalledProcessError(255, ["keygen"], stderr="load: invalid format")
+        with patch.object(sync, "run", side_effect=["256 SHA256:x x", err]):
+            with self.assertRaises(ValueError) as ctx:
+                sync.collect(tomllib.loads(self.text), Path("fixture"), "keygen", "agent")
+        self.assertIn("unreadable as a public key", str(ctx.exception))
+
+    def test_agent_unreachable_names_the_service_fix(self):
+        err = subprocess.CalledProcessError(1, ["ssh-add"], stderr="error communicating with agent")
+        with patch.object(sync, "run", side_effect=err):
+            with self.assertRaises(ValueError) as ctx:
+                sync.collect(tomllib.loads(self.text), Path("fixture"), "keygen", "agent")
+        self.assertIn("Start-Service ssh-agent", str(ctx.exception))
+
     def test_not_loaded_refused(self):
         with patch.object(sync, "run", side_effect=["256 SHA256:other comment", "256 SHA256:missing comment"]):
             with self.assertRaises(ValueError):
