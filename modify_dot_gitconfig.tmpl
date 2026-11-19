@@ -4,28 +4,25 @@
   repository baseline owns every other section; machine customization belongs
   in the unmanaged ~/.gitconfig.local included by gitconfig-managed.
 */ -}}
-{{- $extractCredentials := `
-function section_header(line) {
-    return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
-}
-function credential_header(line) {
-    return line ~ /^[[:space:]]*\[credential([[:space:]]+"[^"]*")?\][[:space:]]*$/
-}
-BEGIN {
-    raw = ARGV[1]
-    delete ARGV[1]
-    count = split(raw, lines, "\n")
-    for (i = 1; i <= count; i++) {
-        if (section_header(lines[i]))
-            keep = credential_header(lines[i])
-        if (keep) {
-            printf "%s", lines[i]
-            if (i < count)
-                printf "\n"
-        }
-    }
-}
-` -}}
-{{- $credentials := output "awk" $extractCredentials .chezmoi.stdin -}}
+{{- /* A complete section header may contain ] or escaped quotes inside its
+      quoted subsection and may end in a comment. Match the whole line so a
+      bracket in the subsection cannot become a false boundary. */ -}}
+{{- $sectionHeader := `^[ \t]*\[[^"\]\r\n]*(?:"(?:[^"\\]|\\.)*"[^"\]\r\n]*)?\][ \t]*(?:[#;].*)?\r?$` -}}
+{{- $credentialHeader := `(?i)^[ \t]*\[credential(?:(?:\.[^] \t\r\n]+)|(?:[ \t]+"(?:[^"\\]|\\.)*"))?[ \t]*\][ \t]*(?:[#;].*)?\r?$` -}}
+{{- $state := dict "keep" false "lines" (list) -}}
+{{- $inputLines := splitList "\n" .chezmoi.stdin -}}
+{{- $lastLine := sub (len $inputLines) 1 -}}
+{{- range $index, $line := $inputLines -}}
+{{-   if regexMatch $sectionHeader $line -}}
+{{-     $_ := set $state "keep" (regexMatch $credentialHeader $line) -}}
+{{-   end -}}
+{{-   if $state.keep -}}
+{{-     if lt $index $lastLine -}}
+{{-       $line = printf "%s\n" $line -}}
+{{-     end -}}
+{{-     $_ := set $state "lines" (append $state.lines $line) -}}
+{{-   end -}}
+{{- end -}}
+{{- $credentials := join "" $state.lines -}}
 {{ includeTemplate "gitconfig-managed" . -}}
 {{- $credentials -}}

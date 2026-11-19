@@ -42,19 +42,6 @@ cat >"$tmp/input" <<'GITCONFIG'
     editor = nano
 GITCONFIG
 
-extract_credentials() {
-    awk '
-        function section_header(line) {
-            return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
-        }
-        function credential_header(line) {
-            return line ~ /^[[:space:]]*\[credential([[:space:]]+"[^"]*")?\][[:space:]]*$/
-        }
-        section_header($0) { keep = credential_header($0) }
-        keep { print }
-    ' "$1"
-}
-
 render_merge() {
     chezmoi execute-template --config "$config" --source "$repo_root" \
         --with-stdin --file "$template" <"$1" >"$2"
@@ -71,12 +58,80 @@ tail -n 2 "$tmp/baseline" >"$tmp/baseline-tail"
 cmp -s "$tmp/include-tail" "$tmp/baseline-tail" ||
     fail "managed ~/.gitconfig.local include is not the baseline's final section"
 pass
-extract_credentials "$tmp/input" >"$tmp/credentials"
+cat >"$tmp/credentials" <<'GITCONFIG'
+[credential]
+    helper =
+
+    helper = "/usr/bin/gh" auth git-credential
+[credential "https://gist.github.com"]
+    helper =
+    helper = "/usr/bin/gh" auth git-credential
+[credential "https://github.com"]
+    helper =
+    helper = "/usr/bin/gh" auth git-credential
+[credential "https://github.com/some-org"]
+    helper = manager-core
+GITCONFIG
 cat "$tmp/baseline" "$tmp/credentials" >"$tmp/expected"
 cmp -s "$tmp/expected" "$tmp/output" || {
     diff -u "$tmp/expected" "$tmp/output" >&2 || true
     fail "rendered gitconfig is not exactly the managed baseline followed by preserved credential sections"
 }
+pass
+
+# Git accepts case-insensitive section names, quoted subsections containing `]`
+# or escaped quotes, and trailing comments. Literal expected output keeps this
+# oracle independent from the production section classifier.
+cat >"$tmp/edge-input" <<'GITCONFIG'
+[user]
+    name = Student User
+[Credential] # case and trailing comment
+    helper = case-helper
+[credential "https://[2001:db8::1]/path"] ; closing bracket inside subsection
+    helper = ipv6-helper
+[credential "https://example.test/a\"b"] # escaped quote in subsection
+    helper = quote-helper
+[credential "https://keep-before-boundary.test"]
+    helper = boundary-helper
+
+[student] # commented non-credential boundary
+    editor = nano
+GITCONFIG
+git config --file "$tmp/edge-input" --list >/dev/null || fail "edge fixture is not valid Git config"
+pass
+cat >"$tmp/edge-credentials" <<'GITCONFIG'
+[Credential] # case and trailing comment
+    helper = case-helper
+[credential "https://[2001:db8::1]/path"] ; closing bracket inside subsection
+    helper = ipv6-helper
+[credential "https://example.test/a\"b"] # escaped quote in subsection
+    helper = quote-helper
+[credential "https://keep-before-boundary.test"]
+    helper = boundary-helper
+
+GITCONFIG
+cat "$tmp/baseline" "$tmp/edge-credentials" >"$tmp/edge-expected"
+render_merge "$tmp/edge-input" "$tmp/edge-output"
+cmp -s "$tmp/edge-expected" "$tmp/edge-output" || {
+    diff -u "$tmp/edge-expected" "$tmp/edge-output" >&2 || true
+    fail "Git-valid credential headers were not preserved exactly or a commented non-credential section survived"
+}
+pass
+
+# Native chezmoi execution must not require awk (Git for Windows does not put
+# usr/bin/awk.exe on PowerShell's PATH) or send the whole config to a process.
+mkdir "$tmp/no-awk-bin"
+cat >"$tmp/no-awk-bin/awk" <<'SH'
+#!/bin/sh
+exit 97
+SH
+chmod +x "$tmp/no-awk-bin/awk"
+if ! PATH="$tmp/no-awk-bin:$PATH" render_merge "$tmp/edge-input" "$tmp/no-awk-output"; then
+    fail "modify template invokes external awk"
+fi
+cmp -s "$tmp/edge-expected" "$tmp/no-awk-output" || fail "render changed when awk was unavailable"
+forbid "$template" 'output '
+pass
 pass
 
 git config --file "$tmp/output" --list >/dev/null || fail "rendered gitconfig does not parse"

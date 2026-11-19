@@ -3,8 +3,9 @@
 `~/.gitconfig` is merge-managed. The repository renders the shared account
 rewrites, signing, diff, defaults, aliases, and hooks from
 `.chezmoitemplates/gitconfig-managed`; the modify-template then preserves every
-complete `[credential]` and `[credential "..."]` section already in the file,
-byte-for-byte and in its original order. Repeated applies are idempotent.
+complete, Git-valid `[credential]` and `[credential "..."]` section already in
+the file, byte-for-byte and in its original order. Repeated applies are
+idempotent.
 
 For machine-specific Git settings, use `~/.gitconfig.local`. The shared baseline
 includes it once, but chezmoi never creates or manages it. Other local sections
