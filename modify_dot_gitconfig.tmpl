@@ -10,7 +10,11 @@
 {{- $sectionHeader := `^[ \t]*\[[^"\]\r\n]*(?:"(?:[^"\\]|\\.)*"[^"\]\r\n]*)?\][ \t]*(?:[#;].*)?\r?$` -}}
 {{- $credentialHeader := `(?i)^[ \t]*\[credential(?:(?:\.[^] \t\r\n]+)|(?:[ \t]+"(?:[^"\\]|\\.)*"))?[ \t]*\][ \t]*(?:[#;].*)?\r?$` -}}
 {{- $state := dict "keep" false "lines" (list) -}}
-{{- $inputLines := splitList "\n" .chezmoi.stdin -}}
+{{- $input := "" -}}
+{{- if hasKey .chezmoi "stdin" -}}
+{{-   $input = .chezmoi.stdin -}}
+{{- end -}}
+{{- $inputLines := splitList "\n" $input -}}
 {{- $lastLine := sub (len $inputLines) 1 -}}
 {{- range $index, $line := $inputLines -}}
 {{-   if regexMatch $sectionHeader $line -}}

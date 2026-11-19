@@ -50,6 +50,18 @@ render_merge() {
 render_merge "$tmp/input" "$tmp/output"
 chezmoi execute-template --config "$config" --source "$repo_root" \
     --file "$managed_template" >"$tmp/baseline"
+
+# A fresh machine has no existing ~/.gitconfig, so chezmoi does not add
+# .chezmoi.stdin to the template context. That path must still render exactly
+# the managed baseline rather than failing with missingkey=error.
+chezmoi execute-template --config "$config" --source "$repo_root" \
+    --file "$template" >"$tmp/fresh-output"
+cmp -s "$tmp/baseline" "$tmp/fresh-output" || {
+    diff -u "$tmp/baseline" "$tmp/fresh-output" >&2 || true
+    fail "fresh gitconfig without stdin did not render exactly the managed baseline"
+}
+pass
+
 cat >"$tmp/include-tail" <<'GITCONFIG'
 [include]
     path = ~/.gitconfig.local
@@ -166,8 +178,9 @@ if git config --file "$tmp/output" --get student.editor >/dev/null 2>&1; then
 fi
 pass
 
-[ "$(git config --file "$tmp/output" --get-all include.path | grep -Fxc '~/.gitconfig.local')" -eq 1 ] ||
-    fail "~/.gitconfig.local include must appear exactly once"
+local_include="$(printf '\176')/.gitconfig.local"
+[ "$(git config --file "$tmp/output" --get-all include.path | grep -Fxc "$local_include")" -eq 1 ] ||
+    fail "$local_include include must appear exactly once"
 pass
 
 render_merge "$tmp/output" "$tmp/output-second"
