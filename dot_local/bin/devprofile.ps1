@@ -331,7 +331,7 @@ function Use-Account {
     }
     
     # Prefer the account's dedicated signing key over the auth key, same as
-    # dot_gitconfig.tmpl / run_onchange_generate_identities - falls back to the
+    # .chezmoitemplates/gitconfig-managed / run_onchange_generate_identities - falls back to the
     # auth key only if no signingKey is configured for this account.
     $signKeyName = if ($selected.signingKey) { $selected.signingKey } else { $selected.key }
 

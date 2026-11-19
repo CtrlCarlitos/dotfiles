@@ -1,6 +1,6 @@
 #!/bin/sh
 # Shared commit-msg hook, run in every repository through
-# core.hooksPath = ~/.config/git/hooks (dot_gitconfig.tmpl, docs/git.md).
+# core.hooksPath = ~/.config/git/hooks (.chezmoitemplates/gitconfig-managed, docs/git.md).
 #
 # 1. Remove any Claude co-author trailer. Claude Code appends
 #    "Co-Authored-By: Claude <noreply@anthropic.com>" unless its attribution
