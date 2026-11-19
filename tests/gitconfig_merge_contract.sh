@@ -6,11 +6,11 @@ set -euo pipefail
 export TESTS_FAILFAST=1
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-template="$repo_root/modify_dot_gitconfig.tmpl"
+template="$repo_root/modify_dot_gitconfig"
 managed_template="$repo_root/.chezmoitemplates/gitconfig-managed"
 config="$repo_root/tests/fixtures/chezmoi/accounts-single.toml"
 
-[ -f "$template" ] || fail "modify_dot_gitconfig.tmpl is missing"
+[ -f "$template" ] || fail "modify_dot_gitconfig is missing"
 [ -f "$managed_template" ] || fail "gitconfig-managed template is missing"
 [ ! -e "$repo_root/dot_gitconfig.tmpl" ] || fail "dot_gitconfig.tmpl would still fully own ~/.gitconfig"
 pass
@@ -50,6 +50,33 @@ render_merge() {
 render_merge "$tmp/input" "$tmp/output"
 chezmoi execute-template --config "$config" --source "$repo_root" \
     --file "$managed_template" >"$tmp/baseline"
+
+# Render-only checks do not exercise chezmoi's modify-template classification.
+# Apply to a scratch home so the source must run through the real merge path.
+mkdir "$tmp/home"
+apply_merge() {
+    chezmoi --cache "$tmp/cache" --config "$config" --source "$repo_root" \
+        --destination "$tmp/home" --persistent-state "$tmp/chezmoistate.boltdb" \
+        --no-tty apply --force "$tmp/home/.gitconfig"
+}
+if ! apply_merge; then
+    fail "fresh gitconfig failed through chezmoi apply"
+fi
+cmp -s "$tmp/baseline" "$tmp/home/.gitconfig" || {
+    diff -u "$tmp/baseline" "$tmp/home/.gitconfig" >&2 || true
+    fail "fresh gitconfig apply did not create exactly the managed baseline"
+}
+pass
+
+cp "$tmp/input" "$tmp/home/.gitconfig"
+if ! apply_merge; then
+    fail "existing gitconfig failed through chezmoi apply"
+fi
+cmp -s "$tmp/output" "$tmp/home/.gitconfig" || {
+    diff -u "$tmp/output" "$tmp/home/.gitconfig" >&2 || true
+    fail "existing gitconfig apply did not preserve credential sections"
+}
+pass
 
 # A fresh machine has no existing ~/.gitconfig, so chezmoi does not add
 # .chezmoi.stdin to the template context. That path must still render exactly
@@ -190,7 +217,7 @@ cmp -s "$tmp/output" "$tmp/output-second" || {
 }
 pass
 
-chezmoi managed --config "$config" --source "$repo_root" >"$tmp/managed"
+chezmoi managed --cache "$tmp/cache" --config "$config" --source "$repo_root" >"$tmp/managed"
 grep -Fxq '.gitconfig' "$tmp/managed" || fail ".gitconfig is not managed"
 if grep -Fxq '.gitconfig.local' "$tmp/managed"; then
     fail ".gitconfig.local must never be managed"
