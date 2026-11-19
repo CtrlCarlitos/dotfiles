@@ -65,7 +65,7 @@ fi
 grep -Eq '^end_of_line[[:space:]]*=[[:space:]]*lf' .editorconfig || fail '.editorconfig: the [*] default must be end_of_line = lf'
 
 # --- 4. no machine-level conversion ---------------------------------------------
-grep -Eq '^[[:space:]]*autocrlf[[:space:]]*=[[:space:]]*false' dot_gitconfig.tmpl ||
-    fail 'dot_gitconfig.tmpl: core.autocrlf must be false (.gitattributes is the single authority)'
+grep -Eq '^[[:space:]]*autocrlf[[:space:]]*=[[:space:]]*false' .chezmoitemplates/gitconfig-managed ||
+    fail 'gitconfig-managed: core.autocrlf must be false (.gitattributes is the single authority)'
 
 finish

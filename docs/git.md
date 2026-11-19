@@ -1,8 +1,17 @@
 # 🌿 Git
 
-`dot_gitconfig.tmpl` renders `~/.gitconfig` on every machine. Identities and
-per-folder accounts are covered in [devprofile](devprofile.md); this page covers
-everything else: line endings, defaults, delta, and aliases.
+`~/.gitconfig` is merge-managed. The repository renders the shared account
+rewrites, signing, diff, defaults, aliases, and hooks from
+`.chezmoitemplates/gitconfig-managed`; the modify-template then preserves every
+complete `[credential]` and `[credential "..."]` section already in the file,
+byte-for-byte and in its original order. Repeated applies are idempotent.
+
+For machine-specific Git settings, use `~/.gitconfig.local`. The shared baseline
+includes it once, but chezmoi never creates or manages it. Other local sections
+in `~/.gitconfig` are intentionally removed on apply so stale managed content
+does not survive indefinitely. Identities and per-folder accounts are covered in
+[devprofile](devprofile.md); this page covers everything else: line endings,
+defaults, delta, and aliases.
 
 ## Line endings
 

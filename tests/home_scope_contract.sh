@@ -136,6 +136,12 @@ if command -v chezmoi >/dev/null; then
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
     grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
         fail "linux: .gitconfig must stay managed"
+    grep -Fxq '.gitconfig.local' "$tmp/lin-managed.txt" &&
+        fail "linux: .gitconfig.local must remain unmanaged"
+    grep -Fxq '.gitconfig' "$tmp/win-managed.txt" ||
+        fail "windows: .gitconfig must stay managed"
+    grep -Fxq '.gitconfig.local' "$tmp/win-managed.txt" &&
+        fail "windows: .gitconfig.local must remain unmanaged"
     # Operator repo policy is a machine capability, not part of the public baseline.
     for f in "$tmp/lin-managed.txt" "$tmp/win-managed.txt"; do
         ! grep -Fxq '.config/repo-policy/policies/default.yaml' "$f" ||

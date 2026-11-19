@@ -1,0 +1,31 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Preserve only complete credential sections written by Git tooling. The
+  repository baseline owns every other section; machine customization belongs
+  in the unmanaged ~/.gitconfig.local included by gitconfig-managed.
+*/ -}}
+{{- $extractCredentials := `
+function section_header(line) {
+    return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
+}
+function credential_header(line) {
+    return line ~ /^[[:space:]]*\[credential([[:space:]]+"[^"]*")?\][[:space:]]*$/
+}
+BEGIN {
+    raw = ARGV[1]
+    delete ARGV[1]
+    count = split(raw, lines, "\n")
+    for (i = 1; i <= count; i++) {
+        if (section_header(lines[i]))
+            keep = credential_header(lines[i])
+        if (keep) {
+            printf "%s", lines[i]
+            if (i < count)
+                printf "\n"
+        }
+    }
+}
+` -}}
+{{- $credentials := output "awk" $extractCredentials .chezmoi.stdin -}}
+{{ includeTemplate "gitconfig-managed" . -}}
+{{- $credentials -}}

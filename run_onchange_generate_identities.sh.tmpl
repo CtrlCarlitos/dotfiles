@@ -1,6 +1,6 @@
 {{- if eq .chezmoi.os "linux" "darwin" -}}
 {{- if and (hasKey . "accounts") .accounts -}}
-{{- /* Same container rule as dot_gitconfig.tmpl: a devcontainer has no key
+{{- /* Same container rule as gitconfig-managed: a devcontainer has no key
        FILES (keys arrive through the forwarded agent socket), so pinning
        `-i <path> -o IdentitiesOnly=yes` there would refuse the agent's keys,
        and ssh signing would need a .pub that isn't present either. */ -}}
@@ -138,7 +138,7 @@ unset __sign_pub __agent_keys __match
 {{- end }}
 
 # Generate ~/.ssh/allowed_signers (for `git log --show-signature` / `git verify-commit`
-# to work locally - dot_gitconfig.tmpl points gpg.ssh.allowedSignersFile here).
+# to work locally - gitconfig-managed points gpg.ssh.allowedSignersFile here).
 #
 # This repo is used across many independent machines/people, not just one person's
 # own - so this deliberately does NOT centralize anyone's public keys in the git repo

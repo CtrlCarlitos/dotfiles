@@ -76,7 +76,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 {{- end }}
 
 # Generate ~/.ssh/allowed_signers (for `git log --show-signature` / `git verify-commit`
-# to work locally - dot_gitconfig.tmpl points gpg.ssh.allowedSignersFile here).
+# to work locally - gitconfig-managed points gpg.ssh.allowedSignersFile here).
 #
 # This repo is used across many independent machines/people, not just one person's
 # own - so this deliberately does NOT centralize anyone's public keys in the git repo
