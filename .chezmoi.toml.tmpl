@@ -266,6 +266,11 @@
   #     "[python]"            = { "editor.tabSize" = 4 }
 {{- end }}
 
+{{- if hasKey . "repoPolicy" }}
+[data.repoPolicy]
+{{ includeTemplate "toml-align" (toToml .repoPolicy) | indent 2 }}
+{{- end }}
+
 {{/* upgrade: machine-local `dot upgrade` behavior. Its own table, not
      [data.packages], so the package-selection menu never rewrites it.
      Windows only: the desktop-shortcut cleanup lives in scripts/lib/ps-desktop-shortcuts.ps1
