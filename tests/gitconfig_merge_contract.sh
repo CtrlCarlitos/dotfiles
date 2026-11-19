@@ -58,6 +58,23 @@ tail -n 2 "$tmp/baseline" >"$tmp/baseline-tail"
 cmp -s "$tmp/include-tail" "$tmp/baseline-tail" ||
     fail "managed ~/.gitconfig.local include is not the baseline's final section"
 pass
+
+cat >"$tmp/credential-free-input" <<'GITCONFIG'
+[user]
+    name = Student User
+    email = student@example.test
+[student]
+    editor = nano
+[include]
+    path = ~/.gitconfig.student
+GITCONFIG
+render_merge "$tmp/credential-free-input" "$tmp/credential-free-output"
+cmp -s "$tmp/baseline" "$tmp/credential-free-output" || {
+    diff -u "$tmp/baseline" "$tmp/credential-free-output" >&2 || true
+    fail "credential-free input did not render exactly the managed baseline"
+}
+pass
+
 cat >"$tmp/credentials" <<'GITCONFIG'
 [credential]
     helper =
