@@ -577,7 +577,7 @@ deciding who should own it:
 - **baseline update:** only chezmoi's target changed; review and target-apply the
   change. Repository source should change when the desired shared baseline
   changed;
-- **local conflict:** machine and target both changed; merge or move local data
+- **local conflict:** source and target both changed; merge or move local data
   to its seam;
 - **merge-managed rewrite:** an app rewrote a file but forced semantics already
   match; no cleanup solely for formatting. The tool will rewrite only managed
