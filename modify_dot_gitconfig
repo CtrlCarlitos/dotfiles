@@ -1,0 +1,32 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /*
+  Preserve only complete credential sections written by Git tooling. The
+  repository baseline owns every other section; machine customization belongs
+  in the unmanaged ~/.gitconfig.local included by gitconfig-managed.
+*/ -}}
+{{- /* A complete section header may contain ] or escaped quotes inside its
+      quoted subsection and may end in a comment. Match the whole line so a
+      bracket in the subsection cannot become a false boundary. */ -}}
+{{- $sectionHeader := `^[ \t]*\[[^"\]\r\n]*(?:"(?:[^"\\]|\\.)*"[^"\]\r\n]*)?\][ \t]*(?:[#;].*)?\r?$` -}}
+{{- $credentialHeader := `(?i)^[ \t]*\[credential(?:(?:\.[^] \t\r\n]+)|(?:[ \t]+"(?:[^"\\]|\\.)*"))?[ \t]*\][ \t]*(?:[#;].*)?\r?$` -}}
+{{- $state := dict "keep" false "lines" (list) -}}
+{{- $input := "" -}}
+{{- if hasKey .chezmoi "stdin" -}}
+{{-   $input = .chezmoi.stdin -}}
+{{- end -}}
+{{- $inputLines := splitList "\n" $input -}}
+{{- $lastLine := sub (len $inputLines) 1 -}}
+{{- range $index, $line := $inputLines -}}
+{{-   if regexMatch $sectionHeader $line -}}
+{{-     $_ := set $state "keep" (regexMatch $credentialHeader $line) -}}
+{{-   end -}}
+{{-   if $state.keep -}}
+{{-     if lt $index $lastLine -}}
+{{-       $line = printf "%s\n" $line -}}
+{{-     end -}}
+{{-     $_ := set $state "lines" (append $state.lines $line) -}}
+{{-   end -}}
+{{- end -}}
+{{- $credentials := join "" $state.lines -}}
+{{ includeTemplate "gitconfig-managed" . -}}
+{{- $credentials -}}

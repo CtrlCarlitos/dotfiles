@@ -136,13 +136,29 @@ if command -v chezmoi >/dev/null; then
         fail "linux: .local/bin/ssh-agent-relay must stay managed"
     grep -Fxq '.gitconfig' "$tmp/lin-managed.txt" ||
         fail "linux: .gitconfig must stay managed"
-    # The operator's repo-policy default, read by the repo-policy skill on
-    # every OS (it would otherwise fall back to a built-in default that
-    # requires an approval nobody can give on a solo repo).
+    grep -Fxq '.gitconfig.local' "$tmp/lin-managed.txt" &&
+        fail "linux: .gitconfig.local must remain unmanaged"
+    grep -Fxq '.gitconfig' "$tmp/win-managed.txt" ||
+        fail "windows: .gitconfig must stay managed"
+    grep -Fxq '.gitconfig.local' "$tmp/win-managed.txt" &&
+        fail "windows: .gitconfig.local must remain unmanaged"
+    # Operator repo policy is a machine capability, not part of the public baseline.
     for f in "$tmp/lin-managed.txt" "$tmp/win-managed.txt"; do
-        grep -Fxq '.config/repo-policy/policies/default.yaml' "$f" ||
-            fail "$(basename "$f"): .config/repo-policy/policies/default.yaml must be managed"
+        ! grep -Fxq '.config/repo-policy/policies/default.yaml' "$f" ||
+            fail "$(basename "$f"): repo policy is managed without data.repoPolicy.enabled"
     done
+
+    printf '[data.repoPolicy]\nenabled = false\n' >"$tmp/repo-policy-off.toml"
+    chezmoi managed --config "$tmp/repo-policy-off.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"},"homeDir":"/nonexistent"}}' >"$tmp/repo-policy-managed.txt"
+    ! grep -Fxq '.config/repo-policy/policies/default.yaml' "$tmp/repo-policy-managed.txt" ||
+        fail "repoPolicy.enabled=false still manages the operator policy"
+
+    printf '[data.repoPolicy]\nenabled = true\n' >"$tmp/repo-policy-on.toml"
+    chezmoi managed --config "$tmp/repo-policy-on.toml" --source "$repo_root" \
+        --override-data '{"chezmoi":{"os":"linux","kernel":{"osrelease":"6.8.0-generic"},"homeDir":"/nonexistent"}}' >"$tmp/repo-policy-managed.txt"
+    grep -Fxq '.config/repo-policy/policies/default.yaml' "$tmp/repo-policy-managed.txt" ||
+        fail "repoPolicy.enabled=true does not manage the operator policy"
 
     # Windows apps from dev_desktop: VS Code's keybindings and Geany's dark
     # scheme are gated on the app's dir, which the package installer creates

@@ -88,6 +88,9 @@ cat >"$tmp/fixture.toml" <<'EOF'
   log = false
   verbose = true
 
+[data.repoPolicy]
+  enabled = true
+
 [[data.accounts]]
   name = "Full Account"
   email = "full@example.com"
@@ -150,7 +153,7 @@ for os_json in '{"os":"windows"}' '{"os":"linux","kernel":{"osrelease":"6.8.0-ge
 import sys, tomllib
 a = tomllib.load(open(sys.argv[1], "rb"))["data"]
 b = tomllib.load(open(sys.argv[2], "rb"))["data"]
-diff = [k for k in ("accounts", "ssh_hosts", "vscode", "vscode_overrides") if a.get(k) != b.get(k)]
+diff = [k for k in ("accounts", "ssh_hosts", "vscode", "vscode_overrides", "repoPolicy") if a.get(k) != b.get(k)]
 if diff:
     for k in diff:
         print("  %s:\n    fixture  %r\n    rendered %r" % (k, a.get(k), b.get(k)))

@@ -28,7 +28,7 @@ if tr -cd '\r' < "$hook" | grep -q .; then
     fail 'commit-msg contains CR bytes - sh would reject the shebang line'
 fi
 pass
-require "$repo_root/dot_gitconfig.tmpl" 'hooksPath = ~/.config/git/hooks'
+require "$repo_root/.chezmoitemplates/gitconfig-managed" 'hooksPath = ~/.config/git/hooks'
 require "$repo_root/docs/git.md" 'hooksPath'
 require "$repo_root/docs/git.md" 'pre-commit install'
 if grep -q 'rev-parse --git-path hooks' "$hook"; then
@@ -142,7 +142,7 @@ if grep -q 'rev-parse --git-path hooks' "$pre_commit"; then
 fi
 pass
 require "$repo_root/docs/git.md" '| `pre-commit` |'
-require "$repo_root/dot_gitconfig.tmpl" 'pre-commit'
+require "$repo_root/.chezmoitemplates/gitconfig-managed" 'pre-commit'
 
 # Behaviour, in the same scratch repo (core.hooksPath still points at
 # $hooks_dir from section 3; install the twin there the way dot up does).

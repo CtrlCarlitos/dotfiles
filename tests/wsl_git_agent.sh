@@ -32,7 +32,7 @@ chezmoi execute-template --config "$tmp/empty.toml" --source "$repo_root" --over
     < "$repo_root/run_onchange_generate_identities.sh.tmpl" > "$tmp/generate"
 bash "$tmp/generate"
 chezmoi execute-template --config "$tmp/empty.toml" --source "$repo_root" --override-data "$data" \
-    < "$repo_root/dot_gitconfig.tmpl" > "$HOME/.gitconfig"
+    < "$repo_root/.chezmoitemplates/gitconfig-managed" > "$HOME/.gitconfig"
 # An unrelated ambient agent must not influence signing.
 export SSH_AUTH_SOCK="$tmp/nonexistent"
 git -C "$tmp/project" init -q

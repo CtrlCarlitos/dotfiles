@@ -126,7 +126,7 @@ WSL runs the same apt code path as native Linux (see that section), plus:
   as a secondary net). WSLg sets `$DISPLAY` automatically, so "it didn't
   install" proves nothing unless you tested with `dev_desktop = true` and a
   WSLg session.
-- **Interop and line endings.** `dot_gitconfig.tmpl` picks `core.editor`
+- **Interop and line endings.** `.chezmoitemplates/gitconfig-managed` picks `core.editor`
   based on `code` findability; `.gitattributes` keeps the index LF, pins
   `*.sh`/`*.zsh` to LF and `*.ps1`/`*.bat`/`*.cmd` to CRLF in the worktree —
   on CRLF drift, `git add --renormalize .` first, then root-cause

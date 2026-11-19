@@ -141,6 +141,7 @@ After installation, everything lives in `~/.config/chezmoi/chezmoi.toml`:
 
 - **Change package groups** — re-run the menu (`select-packages.sh`) or edit the file directly
 - **Add git accounts** — each gets its own SSH keys, signing key, and auto-selected identity based on which folder you're in
+- **Interpret drift** — use the [raw `chezmoi status` drift classes](docs/invariants.md#23-interpreting-raw-chezmoi-status)
 - **Example config** — [docs/chezmoi.toml.example](docs/chezmoi.toml.example)
 
 Apply changes:
@@ -320,7 +321,7 @@ run_once_windows_set-executionpolicy.ps1.tmpl  # PS execution policy, once ever
 .gitattributes                        # Line-ending authority (index LF; .ps1/.bat/.cmd CRLF on checkout)
 guardrail.toml                        # guardrail overlay (read from the source repo, not $HOME)
 dot_zshrc / dot_aliases.zsh           # Shell config + the dot/devprofile/dco alias layer
-dot_tmux.conf / dot_gitconfig.tmpl    # tmux bindings; gitconfig with includeIf identity routing
+dot_tmux.conf / .chezmoitemplates/gitconfig-managed  # tmux bindings; gitconfig with includeIf identity routing
 dot_config/                           # nvim (Lazy.nvim), git hooks, starship, ghostty, opencode, psmux (Windows tmux twin), Code keys
 dot_codex/modify_private_config.toml  # Codex config (merged, never clobbered)
 dot_local/bin/                        # devprofile (+ .ps1 twin), git-agent, ssh-agent-key/-relay, python3 shim (+ .cmd)

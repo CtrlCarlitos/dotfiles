@@ -14,6 +14,7 @@ intentionally tracked; real host names, aliases, and credentials are not.
 | SSH host aliases (bastions, servers) | `[[data.ssh_hosts]]` in chezmoi.toml |
 | Remote-access login keys (names + targets only) | `[[data.remote_access.login_keys]]` in chezmoi.toml |
 | Per-machine tool behavior (`dot upgrade` desktop shortcuts, `dot devtmp` folder) | `[data.upgrade]`, `[data.devtmp]` in chezmoi.toml (Windows) |
+| CtrlCarlitos repository governance capability opt-in | `[data.repoPolicy]` in chezmoi.toml |
 | Genuine secret file payloads (keys, tokens) | chezmoi `encrypted_` prefix with age/gpg — future; overkill for aliases |
 
 Nothing in this table is ever committed. If you can `git grep` it, it is in
@@ -29,12 +30,26 @@ table survives only if the template re-emits it for that machine:
 | `[[data.accounts]]` | yes | yes | yes (git identity, SSH aliases and the agent relay read it) |
 | `[[data.ssh_hosts]]` | yes | yes | yes, outgoing aliases and fingerprint selectors |
 | `[data.remote_access]` | yes | yes | preserved when explicitly configured; local incoming access |
+| `[data.repoPolicy]` | yes | yes | yes, when explicitly configured |
 | `[data.upgrade]` | yes | no | no |
 | `[data.devtmp]` | yes ([`dot devtmp`](devtmp.md)) | no | no |
 | `[interpreters.ps1]` | yes | macOS only | no |
 
 So a table you hand-add on WSL that the template does not emit there is
 dropped at the next `chezmoi init`.
+
+## Repository policy (`[data.repoPolicy]`)
+
+Set `data.repoPolicy.enabled = true` to opt a machine into CtrlCarlitos's
+repository governance policy:
+
+```toml
+[data.repoPolicy]
+  enabled = true
+```
+
+When the table is absent or `enabled` is `false`, chezmoi does not manage the
+policy. That is the safe public and student default.
 
 ## SSH hosts (`[[data.ssh_hosts]]`)
 

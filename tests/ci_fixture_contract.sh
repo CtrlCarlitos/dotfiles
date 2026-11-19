@@ -158,7 +158,7 @@ tied 'name = "Minimal User"'      accounts-minimal.toml 'name = "Minimal User"' 
 # absent) sit on the two edges of the optional data; each template below reads
 # at least one of them, so it must render cleanly on both.
 affected_templates=(
-    dot_gitconfig.tmpl
+    .chezmoitemplates/gitconfig-managed
     private_dot_ssh/private_config.tmpl
     run_onchange_generate_identities.sh.tmpl
     run_onchange_generate_identities.ps1.tmpl

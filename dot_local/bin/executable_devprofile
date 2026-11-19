@@ -156,7 +156,8 @@ load_accounts() {
 
 # Given a path relative to $HOME (no leading/trailing slash), return the index
 # of the account whose `dirs` list contains the longest matching prefix (same
-# prefix-match semantics as dot_gitconfig.tmpl's `gitdir/i:.../<dir>/` includeIf).
+# prefix-match semantics as .chezmoitemplates/gitconfig-managed's
+# `gitdir/i:.../<dir>/` includeIf).
 # Echoes the index and returns 0 on a match; returns 1 if no account's dirs match.
 find_account_for_relpath() {
     local relpath="$1"
@@ -298,7 +299,7 @@ show_current() {
         echo ""
 
         # A signing-key path displays with its .pub half - the form
-        # use_account and dot_gitconfig.tmpl actually configure
+        # use_account and .chezmoitemplates/gitconfig-managed actually configure
         # user.signingkey with (a bare private-key path is accepted by
         # git but made the box disagree with the config it described).
         local display_key="$signingkey"
@@ -460,7 +461,7 @@ use_account() {
         git config user.email "$email"
         if [[ -n "$key" ]]; then
             # Prefer the account's dedicated signing key over the auth key, same as
-            # dot_gitconfig.tmpl / run_onchange_generate_identities - falls back to
+            # .chezmoitemplates/gitconfig-managed / run_onchange_generate_identities - falls back to
             # the auth key only if no signingKey is configured for this account.
             git config user.signingkey "$HOME/.ssh/${signkey:-$key}.pub"
             git config commit.gpgsign true

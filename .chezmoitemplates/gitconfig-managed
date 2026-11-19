@@ -306,3 +306,6 @@
 {{- end }}
 {{- end }}
 {{- end }}
+
+[include]
+    path = ~/.gitconfig.local

@@ -569,6 +569,30 @@ run up front, naming the PIDs, when a leftover apt is sitting under a debconf di
 
 ---
 
+## 23. Interpreting raw `chezmoi status`
+
+`chezmoi status` remains the raw source. Classify each reported change before
+deciding who should own it:
+
+- **baseline update:** only chezmoi's target changed; review and target-apply the
+  change. Repository source should change when the desired shared baseline
+  changed;
+- **local conflict:** source and target both changed; merge or move local data
+  to its seam;
+- **merge-managed rewrite:** an app rewrote a file but forced semantics already
+  match; no cleanup solely for formatting. The tool will rewrite only managed
+  portions while preserving documented local seams. For Git, automatic
+  preservation is limited to complete credential sections; every other
+  customization belongs in `.gitconfig.local`, which is included but not
+  managed;
+- **pending script:** a run-on-change/after script is pending; treat it as an
+  operation with its own side effects, not ordinary file drift.
+
+Capability flags such as `data.repoPolicy.enabled` decide whether optional policy
+belongs to a machine.
+
+---
+
 ## Checking yourself
 
 ```sh

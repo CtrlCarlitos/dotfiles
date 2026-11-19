@@ -81,6 +81,11 @@ guardrail.toml
 # copying this junk into $HOME.
 temp/**
 
+# CtrlCarlitos repository governance is an explicit machine-local capability.
+{{- if not (and (hasKey . "repoPolicy") (hasKey .repoPolicy "enabled") .repoPolicy.enabled) }}
+.config/repo-policy/**
+{{- end }}
+
 # Stray build/testing artifacts that don't belong in the source tree - this
 # repo's real managed executables live under dot_local/bin/ (with the proper
 # dot_ prefix), never a bare top-level bin/. Confirmed live: a stray chezmoi
