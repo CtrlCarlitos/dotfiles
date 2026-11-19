@@ -141,6 +141,7 @@ After installation, everything lives in `~/.config/chezmoi/chezmoi.toml`:
 
 - **Change package groups** — re-run the menu (`select-packages.sh`) or edit the file directly
 - **Add git accounts** — each gets its own SSH keys, signing key, and auto-selected identity based on which folder you're in
+- **Interpret drift** — use the [raw `chezmoi status` drift classes](docs/invariants.md#23-interpreting-raw-chezmoi-status)
 - **Example config** — [docs/chezmoi.toml.example](docs/chezmoi.toml.example)
 
 Apply changes:
