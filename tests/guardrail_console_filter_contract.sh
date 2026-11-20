@@ -70,10 +70,13 @@ setup: plane status
 claude: guardrail hook registered
 codex: guardrail hooks registered; verify trust in /hooks; hosted tools and write_stdin bypass pre-hooks (ADR-0014)
 approve this request at https://127.0.0.1:41823/approve/9f2c - waiting for your passkey...
+Approve register guardrail on planes: claude,codex? [y/N] (answer in the terminal running this command)
 doctor: a line this filter has never seen
 EOF
 
-# What must survive, in order: the install line, every real finding, and the two unknown lines.
+# What must survive, in order: the install line, every real finding, both approval-prompt
+# spellings (the WebAuthn URL and, since agent-guardrails #538 (v0.23.46-dev), the complete
+# line the question also writes to a piped stdout before the run waits), and the unknown line.
 cat >"$tmp/expected.txt" <<'EOF'
 install: guardrail v0.23.36-dev already installed at /home/carlitos/.local/bin/guardrail
 claude settings: guardrail hook registered but NEVER OBSERVED FIRING - no audit record from a real session since this binary was built.
@@ -85,6 +88,7 @@ credential posture:
 verdict: 2 problems (see above)
 selftest: all probes passed
 approve this request at https://127.0.0.1:41823/approve/9f2c - waiting for your passkey...
+Approve register guardrail on planes: claude,codex? [y/N] (answer in the terminal running this command)
 doctor: a line this filter has never seen
 EOF
 total="$(wc -l <"$tmp/fixture.txt" | tr -d ' ')"

@@ -133,4 +133,4 @@ versions:
   lazygit_sha256_aarch64: "79a3161eeb642f0473e23db6341f7baabd4a5933e921a9c1167c5d5c765c41a4"
 
 guardrail:
-  version: v0.23.45-dev
+  version: v0.23.46-dev
