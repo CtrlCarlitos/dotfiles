@@ -86,6 +86,16 @@ got="$(run "$home" claude_superpowers_installs)"
 [ "$got" = "$(printf '7.0.0\tuser\t\n6.2.0\tlocal\t/p\nrc=0')" ] || fail "claude_superpowers_installs (file): got '$got'"
 [ ! -s "$tmp/cli.log" ] || fail "claude_superpowers_installs: the file answered, no CLI call allowed (log: $(/bin/cat "$tmp/cli.log"))"
 [ "$(run "$home" claude_superpowers_user_version)" = "$(printf '7.0.0\nrc=0')" ] || fail "claude_superpowers_user_version: expected 7.0.0"
+# D2b. user_version must drain its producer: awk's `exit` after the user row closed the
+# pipe while the producer was still writing (MSYS splits even one printf), SIGPIPE failed
+# the pipeline under pipefail, and `|| v=""` wiped the already-captured version. The
+# Windows suite run of 2026-11-24 failed "expected 7.0.0" exactly this way; CI never saw
+# it. The stub producer writes the second row a second after the first, so the race is
+# deterministic on every platform.
+got="$(bash -c 'set -uo pipefail; . "$1"
+claude_superpowers_installs() { printf "7.0.0\tuser\t\n"; sleep 1; printf "6.2.0\tlocal\t/p\n"; }
+claude_superpowers_user_version; echo "rc=$?"' _ "$lib" 2>/dev/null)"
+[ "$got" = "$(printf '7.0.0\nrc=0')" ] || fail "claude_superpowers_user_version: must survive a producer still writing after the user row (got '$got')"
 run "$tmp/empty-home" claude_superpowers_installs >/dev/null
 grep -Fxq 'claude plugin list --json' "$tmp/cli.log" || fail "claude_superpowers_installs, no file: must fall back to the CLI (log: $(/bin/cat "$tmp/cli.log"))"
 [ "$(run "$tmp/empty-home" claude_superpowers_installs_file)" = "rc=2" ] || fail "claude_superpowers_installs_file, no file: expected 2 (unknown)"

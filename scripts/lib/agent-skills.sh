@@ -1501,10 +1501,13 @@ claude_superpowers_installs_file() {
 }
 
 # claude_superpowers_user_version - the user-scope install's version (the one `dot upgrade`
-# updates); empty and exit 1 when there is none or the lookup failed.
+# updates); empty and exit 1 when there is none or the lookup failed. The awk drains its
+# producer and prints in END: an `exit` after the first user row closes the pipe under a
+# still-writing producer, SIGPIPE fails the pipeline under pipefail, and `|| v=""` would
+# wipe the version already captured (Windows suite, 2026-11-24).
 claude_superpowers_user_version() {
     local v
-    v="$(claude_superpowers_installs | awk -F'\t' '$2 == "user" { print $1; exit }')" || v=""
+    v="$(claude_superpowers_installs | awk -F'\t' '$2 == "user" && !u { v = $1; u = 1 } END { if (u) print v }')" || v=""
     [ -n "$v" ] || return 1
     printf '%s\n' "$v"
 }
